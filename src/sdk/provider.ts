@@ -92,8 +92,8 @@ export interface ListChangesResult {
   defaultBranch: string;
   /** Limitations a reader of the manifest must know (copied into every manifest). */
   limitations: string[];
-  /** Optional provider-native comparison numbers, e.g. GitHub's own `review:none` count. Not used for selection. */
-  nativeCounts?: { label: string; value: number }[];
+  /** Optional counts that explain the population (e.g. PRs merged into other branches, excluded). Not used for selection. */
+  diagnostics?: { label: string; value: number }[];
 }
 
 export interface ProviderContext {

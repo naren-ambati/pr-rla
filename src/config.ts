@@ -1,0 +1,156 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { parse } from "yaml";
+import type { AuditParameters } from "./core/records.js";
+import { normalizeSelector, type Selector } from "./core/selector.js";
+import { validateParams } from "./core/sprt.js";
+import { resolveWindow, type ResolvedWindow } from "./core/window.js";
+import { normalizePluginSpec, type PluginSpec } from "./registry.js";
+
+export const CONFIG_FILE = ".pr-rla.yml";
+
+export interface PrRlaConfig {
+  configPath: string;
+  /** The audit repo: directory holding .pr-rla.yml. */
+  dir: string;
+  provider: PluginSpec;
+  repo: string;
+  window: ResolvedWindow;
+  selector: Selector;
+  parameters: AuditParameters;
+  /** Path to the review protocol, relative to dir. */
+  protocol: string;
+  ledger: PluginSpec;
+  auditDir: string;
+  signingKey: string;
+  transparencyLog: { url: string | null; publicKeyFile: string | null };
+}
+
+export interface WindowPaths {
+  windowDir: string;
+  manifest: string;
+  registration: string;
+  commitment: string;
+  draws: string;
+}
+
+export function windowPaths(c: Pick<PrRlaConfig, "dir" | "auditDir" | "window">): WindowPaths {
+  const base = resolve(c.dir, c.auditDir);
+  const windowDir = join(base, c.window.name);
+  return {
+    windowDir,
+    manifest: join(base, `${c.window.name}.manifest.json`),
+    registration: join(windowDir, "registration.json"),
+    commitment: join(windowDir, "manifest-commitment.json"),
+    draws: join(windowDir, "draws.json"),
+  };
+}
+
+function num(v: unknown, name: string, dflt: number): number {
+  if (v === undefined || v === null) return dflt;
+  if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`${name} must be a number`);
+  return v;
+}
+
+export function parseConfig(text: string, configPath: string, overrides: { fromFile?: string } = {}): PrRlaConfig {
+  const raw = (parse(text) ?? {}) as Record<string, unknown>;
+  const dir = dirname(resolve(configPath));
+  let provider = normalizePluginSpec(raw.provider, "provider", "github");
+  if (overrides.fromFile) provider = { use: "json-file", options: { path: resolve(process.cwd(), overrides.fromFile) } };
+  if (typeof raw.repo !== "string" || raw.repo.length === 0) throw new Error(`${configPath}: "repo" is required (e.g. github/gh-aw)`);
+  const w = (raw.window ?? {}) as Record<string, unknown>;
+  const start = String(w.start ?? "");
+  const end = String(w.end ?? "");
+  const window = resolveWindow({ name: typeof w.name === "string" ? w.name : `${start}_${end}`, start, end });
+  const a = (raw.audit ?? {}) as Record<string, unknown>;
+  const claim = a.claim ?? "D";
+  if (claim !== "D") throw new Error(`audit.claim "${String(claim)}" is not supported in v0.1 (claim T needs calibration; planned for v0.2)`);
+  const p0 = num(a.p0, "audit.p0", 0.1);
+  const parameters: AuditParameters = {
+    claim: "D",
+    p0,
+    p1: num(a.p1, "audit.p1", p0 / 5),
+    alpha: num(a.alpha, "audit.alpha", 0.05),
+    cap: a.cap === undefined || a.cap === null ? null : num(a.cap, "audit.cap", 0),
+    minPopulation: num(a.min_population, "audit.min_population", 150),
+  };
+  validateParams(parameters);
+  const tl = (raw.transparency_log ?? {}) as Record<string, unknown>;
+  return {
+    configPath: resolve(configPath),
+    dir,
+    provider,
+    repo: raw.repo,
+    window,
+    selector: normalizeSelector(raw.selector as Record<string, unknown> | undefined),
+    parameters,
+    protocol: typeof raw.protocol === "string" ? raw.protocol : "review-protocol.md",
+    ledger: normalizePluginSpec(raw.ledger, "ledger", "git-file"),
+    auditDir: typeof raw.audit_dir === "string" ? raw.audit_dir : "audit",
+    signingKey: typeof raw.signing_key === "string" ? raw.signing_key : ".pr-rla/signing-key.pem",
+    transparencyLog: {
+      url: typeof tl.url === "string" ? tl.url : null,
+      publicKeyFile: typeof tl.public_key_file === "string" ? tl.public_key_file : null,
+    },
+  };
+}
+
+export function loadConfig(path: string, overrides: { fromFile?: string } = {}): PrRlaConfig {
+  if (!existsSync(path)) throw new Error(`no ${CONFIG_FILE} at ${path} (run "pr-rla init")`);
+  return parseConfig(readFileSync(path, "utf8"), path, overrides);
+}
+
+export const CONFIG_TEMPLATE = (repo: string, provider: string) => `# pr-rla configuration. Everything under selector/window/audit is frozen by "pr-rla register".
+provider: ${provider}            # github | json-file | ./my-provider.mjs | { use: <name|path|package>, options: {...} }
+repo: ${repo}
+
+window:
+  name: 2026-q3                 # file-name safe; audit files live under audit/<name>/
+  start: 2026-07-01             # inclusive, UTC
+  end: 2026-09-30               # inclusive, UTC
+
+selector:
+  kinds: [pull_request, direct_push]
+  authors: any                  # or a list, e.g. [copilot-swe-agent[bot], claude[bot]]
+  labels: []                    # a change must carry all of these
+  unreviewed: no-human-review   # no-human-review | no-review | any
+  merged_by: any                # human | bot | any (direct pushes only match any)
+  max_changed_lines: null       # e.g. 200 (raw additions + deletions)
+  exclude_generated: true       # review scope only; does not change the stratum
+
+audit:
+  claim: D                      # detected-defect rate under the review protocol
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  cap: null                     # default: 4 x the zero-failure stopping point
+  min_population: 150
+
+protocol: review-protocol.md
+ledger: git-file                # verdicts in audit/<window>/verdicts.jsonl
+# transparency_log:             # used only with --submit / by verify; no default on purpose
+#   url: https://<your-rekor>
+#   public_key_file: rekor.pub
+`;
+
+export const PROTOCOL_TEMPLATE = `# Review protocol
+
+This file is hashed into the registration. Every verdict names its hash, so
+changing the protocol mid-audit is detectable. Fix it before \`pr-rla register\`.
+
+## Scope
+Read the change's full diff (generated files excluded when \`exclude_generated\` is true),
+its description and its CI results.
+
+## A change FAILS if any of these holds
+1. It introduces a bug a user or another developer would hit (wrong result, crash, data loss).
+2. It introduces a security weakness (injection, auth bypass, secret exposure, unsafe defaults).
+3. It breaks or silently weakens a test, check or CI gate.
+4. It does not do what its title/description says, in a way that matters.
+
+## Otherwise it PASSES
+Style, naming and taste issues are not failures.
+
+## Recording
+\`pr-rla record <draw> pass|fail --reviewer <you> --note "<one line>"\`, then commit.
+`;

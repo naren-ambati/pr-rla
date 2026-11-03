@@ -135,3 +135,19 @@ export type AuditMode = "PROSPECTIVE" | "RETROSPECTIVE";
 export function auditMode(reg: SignedRecord<RegistrationRecord>): AuditMode {
   return registrationTime(reg).unix < isoToUnix(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
 }
+
+export interface DrawsFile {
+  schema: "pr-rla/draws/v1";
+  repo: string;
+  window: string;
+  manifestSha256: string;
+  N: number;
+  round: number;
+  beacon: { round: number; randomness: string; signature: string };
+  chainHash: string;
+  /** Draws released to reviewers so far (the prefix rule only looks at these). */
+  issued: number;
+  cap: number;
+  draws: { draw: number; index: number; changeId: string; url: string; mergeSha: string; firstOccurrence: boolean }[];
+}
+
