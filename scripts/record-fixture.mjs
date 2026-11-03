@@ -150,27 +150,22 @@ if (cliMode) {
 }
 const { def, window } = fixture;
 const result = { changes: fixture.changes, diagnostics: fixture.diagnostics, defaultBranch: fixture.defaultBranch };
-writeFileSync(
-  fixture.out,
-  `${JSON.stringify(
-    {
-      description: `Real ${def.name} API responses for ${fixture.repo}, window ${fixture.label} (UTC), recorded read-only${tokenEnv.length ? " with a token" : " without a token"}${cliMode ? " during a CLI freeze --dry-run" : ""}. Trimmed to the fields pr-rla reads; personal e-mail addresses and comment bodies scrubbed.`,
-      provider: def.name,
-      recordedAt: recordedAt.toISOString(),
-      options: fixture.options,
-      window,
-      repo: fixture.repo,
-      expected: {
-        ids: result.changes.map((c) => c.id).sort(),
-        pullRequests: result.changes.filter((c) => c.kind === "pull_request").length,
-        directPushes: result.changes.filter((c) => c.kind === "direct_push").map((c) => c.id).sort(),
-        ...(result.defaultBranch ? { defaultBranch: result.defaultBranch } : {}),
-        diagnostics: result.diagnostics ?? [],
-      },
-      exchanges,
-    },
-    null,
-    1,
-  )}\n`,
-);
+const header = {
+  description: `Real ${def.name} API responses for ${fixture.repo}, window ${fixture.label} (UTC), recorded read-only${tokenEnv.length ? " with a token" : " without a token"}${cliMode ? " during a CLI freeze --dry-run" : ""}. Trimmed to the fields pr-rla reads; personal e-mail addresses and comment bodies scrubbed.`,
+  provider: def.name,
+  recordedAt: recordedAt.toISOString(),
+  options: fixture.options,
+  window,
+  repo: fixture.repo,
+  expected: {
+    ids: result.changes.map((c) => c.id).sort(),
+    pullRequests: result.changes.filter((c) => c.kind === "pull_request").length,
+    directPushes: result.changes.filter((c) => c.kind === "direct_push").map((c) => c.id).sort(),
+    ...(result.defaultBranch ? { defaultBranch: result.defaultBranch } : {}),
+    diagnostics: result.diagnostics ?? [],
+  },
+};
+// One compact line per exchange keeps the file small and its diffs readable.
+const text = JSON.stringify({ ...header, exchanges: [] }, null, 1).replace(/"exchanges": \[\]\n}$/, `"exchanges": [\n${exchanges.map((e) => JSON.stringify(e)).join(",\n")}\n ]\n}`);
+writeFileSync(fixture.out, `${text}\n`);
 console.error(`recorded ${exchanges.length} exchanges; ${result.changes.length} changes (${result.changes.filter((c) => c.kind === "direct_push").length} direct pushes) -> ${fixture.out}`);
