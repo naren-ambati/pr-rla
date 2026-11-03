@@ -18,6 +18,9 @@ export class GitHubHttpError extends Error {
   }
 }
 
+/** Status carried by the error thrown when retries are exhausted on a transient failure. */
+export const GAVE_UP = 0;
+
 /** GraphQL errors GitHub documents as transient (timeouts, internal errors, rate limits). */
 const TRANSIENT_GRAPHQL = /something went wrong|timeout|timed out|rate limit|abuse|secondary|try again/i;
 
@@ -40,8 +43,8 @@ export class GitHubHttp {
    * One request with retries. `accept(body)` returns null to accept the parsed
    * body, or a reason string to retry (e.g. a transient GraphQL error).
    */
-  private async request<T>(url: string, init: RequestInit, accept: (body: unknown) => string | null = () => null): Promise<{ body: T; res: Response }> {
-    const max = this.o.maxRetries ?? 6;
+  private async request<T>(url: string, init: RequestInit, accept: (body: unknown) => string | null = () => null, maxRetries?: number): Promise<{ body: T; res: Response }> {
+    const max = maxRetries ?? this.o.maxRetries ?? 6;
     const sleep = this.o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
     const short = url.replace(this.apiUrl, "");
     for (let attempt = 0; ; attempt++) {
@@ -74,7 +77,7 @@ export class GitHubHttp {
         if (e instanceof GitHubHttpError) throw e;
         reason = (e as Error).message;
       }
-      if (attempt >= max) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${attempt + 1} attempts (${reason})`, 0);
+      if (attempt >= max) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${attempt + 1} attempts (${reason})`, GAVE_UP);
       this.o.log?.(`github: ${reason} on ${short}; retrying in ${Math.round(wait / 1000)}s`);
       await sleep(Math.min(wait, 15 * 60 * 1000));
     }
@@ -88,13 +91,13 @@ export class GitHubHttp {
     return { data: body, next };
   }
 
-  async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  async graphql<T>(query: string, variables: Record<string, unknown>, opts: { maxRetries?: number } = {}): Promise<T> {
     type G = { data?: T; errors?: { message: string; type?: string }[] };
     const { body } = await this.request<G>(this.graphqlUrl, { method: "POST", headers: this.headers({ "content-type": "application/json" }), body: JSON.stringify({ query, variables }) }, (b) => {
       const errs = (b as G).errors ?? [];
       if (errs.length && errs.every((e) => TRANSIENT_GRAPHQL.test(e.message) || e.type === "RATE_LIMITED")) return `GraphQL: ${errs[0]!.message}`;
       return null;
-    });
+    }, opts.maxRetries);
     if (body.errors?.length) throw new GitHubHttpError(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`, 200);
     if (!body.data) throw new GitHubHttpError("GitHub GraphQL: empty response", 200);
     return body.data;

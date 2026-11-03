@@ -112,6 +112,16 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
+  it("halves the history page size while GitHub 502s on heavy pages, without losing commits", async () => {
+    const fake = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { pageSize: 2, failHistoryAbove: 13 });
+    const logs: string[] = [];
+    const p = new GitHubProvider({ page_size: 2, batch_size: 3, history_page_size: 50 }, { cwd: ".", env: {}, log: (m) => logs.push(m), fetch: fake.fetch, now: () => Date.parse("2026-08-03T00:00:00Z") });
+    (p.http as unknown as { o: { sleep: () => Promise<void> } }).o.sleep = async () => {};
+    const r = await p.listChanges({ repo: sc.repo, window: sc.window, kinds: ["direct_push"] });
+    expect(r.changes.map((c) => c.id).sort()).toEqual([ids.alice, ids.bot].sort());
+    expect(logs.filter((l) => /continuing with/.test(l))).toEqual(["github: history page failed repeatedly; continuing with 25 commits per page", "github: history page failed repeatedly; continuing with 13 commits per page"]);
+  });
+
   it("follows review pagination past 100 (PR #1 has 150 reviews)", async () => {
     const r = await make().provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
     expect(r.changes.find((c) => c.id === ids.squash)!.reviews).toHaveLength(150);

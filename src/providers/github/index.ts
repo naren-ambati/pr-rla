@@ -8,7 +8,7 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { classifyFirstParent, type HistoryNode } from "./history.js";
-import { GitHubHttp } from "./http.js";
+import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
 import { COMMIT_QUERY, HEAD_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
 
@@ -21,7 +21,7 @@ export interface GitHubProviderOptions {
   page_size?: number;
   /** PRs per GraphQL query (default 40). */
   batch_size?: number;
-  /** Commits per history page (default 100). */
+  /** Commits per history page (default 50; halved automatically while GitHub returns 5xx). */
   history_page_size?: number;
 }
 
@@ -53,7 +53,7 @@ export class GitHubProvider implements ScmProvider {
     this.http = new GitHubHttp({ token, apiUrl: opts.api_url, graphqlUrl: opts.graphql_url, fetch: ctx.fetch, log: ctx.log });
     this.pageSize = Math.min(100, opts.page_size ?? 100);
     this.batchSize = opts.batch_size ?? 40;
-    this.historyPageSize = opts.history_page_size ?? 100;
+    this.historyPageSize = opts.history_page_size ?? 50;
   }
 
   private split(repo: string): { owner: string; name: string } {
@@ -149,12 +149,23 @@ export class GitHubProvider implements ScmProvider {
   async walkHistory(owner: string, name: string, req: ListChangesRequest, defaultBranch: string, headOid: string, mergeCommits: ReadonlyMap<string, number>) {
     const nodes = new Map<string, GqlHistoryCommit>();
     let after: string | null = null;
-    const q = historyQuery(this.historyPageSize);
+    let size = this.historyPageSize;
     let pages = 0;
     for (;;) {
       req.signal?.throwIfAborted();
       type Page = { repository: { object: { history: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: GqlHistoryCommit[] } } | null } };
-      const data: Page = await this.http.graphql<Page>(q, { owner, name, head: headOid, since: req.window.opensAt, after });
+      let data: Page;
+      try {
+        // Few retries per size: GitHub 502s on heavy history pages; a smaller page from the same cursor usually succeeds.
+        data = await this.http.graphql<Page>(historyQuery(size), { owner, name, head: headOid, since: req.window.opensAt, after }, { maxRetries: size > 10 ? 2 : undefined });
+      } catch (e) {
+        if (e instanceof GitHubHttpError && e.status === GAVE_UP && size > 10) {
+          size = Math.ceil(size / 2);
+          this.ctx.log(`github: history page failed repeatedly; continuing with ${size} commits per page`);
+          continue;
+        }
+        throw e;
+      }
       const h = data.repository.object?.history;
       if (!h) throw new Error(`github: cannot read history of ${headOid}`);
       for (const c of h.nodes) nodes.set(c.oid, c);

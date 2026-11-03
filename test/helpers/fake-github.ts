@@ -30,7 +30,7 @@ export interface FakePr {
 const h = (c: string) => c.repeat(40).slice(0, 40);
 export const OID = (tag: string) => h(Buffer.from(tag).toString("hex"));
 
-export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], prs: FakePr[], opts: { pageSize?: number } = {}) {
+export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], prs: FakePr[], opts: { pageSize?: number; failHistoryAbove?: number } = {}) {
   let served = 0;
   const byOid = new Map(commits.map((c) => [c.oid, c]));
   const commitNode = (c: FakeCommit) => ({
@@ -88,6 +88,7 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
       if (query.includes("defaultBranchRef")) return json({ data: { repository: { defaultBranchRef: { name: "main", target: { oid: head } } } } });
       if (query.includes("history(")) {
         const size = Number(/history\(first: (\d+)/.exec(query)![1]);
+        if (opts.failHistoryAbove !== undefined && size > opts.failHistoryAbove) return new Response("bad gateway", { status: 502 });
         const since = Date.parse(String(variables.since));
         const all = reachable.filter((c) => Date.parse(c.date) >= since);
         const start = variables.after ? Number(variables.after) : 0;
