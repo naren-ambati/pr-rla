@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
 import {
   LEDGER_API_VERSION,
@@ -68,7 +68,9 @@ export class GitFileLedger implements Ledger {
     } catch {
       return { ok: true, tamperTrail: false, findings: ["verdicts are not in a git repository: there is no tamper trail"] };
     }
-    const rel = relative(top, this.file).split("\\").join("/");
+    // Resolve symlinks (e.g. macOS /var -> /private/var) so the path is relative to git's real toplevel.
+    const realFile = existsSync(dir) ? join(realpathSync(dir), basename(this.file)) : this.file;
+    const rel = relative(realpathSync(top), realFile).split("\\").join("/");
     const findings: string[] = [];
     let ok = true;
     let commits: string[] = [];
