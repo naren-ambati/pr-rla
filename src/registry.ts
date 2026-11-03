@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +18,9 @@ import {
   type ProviderDefinition,
   type ScmProvider,
 } from "./sdk/provider.js";
+import { sha256Hex, canonicalJson } from "./core/canonical.js";
+import type { PluginIdentity } from "./core/records.js";
+import { PR_RLA_VERSION } from "./version.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
 import bitbucketCloud from "./providers/bitbucket-cloud/index.js";
@@ -121,4 +125,42 @@ export async function createLedger(spec: PluginSpec, ctx: LedgerContext): Promis
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
   for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new Error(`ledger "${def.name}" has no ${m}()`);
   return l;
+}
+
+/** SHA-256 over the canonical JSON of `options` restricted to `keys`. */
+export function optionsDigest(options: Record<string, unknown>, keys?: readonly string[]): string {
+  const picked = keys ? Object.fromEntries(keys.filter((k) => k in options).map((k) => [k, options[k]])) : options;
+  return sha256Hex(canonicalJson(picked));
+}
+
+function packageVersion(use: string, baseDir: string): string | null {
+  try {
+    const pkg = createRequire(join(baseDir, "noop.js")).resolve(`${use}/package.json`);
+    const v = (JSON.parse(readFileSync(pkg, "utf8")) as { version?: unknown }).version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a registration or manifest records about a provider or ledger (contracts.md §5).
+ * Built-ins carry the pr-rla version. External plugins run in-process until the
+ * isolated host exists (bolt 4), so their trust is "full" and their integrity is
+ * null until a lock entry exists.
+ */
+export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string): Promise<PluginIdentity> {
+  const builtinName = kind === "provider" ? (BUILTIN_PROVIDERS[PROVIDER_ALIASES[spec.use] ?? spec.use] ? PROVIDER_ALIASES[spec.use] ?? spec.use : null) : BUILTIN_LEDGERS[spec.use] ? spec.use : null;
+  const def = kind === "provider" ? await loadProviderDefinition(spec.use, baseDir) : await loadLedgerDefinition(spec.use, baseDir);
+  const populationOptions = (def as { populationOptions?: unknown }).populationOptions;
+  const keys = Array.isArray(populationOptions) ? populationOptions.filter((k): k is string => typeof k === "string") : [];
+  return {
+    name: builtinName ?? def.name,
+    source: builtinName ? "builtin" : isPathLike(spec.use) ? "path" : "package",
+    version: builtinName ? PR_RLA_VERSION : isPathLike(spec.use) ? null : packageVersion(spec.use, baseDir),
+    integrity: null,
+    optionsSha256: optionsDigest(spec.options),
+    populationOptionsSha256: optionsDigest(spec.options, keys),
+    trust: builtinName ? "builtin" : "full",
+  };
 }

@@ -1,25 +1,36 @@
 import type { Ledger } from "../sdk/ledger.js";
 import type { ScmProvider } from "../sdk/provider.js";
-import { canonicalJson } from "./canonical.js";
+import type { TrustBundle } from "../timestamp/bundle.js";
+import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
+import { verifyLoggedEntry } from "../translog/rekor.js";
+import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
+import { canonicalJson, sha256Hex } from "./canonical.js";
 import { buildPopulation } from "./population.js";
 import {
   auditMode,
   derivedRoundFor,
   effectiveTime,
+  isCommitmentV2,
+  isManifestV2,
+  isRegistrationV2,
+  manifestRepo,
   manifestSha256,
+  registrationRepo,
   registrationTime,
+  type AnyCommitment,
+  type AnyManifest,
+  type AnyRegistration,
+  type AuditMode,
   type DrawsFile,
   type LoggedEntry,
-  type Manifest,
-  type ManifestCommitmentRecord,
-  type RegistrationRecord,
+  type RegistrationRecordV2,
+  type RekorV2Entry,
   type SignedRecord,
 } from "./records.js";
 import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
 import { computeStatus, type StatusReport } from "./status.js";
-import { verifyLoggedEntry } from "../translog/rekor.js";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL" | "SKIP";
 
@@ -33,9 +44,9 @@ export interface VerifyCheck {
 }
 
 export interface VerifyArtifacts {
-  registration: SignedRecord<RegistrationRecord>;
-  manifest: Manifest | null;
-  commitment: SignedRecord<ManifestCommitmentRecord> | null;
+  registration: SignedRecord<AnyRegistration>;
+  manifest: AnyManifest | null;
+  commitment: SignedRecord<AnyCommitment> | null;
   draws: DrawsFile | null;
   /** SHA-256 of the protocol file as it is now (null if the file is missing). */
   currentProtocolSha256: string | null;
@@ -49,6 +60,8 @@ export interface VerifyDeps {
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL, or null if none is available. */
   logKey: (logUrl: string) => Promise<string | null>;
+  /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
+  trustBundle: TrustBundle;
 }
 
 export interface VerifyReport {
@@ -58,47 +71,106 @@ export interface VerifyReport {
   timestampTamperProof: boolean;
   status: StatusReport | null;
   derivedRound: number;
+  /** Schema v2: the RFC 3161 evidence for each signed record (null for v1 records). */
+  timestamps: { registration: TimeEvidenceSummary | null; commitment: TimeEvidenceSummary | null };
+  /** pr-rla releases that wrote the registration and the manifest (null for v1 records, which do not say). */
+  versions: { registered: string | null; frozen: string | null };
 }
 
 const n = (x: number) => x.toLocaleString("en-US");
 
-async function checkLog(entry: LoggedEntry | null, signed: SignedRecord<unknown>, what: string, deps: VerifyDeps, c: VerifyCheck): Promise<boolean> {
+/**
+ * Checks a record's transparency-log entry. v1 records: the entry is the time evidence.
+ * v2 records: a Rekor v1 entry is one more bound (operator Sigstore), a Rekor v2 entry
+ * carries no time, and a missing entry is not a warning (tokens are the evidence).
+ */
+async function checkLog(entry: LoggedEntry | RekorV2Entry | null, signed: SignedRecord<unknown>, what: string, deps: VerifyDeps, c: VerifyCheck, v2: boolean): Promise<{ verified: boolean; integratedTime: number | null }> {
+  const none = { verified: false, integratedTime: null };
   if (!entry) {
-    c.details.push(`TIMESTAMP NOT TAMPER-PROOF: the ${what} is not in a transparency log; its time is the signer's own clock`);
-    if (c.status === "PASS") c.status = "WARN";
-    return false;
+    if (!v2) {
+      c.details.push(`TIMESTAMP NOT TAMPER-PROOF: the ${what} is not in a transparency log; its time is the signer's own clock`);
+      if (c.status === "PASS") c.status = "WARN";
+    }
+    return none;
   }
   const key = await deps.logKey(entry.logUrl);
   if (!key) {
-    c.details.push(`${what} log entry present but no trusted key for ${entry.logUrl} (offline): integratedTime not checked`);
-    if (c.status === "PASS") c.status = "WARN";
-    return false;
+    c.details.push(`${what} log entry present but no trusted key for ${entry.logUrl} (offline): ${"apiVersion" in entry ? "inclusion proof not checked" : "integratedTime not checked"}`);
+    if (!v2 && c.status === "PASS") c.status = "WARN";
+    return none;
+  }
+  if ("apiVersion" in entry) {
+    const r = verifyRekorV2Entry(entry, signed, key);
+    if (!r.ok) {
+      c.status = "FAIL";
+      c.details.push(...r.problems.map((p) => `${what} Rekor v2 entry: ${p}`));
+      return none;
+    }
+    c.details.push(`${what} in Rekor v2 log ${entry.logUrl} index ${entry.logIndex} (inclusion proof and signed checkpoint verified; v2 entries carry no time, and the client is unverified against the production log)`);
+    return { verified: true, integratedTime: null };
   }
   const r = verifyLoggedEntry(entry, signed, key);
   if (!r.ok) {
     c.status = "FAIL";
     c.details.push(...r.problems.map((p) => `${what} log entry: ${p}`));
-    return false;
+    return none;
   }
   c.details.push(`${what} logged at ${entry.logUrl} index ${entry.logIndex}, integratedTime ${unixToIso(entry.integratedTime)} (SET and inclusion proof verified)`);
-  return true;
+  return { verified: true, integratedTime: entry.integratedTime };
+}
+
+/** Rule-checks a v2 record's tokens; any token failing rules 1–7 FAILs the check. */
+async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], log: { integratedTime: number | null }, what: string, deps: VerifyDeps, c: VerifyCheck): Promise<TimeEvidenceSummary> {
+  const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
+  const ts = await assessTimestamps({
+    timestamps: signed.timestamps ?? [],
+    data,
+    digestHex: sha256Hex(data),
+    signedTimeIso,
+    timestamping,
+    bundle: deps.trustBundle,
+    log: log.integratedTime !== null ? { operator: deps.trustBundle.authorities.sigstore?.operator ?? "Sigstore", integratedTime: log.integratedTime } : null,
+  });
+  for (const f of ts.failed) {
+    c.status = "FAIL";
+    c.details.push(`FAIL ${what} token from ${f.tsa}: ${f.problems.join("; ")}`);
+  }
+  if (ts.logProblem) {
+    c.status = "FAIL";
+    c.details.push(`FAIL ${what} ${ts.logProblem}`);
+  }
+  c.details.push(`${what} ${timestampsLine(ts)}${ts.ukMs !== null ? ` · existed by ${isoMs(ts.ukMs)} (U_k)` : ""}`);
+  if (!ts.proven) {
+    c.details.push(`${notTamperProof(ts)}: the ${what}'s time is the signer's own clock${ts.configured.length ? `, bounded by ${ts.operators.length} operator(s) where ${ts.k} are required` : ""}`);
+    if (c.status === "PASS") c.status = "WARN";
+  }
+  return ts;
 }
 
 export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise<VerifyReport> {
   const checks: VerifyCheck[] = [];
   const reg = a.registration;
-  const mode = auditMode(reg);
+  const v2 = isRegistrationV2(reg);
+  let mode: AuditMode = auditMode(reg);
   const derived = derivedRoundFor(reg);
   let tamperProof = true;
+  let regTs: TimeEvidenceSummary | null = null;
+  let cmTs: TimeEvidenceSummary | null = null;
 
-  // 1. Registration exists, is signed, (ideally) logged; prospective or retrospective.
+  // 1. Registration exists, is signed and time-stamped (v2: k-of-n tokens; v1: logged); prospective or retrospective.
   const c1: VerifyCheck = { n: 1, name: "registration", status: "PASS", summary: "", details: [] };
   const sig = verifySignedRecord(reg);
   if (!sig.ok) {
     c1.status = "FAIL";
     c1.details.push(`registration signature: ${sig.reason}`);
   }
-  if (!(await checkLog(reg.log, reg, "registration", deps, c1))) tamperProof = false;
+  const regLog = await checkLog(reg.log, reg, "registration", deps, c1, v2);
+  if (v2) {
+    regTs = await checkTimestamps(reg, reg.record.registeredAt, reg.record.timestamping, regLog, "registration", deps, c1);
+    if (!regTs.proven) tamperProof = false;
+    else mode = regTs.ukMs! < Date.parse(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
+    c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${reg.record.verdicts.minProvenance}`);
+  } else if (!regLog.verified) tamperProof = false;
   if (a.currentProtocolSha256 === null) {
     c1.details.push("review protocol file not found: cannot confirm it is the registered one");
     if (c1.status === "PASS") c1.status = "WARN";
@@ -107,10 +179,11 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c1.details.push(`review protocol changed: file hashes ${a.currentProtocolSha256.slice(0, 12)}…, registration says ${reg.record.protocolSha256.slice(0, 12)}…`);
   }
   const rt = registrationTime(reg);
+  const unproven = v2 && !regTs?.proven ? " (unproven: too few timestamps)" : "";
   c1.summary =
     mode === "PROSPECTIVE"
-      ? `registered ${rt.iso} before the window opened → PROSPECTIVE`
-      : `registration ${isoToUnix(reg.record.window.closesAt) <= rt.unix ? "after window close" : "after window opened"} → RETROSPECTIVE (a demonstration)`;
+      ? `registered ${rt.iso}${regTs?.ukMs ? `, proven by ${isoMs(regTs.ukMs)}` : ""} before the window opened → PROSPECTIVE${unproven}`
+      : `registration ${isoToUnix(reg.record.window.closesAt) <= rt.unix ? "after window close" : "after window opened"} → RETROSPECTIVE (a demonstration)${unproven}`;
   checks.push(c1);
 
   // 2. Manifest consistent with the registration, committed, and logged before R published.
@@ -127,12 +200,21 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (new Set(ids).size !== ids.length) c2.details.push("manifest lists a change twice");
     if (ids.some((id, i) => i > 0 && ids[i - 1]! >= id)) c2.details.push("manifest changes are not sorted by id");
     if (m.registrationSha256 !== reg.sha256) c2.details.push("manifest names a different registration");
+    let mRepo: string | null = null;
+    let rRepo: string | null = null;
+    try {
+      mRepo = manifestRepo(m);
+      rRepo = registrationRepo(reg);
+    } catch (e) {
+      c2.details.push((e as Error).message);
+    }
+    if (isManifestV2(m) !== v2 || isCommitmentV2(cm) !== v2) c2.details.push("registration, manifest and commitment use different schema versions");
     for (const [k, mine, theirs] of [
       ["selector", m.selector, reg.record.selector],
       ["window", m.window, reg.record.window],
       ["parameters", m.parameters, reg.record.parameters],
       ["protocol", m.protocolSha256, reg.record.protocolSha256],
-      ["repo", m.repo, reg.record.repo],
+      ["repo", mRepo, rRepo],
     ] as const)
       if (canonicalJson(mine) !== canonicalJson(theirs)) c2.details.push(`manifest ${k} differs from the registration`);
     const csig = verifySignedRecord(cm);
@@ -143,13 +225,22 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (cm.record.registrationSha256 !== reg.sha256) c2.details.push("commitment names a different registration");
     if (isoToUnix(m.frozenAt) < isoToUnix(reg.record.window.closesAt)) c2.details.push(`frozen ${m.frozenAt}, before the window closed`);
     if (c2.details.length) c2.status = "FAIL";
-    if (!(await checkLog(cm.log, cm, "manifest commitment", deps, c2))) tamperProof = false;
+    const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
+    if (v2 && isRegistrationV2(reg)) {
+      cmTs = await checkTimestamps(cm, cm.record.frozenAt, reg.record.timestamping, cmLog, "manifest commitment", deps, c2);
+      if (!cmTs.proven) tamperProof = false;
+      if (isManifestV2(m)) c2.details.push(`frozen with pr-rla ${m.prRlaVersion} · provider ${m.provider.name} (${m.provider.source} ${m.provider.version ?? "?"})`);
+    } else if (!cmLog.verified) tamperProof = false;
     const t = effectiveTime(cm, cm.record.frozenAt);
-    if (t.unix >= derived.publishesAt) {
+    const bound = cmTs?.ukMs ?? null;
+    const late = t.unix >= derived.publishesAt ? t.iso : bound !== null && bound >= derived.publishesAt * 1000 ? isoMs(bound) : null;
+    if (late) {
       c2.status = "FAIL";
-      c2.details.unshift(`FAIL manifest logged after the seed was public (${t.iso} ≥ round ${derived.round} at ${unixToIso(derived.publishesAt)})`);
+      c2.details.unshift(`FAIL manifest logged after the seed was public (${late} ≥ round ${derived.round} at ${unixToIso(derived.publishesAt)})`);
       c2.summary = "manifest logged after the seed was public";
-    } else c2.summary = c2.status === "FAIL" ? "manifest inconsistent" : `manifest ${t.source === "log" ? "logged" : "written (local clock)"} ${t.iso}, before R`;
+    } else if (c2.status === "FAIL") c2.summary = "manifest inconsistent";
+    else if (cmTs) c2.summary = cmTs.proven ? `manifest logged by ${cmTs.k} of ${cmTs.operators.length} operators by ${isoMs(bound!)}, before R` : `manifest written (signed time, unproven) ${t.iso}, before R`;
+    else c2.summary = `manifest ${t.source === "log" ? "logged" : "written (local clock)"} ${t.iso}, before R`;
   }
   checks.push(c2);
 
@@ -185,7 +276,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c5.status = "SKIP";
     c5.summary = "offline: population not rebuilt";
   } else {
-    const pop = await buildPopulation(deps.provider, { repo: reg.record.repo, window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt });
+    const pop = await buildPopulation(deps.provider, { repo: registrationRepo(reg), window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt });
     const mine = new Map(m.changes.map((x) => [x.id, x]));
     const rebuilt = new Map(pop.entries.map((x) => [x.id, x]));
     const missing = [...rebuilt.keys()].filter((id) => !mine.has(id));
@@ -270,5 +361,14 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   }
   checks.push(c7);
 
-  return { checks, ok: !checks.some((c) => c.status === "FAIL"), mode, timestampTamperProof: tamperProof, status, derivedRound: derived.round };
+  return {
+    checks,
+    ok: !checks.some((c) => c.status === "FAIL"),
+    mode,
+    timestampTamperProof: tamperProof,
+    status,
+    derivedRound: derived.round,
+    timestamps: { registration: regTs, commitment: cmTs },
+    versions: { registered: isRegistrationV2(reg) ? reg.record.prRlaVersion : null, frozen: m && isManifestV2(m) ? m.prRlaVersion : null },
+  };
 }

@@ -8,6 +8,8 @@ import { makeRng } from "../../src/core/simulate.js";
 import type { ChangeRecord } from "../../src/sdk/provider.js";
 import { recordedBeacon } from "./fixtures.js";
 import type { MockRekor } from "./mock-rekor.js";
+import type { TrustBundleExtra } from "../../src/timestamp/bundle.js";
+import type { MockTsaServer } from "./test-tsa.js";
 
 export const REPO = "acme/widgets";
 export const T = (iso: string) => Date.parse(iso);
@@ -43,13 +45,18 @@ export interface Scenario {
   ctx: CommandContext;
   git: (...args: string[]) => string;
   fetch: typeof fetch;
+  tsaTrust: TrustBundleExtra[];
 }
 
 /**
  * An audit repo in a temp dir. By default its provider is json-file over `changes`;
  * `provider` (a YAML flow value) and `fetch` swap in another provider and its transport.
  */
-export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; logKeyFile?: boolean; provider?: string; fetch?: typeof fetch }): Scenario {
+/**
+ * `tsa` configures mock timestamp authorities: their ids go into .pr-rla.yml and their test roots
+ * into the context's trust (as a verifier would pass them with --tsa-trust).
+ */
+export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; logKeyFile?: boolean; provider?: string; fetch?: typeof fetch; tsa?: { ids: string[]; k?: number; server?: MockTsaServer } }): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "prrla-audit-"));
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   git("init", "-q");
@@ -65,6 +72,8 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
       "selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }",
       "audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }",
       ...(opts.log ? [`transparency_log: { url: "${opts.log.url}", public_key_file: rekor.pub }`] : []),
+      // No authority unless the test brings mock ones: the suite never reaches a real timestamp authority.
+      `timestamping: { authorities: [${(opts.tsa?.ids ?? []).join(", ")}], min_tokens: ${opts.tsa?.k ?? 2} }`,
       "",
     ].join("\n"),
   );
@@ -74,15 +83,19 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   const clock = { now: T("2026-10-20T00:00:00Z") };
   const out: string[] = [];
   const fetchImpl = opts.fetch ?? globalThis.fetch;
-  const ctx = makeCtx(dir, clock, out, fetchImpl);
-  return { dir, clock, out, ctx, git, fetch: fetchImpl };
+  const tsaTrust = opts.tsa?.server ? [opts.tsa.server.trust()] : [];
+  const ctx = makeCtx(dir, clock, out, fetchImpl, tsaTrust);
+  return { dir, clock, out, ctx, git, fetch: fetchImpl, tsaTrust };
 }
 
-function makeCtx(dir: string, clock: { now: number }, out: string[], fetchImpl: typeof fetch): CommandContext {
+function makeCtx(dir: string, clock: { now: number }, out: string[], fetchImpl: typeof fetch, tsaTrust: TrustBundleExtra[]): CommandContext {
   return {
     cwd: dir,
     env: {},
     nowMs: () => clock.now,
+    // Waits advance the fake clock, so retry deadlines run on the test's own time.
+    sleep: async (ms) => void (clock.now += ms),
+    tsaTrust,
     fetch: fetchImpl,
     out: (l) => out.push(l),
     err: (l) => out.push(`ERR ${l}`),
@@ -102,5 +115,5 @@ export function cloneScenario(s: Scenario): Scenario {
   const out: string[] = [];
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const clock = { ...s.clock };
-  return { dir, clock, out, git, fetch: s.fetch, ctx: makeCtx(dir, clock, out, s.fetch) };
+  return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
 }

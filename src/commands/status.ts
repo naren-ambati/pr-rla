@@ -1,10 +1,34 @@
 import { existsSync } from "node:fs";
 import { buildPopulation } from "../core/population.js";
-import { auditMode, derivedRoundFor } from "../core/records.js";
+import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, type StatusReport } from "../core/status.js";
 import { windowDays } from "../core/window.js";
-import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readDraws, readManifest, readRegistration, type CommandContext } from "./context.js";
+import type { PrRlaConfig, WindowPaths } from "../config.js";
+import { notTamperProof } from "../timestamp/verify.js";
+import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
+import { assessRecord } from "./timestamps.js";
+
+/**
+ * The audit mode and the honest-output note for status. v1: tamper-evident iff logged.
+ * v2: the stored tokens are checked offline; the mode is proven by U_k when k operators agree,
+ * and the note says TIMESTAMP NOT TAMPER-PROOF (n of k) when the registration or the commitment falls short.
+ */
+export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean }> {
+  if (!isRegistrationV2(reg)) return { mode: auditMode(reg), note: reg.log ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: !!reg.log };
+  const v2 = reg as SignedRecord<RegistrationRecordV2>;
+  const bundle = trustFor(ctx);
+  const ts = v2.record.timestamping;
+  const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle);
+  let short = r.proven ? null : r;
+  if (existsSync(paths.commitment)) {
+    const cm = readCommitment(paths);
+    const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle);
+    if (!c.proven && !short) short = c;
+  }
+  const mode: AuditMode = r.proven ? (r.ukMs! < Date.parse(v2.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE") : auditMode(reg);
+  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short };
+}
 
 export interface StatusOptions {
   json?: boolean;
@@ -29,11 +53,10 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     return 1;
   }
   const reg = readRegistration(paths);
-  const mode = auditMode(reg);
+  const { mode, note: tsNote, tamperProof } = await timeStanding(ctx, config, paths, reg);
   const w = reg.record.window;
   const now = Math.floor(ctx.nowMs() / 1000);
   const { round, publishesAt } = derivedRoundFor(reg);
-  const tsNote = reg.log ? "" : " · TIMESTAMP NOT TAMPER-PROOF";
   if (!existsSync(paths.manifest)) {
     const opens = Date.parse(w.opensAt) / 1000;
     const closes = Date.parse(w.closesAt) / 1000;
@@ -41,7 +64,7 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     let soFar = "";
     if (!opts.offline && now >= opens) {
       const provider = await providerFor(ctx, config);
-      const pop = await buildPopulation(provider, { repo: reg.record.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
+      const pop = await buildPopulation(provider, { repo: registrationRepo(reg), window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
       soFar = ` · N so far ${fmt(pop.entries.length)}`;
     }
     ctx.out(`${mode} · ${phase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${tsNote}`);
@@ -64,7 +87,7 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     params: reg.record.parameters,
   });
   if (opts.json) {
-    ctx.out(JSON.stringify({ mode, timestampTamperProof: !!reg.log, ...report }, null, 2));
+    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report }, null, 2));
   } else if (report.refusal) {
     ctx.out(report.refusal);
     return 3;

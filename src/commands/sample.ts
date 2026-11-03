@@ -1,5 +1,5 @@
 import { RoundNotYetPublished } from "../beacon/drand.js";
-import { manifestSha256, derivedRoundFor } from "../core/records.js";
+import { manifestSha256, manifestRepo, derivedRoundFor } from "../core/records.js";
 import { computeDraws, QUICKNET, unixToIso } from "../core/seed.js";
 import { effectiveCap, zeroFailureStop } from "../core/sprt.js";
 import { existsSync } from "node:fs";
@@ -60,7 +60,7 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   });
   const file: DrawsFile = {
     schema: "pr-rla/draws/v1",
-    repo: manifest.repo,
+    repo: manifestRepo(manifest),
     window: manifest.window.name,
     manifestSha256: manifest.sha256,
     N: manifest.N,

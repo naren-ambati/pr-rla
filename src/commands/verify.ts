@@ -5,6 +5,7 @@ import { statusLine } from "./status.js";
 import {
   configFor,
   getBeacon,
+  trustFor,
   ledgerFor,
   protocolSha256,
   providerFor,
@@ -15,12 +16,16 @@ import {
   type CommandContext,
 } from "./context.js";
 import { logPublicKey } from "./translog.js";
+import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
+import { PR_RLA_VERSION } from "../version.js";
 
 export interface VerifyOptions {
   offline?: boolean;
   logKey?: string;
   beaconFile?: string;
   json?: boolean;
+  /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
+  tsaTrust?: string[];
 }
 
 export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promise<VerifyReport> {
@@ -55,6 +60,7 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
         }
       },
       logKey: (url) => logPublicKey(ctx, config, url, opts.logKey, !!opts.offline),
+      trustBundle: trustFor(ctx, opts.tsaTrust),
     },
   );
 }
@@ -71,7 +77,15 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
     for (const d of c.details) ctx.out(`        ${d}`);
   }
   ctx.out(report.checks.map((c) => (c.n === 1 ? c.summary : `${c.summary} ${mark(c.status)}`)).join(" · "));
-  if (!report.timestampTamperProof) ctx.out("TIMESTAMP NOT TAMPER-PROOF: registration and/or manifest times are self-asserted (no transparency-log entry was verified)");
+  if (report.versions.registered) ctx.out(`registered with pr-rla ${report.versions.registered}${report.versions.frozen ? ` · frozen with pr-rla ${report.versions.frozen}` : ""} · verified with pr-rla ${PR_RLA_VERSION}`);
+  const ts = report.timestamps;
+  if (ts.registration) {
+    for (const [what, s] of [["registration", ts.registration], ["manifest commitment", ts.commitment]] as const) if (s) ctx.out(`${what} ${timestampsLine(s)}`);
+    if (!report.timestampTamperProof) {
+      const short = !ts.registration.proven ? ts.registration : ts.commitment;
+      ctx.out(`${short ? notTamperProof(short) : "TIMESTAMP NOT TAMPER-PROOF"}: registration and/or manifest times are self-asserted (fewer than k timestamp authorities agree)`);
+    }
+  } else if (!report.timestampTamperProof) ctx.out("TIMESTAMP NOT TAMPER-PROOF: registration and/or manifest times are self-asserted (no transparency-log entry was verified)");
   if (report.status) {
     const reg = readRegistration(configFor(ctx).paths);
     ctx.out(statusLine(report.status, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode: report.mode }));

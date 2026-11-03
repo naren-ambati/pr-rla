@@ -10,10 +10,13 @@ import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { manifestSha256, type DrawsFile, type Manifest, type ManifestCommitmentRecord, type SignedRecord } from "../src/core/records.js";
 import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { RekorClient, buildHashedRekord } from "../src/translog/rekor.js";
+import { optionsDigest } from "../src/registry.js";
+import { PR_RLA_VERSION } from "../src/version.js";
 import { cloneScenario, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
 import { generatedGitLabScenario } from "./helpers/gitlab-population.js";
 import { MockRekor } from "./helpers/mock-rekor.js";
+import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
 /**
  * The e2e audit again, with the GitLab provider swapped in for json-file: a fake
@@ -24,6 +27,7 @@ import { MockRekor } from "./helpers/mock-rekor.js";
 const R = 33245812;
 const W = "audit/2026-q3";
 const log = new MockRekor();
+let tsa: MockTsaServer;
 const sc = generatedGitLabScenario();
 const gitlab = fakeGitLab(sc, { pageSize: 100 });
 const viaGitLab = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -37,11 +41,13 @@ const writeJ = (s: Scenario, p: string, v: unknown) => writeFileSync(join(s.dir,
 const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   log.now = Math.floor(T(iso) / 1000);
+  tsa.nowMs = T(iso);
 };
 
 beforeAll(async () => {
   await log.start();
-  honest = setupAuditRepo({ changes: [], log, provider: `{ use: gitlab, options: { base_url: "${GL_BASE}", batch_size: 20 } }`, fetch: viaGitLab });
+  tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+  honest = setupAuditRepo({ changes: [], log, provider: `{ use: gitlab, options: { base_url: "${GL_BASE}", batch_size: 20 } }`, fetch: viaGitLab, tsa: { ids: ["test-a", "test-b"], server: tsa } });
   at(honest, "2026-10-20T00:00:00Z");
   expect(await registerCommand(honest.ctx, { submit: true })).toBe(0);
   at(honest, "2026-10-20T12:00:00Z");
@@ -54,12 +60,16 @@ beforeAll(async () => {
   honest.git("add", "-A");
   honest.git("commit", "-qm", "verdicts through 36");
 }, 120_000);
-afterAll(async () => log.stop());
+afterAll(async () => {
+  await log.stop();
+  await tsa.stop();
+});
 
 describe("end-to-end audit with the GitLab provider (fake self-managed instance, mock Rekor, recorded beacon, git-file ledger)", () => {
   it("freeze lists 400 changes through GitLab's APIs: MRs of three merge methods and direct pushes", () => {
     const m = readJ<Manifest>(honest, `${W}.manifest.json`);
-    expect(m.provider).toEqual({ name: "gitlab", apiVersion: 1 });
+    // Schema v2: the provider identity (contracts.md §5), still naming API version 1.
+    expect(m.provider).toEqual({ name: "gitlab", apiVersion: 1, source: "builtin", version: PR_RLA_VERSION, integrity: null, optionsSha256: optionsDigest({ base_url: GL_BASE, batch_size: 20 }), populationOptionsSha256: optionsDigest({}), trust: "builtin", reviewGranularity: "submission" });
     expect(m.N).toBe(400);
     expect(m.changes.filter((c) => c.kind === "direct_push")).toHaveLength(40);
     expect(m.changes.every((c) => c.id.startsWith("gitlab:acme/widgets"))).toBe(true);

@@ -57,18 +57,180 @@ export interface LoggedEntry {
   };
 }
 
+/**
+ * A Rekor v2 (rekor-tiles) entry. v2 sets no usable time (`integrated_time` is
+ * always 0 and must be ignored), so it is evidence of public discoverability
+ * only; the time comes from RFC 3161 tokens. Built from the documented API and
+ * tested against a mock log only: unverified against the production log.
+ */
+export interface RekorV2Entry {
+  apiVersion: "v2";
+  logUrl: string;
+  logIndex: number;
+  /** Base64 key id of the log. */
+  logId: string;
+  kindVersion: { kind: string; version: string };
+  /** Base64 canonicalized entry body (the Merkle leaf). */
+  canonicalizedBody: string;
+  inclusionProof: { logIndex: number; treeSize: number; rootHash: string; hashes: string[]; checkpoint: { envelope: string } };
+}
+
+/** An RFC 3161 token over a signed record's digest (contracts.md §5). Identity: (tsa, serial). */
+export interface TimestampEvidence {
+  kind: "rfc3161";
+  /** Trust-bundle id of the authority, e.g. "sigstore". */
+  tsa: string;
+  url: string;
+  /** Base64 DER TimeStampToken (CMS ContentInfo). */
+  tokenDer: string;
+  /** Copied from the token for reading; verify checks it against the token. */
+  genTime: string;
+  /** The token's stated accuracy in seconds, or null when the authority states none (verify then uses 60 s). */
+  accuracySeconds: number | null;
+  /** Hex, as the authority issued it. */
+  serial: string;
+  /** Hex of the 64-bit request nonce. */
+  nonce: string;
+}
+
 export interface SignedRecord<T> {
   record: T;
-  /** SHA-256 of canonicalJson(record): the artifact digest that is signed and logged. */
+  /** SHA-256 of canonicalJson(record): the artifact digest that is signed, time-stamped and logged. */
   sha256: string;
   /** Base64 DER ECDSA (P-256, SHA-256) signature over canonicalJson(record). */
   signature: string;
   publicKeyPem: string;
-  /** null = written locally only; its timestamps are NOT tamper-proof. */
-  log: LoggedEntry | null;
+  /** null = not in a transparency log. */
+  log: LoggedEntry | RekorV2Entry | null;
+  /** Schema v2: RFC 3161 tokens over `sha256`. Absent on v1 records. */
+  timestamps?: TimestampEvidence[];
 }
 
 export interface ManifestEntry extends ChangeRecord {}
+
+/* ---------------------------------------------------------------------------
+ * Schema v2 (contracts.md §5), defined in full here once. Writers emit v2 from
+ * bolt 1 on; v1 files keep verifying. Fields that later bolts fill carry null
+ * (or their documented default) until then, so the shape does not change again.
+ * ------------------------------------------------------------------------- */
+
+/** Which repositories an audit covers. Only `repo` is supported until org-pooled freeze (bolt 9). */
+export type RepoSet =
+  | { kind: "repo"; repo: string }
+  | { kind: "list"; repos: string[] }
+  | { kind: "rule"; owner: string; include: string[]; exclude: string[]; archived: false; forks: false; visibility: ("public" | "private" | "internal")[] };
+
+export type ProvenanceLevel = "self-asserted" | "account" | "presence";
+
+/** What exactly ran as a provider or ledger. */
+export interface PluginIdentity {
+  name: string;
+  source: "builtin" | "package" | "path";
+  /** The pr-rla version for built-ins; the plugin's package version otherwise (null if it has none). */
+  version: string | null;
+  /** The lock's treeSha256 (bolt 4). null for built-ins, and for external plugins until the lock exists. */
+  integrity: string | null;
+  optionsSha256: string;
+  /** SHA-256 over only the options the definition lists in `populationOptions` (none are listed before bolt 5). */
+  populationOptionsSha256: string;
+  trust: "builtin" | "isolated" | "full";
+}
+
+export interface TimestampingParams {
+  /** Trust-bundle ids. [] = none configured: no network call, and every output says TIMESTAMP NOT TAMPER-PROOF. */
+  authorities: string[];
+  /** k: distinct operators whose tokens must be accepted. */
+  minTokens: number;
+  toleranceSeconds: number;
+  defaultAccuracySeconds: number;
+  /** Trust-bundle version the record was made with (informational). */
+  bundle: string;
+}
+
+export interface RegistrationRecordV2 {
+  schema: "pr-rla/registration/v2";
+  repos: RepoSet;
+  window: ResolvedWindow;
+  selector: Selector;
+  protocolSha256: string;
+  parameters: AuditParameters;
+  beacon: RegistrationRecord["beacon"];
+  /** Signed; the seed-derivation input. RFC 3161 tokens bound it, they do not replace it. */
+  registeredAt: string;
+  timestamping: TimestampingParams;
+  plugins: { provider: PluginIdentity; ledger: PluginIdentity };
+  verdicts: { minProvenance: ProvenanceLevel; reviewers: string[] | null; require_signed?: boolean };
+  /** The pr-rla release that wrote the record. */
+  prRlaVersion: string;
+}
+
+export interface ManifestRepo {
+  repo: string;
+  /** The SCM's stable repository id (bolt 9). */
+  repoId: string | null;
+  defaultBranch: string;
+  /** The default-branch head the population was walked from (bolt 5). */
+  headSha: string | null;
+}
+
+export interface ManifestV2 {
+  schema: "pr-rla/manifest/v2";
+  registrationSha256: string;
+  /** Sorted by repo. */
+  repos: ManifestRepo[];
+  provider: PluginIdentity & { apiVersion: number; reviewGranularity: "submission" | "first-comment-per-user" };
+  window: ResolvedWindow;
+  frozenAt: string;
+  selector: Selector;
+  parameters: AuditParameters;
+  protocolSha256: string;
+  funnel: FunnelStep[];
+  limitations: string[];
+  N: number;
+  /** Sorted by id (UTF-16 code-unit order). Reviews are as of frozenAt. */
+  changes: ManifestEntry[];
+  prRlaVersion: string;
+  /** SHA-256 over canonicalJson of every other field. */
+  sha256: string;
+}
+
+/** Signed; carries its RFC 3161 tokens in the SignedRecord envelope. */
+export interface CommitmentRecordV2 {
+  schema: "pr-rla/commitment/v2";
+  window: string;
+  manifestSha256: string;
+  N: number;
+  registrationSha256: string;
+  /** Signed; the freeze time that must precede round R. */
+  frozenAt: string;
+  /** The seed round this commitment names. verify recomputes it (check 3). */
+  seedRound: number;
+  seedRoundPublishesAt: string;
+  prRlaVersion: string;
+}
+
+export type AnyRegistration = RegistrationRecord | RegistrationRecordV2;
+export type AnyManifest = Manifest | ManifestV2;
+export type AnyCommitment = ManifestCommitmentRecord | CommitmentRecordV2;
+
+export const isRegistrationV2 = (r: SignedRecord<AnyRegistration>): r is SignedRecord<RegistrationRecordV2> => r.record.schema === "pr-rla/registration/v2";
+export const isCommitmentV2 = (c: SignedRecord<AnyCommitment>): c is SignedRecord<CommitmentRecordV2> => c.record.schema === "pr-rla/commitment/v2";
+export const isManifestV2 = (m: AnyManifest): m is ManifestV2 => m.schema === "pr-rla/manifest/v2";
+
+/** The one repository of a single-repo audit (every v1 audit, and v2 with `repos.kind: "repo"`). */
+export function registrationRepo(reg: SignedRecord<AnyRegistration>): string {
+  const r = reg.record;
+  if (r.schema !== "pr-rla/registration/v2") return r.repo;
+  const set = r.repos;
+  if (set.kind === "repo") return set.repo;
+  throw new Error(`registration covers a repo set of kind "${set.kind}"; org-pooled audits are not supported by this build`);
+}
+
+export function manifestRepo(m: AnyManifest): string {
+  if (m.schema !== "pr-rla/manifest/v2") return m.repo;
+  if (m.repos.length !== 1) throw new Error(`manifest covers ${m.repos.length} repos; org-pooled audits are not supported by this build`);
+  return m.repos[0]!.repo;
+}
 
 export interface Manifest {
   schema: "pr-rla/manifest/v1";
@@ -94,7 +256,7 @@ export function recordSha256(record: unknown): string {
   return sha256Hex(canonicalJson(record));
 }
 
-export function manifestSha256(m: Omit<Manifest, "sha256"> | Manifest): string {
+export function manifestSha256(m: Omit<Manifest, "sha256"> | Manifest | Omit<ManifestV2, "sha256"> | ManifestV2): string {
   return hashCanonical(m as unknown as Record<string, unknown>, ["sha256"]);
 }
 
@@ -109,21 +271,27 @@ export function beaconParams(): RegistrationRecord["beacon"] {
 export interface EffectiveTime {
   unix: number;
   iso: string;
-  source: "log" | "local";
+  /** log: a v1 record's Rekor integratedTime · local: a v1 record's own clock · signed: a v2 record's signed time (tokens bound it). */
+  source: "log" | "local" | "signed";
 }
 
-/** The time a signed record counts as registered: the log's integratedTime if logged, else the self-asserted local time. */
+/**
+ * v1: the time a signed record counts as registered is the log's integratedTime
+ * if logged, else the self-asserted local time. v2: always the signed field
+ * (FR1.4); RFC 3161 tokens and any log entry only bound it.
+ */
 export function effectiveTime(signed: SignedRecord<unknown>, localIso: string): EffectiveTime {
-  if (signed.log) return { unix: signed.log.integratedTime, iso: unixToIso(signed.log.integratedTime), source: "log" };
   const unix = isoToUnix(localIso);
+  if (signed.timestamps !== undefined) return { unix, iso: unixToIso(unix), source: "signed" };
+  if (signed.log && !("apiVersion" in signed.log)) return { unix: signed.log.integratedTime, iso: unixToIso(signed.log.integratedTime), source: "log" };
   return { unix, iso: unixToIso(unix), source: "local" };
 }
 
-export function registrationTime(reg: SignedRecord<RegistrationRecord>): EffectiveTime {
+export function registrationTime(reg: SignedRecord<AnyRegistration>): EffectiveTime {
   return effectiveTime(reg, reg.record.registeredAt);
 }
 
-export function derivedRoundFor(reg: SignedRecord<RegistrationRecord>): { round: number; publishesAt: number; base: "window-close" | "registration" } {
+export function derivedRoundFor(reg: SignedRecord<AnyRegistration>): { round: number; publishesAt: number; base: "window-close" | "registration" } {
   const windowClosesAt = isoToUnix(reg.record.window.closesAt);
   const registeredAt = registrationTime(reg).unix;
   const round = deriveSeedRound({ windowClosesAt, registeredAt });
@@ -132,7 +300,8 @@ export function derivedRoundFor(reg: SignedRecord<RegistrationRecord>): { round:
 
 export type AuditMode = "PROSPECTIVE" | "RETROSPECTIVE";
 
-export function auditMode(reg: SignedRecord<RegistrationRecord>): AuditMode {
+/** The mode the registration's own time claims. For v2, verify proves it from the tokens (U_k < opensAt). */
+export function auditMode(reg: SignedRecord<AnyRegistration>): AuditMode {
   return registrationTime(reg).unix < isoToUnix(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
 }
 

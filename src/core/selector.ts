@@ -15,6 +15,13 @@ export interface Selector {
   max_changed_lines: number | null;
   /** Review scope only: generated files are dropped from what the reviewer reads. Does not change the stratum. */
   exclude_generated: boolean;
+  /**
+   * Schema v2: logins (or `id:<v>`) to treat as bots wherever they appear. Registered from bolt 1 so the
+   * selector's shape is fixed; applied from bolt 5 (U3). Until then only [] is accepted. Absent on v1 records.
+   */
+  bots?: string[];
+  /** Schema v2: whether direct pushes that landed through a pushed merge commit count. Only "include" until bolt 5 (U3). */
+  direct_push_via_merge?: "include" | "exclude";
 }
 
 export const DEFAULT_SELECTOR: Selector = {
@@ -25,6 +32,8 @@ export const DEFAULT_SELECTOR: Selector = {
   merged_by: "any",
   max_changed_lines: null,
   exclude_generated: true,
+  bots: [],
+  direct_push_via_merge: "include",
 };
 
 export function normalizeSelector(raw: Partial<Record<keyof Selector, unknown>> | undefined): Selector {
@@ -47,8 +56,15 @@ export function normalizeSelector(raw: Partial<Record<keyof Selector, unknown>> 
   if (mcl !== null && (typeof mcl !== "number" || !Number.isInteger(mcl) || mcl < 0)) throw new Error("selector.max_changed_lines must be a non-negative integer or null");
   const eg = r.exclude_generated ?? DEFAULT_SELECTOR.exclude_generated;
   if (typeof eg !== "boolean") throw new Error("selector.exclude_generated must be true or false");
+  const bots = r.bots ?? [];
+  if (!Array.isArray(bots) || bots.some((b) => typeof b !== "string")) throw new Error("selector.bots must be a list of logins");
+  // Registering a bot list this build cannot apply would sign a stratum it does not compute: refuse instead.
+  if (bots.length > 0) throw new Error("selector.bots is applied from bolt 5 (U3); this build cannot honour a non-empty list, so leave it [] for now");
+  const dpvm = r.direct_push_via_merge ?? "include";
+  if (dpvm !== "include" && dpvm !== "exclude") throw new Error("selector.direct_push_via_merge must be include or exclude");
+  if (dpvm === "exclude") throw new Error('selector.direct_push_via_merge: "exclude" needs landedVia from the providers (bolt 5, U3); this build supports only "include"');
   const orderedKinds = CHANGE_KINDS.filter((k) => (kinds as ChangeKind[]).includes(k));
-  return { kinds: orderedKinds, authors, labels: [...(labels as string[])].sort(), unreviewed, merged_by, max_changed_lines: mcl as number | null, exclude_generated: eg };
+  return { kinds: orderedKinds, authors, labels: [...(labels as string[])].sort(), unreviewed, merged_by, max_changed_lines: mcl as number | null, exclude_generated: eg, bots: [], direct_push_via_merge: "include" };
 }
 
 /** Reviews visible as of `cutoffIso` (inclusive). Later reviews are not part of the frozen record. */

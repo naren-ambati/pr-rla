@@ -12,18 +12,20 @@ import { sampleCommand } from "./commands/sample.js";
 import { simulateCommand } from "./commands/simulate.js";
 import { statusCommand } from "./commands/status.js";
 import { verifyCommand } from "./commands/verify.js";
+import { PR_RLA_VERSION } from "./version.js";
 
 export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromFile?: string }) => CommandContext, setExit: (code: number) => void): Command {
   const program = new Command();
   program
     .name("pr-rla")
     .description("Risk-limiting audits for code changes that landed with no recorded human review")
-    .version("0.1.0")
+    .version(PR_RLA_VERSION)
     .option("-C, --dir <path>", "audit repo directory (holds .pr-rla.yml)")
     .option("-c, --config <path>", "config file (default <dir>/.pr-rla.yml)")
     .option("--from-file <changes.json>", "use the json-file provider with this export instead of the configured provider")
     .showHelpAfterError();
 
+  const collect = (v: string, prev: string[] = []) => [...prev, v];
   const run = (fn: (ctx: CommandContext) => Promise<number>) => async () => {
     const g = program.opts<{ dir?: string; config?: string; fromFile?: string }>();
     const ctx = makeCtx(g);
@@ -51,8 +53,11 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--dry-run", "print the registration and derived seed round; write nothing")
     .option("--submit", "submit to a Rekor transparency log (requires --rekor-url; entries are public and permanent)")
     .option("--rekor-url <url>", "Rekor log URL (no default on purpose)")
+    .option("--rekor-api <v1|v2>", "Rekor API for --submit (v2: unverified against the production log; needs --yes)")
+    .option("--yes", "confirm a Rekor v2 submission")
     .option("--key <path>", "ECDSA P-256 signing key (created if missing)")
     .option("--force", "replace an existing registration")
+    .option("--tsa-trust <file>", "extra timestamp-authority anchors (repeatable)", collect)
     .action(function (this: Command) {
       return run((ctx) => registerCommand(ctx, this.opts()))();
     });
@@ -63,7 +68,11 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--dry-run", "print the population (with the config selector if unregistered); write nothing")
     .option("--submit", "submit the manifest commitment to a Rekor log (requires --rekor-url)")
     .option("--rekor-url <url>", "Rekor log URL")
+    .option("--rekor-api <v1|v2>", "Rekor API for --submit (v2: unverified against the production log; needs --yes)")
+    .option("--yes", "confirm a Rekor v2 submission")
     .option("--key <path>", "signing key")
+    .option("--force", "replace an existing manifest (only if it was never shown to anyone)")
+    .option("--tsa-trust <file>", "extra timestamp-authority anchors (repeatable)", collect)
     .option("--json", "machine-readable output")
     .option("--out <file>", "with --dry-run: write the full listing and would-be manifest ids to <file>")
     .action(function (this: Command) {
@@ -103,6 +112,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .description("third-party check of the seven audit properties")
     .option("--offline", "skip the population rebuild and any network fetch")
     .option("--log-key <pem>", "trusted transparency-log public key")
+    .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")
     .action(function (this: Command) {

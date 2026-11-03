@@ -8,19 +8,21 @@ import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
-import { manifestSha256, type DrawsFile, type Manifest, type ManifestCommitmentRecord, type SignedRecord } from "../src/core/records.js";
+import { manifestSha256, type DrawsFile, type LoggedEntry, type Manifest, type ManifestCommitmentRecord, type SignedRecord } from "../src/core/records.js";
 import { computeDraws, roundPublishTime } from "../src/core/seed.js";
 import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { RekorClient, buildHashedRekord } from "../src/translog/rekor.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { recordedBeacon } from "./helpers/fixtures.js";
 import { MockRekor } from "./helpers/mock-rekor.js";
+import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
 const R = 33245812; // first quicknet round >= 24 h after a registration logged 2026-10-20T00:00:00Z
 const OTHER = 33244800;
 const W = "audit/2026-q3";
 
 const log = new MockRekor();
+let tsa: MockTsaServer;
 let honest: Scenario;
 
 const readJ = <T>(s: Scenario, p: string) => JSON.parse(readFileSync(join(s.dir, p), "utf8")) as T;
@@ -28,6 +30,7 @@ const writeJ = (s: Scenario, p: string, v: unknown) => writeFileSync(join(s.dir,
 const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   log.now = Math.floor(T(iso) / 1000);
+  tsa.nowMs = T(iso);
 };
 
 async function reviewDraws(s: Scenario, through: number, failAt: number[] = []) {
@@ -56,7 +59,9 @@ async function relogCommitment(s: Scenario, record: ManifestCommitmentRecord, lo
 
 beforeAll(async () => {
   await log.start();
-  honest = setupAuditRepo({ changes: makeChanges(400, { bad: 80 }), log });
+  // Two mock timestamp authorities of two operators (k = 2): schema-v2 records need tokens to be tamper-evident.
+  tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+  honest = setupAuditRepo({ changes: makeChanges(400, { bad: 80 }), log, tsa: { ids: ["test-a", "test-b"], server: tsa } });
   at(honest, "2026-10-20T00:00:00Z");
   expect(await registerCommand(honest.ctx, { submit: true })).toBe(0);
   at(honest, "2026-10-20T12:00:00Z");
@@ -66,13 +71,16 @@ beforeAll(async () => {
   at(honest, "2026-10-21T03:00:00Z");
   await reviewDraws(honest, 36);
 });
-afterAll(async () => log.stop());
+afterAll(async () => {
+  await log.stop();
+  await tsa.stop();
+});
 
-describe("an honest retrospective audit, end to end (json-file provider, mock Rekor log, recorded beacon, git-file ledger)", () => {
+describe("an honest retrospective audit, end to end (json-file provider, mock timestamp authorities, mock Rekor log, recorded beacon, git-file ledger)", () => {
   it("register derives R from the logged registration time", () => {
     expect(honest.out.join("\n")).toMatch(/RETROSPECTIVE/);
     expect(honest.out.join("\n")).toMatch(new RegExp(`seed round R = ${R}`));
-    const reg = readJ<SignedRecord<unknown>>(honest, `${W}/registration.json`);
+    const reg = readJ<SignedRecord<unknown> & { log: LoggedEntry | null }>(honest, `${W}/registration.json`);
     expect(reg.log?.integratedTime).toBe(T("2026-10-20T00:00:00Z") / 1000);
   });
 

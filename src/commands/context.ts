@@ -1,8 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fetchQuicknetBeacon, verifyQuicknetBeacon, type Beacon } from "../beacon/drand.js";
 import { sha256Hex } from "../core/canonical.js";
-import type { DrawsFile, ManifestCommitmentRecord, Manifest, RegistrationRecord, SignedRecord } from "../core/records.js";
+import type { AnyCommitment, AnyManifest, AnyRegistration, DrawsFile, SignedRecord } from "../core/records.js";
+import { writeFileAtomic } from "../io/atomic.js";
+import type { BrokerFetch } from "../net/contract.js";
+import { createMinimalBroker } from "../net/minimal-adapter.js";
+import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
 export type { DrawsFile } from "../core/records.js";
 import { CONFIG_FILE, loadConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
 import { createLedger, createProvider } from "../registry.js";
@@ -22,6 +27,14 @@ export interface CommandContext {
   err: (line: string) => void;
   /** Overrides how beacons are obtained (tests, --beacon-file). Must return a VERIFIED beacon or throw. */
   beacon?: (round: number) => Promise<Beacon>;
+  /** Waits; injected with nowMs so retry deadlines run on one clock (tests use a fake one). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Request nonce per authority; injected only to replay recorded timestamp responses. */
+  nonceFor?: (tsa: string) => Uint8Array;
+  /** Extra timestamp-authority anchors trusted by whoever runs the command (tests; the CLI's --tsa-trust adds files). */
+  tsaTrust?: TrustBundleExtra[];
+  /** Asks the human a yes/no question; absent when there is no terminal. */
+  confirm?: (question: string) => Promise<boolean>;
 }
 
 export class CommandError extends Error {
@@ -39,8 +52,31 @@ export function nodeContext(overrides: Partial<CommandContext> = {}): CommandCon
     fetch: globalThis.fetch,
     out: (l) => process.stdout.write(`${l}\n`),
     err: (l) => process.stderr.write(`${l}\n`),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    ...(process.stdin.isTTY
+      ? {
+          confirm: async (q: string) => {
+            const rl = createInterface({ input: process.stdin, output: process.stderr });
+            try {
+              return /^y(es)?$/i.test((await rl.question(`${q} [y/N] `)).trim());
+            } finally {
+              rl.close();
+            }
+          },
+        }
+      : {}),
     ...overrides,
   };
+}
+
+/** The fetch broker for this command (the minimal adapter until bolt 2), on the context's clock. */
+export function brokerFor(ctx: CommandContext): BrokerFetch {
+  return createMinimalBroker({ fetch: ctx.fetch, now: ctx.nowMs, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
+}
+
+/** The shipped trust bundle plus anchors the caller trusts (ctx.tsaTrust, --tsa-trust files). Never the audit repo's own. */
+export function trustFor(ctx: CommandContext, files: readonly string[] = []): TrustBundle {
+  return mergeTrust(SHIPPED_TRUST_BUNDLE, [...(ctx.tsaTrust ?? []), ...files.map((f) => readTrustExtra(resolve(ctx.cwd, f)))]);
 }
 
 export function configFor(ctx: CommandContext): { config: PrRlaConfig; paths: WindowPaths } {
@@ -66,9 +102,9 @@ export function readJson<T>(path: string, what: string): T {
   }
 }
 
+/** Every audit file is written atomically: a temporary file, then a rename (NFR15). */
 export function writeJson(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function protocolSha256(config: PrRlaConfig): string {
@@ -77,9 +113,9 @@ export function protocolSha256(config: PrRlaConfig): string {
   return sha256Hex(readFileSync(p));
 }
 
-export const readRegistration = (paths: WindowPaths) => readJson<SignedRecord<RegistrationRecord>>(paths.registration, "registration");
-export const readManifest = (paths: WindowPaths) => readJson<Manifest>(paths.manifest, "manifest");
-export const readCommitment = (paths: WindowPaths) => readJson<SignedRecord<ManifestCommitmentRecord>>(paths.commitment, "manifest commitment");
+export const readRegistration = (paths: WindowPaths) => readJson<SignedRecord<AnyRegistration>>(paths.registration, "registration");
+export const readManifest = (paths: WindowPaths) => readJson<AnyManifest>(paths.manifest, "manifest");
+export const readCommitment = (paths: WindowPaths) => readJson<SignedRecord<AnyCommitment>>(paths.commitment, "manifest commitment");
 
 export const readDraws = (paths: WindowPaths) => readJson<DrawsFile>(paths.draws, "draws");
 

@@ -29,10 +29,12 @@ export function ephemeralKey(): SigningKey {
   return { privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(), publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString() };
 }
 
+/** Signs a record. A schema-v2 record gets an empty `timestamps` list for its RFC 3161 tokens; v1 records keep the v1 envelope. */
 export function signRecord<T>(record: T, key: SigningKey): SignedRecord<T> {
   const bytes = Buffer.from(canonicalJson(record));
   const signature = sign("sha256", bytes, createPrivateKey(key.privateKeyPem)).toString("base64");
-  return { record, sha256: recordSha256(record), signature, publicKeyPem: key.publicKeyPem, log: null };
+  const v2 = /\/v2$/.test(String((record as { schema?: unknown }).schema ?? ""));
+  return { record, sha256: recordSha256(record), signature, publicKeyPem: key.publicKeyPem, log: null, ...(v2 ? { timestamps: [] } : {}) };
 }
 
 export function verifySignedRecord(signed: SignedRecord<unknown>): { ok: boolean; reason?: string } {

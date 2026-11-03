@@ -6,6 +6,7 @@ import { normalizeSelector, type Selector } from "./core/selector.js";
 import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
 import { normalizePluginSpec, type PluginSpec } from "./registry.js";
+import { DEFAULT_AUTHORITIES, DEFAULT_MIN_TOKENS } from "./timestamp/bundle.js";
 
 export const CONFIG_FILE = ".pr-rla.yml";
 
@@ -24,6 +25,8 @@ export interface PrRlaConfig {
   auditDir: string;
   signingKey: string;
   transparencyLog: { url: string | null; publicKeyFile: string | null };
+  /** RFC 3161 authorities (trust-bundle ids) and k. Absent in .pr-rla.yml means the four defaults with k = 2. */
+  timestamping: { authorities: string[]; minTokens: number };
 }
 
 export interface WindowPaths {
@@ -82,6 +85,12 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   };
   validateParams(parameters);
   const tl = (raw.transparency_log ?? {}) as Record<string, unknown>;
+  const ts = (raw.timestamping ?? {}) as Record<string, unknown>;
+  const authorities = ts.authorities === undefined ? [...DEFAULT_AUTHORITIES] : ts.authorities;
+  if (!Array.isArray(authorities) || authorities.some((a) => typeof a !== "string" || a.length === 0)) throw new Error(`${configPath}: timestamping.authorities must be a list of trust-bundle ids, or [] for none`);
+  if (new Set(authorities).size !== authorities.length) throw new Error(`${configPath}: timestamping.authorities lists an authority twice`);
+  const minTokens = num(ts.min_tokens, "timestamping.min_tokens", DEFAULT_MIN_TOKENS);
+  if (!Number.isInteger(minTokens) || minTokens < 1) throw new Error(`${configPath}: timestamping.min_tokens must be a whole number >= 1`);
   return {
     configPath: resolve(configPath),
     dir,
@@ -98,6 +107,7 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
       url: typeof tl.url === "string" ? tl.url : null,
       publicKeyFile: typeof tl.public_key_file === "string" ? tl.public_key_file : null,
     },
+    timestamping: { authorities: authorities as string[], minTokens },
   };
 }
 
@@ -134,6 +144,10 @@ audit:
 
 protocol: review-protocol.md
 ledger: git-file                # verdicts in audit/<window>/verdicts.jsonl
+
+timestamping:                   # RFC 3161 tokens bound the registration and freeze times. Only the
+  authorities: [sigstore, digicert, globalsign, microsoft]   # record's SHA-256 digest and a nonce are sent.
+  min_tokens: 2                 # k: distinct operators that must agree; [] above = none (TIMESTAMP NOT TAMPER-PROOF)
 # transparency_log:             # used only with --submit / by verify; no default on purpose
 #   url: https://<your-rekor>
 #   public_key_file: rekor.pub

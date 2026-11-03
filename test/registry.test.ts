@@ -77,6 +77,22 @@ describe("architecture boundaries", () => {
     expect(hits).toEqual([]);
   });
 
+  it("the core imports no timestamp client, network module, API or plugin host (test-design.md §5)", () => {
+    const bad = importsOf("core").filter((i) => /timestamp\/client|\/net\/|\/api\/|\/plugins\//.test(i.spec));
+    expect(bad).toEqual([]);
+    // The pure token verifier the core uses reaches no network code either (type-only imports aside).
+    const closure = (file: string, seen = new Set<string>()): Set<string> => {
+      if (seen.has(file)) return seen;
+      seen.add(file);
+      const text = readFileSync(join(ROOT, "src", file), "utf8");
+      for (const m of text.matchAll(/^import (?!type )[^;]*?from\s+"(\.[^"]+)"/gm)) closure(join(file, "..", m[1]!).replace(/\.js$/, ".ts"), seen);
+      return seen;
+    };
+    const reach = [...closure("core/verify.ts")];
+    expect(reach.filter((f) => /timestamp\/client|net\/|commands\/|registry/.test(f))).toEqual([]);
+    expect(reach).toContain("timestamp/verify.ts");
+  });
+
   it("the public SDKs are self-contained", () => {
     expect(importsOf("sdk").filter((i) => !i.spec.startsWith("./"))).toEqual([]);
     expect(importsOf("testing").filter((i) => !/^\.\.\/(sdk|core\/canonical)|^\.\//.test(i.spec))).toEqual([]);
