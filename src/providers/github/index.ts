@@ -29,6 +29,7 @@ interface RestPull {
   number: number;
   merged_at: string | null;
   updated_at: string;
+  merge_commit_sha: string | null;
   base: { ref: string };
 }
 
@@ -68,16 +69,15 @@ export class GitHubProvider implements ScmProvider {
     if (!ref) throw new Error(`${req.repo} has no default branch`);
     const changes: ChangeRecord[] = [];
     const diagnostics: { label: string; value: number }[] = [];
-    let prNumbers: number[] = [];
+    // The PR listing is needed for direct pushes too: a PR's merge commit is never a direct push.
+    const listed = await this.listMergedPullNumbers(req, ref.name);
     if (req.kinds.includes("pull_request")) {
-      const listed = await this.listMergedPullNumbers(req, ref.name);
-      prNumbers = listed.intoDefault;
       diagnostics.push({ label: "PRs merged into other branches in window (excluded)", value: listed.otherBase });
-      const prs = await this.fetchPullRequests(owner, name, prNumbers);
+      const prs = await this.fetchPullRequests(owner, name, listed.intoDefault);
       for (const pr of prs) changes.push(pr);
     }
     if (req.kinds.includes("direct_push")) {
-      const { directPushes, linkedPrs, walked, stop } = await this.walkHistory(owner, name, req, ref.name, ref.target.oid);
+      const { directPushes, linkedPrs, walked, stop } = await this.walkHistory(owner, name, req, ref.name, ref.target.oid, listed.mergeCommits);
       changes.push(...directPushes.map((c) => normalizeDirectPush(req.repo, c)));
       diagnostics.push({ label: "first-parent commits walked in window", value: walked });
       diagnostics.push({ label: "first-parent commits linked to a merged PR", value: linkedPrs });
@@ -87,14 +87,16 @@ export class GitHubProvider implements ScmProvider {
   }
 
   /** REST pulls (state=closed, sort=updated desc), filtered by merged_at, plus a re-scan for PRs updated during the walk. */
-  async listMergedPullNumbers(req: ListChangesRequest, defaultBranch: string): Promise<{ intoDefault: number[]; otherBase: number }> {
+  async listMergedPullNumbers(req: ListChangesRequest, defaultBranch: string): Promise<{ intoDefault: number[]; otherBase: number; mergeCommits: Map<string, number> }> {
     const opens = Date.parse(req.window.opensAt);
     const closes = Date.parse(req.window.closesAt);
     const now = this.ctx.now ?? Date.now;
     const into = new Set<number>();
     const other = new Set<number>();
+    const mergeCommits = new Map<string, number>();
     const consider = (p: RestPull) => {
       if (!p.merged_at) return;
+      if (p.base.ref === defaultBranch && p.merge_commit_sha) mergeCommits.set(p.merge_commit_sha.toLowerCase(), p.number);
       const t = Date.parse(p.merged_at);
       if (t < opens || t >= closes) return;
       (p.base.ref === defaultBranch ? into : other).add(p.number);
@@ -119,7 +121,7 @@ export class GitHubProvider implements ScmProvider {
     // Pagination is by page number over a list sorted by updated_at: a PR updated
     // mid-walk jumps to page 1 and could be skipped. Re-read the head of the list.
     await walk(walkStart - 60_000);
-    return { intoDefault: [...into].sort((a, b) => a - b), otherBase: other.size };
+    return { intoDefault: [...into].sort((a, b) => a - b), otherBase: other.size, mergeCommits };
   }
 
   async fetchPullRequests(owner: string, name: string, numbers: readonly number[]): Promise<ChangeRecord[]> {
@@ -144,7 +146,7 @@ export class GitHubProvider implements ScmProvider {
     return out;
   }
 
-  async walkHistory(owner: string, name: string, req: ListChangesRequest, defaultBranch: string, headOid: string) {
+  async walkHistory(owner: string, name: string, req: ListChangesRequest, defaultBranch: string, headOid: string, mergeCommits: ReadonlyMap<string, number>) {
     const nodes = new Map<string, GqlHistoryCommit>();
     let after: string | null = null;
     const q = historyQuery(this.historyPageSize);
@@ -167,7 +169,7 @@ export class GitHubProvider implements ScmProvider {
       parents: c.parents.nodes.map((p) => p.oid),
       associatedPullRequests: c.associatedPullRequests.nodes,
     });
-    let result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch);
+    let result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch, mergeCommits);
     // A first-parent commit dated before `since` is absent from the pages: fetch it and continue.
     for (let extra = 0; result.stop === "missing-parent" && extra < 50; extra++) {
       const missing = this.findMissingParent([...nodes.values()].map(toNode), headOid);
@@ -175,7 +177,7 @@ export class GitHubProvider implements ScmProvider {
       const d = await this.http.graphql<{ repository: { object: GqlHistoryCommit | null } }>(COMMIT_QUERY, { owner, name, oid: missing });
       if (!d.repository.object) break;
       nodes.set(missing, d.repository.object);
-      result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch);
+      result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch, mergeCommits);
     }
     return {
       directPushes: result.directPushes.map((oid) => nodes.get(oid)!),

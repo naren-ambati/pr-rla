@@ -28,9 +28,18 @@ export interface FirstParentClassification {
  * - rebase merge: each rebased commit is first-parent and associated with the PR,
  *   so they all map to that one PR (no double counting);
  * - anything else on the first-parent chain is a direct push.
+ * GitHub's `associatedPullRequests` can be empty for a PR's own merge commit
+ * (seen on real gh-aw data: PR #73884), so a commit that is the
+ * `merge_commit_sha` of a merged PR is attributed to that PR as well.
  * The walk stops at the first first-parent commit dated before the window opens.
  */
-export function classifyFirstParent(nodes: readonly HistoryNode[], headOid: string, window: AuditWindow, defaultBranch: string): FirstParentClassification {
+export function classifyFirstParent(
+  nodes: readonly HistoryNode[],
+  headOid: string,
+  window: AuditWindow,
+  defaultBranch: string,
+  mergeCommitToPr: ReadonlyMap<string, number> = new Map(),
+): FirstParentClassification {
   const byOid = new Map(nodes.map((n) => [n.oid, n]));
   const opens = Date.parse(window.opensAt);
   const closes = Date.parse(window.closesAt);
@@ -56,6 +65,8 @@ export function classifyFirstParent(nodes: readonly HistoryNode[], headOid: stri
     if (t < closes) {
       walkedInWindow++;
       const prs = n.associatedPullRequests.filter((p) => p.merged && p.baseRefName === defaultBranch).map((p) => p.number);
+      const byMergeSha = mergeCommitToPr.get(n.oid);
+      if (byMergeSha !== undefined && !prs.includes(byMergeSha)) prs.push(byMergeSha);
       if (prs.length === 0) directPushes.push(n.oid);
       else {
         const pr = Math.min(...prs);
