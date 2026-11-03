@@ -42,9 +42,14 @@ export interface Scenario {
   out: string[];
   ctx: CommandContext;
   git: (...args: string[]) => string;
+  fetch: typeof fetch;
 }
 
-export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; logKeyFile?: boolean }): Scenario {
+/**
+ * An audit repo in a temp dir. By default its provider is json-file over `changes`;
+ * `provider` (a YAML flow value) and `fetch` swap in another provider and its transport.
+ */
+export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; logKeyFile?: boolean; provider?: string; fetch?: typeof fetch }): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "prrla-audit-"));
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   git("init", "-q");
@@ -54,7 +59,7 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   writeFileSync(
     join(dir, ".pr-rla.yml"),
     [
-      "provider: { use: json-file, options: { path: changes.json } }",
+      `provider: ${opts.provider ?? "{ use: json-file, options: { path: changes.json } }"}`,
       `repo: ${REPO}`,
       "window: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }",
       "selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }",
@@ -68,16 +73,17 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   git("commit", "-qm", "audit repo");
   const clock = { now: T("2026-10-20T00:00:00Z") };
   const out: string[] = [];
-  const ctx = makeCtx(dir, clock, out);
-  return { dir, clock, out, ctx, git };
+  const fetchImpl = opts.fetch ?? globalThis.fetch;
+  const ctx = makeCtx(dir, clock, out, fetchImpl);
+  return { dir, clock, out, ctx, git, fetch: fetchImpl };
 }
 
-function makeCtx(dir: string, clock: { now: number }, out: string[]): CommandContext {
+function makeCtx(dir: string, clock: { now: number }, out: string[], fetchImpl: typeof fetch): CommandContext {
   return {
     cwd: dir,
     env: {},
     nowMs: () => clock.now,
-    fetch: globalThis.fetch,
+    fetch: fetchImpl,
     out: (l) => out.push(l),
     err: (l) => out.push(`ERR ${l}`),
     beacon: async (round) => {
@@ -96,5 +102,5 @@ export function cloneScenario(s: Scenario): Scenario {
   const out: string[] = [];
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const clock = { ...s.clock };
-  return { dir, clock, out, git, ctx: makeCtx(dir, clock, out) };
+  return { dir, clock, out, git, fetch: s.fetch, ctx: makeCtx(dir, clock, out, s.fetch) };
 }

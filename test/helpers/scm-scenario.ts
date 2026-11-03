@@ -195,16 +195,21 @@ export function scmScenario() {
     pr({ number: 12, strategy: "squash", mergedAt: "2026-08-01T00:00:02Z", updatedAt: "2026-07-31T23:59:58Z", squashCommit: OID("S12"), head: OID("H12"), landed: [OID("S12")], listed: [OID("H12")], author: users.agent, additions: 1, deletions: 1 }),
     pr({ number: 8, strategy: "squash", mergedAt: "2026-07-31T22:00:05Z", updatedAt: "2026-07-31T22:00:10Z", squashCommit: OID("B0"), head: OID("H8"), landed: [OID("B0")], listed: [OID("H8")] }),
   ];
+  return { ...buildScenario({ repo: "acme/widgets", head: OID("L10"), window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, commits, prs }), users };
+}
+
+/** The shape every fake server consumes. */
+export function buildScenario(args: { repo: string; head: string; window: { opensAt: string; closesAt: string }; commits: ScCommit[]; prs: ScPr[]; defaultBranch?: string }) {
+  const { commits } = args;
   const byOid = new Map(commits.map((x) => [x.oid, x]));
   return {
-    repo: "acme/widgets",
-    defaultBranch: "main",
-    head: OID("L10"),
-    window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" },
+    repo: args.repo,
+    defaultBranch: args.defaultBranch ?? "main",
+    head: args.head,
+    window: args.window,
     commits,
     byOid,
-    prs,
-    users,
+    prs: args.prs,
     /** Commits reachable from `from` (all parents), newest committer date first, as `git log` lists them. */
     reachable(from: string): ScCommit[] {
       const out: ScCommit[] = [];
@@ -222,7 +227,7 @@ export function scmScenario() {
     },
   };
 }
-export type ScmScenario = ReturnType<typeof scmScenario>;
+export type ScmScenario = ReturnType<typeof buildScenario>;
 
 /** What every provider must make of the scenario (ids built with the provider's own scheme). */
 export function scenarioExpectations(scheme: string, repo = "acme/widgets") {
