@@ -13,9 +13,13 @@ import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type 
 import { HEAD_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
 
 export interface GitHubProviderOptions {
-  /** Env var holding the token (default GITHUB_TOKEN, then GH_TOKEN). */
+  /** Env var holding the token (default GITHUB_TOKEN, then GH_TOKEN; GH_ENTERPRISE_TOKEN too with base_url). */
   token_env?: string;
+  /** GitHub Enterprise Server root, e.g. https://ghe.example.com: REST at /api/v3, GraphQL at /api/graphql. */
+  base_url?: string;
+  /** REST root (default https://api.github.com, or <base_url>/api/v3). */
   api_url?: string;
+  /** GraphQL endpoint (default <api_url>/graphql on github.com; <host>/api/graphql when the REST root ends in /api/v3). */
   graphql_url?: string;
   /** REST page size (max 100). */
   page_size?: number;
@@ -31,6 +35,19 @@ interface RestPull {
   updated_at: string;
   merge_commit_sha: string | null;
   base: { ref: string };
+}
+
+/**
+ * REST and GraphQL endpoints. github.com: api.github.com and api.github.com/graphql.
+ * GitHub Enterprise Server: <host>/api/v3 and <host>/api/graphql (NOT /api/v3/graphql).
+ */
+export function githubEndpoints(opts: Pick<GitHubProviderOptions, "base_url" | "api_url" | "graphql_url">): { apiUrl: string; graphqlUrl: string; enterprise: boolean } {
+  const trim = (u: string) => u.replace(/\/+$/, "");
+  const base = opts.base_url ? trim(opts.base_url) : null;
+  const enterprise = base !== null && !/^https?:\/\/(www\.)?github\.com$/i.test(base);
+  const apiUrl = trim(opts.api_url ?? (enterprise ? `${base}/api/v3` : "https://api.github.com"));
+  const graphqlUrl = opts.graphql_url ?? (/\/api\/v3$/.test(apiUrl) ? apiUrl.replace(/\/api\/v3$/, "/api/graphql") : `${apiUrl}/graphql`);
+  return { apiUrl, graphqlUrl, enterprise: enterprise || /\/api\/v3$/.test(apiUrl) };
 }
 
 export const GITHUB_LIMITATIONS = [
@@ -49,8 +66,9 @@ export class GitHubProvider implements ScmProvider {
   private readonly historyPageSize: number;
 
   constructor(opts: GitHubProviderOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
-    const token = (opts.token_env ? ctx.env[opts.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN;
-    this.http = new GitHubHttp({ token, apiUrl: opts.api_url, graphqlUrl: opts.graphql_url, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
+    const urls = githubEndpoints(opts);
+    const token = (opts.token_env ? ctx.env[opts.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN ?? (urls.enterprise ? ctx.env.GH_ENTERPRISE_TOKEN : undefined);
+    this.http = new GitHubHttp({ token, apiUrl: urls.apiUrl, graphqlUrl: urls.graphqlUrl, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
     this.pageSize = Math.min(100, opts.page_size ?? 100);
     this.batchSize = opts.batch_size ?? 40;
     this.historyPageSize = opts.history_page_size ?? 50;
@@ -213,6 +231,6 @@ export class GitHubProvider implements ScmProvider {
 export default defineProvider<GitHubProviderOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "github",
-  description: "GitHub.com / GHES: REST pulls + GraphQL reviews (batches of 40) + default-branch history for direct pushes",
+  description: "GitHub.com and GitHub Enterprise Server (base_url): REST pulls + GraphQL reviews (batches of 40) + default-branch history for direct pushes",
   create: (options, ctx) => new GitHubProvider(options ?? {}, ctx),
 });

@@ -30,7 +30,10 @@ export interface FakePr {
 const h = (c: string) => c.repeat(40).slice(0, 40);
 export const OID = (tag: string) => h(Buffer.from(tag).toString("hex"));
 
-export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], prs: FakePr[], opts: { pageSize?: number; failHistoryAbove?: number } = {}) {
+export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], prs: FakePr[], opts: { pageSize?: number; failHistoryAbove?: number; restBase?: string } = {}) {
+  // github.com serves REST at the host root; GitHub Enterprise Server under /api/v3 (and GraphQL at /api/graphql).
+  const restBase = opts.restBase ?? "https://api.github.com";
+  const prefix = new URL(restBase).pathname.replace(/\/+$/, "");
   let served = 0;
   const byOid = new Map(commits.map((c) => [c.oid, c]));
   const commitNode = (c: FakeCommit) => ({
@@ -76,14 +79,14 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
   const f = (async (input: string | URL | Request, init?: RequestInit) => {
     served++;
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    if (url.pathname === `/repos/${repo}/pulls`) {
+    if (url.pathname === `${prefix}/repos/${repo}/pulls`) {
       const page = Number(url.searchParams.get("page") ?? "1");
       const per = Math.min(pageSize, Number(url.searchParams.get("per_page") ?? pageSize));
       const items = restSorted.slice((page - 1) * per, page * per).map((p) => ({ number: p.number, merged_at: p.mergedAt, updated_at: p.updatedAt, base: { ref: p.base }, merge_commit_sha: p.mergeCommit }));
-      const next: Record<string, string> = page * per < restSorted.length ? { link: `<https://api.github.com/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${per}&page=${page + 1}>; rel="next"` } : {};
+      const next: Record<string, string> = page * per < restSorted.length ? { link: `<${restBase}/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${per}&page=${page + 1}>; rel="next"` } : {};
       return json(items, next);
     }
-    if (url.pathname.endsWith("/graphql")) {
+    if (url.pathname === (prefix === "/api/v3" ? "/api/graphql" : "/graphql")) {
       const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
       if (query.includes("defaultBranchRef")) return json({ data: { repository: { defaultBranchRef: { name: "main", target: { oid: head } } } } });
       if (query.includes("history(")) {
@@ -112,7 +115,7 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
       }
       return json({ data: { repository: repoData } });
     }
-    if (url.pathname === "/search/issues") return json({ total_count: 0 });
+    if (url.pathname === `${prefix}/search/issues`) return json({ total_count: 0 });
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
   return { fetch: f, served: () => served };

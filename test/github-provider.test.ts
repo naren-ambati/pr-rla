@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
-import github, { GitHubProvider } from "../src/providers/github/index.js";
+import github, { GitHubProvider, githubEndpoints } from "../src/providers/github/index.js";
 import { classifyHistory, type HistoryNode } from "../src/providers/github/history.js";
 import { normalizeActor, normalizeCommitAuthor, normalizeReviews } from "../src/providers/github/normalize.js";
 import { prBatchQuery } from "../src/providers/github/queries.js";
@@ -239,5 +239,35 @@ describe("GitHub normalizers (pure)", () => {
   it("GraphQL PR batches use aliases, 40 per query by default", () => {
     expect(prBatchQuery([1, 2]).match(/pullRequest\(number:/g)).toHaveLength(2);
     expect(github.providerApiVersion).toBe(1);
+  });
+});
+
+describe("GitHub Enterprise Server (base_url)", () => {
+  it("derives REST /api/v3 and GraphQL /api/graphql (not /api/v3/graphql)", () => {
+    expect(githubEndpoints({})).toEqual({ apiUrl: "https://api.github.com", graphqlUrl: "https://api.github.com/graphql", enterprise: false });
+    expect(githubEndpoints({ base_url: "https://github.com/" })).toEqual({ apiUrl: "https://api.github.com", graphqlUrl: "https://api.github.com/graphql", enterprise: false });
+    expect(githubEndpoints({ base_url: "https://ghe.example.com/" })).toEqual({ apiUrl: "https://ghe.example.com/api/v3", graphqlUrl: "https://ghe.example.com/api/graphql", enterprise: true });
+    expect(githubEndpoints({ api_url: "https://ghe.example.com/api/v3" })).toEqual({ apiUrl: "https://ghe.example.com/api/v3", graphqlUrl: "https://ghe.example.com/api/graphql", enterprise: true });
+    expect(githubEndpoints({ api_url: "https://ghe.example.com/api/v3", graphql_url: "https://gql.example.com/q" }).graphqlUrl).toBe("https://gql.example.com/q");
+  });
+
+  it("passes the conformance kit against a fake GHES host", async () => {
+    const sc = classificationScenario();
+    let fake = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { pageSize: 2, restBase: "https://ghe.example.com/api/v3" });
+    const make = (_f: ConformanceFixture, h: ConformanceHarness) => {
+      fake = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { pageSize: 2, restBase: "https://ghe.example.com/api/v3" });
+      return new GitHubProvider({ base_url: "https://ghe.example.com", page_size: 2, batch_size: 3, history_page_size: 2 }, { ...h.context({ fetch: fake.fetch, env: { GH_ENTERPRISE_TOKEN: "t" } }), now: () => Date.parse("2026-08-03T00:00:00Z") });
+    };
+    const report = await runProviderConformance(make, [
+      {
+        name: "synthetic GHES",
+        request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
+        expect: { pullRequests: [1, 2, 3, 5].map((n) => `github:${sc.repo}#${n}`), directPushes: [OID("D2"), OID("D1")].map((o) => `github:${sc.repo}@${o}`), minPages: 12 },
+        pagesServed: () => fake.served(),
+        http: true,
+        rateLimitFault: GITHUB_RATE_LIMIT,
+      },
+    ]);
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 });
