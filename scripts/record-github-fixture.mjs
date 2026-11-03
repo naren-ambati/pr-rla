@@ -3,6 +3,7 @@
 // REST pull objects are trimmed to the fields pr-rla reads; GraphQL responses are stored as returned.
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { createBroker } from "../dist/net/broker.js";
 import github from "../dist/providers/github/index.js";
 
 const [repo, day, out] = process.argv.slice(2);
@@ -12,7 +13,7 @@ const sha = (b) => (typeof b === "string" ? createHash("sha256").update(b).diges
 const trimPull = (p) => ({ number: p.number, merged_at: p.merged_at, updated_at: p.updated_at, base: { ref: p.base.ref }, user: { login: p.user?.login, type: p.user?.type }, merge_commit_sha: p.merge_commit_sha, html_url: p.html_url });
 const recordingFetch = async (input, init) => {
   const res = await fetch(input, init);
-  const url = typeof input === "string" ? input : input.url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   let body = await res.json();
   if (/\/pulls\?/.test(url) && Array.isArray(body)) body = body.map(trimPull);
   if (/\/search\/issues/.test(url)) body = { total_count: body.total_count };
@@ -25,7 +26,9 @@ const recordingFetch = async (input, init) => {
 };
 const recordedAt = new Date();
 const opts = { page_size: 30, batch_size: 10, history_page_size: 40 };
-const provider = github.create(opts, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: recordingFetch, now: () => recordedAt.getTime() });
+// Through the fetch broker, as in a real run: it retries (the provider makes one attempt each) and paces.
+const fetchThroughBroker = createBroker({}, { fetch: recordingFetch, log: (m) => console.error(m) }).bind("provider:github");
+const provider = github.create(opts, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: fetchThroughBroker, now: () => recordedAt.getTime() });
 const window = { opensAt: `${day}T00:00:00Z`, closesAt: new Date(Date.parse(`${day}T00:00:00Z`) + 86400000).toISOString().replace(".000Z", "Z") };
 const result = await provider.listChanges({ repo, window, kinds: ["pull_request", "direct_push"] });
 const native = await provider.nativeCounts({ repo, window, kinds: ["pull_request"] }, { authors: ["copilot-swe-agent[bot]"] });

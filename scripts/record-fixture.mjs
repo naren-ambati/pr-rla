@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { buildProgram } from "../dist/cli.js";
 import { nodeContext } from "../dist/commands/context.js";
 import { loadConfig } from "../dist/config.js";
+import { createBroker } from "../dist/net/broker.js";
 import { loadProviderDefinition } from "../dist/registry.js";
 
 const cliMode = process.argv[2] === "--cli";
@@ -108,7 +109,7 @@ const scrubberFor = (u) => (/\/api\/v4\/|\/api\/graphql$/.test(new URL(u).pathna
 const KEEP_HEADERS = ["link", "x-next-page", "x-total-count", "x-hasmore"];
 const exchanges = [];
 const recordingFetch = async (input, init) => {
-  const url = typeof input === "string" ? input : input.url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const res = await fetch(input, init);
   const text = await res.text();
   let body;
@@ -143,7 +144,9 @@ if (cliMode) {
   fixture = { out: cliOut, def, options: config.provider.options, repo: config.repo, window: { opensAt: config.window.opensAt, closesAt: config.window.closesAt }, label: `${config.window.start}..${config.window.end}`, changes: pop.listed, diagnostics: pop.diagnostics, defaultBranch: null };
 } else {
   const def = await loadProviderDefinition(use, resolve("."));
-  const provider = await def.create(options, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: recordingFetch, now: () => recordedAt.getTime() });
+  // Through the fetch broker, as in a real run: it retries (the built-ins make one attempt each) and paces.
+  const fetchThroughBroker = createBroker({}, { fetch: recordingFetch, log: (m) => console.error(m) }).bind(`provider:${def.name}`);
+  const provider = await def.create(options, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: fetchThroughBroker, now: () => recordedAt.getTime() });
   const window = { opensAt: `${first}T00:00:00Z`, closesAt: new Date(Date.parse(`${last}T00:00:00Z`) + 86_400_000).toISOString().replace(".000Z", "Z") };
   const result = await provider.listChanges({ repo, window, kinds: ["pull_request", "direct_push"] });
   fixture = { out, def, options, repo, window, label: `${first}..${last}`, changes: result.changes, diagnostics: result.diagnostics ?? [], defaultBranch: result.defaultBranch };
