@@ -15,6 +15,7 @@ describe("the network-deny harness (NFR11)", () => {
     }
     const denied = (globalThis as { __prrlaDeniedConnections?: string[] }).__prrlaDeniedConnections!;
     expect(denied).toEqual(expect.arrayContaining(["rekor.sigstore.dev", "log2025-1.rekor.sigstore.dev"]));
+    denied.length = 0; // these four were deliberate; the harness fails a file that leaves any behind
   });
 
   it("no source file names a default Rekor log", () => {

@@ -1,4 +1,5 @@
 import net from "node:net";
+import { afterAll } from "vitest";
 
 /**
  * The network-deny harness (test-design.md §1, NFR11): every test file runs with
@@ -31,3 +32,9 @@ net.Socket.prototype.connect = function (this: net.Socket, ...args: ConnectArgs)
   }
   return original.apply(this, args);
 } as typeof net.Socket.prototype.connect;
+
+// A refused connection that some code caught and swallowed would not fail its test, so every
+// test file also fails afterwards if anything tried to leave the machine.
+afterAll(() => {
+  if (attempts.length) throw new Error(`network-deny: this test file tried to reach ${[...new Set(attempts)].join(", ")}`);
+});
