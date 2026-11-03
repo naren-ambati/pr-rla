@@ -1,0 +1,5425 @@
+{
+  "schema": "pr-rla/manifest/v1",
+  "repo": "acme/widgets",
+  "provider": {
+    "name": "json-file",
+    "apiVersion": 1
+  },
+  "defaultBranch": "main",
+  "window": {
+    "name": "2026-q3",
+    "start": "2026-07-01",
+    "end": "2026-09-30",
+    "opensAt": "2026-07-01T00:00:00Z",
+    "closesAt": "2026-10-01T00:00:00Z"
+  },
+  "frozenAt": "2026-10-20T12:00:00Z",
+  "registrationSha256": "91c99987f19b5ec2bc445cdd64f437ee4867ffd607ecb171732269a674bb1990",
+  "selector": {
+    "kinds": [
+      "pull_request",
+      "direct_push"
+    ],
+    "authors": "any",
+    "labels": [],
+    "unreviewed": "no-human-review",
+    "merged_by": "any",
+    "max_changed_lines": null,
+    "exclude_generated": true
+  },
+  "parameters": {
+    "claim": "D",
+    "p0": 0.1,
+    "p1": 0.02,
+    "alpha": 0.05,
+    "cap": null,
+    "minPopulation": 150
+  },
+  "protocolSha256": "bf8211a278bd3d9fdf87d2ce147843054ccd351db24acb05ec72f6b0b89a224a",
+  "funnel": [
+    {
+      "step": "landed in window",
+      "count": 200
+    },
+    {
+      "step": "kinds pull_request+direct_push",
+      "count": 200
+    },
+    {
+      "step": "any author",
+      "count": 200
+    },
+    {
+      "step": "no recorded human review",
+      "count": 200
+    }
+  ],
+  "limitations": [
+    "json-file: records were exported by a third party; pr-rla validates their shape but cannot re-check them against the SCM.",
+    "direct_push: `author` is the commit author, which is not necessarily who pushed it (commit author != pusher); mergedBy is null because SCM commit APIs do not expose the pusher."
+  ],
+  "N": 200,
+  "changes": [
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000009e3779b97f4a7c15",
+      "mergedAt": "2026-07-13T22:09:38Z",
+      "changedLines": 395,
+      "labels": [],
+      "id": "gitea:acme/widgets#1000",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1000",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-13T22:09:38Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000013c6ef372fe94f82a",
+      "mergedAt": "2026-07-15T03:52:12Z",
+      "changedLines": 69,
+      "labels": [],
+      "id": "gitea:acme/widgets#1001",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1001",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-15T03:52:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000001daa66d2c7ddf743f",
+      "mergedAt": "2026-08-09T12:09:27Z",
+      "changedLines": 323,
+      "labels": [],
+      "id": "gitea:acme/widgets#1002",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1002",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-09T12:09:27Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000278dde6e5fd29f054",
+      "mergedAt": "2026-08-26T22:51:28Z",
+      "changedLines": 124,
+      "labels": [],
+      "id": "gitea:acme/widgets#1003",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1003",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-26T22:51:28Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000031715609f7c746c69",
+      "mergedAt": "2026-08-25T06:26:27Z",
+      "changedLines": 155,
+      "labels": [],
+      "id": "gitea:acme/widgets#1004",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1004",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-25T06:26:27Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000003b54cda58fbbee87e",
+      "mergedAt": "2026-08-01T11:53:12Z",
+      "changedLines": 220,
+      "labels": [],
+      "id": "gitea:acme/widgets#1005",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1005",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-01T11:53:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000004538454127b096493",
+      "mergedAt": "2026-07-18T22:53:14Z",
+      "changedLines": 145,
+      "labels": [],
+      "id": "gitea:acme/widgets#1006",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1006",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-18T22:53:14Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000004f1bbcdcbfa53e0a8",
+      "mergedAt": "2026-09-16T07:55:40Z",
+      "changedLines": 338,
+      "labels": [],
+      "id": "gitea:acme/widgets#1007",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1007",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-16T07:55:40Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000058ff34785799e5cbd",
+      "mergedAt": "2026-08-05T19:03:41Z",
+      "changedLines": 214,
+      "labels": [],
+      "id": "gitea:acme/widgets#1008",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1008",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-05T19:03:41Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000006cc623af8783354e7",
+      "mergedAt": "2026-08-29T05:59:29Z",
+      "changedLines": 32,
+      "labels": [],
+      "id": "gitea:acme/widgets#1010",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1010",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-29T05:59:29Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000076a99b4b1f77dd0fc",
+      "mergedAt": "2026-09-12T23:41:35Z",
+      "changedLines": 129,
+      "labels": [],
+      "id": "gitea:acme/widgets#1011",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1011",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-12T23:41:35Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000808d12e6b76c84d11",
+      "mergedAt": "2026-07-26T16:29:45Z",
+      "changedLines": 101,
+      "labels": [],
+      "id": "gitea:acme/widgets#1012",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1012",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T16:29:45Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000008a708a824f612c926",
+      "mergedAt": "2026-09-24T03:27:16Z",
+      "changedLines": 12,
+      "labels": [],
+      "id": "gitea:acme/widgets#1013",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1013",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-24T03:27:16Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000009454021de755d453b",
+      "mergedAt": "2026-07-29T08:50:18Z",
+      "changedLines": 86,
+      "labels": [],
+      "id": "gitea:acme/widgets#1014",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1014",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-29T08:50:18Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000009e3779b97f4a7c150",
+      "mergedAt": "2026-08-07T16:01:05Z",
+      "changedLines": 170,
+      "labels": [],
+      "id": "gitea:acme/widgets#1015",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1015",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-07T16:01:05Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000a81af155173f23d65",
+      "mergedAt": "2026-07-21T16:24:59Z",
+      "changedLines": 366,
+      "labels": [],
+      "id": "gitea:acme/widgets#1016",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1016",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-21T16:24:59Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000b1fe68f0af33cb97a",
+      "mergedAt": "2026-08-27T09:25:12Z",
+      "changedLines": 350,
+      "labels": [],
+      "id": "gitea:acme/widgets#1017",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1017",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-27T09:25:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000bbe1e08c47287358f",
+      "mergedAt": "2026-09-10T19:00:33Z",
+      "changedLines": 5,
+      "labels": [],
+      "id": "gitea:acme/widgets#1018",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1018",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-10T19:00:33Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000cfa8cfc37711c2db9",
+      "mergedAt": "2026-08-28T22:58:35Z",
+      "changedLines": 254,
+      "labels": [],
+      "id": "gitea:acme/widgets#1020",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1020",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-28T22:58:35Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000d98c475f0f066a9ce",
+      "mergedAt": "2026-07-26T11:16:19Z",
+      "changedLines": 114,
+      "labels": [],
+      "id": "gitea:acme/widgets#1021",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1021",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T11:16:19Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000e36fbefaa6fb125e3",
+      "mergedAt": "2026-08-13T12:16:27Z",
+      "changedLines": 276,
+      "labels": [],
+      "id": "gitea:acme/widgets#1022",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1022",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-13T12:16:27Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000ed5336963eefba1f8",
+      "mergedAt": "2026-07-21T10:13:00Z",
+      "changedLines": 339,
+      "labels": [],
+      "id": "gitea:acme/widgets#1023",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1023",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-21T10:13:00Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000f736ae31d6e461e0d",
+      "mergedAt": "2026-08-04T17:48:07Z",
+      "changedLines": 294,
+      "labels": [],
+      "id": "gitea:acme/widgets#1024",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1024",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-04T17:48:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001011a25cd6ed909a22",
+      "mergedAt": "2026-07-31T22:19:00Z",
+      "changedLines": 228,
+      "labels": [],
+      "id": "gitea:acme/widgets#1025",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1025",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-31T22:19:00Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000010afd9d6906cdb1637",
+      "mergedAt": "2026-08-13T20:25:38Z",
+      "changedLines": 153,
+      "labels": [],
+      "id": "gitea:acme/widgets#1026",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1026",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-13T20:25:38Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000114e115049ec25924c",
+      "mergedAt": "2026-08-18T17:48:07Z",
+      "changedLines": 231,
+      "labels": [],
+      "id": "gitea:acme/widgets#1027",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1027",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-18T17:48:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000011ec48ca036b700e61",
+      "mergedAt": "2026-09-13T12:30:02Z",
+      "changedLines": 321,
+      "labels": [],
+      "id": "gitea:acme/widgets#1028",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1028",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-13T12:30:02Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001328b7bd766a05068b",
+      "mergedAt": "2026-09-05T04:13:26Z",
+      "changedLines": 180,
+      "labels": [],
+      "id": "gitea:acme/widgets#1030",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1030",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-05T04:13:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000013c6ef372fe94f82a0",
+      "mergedAt": "2026-07-02T04:31:39Z",
+      "changedLines": 56,
+      "labels": [],
+      "id": "gitea:acme/widgets#1031",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1031",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-02T04:31:39Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000146526b0e96899feb5",
+      "mergedAt": "2026-07-09T00:56:33Z",
+      "changedLines": 249,
+      "labels": [],
+      "id": "gitea:acme/widgets#1032",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1032",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-09T00:56:33Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000015035e2aa2e7e47aca",
+      "mergedAt": "2026-07-08T01:57:47Z",
+      "changedLines": 379,
+      "labels": [],
+      "id": "gitea:acme/widgets#1033",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1033",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-08T01:57:47Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000015a195a45c672ef6df",
+      "mergedAt": "2026-07-03T09:31:36Z",
+      "changedLines": 366,
+      "labels": [],
+      "id": "gitea:acme/widgets#1034",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1034",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-03T09:31:36Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000163fcd1e15e67972f4",
+      "mergedAt": "2026-09-04T06:52:07Z",
+      "changedLines": 16,
+      "labels": [],
+      "id": "gitea:acme/widgets#1035",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1035",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-04T06:52:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000016de0497cf65c3ef09",
+      "mergedAt": "2026-09-26T05:00:07Z",
+      "changedLines": 154,
+      "labels": [],
+      "id": "gitea:acme/widgets#1036",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1036",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-26T05:00:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000177c3c1188e50e6b1e",
+      "mergedAt": "2026-08-03T21:38:04Z",
+      "changedLines": 154,
+      "labels": [],
+      "id": "gitea:acme/widgets#1037",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1037",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-03T21:38:04Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000181a738b426458e733",
+      "mergedAt": "2026-08-01T11:37:02Z",
+      "changedLines": 217,
+      "labels": [],
+      "id": "gitea:acme/widgets#1038",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1038",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-01T11:37:02Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001956e27eb562eddf5d",
+      "mergedAt": "2026-07-26T20:23:11Z",
+      "changedLines": 360,
+      "labels": [],
+      "id": "gitea:acme/widgets#1040",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1040",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T20:23:11Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000019f519f86ee2385b72",
+      "mergedAt": "2026-09-10T09:54:20Z",
+      "changedLines": 250,
+      "labels": [],
+      "id": "gitea:acme/widgets#1041",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1041",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-10T09:54:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001a935172286182d787",
+      "mergedAt": "2026-07-04T16:19:06Z",
+      "changedLines": 143,
+      "labels": [],
+      "id": "gitea:acme/widgets#1042",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1042",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-04T16:19:06Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001b3188ebe1e0cd539c",
+      "mergedAt": "2026-08-11T12:09:01Z",
+      "changedLines": 247,
+      "labels": [],
+      "id": "gitea:acme/widgets#1043",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1043",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-11T12:09:01Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001bcfc0659b6017cfb1",
+      "mergedAt": "2026-08-18T08:32:37Z",
+      "changedLines": 194,
+      "labels": [],
+      "id": "gitea:acme/widgets#1044",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1044",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-18T08:32:37Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001c6df7df54df624bc6",
+      "mergedAt": "2026-08-08T14:00:26Z",
+      "changedLines": 388,
+      "labels": [],
+      "id": "gitea:acme/widgets#1045",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1045",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-08T14:00:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001d0c2f590e5eacc7db",
+      "mergedAt": "2026-09-09T03:00:00Z",
+      "changedLines": 324,
+      "labels": [],
+      "id": "gitea:acme/widgets#1046",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1046",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-09T03:00:00Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001daa66d2c7ddf743f0",
+      "mergedAt": "2026-07-11T20:58:04Z",
+      "changedLines": 98,
+      "labels": [],
+      "id": "gitea:acme/widgets#1047",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1047",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-11T20:58:04Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001e489e4c815d41c005",
+      "mergedAt": "2026-08-29T06:26:04Z",
+      "changedLines": 320,
+      "labels": [],
+      "id": "gitea:acme/widgets#1048",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1048",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-29T06:26:04Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001f850d3ff45bd6b82f",
+      "mergedAt": "2026-09-03T17:00:20Z",
+      "changedLines": 35,
+      "labels": [],
+      "id": "gitea:acme/widgets#1050",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1050",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-03T17:00:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000202344b9addb213444",
+      "mergedAt": "2026-09-03T19:13:21Z",
+      "changedLines": 269,
+      "labels": [],
+      "id": "gitea:acme/widgets#1051",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1051",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-03T19:13:21Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000020c17c33675a6bb059",
+      "mergedAt": "2026-07-21T13:02:59Z",
+      "changedLines": 305,
+      "labels": [],
+      "id": "gitea:acme/widgets#1052",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1052",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-21T13:02:59Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000215fb3ad20d9b62c6e",
+      "mergedAt": "2026-07-31T11:29:47Z",
+      "changedLines": 155,
+      "labels": [],
+      "id": "gitea:acme/widgets#1053",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1053",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-31T11:29:47Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000021fdeb26da5900a883",
+      "mergedAt": "2026-09-01T00:38:58Z",
+      "changedLines": 113,
+      "labels": [],
+      "id": "gitea:acme/widgets#1054",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1054",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-01T00:38:58Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000229c22a093d84b2498",
+      "mergedAt": "2026-07-27T21:53:51Z",
+      "changedLines": 67,
+      "labels": [],
+      "id": "gitea:acme/widgets#1055",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1055",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-27T21:53:51Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000233a5a1a4d5795a0ad",
+      "mergedAt": "2026-08-22T07:13:19Z",
+      "changedLines": 263,
+      "labels": [],
+      "id": "gitea:acme/widgets#1056",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1056",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-22T07:13:19Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000023d8919406d6e01cc2",
+      "mergedAt": "2026-07-06T11:38:06Z",
+      "changedLines": 24,
+      "labels": [],
+      "id": "gitea:acme/widgets#1057",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1057",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-06T11:38:06Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002476c90dc0562a98d7",
+      "mergedAt": "2026-07-12T03:17:59Z",
+      "changedLines": 105,
+      "labels": [],
+      "id": "gitea:acme/widgets#1058",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1058",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-12T03:17:59Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000025b338013354bf9101",
+      "mergedAt": "2026-07-16T16:55:54Z",
+      "changedLines": 300,
+      "labels": [],
+      "id": "gitea:acme/widgets#1060",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1060",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-16T16:55:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000026516f7aecd40a0d16",
+      "mergedAt": "2026-09-27T16:07:06Z",
+      "changedLines": 325,
+      "labels": [],
+      "id": "gitea:acme/widgets#1061",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1061",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-27T16:07:06Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000026efa6f4a65354892b",
+      "mergedAt": "2026-09-13T13:18:30Z",
+      "changedLines": 400,
+      "labels": [],
+      "id": "gitea:acme/widgets#1062",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1062",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-13T13:18:30Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000278dde6e5fd29f0540",
+      "mergedAt": "2026-07-26T18:51:51Z",
+      "changedLines": 313,
+      "labels": [],
+      "id": "gitea:acme/widgets#1063",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1063",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T18:51:51Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000282c15e81951e98155",
+      "mergedAt": "2026-08-01T16:54:14Z",
+      "changedLines": 161,
+      "labels": [],
+      "id": "gitea:acme/widgets#1064",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1064",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-01T16:54:14Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000028ca4d61d2d133fd6a",
+      "mergedAt": "2026-09-08T14:52:40Z",
+      "changedLines": 8,
+      "labels": [],
+      "id": "gitea:acme/widgets#1065",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1065",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-08T14:52:40Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000296884db8c507e797f",
+      "mergedAt": "2026-09-20T15:22:44Z",
+      "changedLines": 323,
+      "labels": [],
+      "id": "gitea:acme/widgets#1066",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1066",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-20T15:22:44Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002a06bc5545cfc8f594",
+      "mergedAt": "2026-07-30T11:42:12Z",
+      "changedLines": 202,
+      "labels": [],
+      "id": "gitea:acme/widgets#1067",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1067",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-30T11:42:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002aa4f3ceff4f1371a9",
+      "mergedAt": "2026-08-22T11:21:12Z",
+      "changedLines": 291,
+      "labels": [],
+      "id": "gitea:acme/widgets#1068",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1068",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-22T11:21:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002be162c2724da869d3",
+      "mergedAt": "2026-07-26T08:45:23Z",
+      "changedLines": 9,
+      "labels": [],
+      "id": "gitea:acme/widgets#1070",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1070",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T08:45:23Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002c7f9a3c2bccf2e5e8",
+      "mergedAt": "2026-08-11T10:48:57Z",
+      "changedLines": 348,
+      "labels": [],
+      "id": "gitea:acme/widgets#1071",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1071",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-11T10:48:57Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002d1dd1b5e54c3d61fd",
+      "mergedAt": "2026-09-02T03:39:34Z",
+      "changedLines": 123,
+      "labels": [],
+      "id": "gitea:acme/widgets#1072",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1072",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-02T03:39:34Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002dbc092f9ecb87de12",
+      "mergedAt": "2026-09-22T09:19:20Z",
+      "changedLines": 166,
+      "labels": [],
+      "id": "gitea:acme/widgets#1073",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1073",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-22T09:19:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002e5a40a9584ad25a27",
+      "mergedAt": "2026-08-05T14:44:38Z",
+      "changedLines": 382,
+      "labels": [],
+      "id": "gitea:acme/widgets#1074",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1074",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-05T14:44:38Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002ef8782311ca1cd63c",
+      "mergedAt": "2026-07-07T10:55:54Z",
+      "changedLines": 357,
+      "labels": [],
+      "id": "gitea:acme/widgets#1075",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1075",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-07T10:55:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002f96af9ccb49675251",
+      "mergedAt": "2026-08-19T15:50:04Z",
+      "changedLines": 189,
+      "labels": [],
+      "id": "gitea:acme/widgets#1076",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1076",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-19T15:50:04Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003034e71684c8b1ce66",
+      "mergedAt": "2026-08-07T23:15:50Z",
+      "changedLines": 123,
+      "labels": [],
+      "id": "gitea:acme/widgets#1077",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1077",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-07T23:15:50Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000030d31e903e47fc4a7b",
+      "mergedAt": "2026-08-03T23:26:20Z",
+      "changedLines": 261,
+      "labels": [],
+      "id": "gitea:acme/widgets#1078",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1078",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-03T23:26:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000320f8d83b1469142a5",
+      "mergedAt": "2026-09-28T07:00:49Z",
+      "changedLines": 78,
+      "labels": [],
+      "id": "gitea:acme/widgets#1080",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1080",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-28T07:00:49Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000032adc4fd6ac5dbbeba",
+      "mergedAt": "2026-09-28T11:56:23Z",
+      "changedLines": 184,
+      "labels": [],
+      "id": "gitea:acme/widgets#1081",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1081",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-28T11:56:23Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000334bfc772445263acf",
+      "mergedAt": "2026-07-21T00:06:22Z",
+      "changedLines": 141,
+      "labels": [],
+      "id": "gitea:acme/widgets#1082",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1082",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-21T00:06:22Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000033ea33f0ddc470b6e4",
+      "mergedAt": "2026-07-02T06:13:02Z",
+      "changedLines": 206,
+      "labels": [],
+      "id": "gitea:acme/widgets#1083",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1083",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-02T06:13:02Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000034886b6a9743bb32f9",
+      "mergedAt": "2026-07-17T01:22:21Z",
+      "changedLines": 227,
+      "labels": [],
+      "id": "gitea:acme/widgets#1084",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1084",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-17T01:22:21Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003526a2e450c305af0e",
+      "mergedAt": "2026-08-20T06:09:33Z",
+      "changedLines": 280,
+      "labels": [],
+      "id": "gitea:acme/widgets#1085",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1085",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-20T06:09:33Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000035c4da5e0a42502b23",
+      "mergedAt": "2026-09-28T17:26:54Z",
+      "changedLines": 138,
+      "labels": [],
+      "id": "gitea:acme/widgets#1086",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1086",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-28T17:26:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000366311d7c3c19aa738",
+      "mergedAt": "2026-09-09T23:28:55Z",
+      "changedLines": 131,
+      "labels": [],
+      "id": "gitea:acme/widgets#1087",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1087",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-09T23:28:55Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000370149517d40e5234d",
+      "mergedAt": "2026-08-18T09:58:42Z",
+      "changedLines": 5,
+      "labels": [],
+      "id": "gitea:acme/widgets#1088",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1088",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-18T09:58:42Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000383db844f03f7a1b77",
+      "mergedAt": "2026-08-02T19:09:08Z",
+      "changedLines": 29,
+      "labels": [],
+      "id": "gitea:acme/widgets#1090",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1090",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-02T19:09:08Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000038dbefbea9bec4978c",
+      "mergedAt": "2026-07-01T21:52:28Z",
+      "changedLines": 199,
+      "labels": [],
+      "id": "gitea:acme/widgets#1091",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1091",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-01T21:52:28Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000397a2738633e0f13a1",
+      "mergedAt": "2026-09-15T21:23:44Z",
+      "changedLines": 261,
+      "labels": [],
+      "id": "gitea:acme/widgets#1092",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1092",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-15T21:23:44Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003a185eb21cbd598fb6",
+      "mergedAt": "2026-07-09T07:00:26Z",
+      "changedLines": 254,
+      "labels": [],
+      "id": "gitea:acme/widgets#1093",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1093",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-09T07:00:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003ab6962bd63ca40bcb",
+      "mergedAt": "2026-09-23T13:24:49Z",
+      "changedLines": 33,
+      "labels": [],
+      "id": "gitea:acme/widgets#1094",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1094",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-23T13:24:49Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003b54cda58fbbee87e0",
+      "mergedAt": "2026-09-21T17:08:53Z",
+      "changedLines": 22,
+      "labels": [],
+      "id": "gitea:acme/widgets#1095",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1095",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-21T17:08:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003bf3051f493b3903f5",
+      "mergedAt": "2026-09-15T11:18:11Z",
+      "changedLines": 223,
+      "labels": [],
+      "id": "gitea:acme/widgets#1096",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1096",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-15T11:18:11Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003c913c9902ba83800a",
+      "mergedAt": "2026-08-07T06:25:39Z",
+      "changedLines": 122,
+      "labels": [],
+      "id": "gitea:acme/widgets#1097",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1097",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-07T06:25:39Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003d2f7412bc39cdfc1f",
+      "mergedAt": "2026-07-07T04:12:42Z",
+      "changedLines": 127,
+      "labels": [],
+      "id": "gitea:acme/widgets#1098",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1098",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-07T04:12:42Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003e6be3062f3862f449",
+      "mergedAt": "2026-08-09T15:16:42Z",
+      "changedLines": 95,
+      "labels": [],
+      "id": "gitea:acme/widgets#1100",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1100",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-09T15:16:42Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003f0a1a7fe8b7ad705e",
+      "mergedAt": "2026-07-31T14:23:53Z",
+      "changedLines": 395,
+      "labels": [],
+      "id": "gitea:acme/widgets#1101",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1101",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-31T14:23:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003fa851f9a236f7ec73",
+      "mergedAt": "2026-08-02T21:18:51Z",
+      "changedLines": 334,
+      "labels": [],
+      "id": "gitea:acme/widgets#1102",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1102",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-02T21:18:51Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000404689735bb6426888",
+      "mergedAt": "2026-07-15T21:05:41Z",
+      "changedLines": 348,
+      "labels": [],
+      "id": "gitea:acme/widgets#1103",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1103",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-15T21:05:41Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000040e4c0ed15358ce49d",
+      "mergedAt": "2026-07-22T23:48:13Z",
+      "changedLines": 213,
+      "labels": [],
+      "id": "gitea:acme/widgets#1104",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1104",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-22T23:48:13Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004182f866ceb4d760b2",
+      "mergedAt": "2026-07-26T07:14:03Z",
+      "changedLines": 87,
+      "labels": [],
+      "id": "gitea:acme/widgets#1105",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1105",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T07:14:03Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000042212fe0883421dcc7",
+      "mergedAt": "2026-07-16T22:35:53Z",
+      "changedLines": 145,
+      "labels": [],
+      "id": "gitea:acme/widgets#1106",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1106",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-16T22:35:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000042bf675a41b36c58dc",
+      "mergedAt": "2026-08-01T02:44:12Z",
+      "changedLines": 76,
+      "labels": [],
+      "id": "gitea:acme/widgets#1107",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1107",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-01T02:44:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000435d9ed3fb32b6d4f1",
+      "mergedAt": "2026-09-07T00:44:02Z",
+      "changedLines": 248,
+      "labels": [],
+      "id": "gitea:acme/widgets#1108",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1108",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-07T00:44:02Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000449a0dc76e314bcd1b",
+      "mergedAt": "2026-08-09T06:54:34Z",
+      "changedLines": 341,
+      "labels": [],
+      "id": "gitea:acme/widgets#1110",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1110",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-09T06:54:34Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004538454127b0964930",
+      "mergedAt": "2026-08-15T10:35:34Z",
+      "changedLines": 113,
+      "labels": [],
+      "id": "gitea:acme/widgets#1111",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1111",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-15T10:35:34Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000045d67cbae12fe0c545",
+      "mergedAt": "2026-09-24T00:24:35Z",
+      "changedLines": 339,
+      "labels": [],
+      "id": "gitea:acme/widgets#1112",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1112",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-24T00:24:35Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004674b4349aaf2b415a",
+      "mergedAt": "2026-07-13T16:27:54Z",
+      "changedLines": 142,
+      "labels": [],
+      "id": "gitea:acme/widgets#1113",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1113",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-13T16:27:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004712ebae542e75bd6f",
+      "mergedAt": "2026-09-06T10:32:24Z",
+      "changedLines": 226,
+      "labels": [],
+      "id": "gitea:acme/widgets#1114",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1114",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-06T10:32:24Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000047b123280dadc03984",
+      "mergedAt": "2026-08-21T02:39:29Z",
+      "changedLines": 22,
+      "labels": [],
+      "id": "gitea:acme/widgets#1115",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1115",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-21T02:39:29Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000484f5aa1c72d0ab599",
+      "mergedAt": "2026-08-13T04:04:31Z",
+      "changedLines": 357,
+      "labels": [],
+      "id": "gitea:acme/widgets#1116",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1116",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-13T04:04:31Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000048ed921b80ac5531ae",
+      "mergedAt": "2026-07-16T23:06:02Z",
+      "changedLines": 242,
+      "labels": [],
+      "id": "gitea:acme/widgets#1117",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1117",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-16T23:06:02Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000498bc9953a2b9fadc3",
+      "mergedAt": "2026-07-18T18:45:41Z",
+      "changedLines": 261,
+      "labels": [],
+      "id": "gitea:acme/widgets#1118",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1118",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-18T18:45:41Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004ac83888ad2a34a5ed",
+      "mergedAt": "2026-09-06T03:11:07Z",
+      "changedLines": 247,
+      "labels": [],
+      "id": "gitea:acme/widgets#1120",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1120",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-06T03:11:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004b66700266a97f2202",
+      "mergedAt": "2026-07-07T02:04:42Z",
+      "changedLines": 192,
+      "labels": [],
+      "id": "gitea:acme/widgets#1121",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1121",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-07T02:04:42Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004c04a77c2028c99e17",
+      "mergedAt": "2026-08-08T21:01:07Z",
+      "changedLines": 130,
+      "labels": [],
+      "id": "gitea:acme/widgets#1122",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1122",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-08T21:01:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004ca2def5d9a8141a2c",
+      "mergedAt": "2026-08-19T20:19:15Z",
+      "changedLines": 173,
+      "labels": [],
+      "id": "gitea:acme/widgets#1123",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1123",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-19T20:19:15Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004d41166f93275e9641",
+      "mergedAt": "2026-08-24T03:36:27Z",
+      "changedLines": 234,
+      "labels": [],
+      "id": "gitea:acme/widgets#1124",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1124",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-24T03:36:27Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004ddf4de94ca6a91256",
+      "mergedAt": "2026-08-12T04:03:13Z",
+      "changedLines": 275,
+      "labels": [],
+      "id": "gitea:acme/widgets#1125",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1125",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-12T04:03:13Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004e7d85630625f38e6b",
+      "mergedAt": "2026-08-24T23:17:08Z",
+      "changedLines": 348,
+      "labels": [],
+      "id": "gitea:acme/widgets#1126",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1126",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-24T23:17:08Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004f1bbcdcbfa53e0a80",
+      "mergedAt": "2026-07-12T10:19:26Z",
+      "changedLines": 200,
+      "labels": [],
+      "id": "gitea:acme/widgets#1127",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1127",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-12T10:19:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004fb9f4567924888695",
+      "mergedAt": "2026-08-16T08:23:12Z",
+      "changedLines": 256,
+      "labels": [],
+      "id": "gitea:acme/widgets#1128",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1128",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-16T08:23:12Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000050f66349ec231d7ebf",
+      "mergedAt": "2026-08-23T20:48:08Z",
+      "changedLines": 376,
+      "labels": [],
+      "id": "gitea:acme/widgets#1130",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1130",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-23T20:48:08Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000051949ac3a5a267fad4",
+      "mergedAt": "2026-07-25T14:45:27Z",
+      "changedLines": 165,
+      "labels": [],
+      "id": "gitea:acme/widgets#1131",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1131",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-25T14:45:27Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005232d23d5f21b276e9",
+      "mergedAt": "2026-08-05T23:18:58Z",
+      "changedLines": 365,
+      "labels": [],
+      "id": "gitea:acme/widgets#1132",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1132",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-05T23:18:58Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000052d109b718a0fcf2fe",
+      "mergedAt": "2026-09-14T09:25:07Z",
+      "changedLines": 337,
+      "labels": [],
+      "id": "gitea:acme/widgets#1133",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1133",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-14T09:25:07Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000536f4130d220476f13",
+      "mergedAt": "2026-07-06T09:06:17Z",
+      "changedLines": 277,
+      "labels": [],
+      "id": "gitea:acme/widgets#1134",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1134",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-06T09:06:17Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000540d78aa8b9f91eb28",
+      "mergedAt": "2026-07-09T20:51:53Z",
+      "changedLines": 184,
+      "labels": [],
+      "id": "gitea:acme/widgets#1135",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1135",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-09T20:51:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000054abb024451edc673d",
+      "mergedAt": "2026-09-08T18:23:05Z",
+      "changedLines": 380,
+      "labels": [],
+      "id": "gitea:acme/widgets#1136",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1136",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-08T18:23:05Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005549e79dfe9e26e352",
+      "mergedAt": "2026-08-16T04:07:35Z",
+      "changedLines": 128,
+      "labels": [],
+      "id": "gitea:acme/widgets#1137",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1137",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-16T04:07:35Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000055e81f17b81d715f67",
+      "mergedAt": "2026-08-28T17:50:54Z",
+      "changedLines": 301,
+      "labels": [],
+      "id": "gitea:acme/widgets#1138",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1138",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-28T17:50:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000057248e0b2b1c065791",
+      "mergedAt": "2026-07-08T00:38:19Z",
+      "changedLines": 65,
+      "labels": [],
+      "id": "gitea:acme/widgets#1140",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1140",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-08T00:38:19Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000057c2c584e49b50d3a6",
+      "mergedAt": "2026-08-24T21:02:26Z",
+      "changedLines": 336,
+      "labels": [],
+      "id": "gitea:acme/widgets#1141",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1141",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-24T21:02:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005860fcfe9e1a9b4fbb",
+      "mergedAt": "2026-07-20T19:47:15Z",
+      "changedLines": 103,
+      "labels": [],
+      "id": "gitea:acme/widgets#1142",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1142",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-20T19:47:15Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000058ff34785799e5cbd0",
+      "mergedAt": "2026-07-25T05:01:16Z",
+      "changedLines": 389,
+      "labels": [],
+      "id": "gitea:acme/widgets#1143",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1143",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-25T05:01:16Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000599d6bf211193047e5",
+      "mergedAt": "2026-09-17T03:24:33Z",
+      "changedLines": 213,
+      "labels": [],
+      "id": "gitea:acme/widgets#1144",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1144",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-17T03:24:33Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005a3ba36bca987ac3fa",
+      "mergedAt": "2026-09-24T20:33:45Z",
+      "changedLines": 36,
+      "labels": [],
+      "id": "gitea:acme/widgets#1145",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1145",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-24T20:33:45Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005ad9dae58417c5400f",
+      "mergedAt": "2026-08-01T03:15:14Z",
+      "changedLines": 21,
+      "labels": [],
+      "id": "gitea:acme/widgets#1146",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1146",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-01T03:15:14Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005b78125f3d970fbc24",
+      "mergedAt": "2026-09-03T17:19:45Z",
+      "changedLines": 23,
+      "labels": [],
+      "id": "gitea:acme/widgets#1147",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1147",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-03T17:19:45Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005c1649d8f7165a3839",
+      "mergedAt": "2026-07-18T06:18:17Z",
+      "changedLines": 328,
+      "labels": [],
+      "id": "gitea:acme/widgets#1148",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1148",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-18T06:18:17Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005d52b8cc6a14ef3063",
+      "mergedAt": "2026-08-09T03:23:25Z",
+      "changedLines": 268,
+      "labels": [],
+      "id": "gitea:acme/widgets#1150",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1150",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-09T03:23:25Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005df0f046239439ac78",
+      "mergedAt": "2026-09-03T00:29:20Z",
+      "changedLines": 24,
+      "labels": [],
+      "id": "gitea:acme/widgets#1151",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1151",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-03T00:29:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005e8f27bfdd1384288d",
+      "mergedAt": "2026-09-25T04:50:41Z",
+      "changedLines": 263,
+      "labels": [],
+      "id": "gitea:acme/widgets#1152",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1152",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-25T04:50:41Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005f2d5f399692cea4a2",
+      "mergedAt": "2026-09-07T20:14:44Z",
+      "changedLines": 357,
+      "labels": [],
+      "id": "gitea:acme/widgets#1153",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1153",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-07T20:14:44Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005fcb96b350121920b7",
+      "mergedAt": "2026-07-26T04:24:22Z",
+      "changedLines": 391,
+      "labels": [],
+      "id": "gitea:acme/widgets#1154",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1154",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-26T04:24:22Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006069ce2d0991639ccc",
+      "mergedAt": "2026-07-14T08:21:47Z",
+      "changedLines": 301,
+      "labels": [],
+      "id": "gitea:acme/widgets#1155",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1155",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-14T08:21:47Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000610805a6c310ae18e1",
+      "mergedAt": "2026-08-27T00:21:16Z",
+      "changedLines": 262,
+      "labels": [],
+      "id": "gitea:acme/widgets#1156",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1156",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-27T00:21:16Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000061a63d207c8ff894f6",
+      "mergedAt": "2026-09-28T03:09:34Z",
+      "changedLines": 267,
+      "labels": [],
+      "id": "gitea:acme/widgets#1157",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1157",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-28T03:09:34Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006244749a360f43110b",
+      "mergedAt": "2026-09-08T00:14:59Z",
+      "changedLines": 381,
+      "labels": [],
+      "id": "gitea:acme/widgets#1158",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1158",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-08T00:14:59Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006380e38da90dd80935",
+      "mergedAt": "2026-07-31T19:56:46Z",
+      "changedLines": 387,
+      "labels": [],
+      "id": "gitea:acme/widgets#1160",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1160",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-31T19:56:46Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000641f1b07628d22854a",
+      "mergedAt": "2026-07-08T23:44:20Z",
+      "changedLines": 396,
+      "labels": [],
+      "id": "gitea:acme/widgets#1161",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1161",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-08T23:44:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000064bd52811c0c6d015f",
+      "mergedAt": "2026-07-20T16:18:26Z",
+      "changedLines": 400,
+      "labels": [],
+      "id": "gitea:acme/widgets#1162",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1162",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-20T16:18:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000655b89fad58bb77d74",
+      "mergedAt": "2026-07-11T15:12:09Z",
+      "changedLines": 20,
+      "labels": [],
+      "id": "gitea:acme/widgets#1163",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1163",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-11T15:12:09Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000065f9c1748f0b01f989",
+      "mergedAt": "2026-08-04T03:46:40Z",
+      "changedLines": 160,
+      "labels": [],
+      "id": "gitea:acme/widgets#1164",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1164",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-04T03:46:40Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006697f8ee488a4c759e",
+      "mergedAt": "2026-09-30T12:14:04Z",
+      "changedLines": 218,
+      "labels": [],
+      "id": "gitea:acme/widgets#1165",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1165",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-30T12:14:04Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000067363068020996f1b3",
+      "mergedAt": "2026-09-30T21:22:11Z",
+      "changedLines": 307,
+      "labels": [],
+      "id": "gitea:acme/widgets#1166",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1166",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-30T21:22:11Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000067d467e1bb88e16dc8",
+      "mergedAt": "2026-07-06T15:27:54Z",
+      "changedLines": 175,
+      "labels": [],
+      "id": "gitea:acme/widgets#1167",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1167",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-06T15:27:54Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000068729f5b75082be9dd",
+      "mergedAt": "2026-07-08T06:17:26Z",
+      "changedLines": 365,
+      "labels": [],
+      "id": "gitea:acme/widgets#1168",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1168",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-08T06:17:26Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000069af0e4ee806c0e207",
+      "mergedAt": "2026-09-30T07:45:43Z",
+      "changedLines": 390,
+      "labels": [],
+      "id": "gitea:acme/widgets#1170",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1170",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-30T07:45:43Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006a4d45c8a1860b5e1c",
+      "mergedAt": "2026-08-12T20:15:03Z",
+      "changedLines": 169,
+      "labels": [],
+      "id": "gitea:acme/widgets#1171",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1171",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-12T20:15:03Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006aeb7d425b0555da31",
+      "mergedAt": "2026-09-30T02:57:40Z",
+      "changedLines": 65,
+      "labels": [],
+      "id": "gitea:acme/widgets#1172",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1172",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-30T02:57:40Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006b89b4bc1484a05646",
+      "mergedAt": "2026-09-29T23:24:22Z",
+      "changedLines": 174,
+      "labels": [],
+      "id": "gitea:acme/widgets#1173",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1173",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-29T23:24:22Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006c27ec35ce03ead25b",
+      "mergedAt": "2026-09-09T09:15:18Z",
+      "changedLines": 227,
+      "labels": [],
+      "id": "gitea:acme/widgets#1174",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1174",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-09T09:15:18Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006cc623af8783354e70",
+      "mergedAt": "2026-08-16T02:05:53Z",
+      "changedLines": 5,
+      "labels": [],
+      "id": "gitea:acme/widgets#1175",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1175",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-16T02:05:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006d645b2941027fca85",
+      "mergedAt": "2026-09-29T10:31:06Z",
+      "changedLines": 322,
+      "labels": [],
+      "id": "gitea:acme/widgets#1176",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1176",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-29T10:31:06Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006e0292a2fa81ca469a",
+      "mergedAt": "2026-08-06T17:17:52Z",
+      "changedLines": 224,
+      "labels": [],
+      "id": "gitea:acme/widgets#1177",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1177",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-06T17:17:52Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006ea0ca1cb40114c2af",
+      "mergedAt": "2026-07-27T09:44:28Z",
+      "changedLines": 114,
+      "labels": [],
+      "id": "gitea:acme/widgets#1178",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1178",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-27T09:44:28Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006fdd391026ffa9bad9",
+      "mergedAt": "2026-09-09T07:10:23Z",
+      "changedLines": 297,
+      "labels": [],
+      "id": "gitea:acme/widgets#1180",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1180",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-09T07:10:23Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000707b7089e07ef436ee",
+      "mergedAt": "2026-08-17T03:57:43Z",
+      "changedLines": 331,
+      "labels": [],
+      "id": "gitea:acme/widgets#1181",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1181",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-17T03:57:43Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007119a80399fe3eb303",
+      "mergedAt": "2026-08-26T13:50:33Z",
+      "changedLines": 369,
+      "labels": [],
+      "id": "gitea:acme/widgets#1182",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1182",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-26T13:50:33Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000071b7df7d537d892f18",
+      "mergedAt": "2026-09-10T00:55:53Z",
+      "changedLines": 393,
+      "labels": [],
+      "id": "gitea:acme/widgets#1183",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1183",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-10T00:55:53Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000725616f70cfcd3ab2d",
+      "mergedAt": "2026-09-09T23:27:20Z",
+      "changedLines": 305,
+      "labels": [],
+      "id": "gitea:acme/widgets#1184",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1184",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-09T23:27:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000072f44e70c67c1e2742",
+      "mergedAt": "2026-07-10T21:10:35Z",
+      "changedLines": 319,
+      "labels": [],
+      "id": "gitea:acme/widgets#1185",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1185",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-10T21:10:35Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000739285ea7ffb68a357",
+      "mergedAt": "2026-07-30T22:12:46Z",
+      "changedLines": 5,
+      "labels": [],
+      "id": "gitea:acme/widgets#1186",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1186",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-30T22:12:46Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007430bd64397ab31f6c",
+      "mergedAt": "2026-07-06T04:51:45Z",
+      "changedLines": 52,
+      "labels": [],
+      "id": "gitea:acme/widgets#1187",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1187",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-06T04:51:45Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000074cef4ddf2f9fd9b81",
+      "mergedAt": "2026-09-01T06:18:20Z",
+      "changedLines": 362,
+      "labels": [],
+      "id": "gitea:acme/widgets#1188",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1188",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-01T06:18:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000760b63d165f89293ab",
+      "mergedAt": "2026-07-20T18:45:20Z",
+      "changedLines": 354,
+      "labels": [],
+      "id": "gitea:acme/widgets#1190",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1190",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-20T18:45:20Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000076a99b4b1f77dd0fc0",
+      "mergedAt": "2026-07-10T17:43:41Z",
+      "changedLines": 41,
+      "labels": [],
+      "id": "gitea:acme/widgets#1191",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1191",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-10T17:43:41Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007747d2c4d8f7278bd5",
+      "mergedAt": "2026-09-01T23:18:45Z",
+      "changedLines": 289,
+      "labels": [],
+      "id": "gitea:acme/widgets#1192",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1192",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-01T23:18:45Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000077e60a3e92767207ea",
+      "mergedAt": "2026-07-13T14:35:25Z",
+      "changedLines": 251,
+      "labels": [],
+      "id": "gitea:acme/widgets#1193",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1193",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-13T14:35:25Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000788441b84bf5bc83ff",
+      "mergedAt": "2026-08-09T14:52:58Z",
+      "changedLines": 60,
+      "labels": [],
+      "id": "gitea:acme/widgets#1194",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1194",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-08-09T14:52:58Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000792279320575070014",
+      "mergedAt": "2026-09-04T19:14:30Z",
+      "changedLines": 134,
+      "labels": [],
+      "id": "gitea:acme/widgets#1195",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1195",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-09-04T19:14:30Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000079c0b0abbef4517c29",
+      "mergedAt": "2026-07-16T18:06:05Z",
+      "changedLines": 10,
+      "labels": [],
+      "id": "gitea:acme/widgets#1196",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1196",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-16T18:06:05Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007a5ee82578739bf83e",
+      "mergedAt": "2026-07-28T13:53:46Z",
+      "changedLines": 379,
+      "labels": [],
+      "id": "gitea:acme/widgets#1197",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1197",
+      "author": {
+        "login": "copilot-swe-agent[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-28T13:53:46Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007afd1f9f31f2e67453",
+      "mergedAt": "2026-07-02T04:19:06Z",
+      "changedLines": 39,
+      "labels": [],
+      "id": "gitea:acme/widgets#1198",
+      "kind": "pull_request",
+      "url": "https://git.example.com/acme/widgets/pulls/1198",
+      "author": {
+        "login": "claude[bot]",
+        "kind": "bot"
+      },
+      "mergedBy": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "reviews": [
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer[bot]",
+            "kind": "bot"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-07-02T04:19:06Z"
+        }
+      ]
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000062e2ac13ef8e8d8d2",
+      "mergedAt": "2026-09-24T01:15:22Z",
+      "changedLines": 18,
+      "labels": [],
+      "id": "gitea:acme/widgets@0000000000000000000000062e2ac13ef8e8d8d2",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/0000000000000000000000062e2ac13ef8e8d8d2",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000000c5c55827df1d1b1a4",
+      "mergedAt": "2026-08-22T13:08:56Z",
+      "changedLines": 333,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000000c5c55827df1d1b1a4",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000000c5c55827df1d1b1a4",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000128a8043bceaba8a76",
+      "mergedAt": "2026-07-22T09:09:28Z",
+      "changedLines": 301,
+      "labels": [],
+      "id": "gitea:acme/widgets@0000000000000000000000128a8043bceaba8a76",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/0000000000000000000000128a8043bceaba8a76",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000018b8ab04fbe3a36348",
+      "mergedAt": "2026-08-20T16:55:57Z",
+      "changedLines": 275,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000018b8ab04fbe3a36348",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000018b8ab04fbe3a36348",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000001ee6d5c63adc8c3c1a",
+      "mergedAt": "2026-09-12T23:05:56Z",
+      "changedLines": 195,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000001ee6d5c63adc8c3c1a",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000001ee6d5c63adc8c3c1a",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002515008779d57514ec",
+      "mergedAt": "2026-08-18T17:39:37Z",
+      "changedLines": 266,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000002515008779d57514ec",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000002515008779d57514ec",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000002b432b48b8ce5dedbe",
+      "mergedAt": "2026-09-13T15:38:38Z",
+      "changedLines": 40,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000002b432b48b8ce5dedbe",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000002b432b48b8ce5dedbe",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000031715609f7c746c690",
+      "mergedAt": "2026-08-14T03:19:05Z",
+      "changedLines": 303,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000031715609f7c746c690",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000031715609f7c746c690",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000379f80cb36c02f9f62",
+      "mergedAt": "2026-09-03T02:19:31Z",
+      "changedLines": 321,
+      "labels": [],
+      "id": "gitea:acme/widgets@0000000000000000000000379f80cb36c02f9f62",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/0000000000000000000000379f80cb36c02f9f62",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000003dcdab8c75b9187834",
+      "mergedAt": "2026-07-08T01:21:33Z",
+      "changedLines": 93,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000003dcdab8c75b9187834",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000003dcdab8c75b9187834",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000043fbd64db4b2015106",
+      "mergedAt": "2026-07-07T12:50:12Z",
+      "changedLines": 354,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000043fbd64db4b2015106",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000043fbd64db4b2015106",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000004a2a010ef3aaea29d8",
+      "mergedAt": "2026-09-06T21:37:52Z",
+      "changedLines": 136,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000004a2a010ef3aaea29d8",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000004a2a010ef3aaea29d8",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000050582bd032a3d302aa",
+      "mergedAt": "2026-08-31T07:46:49Z",
+      "changedLines": 71,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000050582bd032a3d302aa",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000050582bd032a3d302aa",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000056865691719cbbdb7c",
+      "mergedAt": "2026-09-02T02:02:52Z",
+      "changedLines": 98,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000056865691719cbbdb7c",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000056865691719cbbdb7c",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000005cb48152b095a4b44e",
+      "mergedAt": "2026-09-29T17:23:36Z",
+      "changedLines": 312,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000005cb48152b095a4b44e",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000005cb48152b095a4b44e",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "000000000000000000000062e2ac13ef8e8d8d20",
+      "mergedAt": "2026-09-09T11:14:20Z",
+      "changedLines": 127,
+      "labels": [],
+      "id": "gitea:acme/widgets@000000000000000000000062e2ac13ef8e8d8d20",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000062e2ac13ef8e8d8d20",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006910d6d52e877665f2",
+      "mergedAt": "2026-07-09T12:18:59Z",
+      "changedLines": 393,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000006910d6d52e877665f2",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000006910d6d52e877665f2",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000006f3f01966d805f3ec4",
+      "mergedAt": "2026-09-13T10:00:19Z",
+      "changedLines": 155,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000006f3f01966d805f3ec4",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000006f3f01966d805f3ec4",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "0000000000000000000000756d2c57ac79481796",
+      "mergedAt": "2026-09-18T22:34:20Z",
+      "changedLines": 184,
+      "labels": [],
+      "id": "gitea:acme/widgets@0000000000000000000000756d2c57ac79481796",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/0000000000000000000000756d2c57ac79481796",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    },
+    {
+      "repo": "acme/widgets",
+      "mergeSha": "00000000000000000000007b9b5718eb7230f068",
+      "mergedAt": "2026-09-23T04:56:32Z",
+      "changedLines": 195,
+      "labels": [],
+      "id": "gitea:acme/widgets@00000000000000000000007b9b5718eb7230f068",
+      "kind": "direct_push",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000007b9b5718eb7230f068",
+      "author": {
+        "login": "maint",
+        "kind": "human"
+      },
+      "mergedBy": null,
+      "reviews": []
+    }
+  ],
+  "sha256": "4376f0743dc16749ecddeaba1cd8465a8828b1fe5e95486a5a0884a4a9eaff77"
+}

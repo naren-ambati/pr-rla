@@ -1,0 +1,1 @@
+Written 2026-11-03 by pr-rla v0.1 (phase 2, schema v1) with test/helpers: json-file provider over changes.json, a local mock Rekor v1 log (its key is rekor.pub), recorded drand round 33,245,812, git-file ledger. Synthetic. test/v1-compat.test.ts verifies it 7/7.

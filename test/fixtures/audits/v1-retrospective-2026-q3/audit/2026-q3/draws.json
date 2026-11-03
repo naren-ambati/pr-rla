@@ -1,0 +1,1170 @@
+{
+  "schema": "pr-rla/draws/v1",
+  "repo": "acme/widgets",
+  "window": "2026-q3",
+  "manifestSha256": "4376f0743dc16749ecddeaba1cd8465a8828b1fe5e95486a5a0884a4a9eaff77",
+  "N": 200,
+  "round": 33245812,
+  "beacon": {
+    "round": 33245812,
+    "randomness": "f9b8c2fb7b8afe1e54aa9103093d360296fed04215e1e4e3f825bf2e19da3297",
+    "signature": "9552282785f9a0f49782c7e7cf152706e4261511a615e90bfbf94b37dc2c87197e135df75007cc60a54053cf36dd9c2f"
+  },
+  "chainHash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+  "issued": 36,
+  "cap": 144,
+  "draws": [
+    {
+      "draw": 1,
+      "index": 154,
+      "changeId": "gitea:acme/widgets#1171",
+      "url": "https://git.example.com/acme/widgets/pulls/1171",
+      "mergeSha": "00000000000000000000006a4d45c8a1860b5e1c",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 2,
+      "index": 1,
+      "changeId": "gitea:acme/widgets#1001",
+      "url": "https://git.example.com/acme/widgets/pulls/1001",
+      "mergeSha": "0000000000000000000000013c6ef372fe94f82a",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 3,
+      "index": 77,
+      "changeId": "gitea:acme/widgets#1085",
+      "url": "https://git.example.com/acme/widgets/pulls/1085",
+      "mergeSha": "00000000000000000000003526a2e450c305af0e",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 4,
+      "index": 55,
+      "changeId": "gitea:acme/widgets#1061",
+      "url": "https://git.example.com/acme/widgets/pulls/1061",
+      "mergeSha": "000000000000000000000026516f7aecd40a0d16",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 5,
+      "index": 40,
+      "changeId": "gitea:acme/widgets#1044",
+      "url": "https://git.example.com/acme/widgets/pulls/1044",
+      "mergeSha": "00000000000000000000001bcfc0659b6017cfb1",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 6,
+      "index": 130,
+      "changeId": "gitea:acme/widgets#1144",
+      "url": "https://git.example.com/acme/widgets/pulls/1144",
+      "mergeSha": "0000000000000000000000599d6bf211193047e5",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 7,
+      "index": 56,
+      "changeId": "gitea:acme/widgets#1062",
+      "url": "https://git.example.com/acme/widgets/pulls/1062",
+      "mergeSha": "000000000000000000000026efa6f4a65354892b",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 8,
+      "index": 21,
+      "changeId": "gitea:acme/widgets#1023",
+      "url": "https://git.example.com/acme/widgets/pulls/1023",
+      "mergeSha": "00000000000000000000000ed5336963eefba1f8",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 9,
+      "index": 83,
+      "changeId": "gitea:acme/widgets#1092",
+      "url": "https://git.example.com/acme/widgets/pulls/1092",
+      "mergeSha": "0000000000000000000000397a2738633e0f13a1",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 10,
+      "index": 142,
+      "changeId": "gitea:acme/widgets#1157",
+      "url": "https://git.example.com/acme/widgets/pulls/1157",
+      "mergeSha": "000000000000000000000061a63d207c8ff894f6",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 11,
+      "index": 122,
+      "changeId": "gitea:acme/widgets#1135",
+      "url": "https://git.example.com/acme/widgets/pulls/1135",
+      "mergeSha": "0000000000000000000000540d78aa8b9f91eb28",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 12,
+      "index": 14,
+      "changeId": "gitea:acme/widgets#1015",
+      "url": "https://git.example.com/acme/widgets/pulls/1015",
+      "mergeSha": "000000000000000000000009e3779b97f4a7c150",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 13,
+      "index": 157,
+      "changeId": "gitea:acme/widgets#1174",
+      "url": "https://git.example.com/acme/widgets/pulls/1174",
+      "mergeSha": "00000000000000000000006c27ec35ce03ead25b",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 14,
+      "index": 19,
+      "changeId": "gitea:acme/widgets#1021",
+      "url": "https://git.example.com/acme/widgets/pulls/1021",
+      "mergeSha": "00000000000000000000000d98c475f0f066a9ce",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 15,
+      "index": 26,
+      "changeId": "gitea:acme/widgets#1028",
+      "url": "https://git.example.com/acme/widgets/pulls/1028",
+      "mergeSha": "000000000000000000000011ec48ca036b700e61",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 16,
+      "index": 72,
+      "changeId": "gitea:acme/widgets#1080",
+      "url": "https://git.example.com/acme/widgets/pulls/1080",
+      "mergeSha": "0000000000000000000000320f8d83b1469142a5",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 17,
+      "index": 32,
+      "changeId": "gitea:acme/widgets#1035",
+      "url": "https://git.example.com/acme/widgets/pulls/1035",
+      "mergeSha": "0000000000000000000000163fcd1e15e67972f4",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 18,
+      "index": 174,
+      "changeId": "gitea:acme/widgets#1193",
+      "url": "https://git.example.com/acme/widgets/pulls/1193",
+      "mergeSha": "000000000000000000000077e60a3e92767207ea",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 19,
+      "index": 18,
+      "changeId": "gitea:acme/widgets#1020",
+      "url": "https://git.example.com/acme/widgets/pulls/1020",
+      "mergeSha": "00000000000000000000000cfa8cfc37711c2db9",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 20,
+      "index": 189,
+      "changeId": "gitea:acme/widgets@00000000000000000000003dcdab8c75b9187834",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000003dcdab8c75b9187834",
+      "mergeSha": "00000000000000000000003dcdab8c75b9187834",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 21,
+      "index": 126,
+      "changeId": "gitea:acme/widgets#1140",
+      "url": "https://git.example.com/acme/widgets/pulls/1140",
+      "mergeSha": "000000000000000000000057248e0b2b1c065791",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 22,
+      "index": 195,
+      "changeId": "gitea:acme/widgets@000000000000000000000062e2ac13ef8e8d8d20",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000062e2ac13ef8e8d8d20",
+      "mergeSha": "000000000000000000000062e2ac13ef8e8d8d20",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 23,
+      "index": 2,
+      "changeId": "gitea:acme/widgets#1002",
+      "url": "https://git.example.com/acme/widgets/pulls/1002",
+      "mergeSha": "000000000000000000000001daa66d2c7ddf743f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 24,
+      "index": 88,
+      "changeId": "gitea:acme/widgets#1097",
+      "url": "https://git.example.com/acme/widgets/pulls/1097",
+      "mergeSha": "00000000000000000000003c913c9902ba83800a",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 25,
+      "index": 158,
+      "changeId": "gitea:acme/widgets#1175",
+      "url": "https://git.example.com/acme/widgets/pulls/1175",
+      "mergeSha": "00000000000000000000006cc623af8783354e70",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 26,
+      "index": 117,
+      "changeId": "gitea:acme/widgets#1130",
+      "url": "https://git.example.com/acme/widgets/pulls/1130",
+      "mergeSha": "000000000000000000000050f66349ec231d7ebf",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 27,
+      "index": 117,
+      "changeId": "gitea:acme/widgets#1130",
+      "url": "https://git.example.com/acme/widgets/pulls/1130",
+      "mergeSha": "000000000000000000000050f66349ec231d7ebf",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 28,
+      "index": 40,
+      "changeId": "gitea:acme/widgets#1044",
+      "url": "https://git.example.com/acme/widgets/pulls/1044",
+      "mergeSha": "00000000000000000000001bcfc0659b6017cfb1",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 29,
+      "index": 48,
+      "changeId": "gitea:acme/widgets#1053",
+      "url": "https://git.example.com/acme/widgets/pulls/1053",
+      "mergeSha": "0000000000000000000000215fb3ad20d9b62c6e",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 30,
+      "index": 30,
+      "changeId": "gitea:acme/widgets#1033",
+      "url": "https://git.example.com/acme/widgets/pulls/1033",
+      "mergeSha": "000000000000000000000015035e2aa2e7e47aca",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 31,
+      "index": 11,
+      "changeId": "gitea:acme/widgets#1012",
+      "url": "https://git.example.com/acme/widgets/pulls/1012",
+      "mergeSha": "00000000000000000000000808d12e6b76c84d11",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 32,
+      "index": 35,
+      "changeId": "gitea:acme/widgets#1038",
+      "url": "https://git.example.com/acme/widgets/pulls/1038",
+      "mergeSha": "0000000000000000000000181a738b426458e733",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 33,
+      "index": 168,
+      "changeId": "gitea:acme/widgets#1186",
+      "url": "https://git.example.com/acme/widgets/pulls/1186",
+      "mergeSha": "0000000000000000000000739285ea7ffb68a357",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 34,
+      "index": 55,
+      "changeId": "gitea:acme/widgets#1061",
+      "url": "https://git.example.com/acme/widgets/pulls/1061",
+      "mergeSha": "000000000000000000000026516f7aecd40a0d16",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 35,
+      "index": 118,
+      "changeId": "gitea:acme/widgets#1131",
+      "url": "https://git.example.com/acme/widgets/pulls/1131",
+      "mergeSha": "000000000000000000000051949ac3a5a267fad4",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 36,
+      "index": 190,
+      "changeId": "gitea:acme/widgets@000000000000000000000043fbd64db4b2015106",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000043fbd64db4b2015106",
+      "mergeSha": "000000000000000000000043fbd64db4b2015106",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 37,
+      "index": 124,
+      "changeId": "gitea:acme/widgets#1137",
+      "url": "https://git.example.com/acme/widgets/pulls/1137",
+      "mergeSha": "00000000000000000000005549e79dfe9e26e352",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 38,
+      "index": 52,
+      "changeId": "gitea:acme/widgets#1057",
+      "url": "https://git.example.com/acme/widgets/pulls/1057",
+      "mergeSha": "000000000000000000000023d8919406d6e01cc2",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 39,
+      "index": 92,
+      "changeId": "gitea:acme/widgets#1102",
+      "url": "https://git.example.com/acme/widgets/pulls/1102",
+      "mergeSha": "00000000000000000000003fa851f9a236f7ec73",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 40,
+      "index": 38,
+      "changeId": "gitea:acme/widgets#1042",
+      "url": "https://git.example.com/acme/widgets/pulls/1042",
+      "mergeSha": "00000000000000000000001a935172286182d787",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 41,
+      "index": 89,
+      "changeId": "gitea:acme/widgets#1098",
+      "url": "https://git.example.com/acme/widgets/pulls/1098",
+      "mergeSha": "00000000000000000000003d2f7412bc39cdfc1f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 42,
+      "index": 162,
+      "changeId": "gitea:acme/widgets#1180",
+      "url": "https://git.example.com/acme/widgets/pulls/1180",
+      "mergeSha": "00000000000000000000006fdd391026ffa9bad9",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 43,
+      "index": 196,
+      "changeId": "gitea:acme/widgets@00000000000000000000006910d6d52e877665f2",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000006910d6d52e877665f2",
+      "mergeSha": "00000000000000000000006910d6d52e877665f2",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 44,
+      "index": 93,
+      "changeId": "gitea:acme/widgets#1103",
+      "url": "https://git.example.com/acme/widgets/pulls/1103",
+      "mergeSha": "0000000000000000000000404689735bb6426888",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 45,
+      "index": 90,
+      "changeId": "gitea:acme/widgets#1100",
+      "url": "https://git.example.com/acme/widgets/pulls/1100",
+      "mergeSha": "00000000000000000000003e6be3062f3862f449",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 46,
+      "index": 142,
+      "changeId": "gitea:acme/widgets#1157",
+      "url": "https://git.example.com/acme/widgets/pulls/1157",
+      "mergeSha": "000000000000000000000061a63d207c8ff894f6",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 47,
+      "index": 147,
+      "changeId": "gitea:acme/widgets#1163",
+      "url": "https://git.example.com/acme/widgets/pulls/1163",
+      "mergeSha": "0000000000000000000000655b89fad58bb77d74",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 48,
+      "index": 32,
+      "changeId": "gitea:acme/widgets#1035",
+      "url": "https://git.example.com/acme/widgets/pulls/1035",
+      "mergeSha": "0000000000000000000000163fcd1e15e67972f4",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 49,
+      "index": 160,
+      "changeId": "gitea:acme/widgets#1177",
+      "url": "https://git.example.com/acme/widgets/pulls/1177",
+      "mergeSha": "00000000000000000000006e0292a2fa81ca469a",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 50,
+      "index": 21,
+      "changeId": "gitea:acme/widgets#1023",
+      "url": "https://git.example.com/acme/widgets/pulls/1023",
+      "mergeSha": "00000000000000000000000ed5336963eefba1f8",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 51,
+      "index": 49,
+      "changeId": "gitea:acme/widgets#1054",
+      "url": "https://git.example.com/acme/widgets/pulls/1054",
+      "mergeSha": "000000000000000000000021fdeb26da5900a883",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 52,
+      "index": 107,
+      "changeId": "gitea:acme/widgets#1118",
+      "url": "https://git.example.com/acme/widgets/pulls/1118",
+      "mergeSha": "0000000000000000000000498bc9953a2b9fadc3",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 53,
+      "index": 190,
+      "changeId": "gitea:acme/widgets@000000000000000000000043fbd64db4b2015106",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000043fbd64db4b2015106",
+      "mergeSha": "000000000000000000000043fbd64db4b2015106",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 54,
+      "index": 109,
+      "changeId": "gitea:acme/widgets#1121",
+      "url": "https://git.example.com/acme/widgets/pulls/1121",
+      "mergeSha": "00000000000000000000004b66700266a97f2202",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 55,
+      "index": 109,
+      "changeId": "gitea:acme/widgets#1121",
+      "url": "https://git.example.com/acme/widgets/pulls/1121",
+      "mergeSha": "00000000000000000000004b66700266a97f2202",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 56,
+      "index": 160,
+      "changeId": "gitea:acme/widgets#1177",
+      "url": "https://git.example.com/acme/widgets/pulls/1177",
+      "mergeSha": "00000000000000000000006e0292a2fa81ca469a",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 57,
+      "index": 171,
+      "changeId": "gitea:acme/widgets#1190",
+      "url": "https://git.example.com/acme/widgets/pulls/1190",
+      "mergeSha": "0000000000000000000000760b63d165f89293ab",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 58,
+      "index": 157,
+      "changeId": "gitea:acme/widgets#1174",
+      "url": "https://git.example.com/acme/widgets/pulls/1174",
+      "mergeSha": "00000000000000000000006c27ec35ce03ead25b",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 59,
+      "index": 58,
+      "changeId": "gitea:acme/widgets#1064",
+      "url": "https://git.example.com/acme/widgets/pulls/1064",
+      "mergeSha": "0000000000000000000000282c15e81951e98155",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 60,
+      "index": 63,
+      "changeId": "gitea:acme/widgets#1070",
+      "url": "https://git.example.com/acme/widgets/pulls/1070",
+      "mergeSha": "00000000000000000000002be162c2724da869d3",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 61,
+      "index": 37,
+      "changeId": "gitea:acme/widgets#1041",
+      "url": "https://git.example.com/acme/widgets/pulls/1041",
+      "mergeSha": "000000000000000000000019f519f86ee2385b72",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 62,
+      "index": 31,
+      "changeId": "gitea:acme/widgets#1034",
+      "url": "https://git.example.com/acme/widgets/pulls/1034",
+      "mergeSha": "000000000000000000000015a195a45c672ef6df",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 63,
+      "index": 8,
+      "changeId": "gitea:acme/widgets#1008",
+      "url": "https://git.example.com/acme/widgets/pulls/1008",
+      "mergeSha": "0000000000000000000000058ff34785799e5cbd",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 64,
+      "index": 127,
+      "changeId": "gitea:acme/widgets#1141",
+      "url": "https://git.example.com/acme/widgets/pulls/1141",
+      "mergeSha": "000000000000000000000057c2c584e49b50d3a6",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 65,
+      "index": 76,
+      "changeId": "gitea:acme/widgets#1084",
+      "url": "https://git.example.com/acme/widgets/pulls/1084",
+      "mergeSha": "000000000000000000000034886b6a9743bb32f9",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 66,
+      "index": 132,
+      "changeId": "gitea:acme/widgets#1146",
+      "url": "https://git.example.com/acme/widgets/pulls/1146",
+      "mergeSha": "00000000000000000000005ad9dae58417c5400f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 67,
+      "index": 167,
+      "changeId": "gitea:acme/widgets#1185",
+      "url": "https://git.example.com/acme/widgets/pulls/1185",
+      "mergeSha": "000000000000000000000072f44e70c67c1e2742",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 68,
+      "index": 8,
+      "changeId": "gitea:acme/widgets#1008",
+      "url": "https://git.example.com/acme/widgets/pulls/1008",
+      "mergeSha": "0000000000000000000000058ff34785799e5cbd",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 69,
+      "index": 89,
+      "changeId": "gitea:acme/widgets#1098",
+      "url": "https://git.example.com/acme/widgets/pulls/1098",
+      "mergeSha": "00000000000000000000003d2f7412bc39cdfc1f",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 70,
+      "index": 80,
+      "changeId": "gitea:acme/widgets#1088",
+      "url": "https://git.example.com/acme/widgets/pulls/1088",
+      "mergeSha": "0000000000000000000000370149517d40e5234d",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 71,
+      "index": 136,
+      "changeId": "gitea:acme/widgets#1151",
+      "url": "https://git.example.com/acme/widgets/pulls/1151",
+      "mergeSha": "00000000000000000000005df0f046239439ac78",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 72,
+      "index": 112,
+      "changeId": "gitea:acme/widgets#1124",
+      "url": "https://git.example.com/acme/widgets/pulls/1124",
+      "mergeSha": "00000000000000000000004d41166f93275e9641",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 73,
+      "index": 146,
+      "changeId": "gitea:acme/widgets#1162",
+      "url": "https://git.example.com/acme/widgets/pulls/1162",
+      "mergeSha": "000000000000000000000064bd52811c0c6d015f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 74,
+      "index": 30,
+      "changeId": "gitea:acme/widgets#1033",
+      "url": "https://git.example.com/acme/widgets/pulls/1033",
+      "mergeSha": "000000000000000000000015035e2aa2e7e47aca",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 75,
+      "index": 79,
+      "changeId": "gitea:acme/widgets#1087",
+      "url": "https://git.example.com/acme/widgets/pulls/1087",
+      "mergeSha": "0000000000000000000000366311d7c3c19aa738",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 76,
+      "index": 118,
+      "changeId": "gitea:acme/widgets#1131",
+      "url": "https://git.example.com/acme/widgets/pulls/1131",
+      "mergeSha": "000000000000000000000051949ac3a5a267fad4",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 77,
+      "index": 16,
+      "changeId": "gitea:acme/widgets#1017",
+      "url": "https://git.example.com/acme/widgets/pulls/1017",
+      "mergeSha": "00000000000000000000000b1fe68f0af33cb97a",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 78,
+      "index": 180,
+      "changeId": "gitea:acme/widgets@0000000000000000000000062e2ac13ef8e8d8d2",
+      "url": "https://git.example.com/acme/widgets/commit/0000000000000000000000062e2ac13ef8e8d8d2",
+      "mergeSha": "0000000000000000000000062e2ac13ef8e8d8d2",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 79,
+      "index": 17,
+      "changeId": "gitea:acme/widgets#1018",
+      "url": "https://git.example.com/acme/widgets/pulls/1018",
+      "mergeSha": "00000000000000000000000bbe1e08c47287358f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 80,
+      "index": 49,
+      "changeId": "gitea:acme/widgets#1054",
+      "url": "https://git.example.com/acme/widgets/pulls/1054",
+      "mergeSha": "000000000000000000000021fdeb26da5900a883",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 81,
+      "index": 148,
+      "changeId": "gitea:acme/widgets#1164",
+      "url": "https://git.example.com/acme/widgets/pulls/1164",
+      "mergeSha": "000000000000000000000065f9c1748f0b01f989",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 82,
+      "index": 49,
+      "changeId": "gitea:acme/widgets#1054",
+      "url": "https://git.example.com/acme/widgets/pulls/1054",
+      "mergeSha": "000000000000000000000021fdeb26da5900a883",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 83,
+      "index": 137,
+      "changeId": "gitea:acme/widgets#1152",
+      "url": "https://git.example.com/acme/widgets/pulls/1152",
+      "mergeSha": "00000000000000000000005e8f27bfdd1384288d",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 84,
+      "index": 173,
+      "changeId": "gitea:acme/widgets#1192",
+      "url": "https://git.example.com/acme/widgets/pulls/1192",
+      "mergeSha": "00000000000000000000007747d2c4d8f7278bd5",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 85,
+      "index": 108,
+      "changeId": "gitea:acme/widgets#1120",
+      "url": "https://git.example.com/acme/widgets/pulls/1120",
+      "mergeSha": "00000000000000000000004ac83888ad2a34a5ed",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 86,
+      "index": 72,
+      "changeId": "gitea:acme/widgets#1080",
+      "url": "https://git.example.com/acme/widgets/pulls/1080",
+      "mergeSha": "0000000000000000000000320f8d83b1469142a5",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 87,
+      "index": 126,
+      "changeId": "gitea:acme/widgets#1140",
+      "url": "https://git.example.com/acme/widgets/pulls/1140",
+      "mergeSha": "000000000000000000000057248e0b2b1c065791",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 88,
+      "index": 163,
+      "changeId": "gitea:acme/widgets#1181",
+      "url": "https://git.example.com/acme/widgets/pulls/1181",
+      "mergeSha": "0000000000000000000000707b7089e07ef436ee",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 89,
+      "index": 47,
+      "changeId": "gitea:acme/widgets#1052",
+      "url": "https://git.example.com/acme/widgets/pulls/1052",
+      "mergeSha": "000000000000000000000020c17c33675a6bb059",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 90,
+      "index": 145,
+      "changeId": "gitea:acme/widgets#1161",
+      "url": "https://git.example.com/acme/widgets/pulls/1161",
+      "mergeSha": "0000000000000000000000641f1b07628d22854a",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 91,
+      "index": 79,
+      "changeId": "gitea:acme/widgets#1087",
+      "url": "https://git.example.com/acme/widgets/pulls/1087",
+      "mergeSha": "0000000000000000000000366311d7c3c19aa738",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 92,
+      "index": 12,
+      "changeId": "gitea:acme/widgets#1013",
+      "url": "https://git.example.com/acme/widgets/pulls/1013",
+      "mergeSha": "000000000000000000000008a708a824f612c926",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 93,
+      "index": 77,
+      "changeId": "gitea:acme/widgets#1085",
+      "url": "https://git.example.com/acme/widgets/pulls/1085",
+      "mergeSha": "00000000000000000000003526a2e450c305af0e",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 94,
+      "index": 194,
+      "changeId": "gitea:acme/widgets@00000000000000000000005cb48152b095a4b44e",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000005cb48152b095a4b44e",
+      "mergeSha": "00000000000000000000005cb48152b095a4b44e",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 95,
+      "index": 169,
+      "changeId": "gitea:acme/widgets#1187",
+      "url": "https://git.example.com/acme/widgets/pulls/1187",
+      "mergeSha": "00000000000000000000007430bd64397ab31f6c",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 96,
+      "index": 52,
+      "changeId": "gitea:acme/widgets#1057",
+      "url": "https://git.example.com/acme/widgets/pulls/1057",
+      "mergeSha": "000000000000000000000023d8919406d6e01cc2",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 97,
+      "index": 121,
+      "changeId": "gitea:acme/widgets#1134",
+      "url": "https://git.example.com/acme/widgets/pulls/1134",
+      "mergeSha": "0000000000000000000000536f4130d220476f13",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 98,
+      "index": 34,
+      "changeId": "gitea:acme/widgets#1037",
+      "url": "https://git.example.com/acme/widgets/pulls/1037",
+      "mergeSha": "0000000000000000000000177c3c1188e50e6b1e",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 99,
+      "index": 32,
+      "changeId": "gitea:acme/widgets#1035",
+      "url": "https://git.example.com/acme/widgets/pulls/1035",
+      "mergeSha": "0000000000000000000000163fcd1e15e67972f4",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 100,
+      "index": 199,
+      "changeId": "gitea:acme/widgets@00000000000000000000007b9b5718eb7230f068",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000007b9b5718eb7230f068",
+      "mergeSha": "00000000000000000000007b9b5718eb7230f068",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 101,
+      "index": 7,
+      "changeId": "gitea:acme/widgets#1007",
+      "url": "https://git.example.com/acme/widgets/pulls/1007",
+      "mergeSha": "000000000000000000000004f1bbcdcbfa53e0a8",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 102,
+      "index": 69,
+      "changeId": "gitea:acme/widgets#1076",
+      "url": "https://git.example.com/acme/widgets/pulls/1076",
+      "mergeSha": "00000000000000000000002f96af9ccb49675251",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 103,
+      "index": 82,
+      "changeId": "gitea:acme/widgets#1091",
+      "url": "https://git.example.com/acme/widgets/pulls/1091",
+      "mergeSha": "000000000000000000000038dbefbea9bec4978c",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 104,
+      "index": 76,
+      "changeId": "gitea:acme/widgets#1084",
+      "url": "https://git.example.com/acme/widgets/pulls/1084",
+      "mergeSha": "000000000000000000000034886b6a9743bb32f9",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 105,
+      "index": 193,
+      "changeId": "gitea:acme/widgets@000000000000000000000056865691719cbbdb7c",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000056865691719cbbdb7c",
+      "mergeSha": "000000000000000000000056865691719cbbdb7c",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 106,
+      "index": 107,
+      "changeId": "gitea:acme/widgets#1118",
+      "url": "https://git.example.com/acme/widgets/pulls/1118",
+      "mergeSha": "0000000000000000000000498bc9953a2b9fadc3",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 107,
+      "index": 175,
+      "changeId": "gitea:acme/widgets#1194",
+      "url": "https://git.example.com/acme/widgets/pulls/1194",
+      "mergeSha": "0000000000000000000000788441b84bf5bc83ff",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 108,
+      "index": 150,
+      "changeId": "gitea:acme/widgets#1166",
+      "url": "https://git.example.com/acme/widgets/pulls/1166",
+      "mergeSha": "000000000000000000000067363068020996f1b3",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 109,
+      "index": 52,
+      "changeId": "gitea:acme/widgets#1057",
+      "url": "https://git.example.com/acme/widgets/pulls/1057",
+      "mergeSha": "000000000000000000000023d8919406d6e01cc2",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 110,
+      "index": 76,
+      "changeId": "gitea:acme/widgets#1084",
+      "url": "https://git.example.com/acme/widgets/pulls/1084",
+      "mergeSha": "000000000000000000000034886b6a9743bb32f9",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 111,
+      "index": 26,
+      "changeId": "gitea:acme/widgets#1028",
+      "url": "https://git.example.com/acme/widgets/pulls/1028",
+      "mergeSha": "000000000000000000000011ec48ca036b700e61",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 112,
+      "index": 135,
+      "changeId": "gitea:acme/widgets#1150",
+      "url": "https://git.example.com/acme/widgets/pulls/1150",
+      "mergeSha": "00000000000000000000005d52b8cc6a14ef3063",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 113,
+      "index": 165,
+      "changeId": "gitea:acme/widgets#1183",
+      "url": "https://git.example.com/acme/widgets/pulls/1183",
+      "mergeSha": "000000000000000000000071b7df7d537d892f18",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 114,
+      "index": 161,
+      "changeId": "gitea:acme/widgets#1178",
+      "url": "https://git.example.com/acme/widgets/pulls/1178",
+      "mergeSha": "00000000000000000000006ea0ca1cb40114c2af",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 115,
+      "index": 163,
+      "changeId": "gitea:acme/widgets#1181",
+      "url": "https://git.example.com/acme/widgets/pulls/1181",
+      "mergeSha": "0000000000000000000000707b7089e07ef436ee",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 116,
+      "index": 61,
+      "changeId": "gitea:acme/widgets#1067",
+      "url": "https://git.example.com/acme/widgets/pulls/1067",
+      "mergeSha": "00000000000000000000002a06bc5545cfc8f594",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 117,
+      "index": 171,
+      "changeId": "gitea:acme/widgets#1190",
+      "url": "https://git.example.com/acme/widgets/pulls/1190",
+      "mergeSha": "0000000000000000000000760b63d165f89293ab",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 118,
+      "index": 147,
+      "changeId": "gitea:acme/widgets#1163",
+      "url": "https://git.example.com/acme/widgets/pulls/1163",
+      "mergeSha": "0000000000000000000000655b89fad58bb77d74",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 119,
+      "index": 46,
+      "changeId": "gitea:acme/widgets#1051",
+      "url": "https://git.example.com/acme/widgets/pulls/1051",
+      "mergeSha": "0000000000000000000000202344b9addb213444",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 120,
+      "index": 118,
+      "changeId": "gitea:acme/widgets#1131",
+      "url": "https://git.example.com/acme/widgets/pulls/1131",
+      "mergeSha": "000000000000000000000051949ac3a5a267fad4",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 121,
+      "index": 78,
+      "changeId": "gitea:acme/widgets#1086",
+      "url": "https://git.example.com/acme/widgets/pulls/1086",
+      "mergeSha": "000000000000000000000035c4da5e0a42502b23",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 122,
+      "index": 179,
+      "changeId": "gitea:acme/widgets#1198",
+      "url": "https://git.example.com/acme/widgets/pulls/1198",
+      "mergeSha": "00000000000000000000007afd1f9f31f2e67453",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 123,
+      "index": 196,
+      "changeId": "gitea:acme/widgets@00000000000000000000006910d6d52e877665f2",
+      "url": "https://git.example.com/acme/widgets/commit/00000000000000000000006910d6d52e877665f2",
+      "mergeSha": "00000000000000000000006910d6d52e877665f2",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 124,
+      "index": 13,
+      "changeId": "gitea:acme/widgets#1014",
+      "url": "https://git.example.com/acme/widgets/pulls/1014",
+      "mergeSha": "000000000000000000000009454021de755d453b",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 125,
+      "index": 58,
+      "changeId": "gitea:acme/widgets#1064",
+      "url": "https://git.example.com/acme/widgets/pulls/1064",
+      "mergeSha": "0000000000000000000000282c15e81951e98155",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 126,
+      "index": 90,
+      "changeId": "gitea:acme/widgets#1100",
+      "url": "https://git.example.com/acme/widgets/pulls/1100",
+      "mergeSha": "00000000000000000000003e6be3062f3862f449",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 127,
+      "index": 117,
+      "changeId": "gitea:acme/widgets#1130",
+      "url": "https://git.example.com/acme/widgets/pulls/1130",
+      "mergeSha": "000000000000000000000050f66349ec231d7ebf",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 128,
+      "index": 89,
+      "changeId": "gitea:acme/widgets#1098",
+      "url": "https://git.example.com/acme/widgets/pulls/1098",
+      "mergeSha": "00000000000000000000003d2f7412bc39cdfc1f",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 129,
+      "index": 60,
+      "changeId": "gitea:acme/widgets#1066",
+      "url": "https://git.example.com/acme/widgets/pulls/1066",
+      "mergeSha": "0000000000000000000000296884db8c507e797f",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 130,
+      "index": 44,
+      "changeId": "gitea:acme/widgets#1048",
+      "url": "https://git.example.com/acme/widgets/pulls/1048",
+      "mergeSha": "00000000000000000000001e489e4c815d41c005",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 131,
+      "index": 193,
+      "changeId": "gitea:acme/widgets@000000000000000000000056865691719cbbdb7c",
+      "url": "https://git.example.com/acme/widgets/commit/000000000000000000000056865691719cbbdb7c",
+      "mergeSha": "000000000000000000000056865691719cbbdb7c",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 132,
+      "index": 151,
+      "changeId": "gitea:acme/widgets#1167",
+      "url": "https://git.example.com/acme/widgets/pulls/1167",
+      "mergeSha": "000000000000000000000067d467e1bb88e16dc8",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 133,
+      "index": 29,
+      "changeId": "gitea:acme/widgets#1032",
+      "url": "https://git.example.com/acme/widgets/pulls/1032",
+      "mergeSha": "0000000000000000000000146526b0e96899feb5",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 134,
+      "index": 11,
+      "changeId": "gitea:acme/widgets#1012",
+      "url": "https://git.example.com/acme/widgets/pulls/1012",
+      "mergeSha": "00000000000000000000000808d12e6b76c84d11",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 135,
+      "index": 39,
+      "changeId": "gitea:acme/widgets#1043",
+      "url": "https://git.example.com/acme/widgets/pulls/1043",
+      "mergeSha": "00000000000000000000001b3188ebe1e0cd539c",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 136,
+      "index": 151,
+      "changeId": "gitea:acme/widgets#1167",
+      "url": "https://git.example.com/acme/widgets/pulls/1167",
+      "mergeSha": "000000000000000000000067d467e1bb88e16dc8",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 137,
+      "index": 148,
+      "changeId": "gitea:acme/widgets#1164",
+      "url": "https://git.example.com/acme/widgets/pulls/1164",
+      "mergeSha": "000000000000000000000065f9c1748f0b01f989",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 138,
+      "index": 146,
+      "changeId": "gitea:acme/widgets#1162",
+      "url": "https://git.example.com/acme/widgets/pulls/1162",
+      "mergeSha": "000000000000000000000064bd52811c0c6d015f",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 139,
+      "index": 171,
+      "changeId": "gitea:acme/widgets#1190",
+      "url": "https://git.example.com/acme/widgets/pulls/1190",
+      "mergeSha": "0000000000000000000000760b63d165f89293ab",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 140,
+      "index": 20,
+      "changeId": "gitea:acme/widgets#1022",
+      "url": "https://git.example.com/acme/widgets/pulls/1022",
+      "mergeSha": "00000000000000000000000e36fbefaa6fb125e3",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 141,
+      "index": 69,
+      "changeId": "gitea:acme/widgets#1076",
+      "url": "https://git.example.com/acme/widgets/pulls/1076",
+      "mergeSha": "00000000000000000000002f96af9ccb49675251",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 142,
+      "index": 131,
+      "changeId": "gitea:acme/widgets#1145",
+      "url": "https://git.example.com/acme/widgets/pulls/1145",
+      "mergeSha": "00000000000000000000005a3ba36bca987ac3fa",
+      "firstOccurrence": true
+    },
+    {
+      "draw": 143,
+      "index": 124,
+      "changeId": "gitea:acme/widgets#1137",
+      "url": "https://git.example.com/acme/widgets/pulls/1137",
+      "mergeSha": "00000000000000000000005549e79dfe9e26e352",
+      "firstOccurrence": false
+    },
+    {
+      "draw": 144,
+      "index": 87,
+      "changeId": "gitea:acme/widgets#1096",
+      "url": "https://git.example.com/acme/widgets/pulls/1096",
+      "mergeSha": "00000000000000000000003bf3051f493b3903f5",
+      "firstOccurrence": true
+    }
+  ]
+}

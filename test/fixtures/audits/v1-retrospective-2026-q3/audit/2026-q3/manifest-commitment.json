@@ -1,0 +1,35 @@
+{
+  "record": {
+    "schema": "pr-rla/manifest-commitment/v1",
+    "repo": "acme/widgets",
+    "window": "2026-q3",
+    "manifestSha256": "4376f0743dc16749ecddeaba1cd8465a8828b1fe5e95486a5a0884a4a9eaff77",
+    "N": 200,
+    "registrationSha256": "91c99987f19b5ec2bc445cdd64f437ee4867ffd607ecb171732269a674bb1990",
+    "frozenAt": "2026-10-20T12:00:00Z",
+    "seedRound": 33245812,
+    "seedRoundPublishesAt": "2026-10-21T00:00:00Z"
+  },
+  "sha256": "b9d8be763ec6375c0c2f3d645d2954398d802609704ee4366f3b5a05b907ba86",
+  "signature": "MEYCIQDcTTVPGaaSEaMPDT5qE80ld7/+Ra5LeaGARe1amUMM8AIhAMojY+xJ0LNbUs1HCps2mRg4omwUeKf+N1q9aWSnqjil",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1DnZ9o4zUnK4Q2NPhSUpQQQ9XSq3\n2BFFwCLYhaq4l0SJRY/qvS83jgOLZa1o6y7prpBVnrX3EYGYtqPLkkspkg==\n-----END PUBLIC KEY-----\n",
+  "log": {
+    "logUrl": "http://127.0.0.1:61085",
+    "uuid": "9fd66b93557baf259c73d52575e603eaf392b2caf38c83326b213d494cfc0dd0",
+    "logIndex": 1,
+    "integratedTime": 1792497600,
+    "logID": "bb6ef1d068ee86849a8c9f7e27fb90c1b53dac8f371e27c9964380b65386f8f6",
+    "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiJiOWQ4YmU3NjNlYzYzNzVjMGMyZjNkNjQ1ZDI5NTQzOThkODAyNjA5NzA0ZWU0MzY2ZjNiNWEwNWI5MDdiYTg2In19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUURjVFRWUEdhYVNFYU1QRFQ1cUU4MGxkNy8rUmE1TGVhR0FSZTFhbVVNTThBSWhBTW9qWSt4SjBMTmJVczFIQ3BzMm1SZzRvbXdVZUtmK04xcTlhV1NucWppbCIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCUVZVSk1TVU1nUzBWWkxTMHRMUzBLVFVacmQwVjNXVWhMYjFwSmVtb3dRMEZSV1VsTGIxcEplbW93UkVGUlkwUlJaMEZGTVVSdVdqbHZOSHBWYmtzMFVUSk9VR2hUVlhCUlVWRTVXRk54TXdveVFrWkdkME5NV1doaGNUUnNNRk5LVWxrdmNYWlRPRE5xWjA5TVdtRXhielo1TjNCeWNFSldibkpZTTBWWlIxbDBjVkJNYTJ0emNHdG5QVDBLTFMwdExTMUZUa1FnVUZWQ1RFbERJRXRGV1MwdExTMHRDZz09In19fX0=",
+    "verification": {
+      "signedEntryTimestamp": "MEUCIQDJl54aawoof2Xwxq86mZEUVF6fGhatktrigF55JBka5wIgJmq6YY1IgEsFFYt6tcLyID9U+h0Us3Xof6yyRT1IbU4=",
+      "inclusionProof": {
+        "logIndex": 1,
+        "treeSize": 2,
+        "rootHash": "f8b500b00ff083968dc4f7efa251b19421717fa94055c500cd38308b1d6c3b8f",
+        "hashes": [
+          "84cb2eb1acd9395f476234668a3a48919e31cbdab34ee9718af5c8d42320c953"
+        ]
+      }
+    }
+  }
+}

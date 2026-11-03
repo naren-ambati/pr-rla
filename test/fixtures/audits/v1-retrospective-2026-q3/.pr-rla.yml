@@ -1,0 +1,6 @@
+provider: { use: json-file, options: { path: changes.json } }
+repo: acme/widgets
+window: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }
+selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }
+audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }
+transparency_log: { url: "http://127.0.0.1:61085", public_key_file: rekor.pub }

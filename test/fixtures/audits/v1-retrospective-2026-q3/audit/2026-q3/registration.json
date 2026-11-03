@@ -1,0 +1,63 @@
+{
+  "record": {
+    "schema": "pr-rla/registration/v1",
+    "provider": "json-file",
+    "repo": "acme/widgets",
+    "window": {
+      "name": "2026-q3",
+      "start": "2026-07-01",
+      "end": "2026-09-30",
+      "opensAt": "2026-07-01T00:00:00Z",
+      "closesAt": "2026-10-01T00:00:00Z"
+    },
+    "selector": {
+      "kinds": [
+        "pull_request",
+        "direct_push"
+      ],
+      "authors": "any",
+      "labels": [],
+      "unreviewed": "no-human-review",
+      "merged_by": "any",
+      "max_changed_lines": null,
+      "exclude_generated": true
+    },
+    "protocolSha256": "bf8211a278bd3d9fdf87d2ce147843054ccd351db24acb05ec72f6b0b89a224a",
+    "parameters": {
+      "claim": "D",
+      "p0": 0.1,
+      "p1": 0.02,
+      "alpha": 0.05,
+      "cap": null,
+      "minPopulation": 150
+    },
+    "beacon": {
+      "chain": "drand-quicknet",
+      "chainHash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+      "genesis": 1692803367,
+      "period": 3,
+      "delaySeconds": 86400
+    },
+    "registeredAt": "2026-10-20T00:00:00Z"
+  },
+  "sha256": "91c99987f19b5ec2bc445cdd64f437ee4867ffd607ecb171732269a674bb1990",
+  "signature": "MEYCIQC5GvTSYu3W343C3TJkDcRZ+AFb/8okC/EZ1mUaGMQhwQIhALiqUcb7Ctn++nvR8SnmQNOoPF3J1fVHvk5/19tUBzp/",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1DnZ9o4zUnK4Q2NPhSUpQQQ9XSq3\n2BFFwCLYhaq4l0SJRY/qvS83jgOLZa1o6y7prpBVnrX3EYGYtqPLkkspkg==\n-----END PUBLIC KEY-----\n",
+  "log": {
+    "logUrl": "http://127.0.0.1:61085",
+    "uuid": "84cb2eb1acd9395f476234668a3a48919e31cbdab34ee9718af5c8d42320c953",
+    "logIndex": 0,
+    "integratedTime": 1792454400,
+    "logID": "bb6ef1d068ee86849a8c9f7e27fb90c1b53dac8f371e27c9964380b65386f8f6",
+    "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI5MWM5OTk4N2YxOWI1ZWMyYmM0NDVjZGQ2NGY0MzdlZTQ4NjdmZmQ2MDdlY2IxNzE3MzIyNjlhNjc0YmIxOTkwIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUUM1R3ZUU1l1M1czNDNDM1RKa0RjUlorQUZiLzhva0MvRVoxbVVhR01RaHdRSWhBTGlxVWNiN0N0bisrbnZSOFNubVFOT29QRjNKMWZWSHZrNS8xOXRVQnpwLyIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCUVZVSk1TVU1nUzBWWkxTMHRMUzBLVFVacmQwVjNXVWhMYjFwSmVtb3dRMEZSV1VsTGIxcEplbW93UkVGUlkwUlJaMEZGTVVSdVdqbHZOSHBWYmtzMFVUSk9VR2hUVlhCUlVWRTVXRk54TXdveVFrWkdkME5NV1doaGNUUnNNRk5LVWxrdmNYWlRPRE5xWjA5TVdtRXhielo1TjNCeWNFSldibkpZTTBWWlIxbDBjVkJNYTJ0emNHdG5QVDBLTFMwdExTMUZUa1FnVUZWQ1RFbERJRXRGV1MwdExTMHRDZz09In19fX0=",
+    "verification": {
+      "signedEntryTimestamp": "MEUCIFqLqzdNYTt3+TcYyqKHF+ojbxszWLYIMasHLBz9HErDAiEA7G91xmhAYieEwr9v18LcZ341b5Fv5NxWJCVvjDUyB4A=",
+      "inclusionProof": {
+        "logIndex": 0,
+        "treeSize": 1,
+        "rootHash": "84cb2eb1acd9395f476234668a3a48919e31cbdab34ee9718af5c8d42320c953",
+        "hashes": []
+      }
+    }
+  }
+}
