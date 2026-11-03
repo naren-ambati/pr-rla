@@ -30,12 +30,16 @@ Every bolt starts only when the units it depends on are done (`unit-of-work-depe
 | 10 | U9 Presence verdicts | Could; built and tested with software keys | RK-01 and RK-12, stated as limits | FR9.1–FR9.6 pass on software-key fixtures. No doc or certificate claims hardware-verified presence | 1.5 days |
 | 11 | U10 Docs + release | Last: it documents finished behaviour | none | FR8.1–FR8.3 pass. The release checklist exists. No publish step ran | 2 days |
 
+> **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance. This applies to bolt 1's definition of done above: bolt 1 prepares the configuration and the command; the founder runs `register` after bolt 3.
+
 **Total:** about 22.5 days, against the draft's 20.5. The extra two days cover the library evaluation (U1), the `src/api` foundation (U2a), the public-timeline recordings (U4), the full command refactor (U5) and the mock-server CI harness (U7).
 
 **The gh-aw registration and the build.**
 - The founder can register right after bolt 1. The registration fixes the fields listed in `functional-design.md` §U1, and uses the `git-file` ledger, so its provenance is `self-asserted`.
 - `freeze` for gh-aw must run with a build that includes bolt 5 (U3, pinned head).
 - Registering after bolt 3 (U4) instead would allow `account` provenance through `github-issues`.
+
+> **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance.
 
 ## Verification command
 

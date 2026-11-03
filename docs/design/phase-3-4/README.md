@@ -78,9 +78,13 @@ Infrastructure design does not apply (no hosted backend), as the draft already s
     - A `prrla-basic:` credential form covers Basic auth in the isolated host.
     - The gh-aw registration's fixed fields are spelled out, including that registering right after U1 means `git-file` and `self-asserted` provenance.
 
+> **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance.
+
 ## One trade-off for the founder to know
 
 The founder chose to register gh-aw as soon as U1 is built. That registration must use the `git-file` ledger, so the gh-aw certificate's verdict provenance will be `self-asserted`. Registering after U4 instead (about 6.5 build days later) would allow `github-issues` and `account` provenance. The design keeps the founder's choice; it can be changed by registering later.
+
+> **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance.
 
 ## Still unverified (each has a named test that settles it)
 
@@ -102,6 +106,9 @@ The founder chose to register gh-aw as soon as U1 is built. That registration mu
 ## What only the founder does
 
 - Runs the prospective gh-aw `register` once U1 is built. The command is prepared in `docs/gh-aw-prospective.md`.
+
+  > **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance.
+
 - Runs the manual assistant checks in Claude Code, Codex and Cursor.
 - Decides the security contact (D10), the licence, and when to claim the npm names and create the public repo.
 - Publishes. No step in the build publishes anything.

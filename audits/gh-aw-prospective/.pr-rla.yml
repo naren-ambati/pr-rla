@@ -1,0 +1,47 @@
+# Prospective audit of github/gh-aw: the launch artifact (docs/design/spec.md, validation gate).
+# Prepared in bolt 1; REGISTERED BY THE FOUNDER, AFTER BOLT 3. See docs/gh-aw-prospective.md.
+# Until it is edited this file does not load (the window dates are placeholders), so nothing can
+# register it by accident.
+provider: github                # the built-in provider, at the registering pr-rla version
+repo: github/gh-aw
+
+window:                         # 42 days, opening the UTC day after you register (so U_k < opensAt)
+  name: gh-aw-prospective
+  start: YYYY-MM-DD             # EDIT: the UTC day after the day you register
+  end: YYYY-MM-DD               # EDIT: start + 41 days (inclusive UTC days)
+
+selector:                       # the phase-1 selector: the same stratum as the Q3 demonstration
+  kinds: [pull_request, direct_push]
+  authors: ["copilot-swe-agent[bot]"]
+  labels: []
+  unreviewed: no-human-review
+  merged_by: any
+  max_changed_lines: 200
+  exclude_generated: true
+  bots: []                      # registered empty: behaves exactly as phase 1 did
+  direct_push_via_merge: include
+
+audit:                          # the default parameters
+  claim: D
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  min_population: 150
+
+protocol: review-protocol.md    # hashed into the registration: finalize it first
+
+timestamping:                   # the four default authorities, k = 2
+  authorities: [sigstore, digicert, globalsign, microsoft]
+  min_tokens: 2
+
+# --- available from bolt 3 (U4, issue ledgers) -------------------------------------------------
+# The github-issues ledger does not exist in bolt 1, so `register` refuses this file until bolt 3
+# ships it. Option names follow docs/design/phase-3-4 (§U4); bolt 3 confirms them.
+ledger:
+  use: github-issues
+  options:
+    repo: <owner>/<audit-repo>  # the audit repo the founder owns: draw issues and verdict labels live there
+verdicts:
+  min_provenance: account       # label events by a GitHub account; the default with an issue ledger
+  reviewers: ["<founder's GitHub login>"]   # only these accounts' label events count
+# ------------------------------------------------------------------------------------------------

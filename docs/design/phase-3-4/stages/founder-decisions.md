@@ -279,6 +279,8 @@ X. Other (please specify)
 
 [Answer]: X. As soon as U1 is built (A), but the founder runs `register` personally: the build prepares the config and the exact command and stops there. Registering is the founder's decision.
 
+> **Changed 2026-11-03 by the founder:** register after bolt 3 (U4) with the github-issues ledger, for account provenance.
+
 ---
 
 ## Already settled: I'll apply these, no answer needed
