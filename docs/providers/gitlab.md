@@ -43,7 +43,7 @@ Change ids are `gitlab:<path>#<iid>` for an MR and `gitlab:<path>@<sha>` for a d
    | Squash (fast-forward) | null | set | the squash commit | the squash SHA |
    | Fast-forward / semi-linear rebase | null (fast-forward) | null | the MR's (rebased) commits, unchanged | `GET …/merge_requests/:iid/commits` (GitLab rebases the source branch itself, so these are the SHAs that land) |
 
-   MRs merged *after* the window are read too: their commits can be dated inside it (rebased the day before), and they are not direct pushes.
+   MRs merged *after* the window are read too: their commits can be dated inside it (rebased the day before), and they are not direct pushes. Commit lists are read lazily: merge and squash SHAs from the listing claim most commits for free, and an MR's list is read only while some commit in the window is unclaimed.
 3. **Direct pushes.** The default branch's head is pinned, then `GET /repository/commits?ref_name=<head sha>&since&until&with_stats=true` lists every ancestor (all parents, not `first_parent`) dated in the window. A commit that no MR above claims is checked with `GET /repository/commits/:sha/merge_requests`; if no merged MR into the default branch contains it, it is a `direct_push` with `reviews: []` and `mergedBy: null`. `changedLines` are GitLab's commit stats (against the first parent for a merge commit).
 
 ## Reviews and approvals
@@ -74,7 +74,7 @@ Deleted users are GitLab's `ghost`, counted as human (as on GitHub).
 
 ## Rate limits
 
-Every request retries network errors, HTTP 5xx, 429 and truncated bodies with exponential backoff (6 retries). It waits as long as `Retry-After` and `RateLimit-Reset` (epoch seconds) say. A success with `RateLimit-Remaining: 0` delays the next request until the reset. Requests per window: about 2 per MR (approvals, reviewers) plus 1 per unsquashed MR (commits), 1 GraphQL query per 20 MRs, and 1 lookup per direct push.
+Every request retries network errors, HTTP 5xx, 429 and truncated bodies with exponential backoff (6 retries). It waits as long as `Retry-After` and `RateLimit-Reset` (epoch seconds) say. A success with `RateLimit-Remaining: 0` delays the next request until the reset. Requests per window: 2 per MR (approvals, reviewers) and 1 GraphQL query per 20 MRs. Unsquashed MRs' commit lists are read only while some commit in the window is still unclaimed, and each direct push costs 1 commit → MR lookup.
 
 ## Verified
 

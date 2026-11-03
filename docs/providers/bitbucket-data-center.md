@@ -28,7 +28,7 @@ Change ids are `bitbucket-data-center:<KEY>/<slug>#<id>` and `bitbucket-data-cen
 
 1. **Default branch.** `GET /rest/api/1.0/projects/{key}/repos/{slug}/default-branch`, falling back to `/branches/default` on servers older than 7.6.
 2. **PRs.** `GET …/pull-requests?state=MERGED&at=refs/heads/<default>&withProperties=true`, every page (`start`/`limit`, `isLastPage`, `nextPageStart`). The API has no date filter, so the whole merged list for the branch is read and filtered by `closedDate`; on a busy repository that is many pages. The merge commit is `properties.mergeCommit.id`, or the `commit` of the PR's `MERGED` activity (older servers).
-3. **What each PR brought in.** The merge commit plus `GET …/pull-requests/{id}/commits` for every PR merged since the window opened, including after it closed:
+3. **What each PR brought in.** The merge commit, plus `GET …/pull-requests/{id}/commits` for PRs merged since the window opened (after it closed too). A list is read only while some commit in the window is still unclaimed:
 
    | Merge strategy | Commits on the default branch | Attributed by |
    |---|---|---|
@@ -59,7 +59,7 @@ Users with `type: "SERVICE"` (access-token users and other service accounts) are
 
 ## Rate limits
 
-Bitbucket Data Center's optional rate limiting answers 429; the client waits for `Retry-After` when present and otherwise backs off exponentially (6 retries). 5xx responses and truncated bodies are retried the same way. Requests per window: the merged-PR list for the branch, then about 3 per PR (activities, diff, commits) and 1 per direct push.
+Bitbucket Data Center's optional rate limiting answers 429; the client waits for `Retry-After` when present and otherwise backs off exponentially (6 retries). 5xx responses and truncated bodies are retried the same way. Requests per window: the merged-PR list for the branch, then 2 per PR in the window (activities, diff), the PR commit lists while some commit is unclaimed, and 1 per direct push.
 
 ## Known limitations
 
