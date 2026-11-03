@@ -2,10 +2,12 @@ import { canonicalJson } from "../core/canonical.js";
 import {
   SUPPORTED_PROVIDER_API_VERSIONS,
   changeRecordProblems,
+  normalizeLogin,
   type Actor,
   type ChangeKind,
   type ChangeRecord,
   type ListChangesRequest,
+  type ProviderContext,
   type ReviewState,
   type ScmProvider,
 } from "../sdk/provider.js";
@@ -26,21 +28,63 @@ export interface ConformanceFixture {
     directPushes?: string[];
     /** Review states per change id, in submittedAt order. */
     reviewStates?: Record<string, ReviewState[]>;
+    /** Review authors per change id, in submittedAt order (checks reviewer bot detection). */
+    reviewers?: Record<string, Actor[]>;
     actors?: Record<string, { author?: Actor; mergedBy?: Actor | null }>;
     changedLines?: Record<string, number>;
-    /** With `pagesServed`: the transport must have served at least this many requests. */
+    /** With `pagesServed` (or requests through the harness): the transport must have served at least this many requests. */
     minPages?: number;
+    /**
+     * Commits each PR brought onto the default branch: its merge or squash commit,
+     * every rebased or fast-forwarded commit, a merge commit's branch commits.
+     * None of them may come back as a direct push, and each PR must be returned.
+     */
+    prCommits?: Record<string, string[]>;
+    /** The commit each change landed as (`mergeSha`): merge/squash commit, last rebased commit, or the fast-forwarded head. */
+    mergeShas?: Record<string, string>;
+    /** Logins that must be `kind: "bot"` wherever they appear (author, mergedBy, review authors). */
+    bots?: string[];
+    /** Logins that must be `kind: "human"` wherever they appear. */
+    humans?: string[];
   };
-  /** How many requests/pages the fixture transport has served (pagination check). */
+  /** How many requests/pages the fixture transport has served (pagination check). Defaults to the harness's request count. */
   pagesServed?: () => number;
+  /**
+   * The provider talks HTTP. The kit then requires its requests to go through
+   * `harness.wrapFetch` (or `harness.context`) and runs the transient-fault check.
+   */
+  http?: boolean;
+  /**
+   * Optional provider-specific rate-limit response for the transient-fault
+   * check, e.g. GitHub's 403 with `x-ratelimit-remaining: 0`. The provider must
+   * wait at least `minWaitMs` before its next request.
+   */
+  rateLimitFault?: { status: number; headers: (nowUnixSeconds: number) => Record<string, string>; minWaitMs: number };
 }
 
-export type ProviderUnderTest = ScmProvider | ((fixture: ConformanceFixture) => ScmProvider | Promise<ScmProvider>);
+/**
+ * Handed to a provider factory. Route the provider's HTTP through `wrapFetch`
+ * and its retry waits through `sleep` (or use `context()`), so the kit can count
+ * requests and inject transient faults (5xx, 429 with Retry-After).
+ */
+export interface ConformanceHarness {
+  wrapFetch(inner: typeof fetch): typeof fetch;
+  /** Records the wait instead of sleeping. */
+  sleep(ms: number): Promise<void>;
+  /** A ProviderContext whose fetch is wrapped and whose sleep is the kit's. */
+  context(base: { fetch: typeof fetch } & Partial<ProviderContext>): ProviderContext;
+  /** Requests that went through the wrapped fetch (injected faults included). */
+  requests(): number;
+}
+
+export type ProviderUnderTest = ScmProvider | ((fixture: ConformanceFixture, harness: ConformanceHarness) => ScmProvider | Promise<ScmProvider>);
 
 export interface ConformanceResult {
   fixture: string;
   check: string;
   ok: boolean;
+  /** True when the check did not apply (e.g. no HTTP); `message` says why. */
+  skipped?: boolean;
   message?: string;
 }
 
@@ -54,13 +98,20 @@ export const CONFORMANCE_CHECKS = [
   "normalization",
   "window-and-kinds",
   "classification",
+  "merge-strategies",
   "no-double-counting",
   "stable-sorted-ids",
   "review-state-mapping",
   "actors",
+  "bot-detection",
   "pagination",
   "kind-filtering",
+  "transient-faults",
 ] as const;
+export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
+
+/** The Retry-After the kit sends with its injected 429, in seconds. */
+export const INJECTED_RETRY_AFTER_SECONDS = 7;
 
 const sortById = (cs: readonly ChangeRecord[]) => [...cs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 const sameSet = (a: readonly string[], b: readonly string[]) => canonicalJson([...a].sort()) === canonicalJson([...b].sort());
@@ -72,15 +123,60 @@ const diff = (want: readonly string[], got: readonly string[]) => {
   return `missing ${missing.length} (${missing.slice(0, 3).join(", ")}), extra ${extra.length} (${extra.slice(0, 3).join(", ")})`;
 };
 
-async function instantiate(p: ProviderUnderTest, f: ConformanceFixture): Promise<ScmProvider> {
-  return typeof p === "function" ? p(f) : p;
+interface Fault {
+  /** 1-based call number through the wrapped fetch. */
+  call: number;
+  response: () => Response;
+  /** The provider must wait at least this long before its next call. */
+  minWaitMs: number;
+  label: string;
+}
+
+interface Harness extends ConformanceHarness {
+  /** Per call: the waits requested after it, and wall-clock time to the next call. */
+  log: { url: string; method: string; sleptAfter: number; at: number }[];
+}
+
+function makeHarness(faults: readonly Fault[] = []): Harness {
+  const log: Harness["log"] = [];
+  const h: Harness = {
+    log,
+    requests: () => log.length,
+    wrapFetch(inner) {
+      return (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        log.push({ url, method: (init?.method ?? "GET").toUpperCase(), sleptAfter: 0, at: Date.now() });
+        const fault = faults.find((f) => f.call === log.length);
+        if (fault) return fault.response();
+        return inner(input as string, init);
+      }) as typeof fetch;
+    },
+    async sleep(ms) {
+      const last = log[log.length - 1];
+      if (last) last.sleptAfter += ms;
+    },
+    context(base) {
+      return { cwd: ".", env: {}, log: () => {}, ...base, fetch: h.wrapFetch(base.fetch), sleep: h.sleep };
+    },
+  };
+  return h;
+}
+
+async function instantiate(p: ProviderUnderTest, f: ConformanceFixture, h: ConformanceHarness): Promise<ScmProvider> {
+  return typeof p === "function" ? p(f, h) : p;
+}
+
+function allActors(c: ChangeRecord): Actor[] {
+  return [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)];
 }
 
 export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[]): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
   for (const f of fixtures) {
-    const push = (check: (typeof CONFORMANCE_CHECKS)[number], ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
-    const p1 = await instantiate(provider, f);
+    const push = (check: ConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
+    const skip = (check: ConformanceCheck, message: string) => results.push({ fixture: f.name, check, ok: true, skipped: true, message });
+    const h1 = makeHarness();
+    const p1 = await instantiate(provider, f, h1);
     push("api-version", SUPPORTED_PROVIDER_API_VERSIONS.includes(p1.apiVersion) && /^[a-z0-9][a-z0-9-]*$/.test(p1.name), `apiVersion ${p1.apiVersion} / name ${p1.name}`);
     let first: ChangeRecord[];
     try {
@@ -89,7 +185,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       push("normalization", false, `listChanges threw: ${(e as Error).message}`);
       continue;
     }
-    const pages = f.pagesServed?.();
+    const cleanRequests = h1.requests();
+    const pages = f.pagesServed?.() ?? (cleanRequests > 0 ? cleanRequests : undefined);
 
     const bad = first.map((c) => ({ c, p: changeRecordProblems(c) })).filter((x) => x.p.length > 0);
     const wrongRepo = first.filter((c) => c.repo !== f.request.repo);
@@ -111,6 +208,22 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     if (f.expect.directPushes && !sameSet(f.expect.directPushes, byKind("direct_push"))) classProblems.push(`direct pushes: ${diff(f.expect.directPushes, byKind("direct_push"))}`);
     push("classification", classProblems.length === 0, classProblems.join("; "));
 
+    const ms: string[] = [];
+    const directBySha = new Map(first.filter((c) => c.kind === "direct_push").map((c) => [c.mergeSha, c.id]));
+    for (const [id, shas] of Object.entries(f.expect.prCommits ?? {})) {
+      if (f.request.kinds.includes("pull_request") && !first.some((c) => c.id === id && c.kind === "pull_request")) ms.push(`${id} missing`);
+      for (const sha of shas) {
+        const leaked = directBySha.get(sha.toLowerCase());
+        if (leaked) ms.push(`commit ${sha.slice(0, 12)} of ${id} was returned as direct push ${leaked}`);
+      }
+    }
+    for (const [id, sha] of Object.entries(f.expect.mergeShas ?? {})) {
+      const c = first.find((x) => x.id === id);
+      if (c && c.mergeSha !== sha.toLowerCase()) ms.push(`${id} mergeSha ${c.mergeSha.slice(0, 12)} ≠ ${sha.slice(0, 12)}`);
+      if (!c && f.request.kinds.includes(id.includes("#") ? "pull_request" : "direct_push")) ms.push(`${id} missing`);
+    }
+    push("merge-strategies", ms.length === 0, ms.join("; "));
+
     const ids = first.map((c) => c.id);
     const shas = first.map((c) => c.mergeSha);
     const dupId = ids.find((x, i) => ids.indexOf(x) !== i);
@@ -119,7 +232,7 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
 
     let second: ChangeRecord[] | null = null;
     try {
-      second = (await (await instantiate(provider, f)).listChanges(f.request)).changes;
+      second = (await (await instantiate(provider, f, makeHarness())).listChanges(f.request)).changes;
     } catch (e) {
       push("stable-sorted-ids", false, `second listChanges threw: ${(e as Error).message}`);
     }
@@ -134,6 +247,11 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const c = first.find((x) => x.id === id);
       const got = c?.reviews.map((r) => r.state) ?? null;
       if (canonicalJson(got) !== canonicalJson(states)) rs.push(`${id}: expected [${states.join(",")}] got [${got?.join(",") ?? "missing"}]`);
+    }
+    for (const [id, actors] of Object.entries(f.expect.reviewers ?? {})) {
+      const c = first.find((x) => x.id === id);
+      const got = c?.reviews.map((r) => r.author) ?? null;
+      if (canonicalJson(got) !== canonicalJson(actors)) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
     }
     push("review-state-mapping", rs.length === 0, rs.join("; "));
 
@@ -152,6 +270,20 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     }
     push("actors", ac.length === 0, ac.join("; "));
 
+    if (f.expect.bots || f.expect.humans) {
+      const bd: string[] = [];
+      const everyone = first.flatMap(allActors);
+      for (const [logins, kind] of [[f.expect.bots ?? [], "bot"], [f.expect.humans ?? [], "human"]] as const) {
+        for (const login of logins) {
+          const seen = everyone.filter((a) => normalizeLogin(a.login) === normalizeLogin(login));
+          if (seen.length === 0) bd.push(`${login} does not appear in any author, mergedBy or review`);
+          const wrong = seen.find((a) => a.kind !== kind);
+          if (wrong) bd.push(`${login} is kind ${wrong.kind}, expected ${kind}`);
+        }
+      }
+      push("bot-detection", bd.length === 0, bd.join("; "));
+    } else skip("bot-detection", "fixture declares no bots/humans");
+
     const pg: string[] = [];
     if (f.expect.ids && !sameSet(f.expect.ids, ids)) pg.push(`ids: ${diff(f.expect.ids, ids)}`);
     if (f.expect.minPages !== undefined && pages !== undefined && pages < f.expect.minPages) pg.push(`transport served ${pages} requests < ${f.expect.minPages}: the fixture does not exercise pagination`);
@@ -161,7 +293,7 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const kp: string[] = [];
       for (const k of f.request.kinds) {
         try {
-          const only = (await (await instantiate(provider, f)).listChanges({ ...f.request, kinds: [k] })).changes;
+          const only = (await (await instantiate(provider, f, makeHarness())).listChanges({ ...f.request, kinds: [k] })).changes;
           if (only.some((c) => c.kind !== k)) kp.push(`kinds [${k}] returned another kind`);
           if (!sameSet(only.map((c) => c.id), byKind(k))) kp.push(`kinds [${k}]: ${diff(byKind(k), only.map((c) => c.id))}`);
         } catch (e) {
@@ -170,12 +302,61 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       }
       push("kind-filtering", kp.length === 0, kp.join("; "));
     }
+
+    if (cleanRequests === 0) {
+      if (f.http) push("transient-faults", false, "fixture says http: true but no request went through the harness: build the provider's context with harness.context() or harness.wrapFetch()");
+      else skip("transient-faults", "the provider made no requests through the harness (not an HTTP provider)");
+    } else {
+      push("transient-faults", ...(await transientFaults(provider, f, first, cleanRequests)));
+    }
   }
   return { ok: results.every((r) => r.ok), results };
 }
 
+/**
+ * Re-runs the fixture with faults injected through the harness: the first
+ * request fails with 503, then 429 + Retry-After, then the fixture's own
+ * rate-limit response (or 502); the request that was last in the clean run
+ * fails once with 503. The provider must retry each, wait at least as long as
+ * the rate-limit headers say, and return exactly the same records.
+ */
+async function transientFaults(provider: ProviderUnderTest, f: ConformanceFixture, clean: readonly ChangeRecord[], cleanRequests: number): Promise<[boolean, string]> {
+  const text = (status: number, body: string, headers: Record<string, string> = {}) => () => new Response(body, { status, headers: { "content-type": "text/plain", ...headers } });
+  const rl = f.rateLimitFault;
+  const faults: Fault[] = [
+    { call: 1, response: text(503, "service unavailable"), minWaitMs: 0, label: "503" },
+    { call: 2, response: text(429, "too many requests", { "retry-after": String(INJECTED_RETRY_AFTER_SECONDS) }), minWaitMs: INJECTED_RETRY_AFTER_SECONDS * 1000, label: `429 with Retry-After: ${INJECTED_RETRY_AFTER_SECONDS}` },
+    rl
+      ? { call: 3, response: () => new Response("rate limited", { status: rl.status, headers: rl.headers(Math.floor(Date.now() / 1000)) }), minWaitMs: rl.minWaitMs, label: `rate-limit ${rl.status}` }
+      : { call: 3, response: text(502, "<html>bad gateway</html>", { "content-type": "text/html" }), minWaitMs: 0, label: "502" },
+  ];
+  if (cleanRequests >= 2) faults.push({ call: cleanRequests + faults.length, response: text(503, "service unavailable"), minWaitMs: 0, label: "503 on the last request" });
+  const h = makeHarness(faults);
+  let got: ChangeRecord[];
+  try {
+    got = (await (await instantiate(provider, f, h)).listChanges(f.request)).changes;
+  } catch (e) {
+    return [false, `listChanges threw under transient faults (${faults.map((x) => x.label).join(", ")}): ${(e as Error).message}`];
+  }
+  const problems: string[] = [];
+  for (const fault of faults) {
+    const at = h.log[fault.call - 1];
+    const next = h.log[fault.call];
+    if (!at) continue;
+    if (!next) {
+      problems.push(`no request after the injected ${fault.label}: not retried`);
+      continue;
+    }
+    if (next.url !== at.url || next.method !== at.method) problems.push(`after the injected ${fault.label} on ${at.method} ${at.url} the provider sent ${next.method} ${next.url} instead of retrying`);
+    const waited = Math.max(at.sleptAfter, next.at - at.at);
+    if (waited < fault.minWaitMs) problems.push(`after the injected ${fault.label} the provider waited ${waited} ms < ${fault.minWaitMs} ms`);
+  }
+  if (canonicalJson(sortById(got)) !== canonicalJson(sortById(clean))) problems.push("records differ from the clean run (data lost or changed under retries)");
+  return [problems.length === 0, problems.join("; ")];
+}
+
 export function formatConformanceReport(r: ConformanceReport): string {
-  return r.results.map((x) => `${x.ok ? "ok  " : "FAIL"} ${x.fixture} › ${x.check}${x.message ? `: ${x.message}` : ""}`).join("\n");
+  return r.results.map((x) => `${x.ok ? (x.skipped ? "skip" : "ok  ") : "FAIL"} ${x.fixture} › ${x.check}${x.message ? `: ${x.message}` : ""}`).join("\n");
 }
 
 export async function assertProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[]): Promise<ConformanceReport> {

@@ -103,6 +103,12 @@ export interface ProviderContext {
   log: (message: string) => void;
   /** Injected for testing and recording; defaults to global fetch. */
   fetch: typeof fetch;
+  /**
+   * Optional (added in pr-rla 0.2, same API version): how the provider waits
+   * between retries. The conformance kit injects one that records the wait
+   * instead of sleeping. When absent, use a real timer.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ScmProvider {

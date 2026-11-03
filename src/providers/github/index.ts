@@ -50,7 +50,7 @@ export class GitHubProvider implements ScmProvider {
 
   constructor(opts: GitHubProviderOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
     const token = (opts.token_env ? ctx.env[opts.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN;
-    this.http = new GitHubHttp({ token, apiUrl: opts.api_url, graphqlUrl: opts.graphql_url, fetch: ctx.fetch, log: ctx.log });
+    this.http = new GitHubHttp({ token, apiUrl: opts.api_url, graphqlUrl: opts.graphql_url, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
     this.pageSize = Math.min(100, opts.page_size ?? 100);
     this.batchSize = opts.batch_size ?? 40;
     this.historyPageSize = opts.history_page_size ?? 50;

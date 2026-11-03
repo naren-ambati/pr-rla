@@ -5,7 +5,7 @@ import { classifyHistory, type HistoryNode } from "../src/providers/github/histo
 import { normalizeActor, normalizeCommitAuthor, normalizeReviews } from "../src/providers/github/normalize.js";
 import { prBatchQuery } from "../src/providers/github/queries.js";
 import type { ProviderContext } from "../src/sdk/provider.js";
-import { runProviderConformance, formatConformanceReport, type ConformanceFixture } from "../src/testing/index.js";
+import { runProviderConformance, formatConformanceReport, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { classificationScenario, fakeGitHub, OID } from "./helpers/fake-github.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
 import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
@@ -18,8 +18,10 @@ type RecordedFixture = Recording & {
 };
 
 const rec = readJsonFixture<RecordedFixture>("github", "gh-aw-2026-11-02.json");
-const ctx = (f: typeof fetch): ProviderContext & { now: () => number } => ({ cwd: ".", env: {}, log: () => {}, fetch: f, now: () => Date.parse(rec.recordedAt) });
-const recordedProvider = (f = replayFetch(rec)) => new GitHubProvider(rec.options as never, ctx(f));
+const ctx = (f: typeof fetch, h?: ConformanceHarness): ProviderContext & { now: () => number } => ({ ...(h ? h.context({ fetch: f }) : { cwd: ".", env: {}, log: () => {}, fetch: f }), now: () => Date.parse(rec.recordedAt) });
+const recordedProvider = (f = replayFetch(rec), h?: ConformanceHarness) => new GitHubProvider(rec.options as never, ctx(f, h));
+/** GitHub's primary rate limit: 403 with x-ratelimit-remaining: 0 and a reset time (epoch seconds). */
+const GITHUB_RATE_LIMIT = { status: 403, headers: (now: number) => ({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now + 30) }), minWaitMs: 29_000 };
 
 describe("GitHub provider on recorded gh-aw responses (2026-11-02, real data)", () => {
   it("passes the provider conformance kit (pagination over 4 REST pages, 4 GraphQL PR batches, 3 history pages)", async () => {
@@ -33,11 +35,18 @@ describe("GitHub provider on recorded gh-aw responses (2026-11-02, real data)", 
         minPages: 10,
         reviewStates: { "github:github/gh-aw#74201": ["COMMENTED", "COMMENTED", "DISMISSED", "COMMENTED", "APPROVED"] },
         actors: { "github:github/gh-aw#74201": { author: { login: "copilot-swe-agent[bot]", kind: "bot" }, mergedBy: { login: "SivaKesava1", kind: "human" } } },
+        bots: ["copilot-swe-agent[bot]"],
+        humans: ["SivaKesava1", "pelikhan"],
+        prCommits: { "github:github/gh-aw#73884": ["a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf"] },
+        mergeShas: { "github:github/gh-aw#73884": "a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf" },
       },
       pagesServed: () => last.served(),
+      http: true,
+      rateLimitFault: GITHUB_RATE_LIMIT,
     };
-    const report = await runProviderConformance(() => recordedProvider((last = replayFetch(rec))), [fixture]);
+    const report = await runProviderConformance((_f, h) => recordedProvider((last = replayFetch(rec)), h), [fixture]);
     expect(report.ok, formatConformanceReport(report)).toBe(true);
+    expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
 
   it("normalizes 38 merged PRs into main; the PR into another branch is excluded", async () => {
@@ -71,9 +80,10 @@ describe("GitHub provider on recorded gh-aw responses (2026-11-02, real data)", 
 
 describe("GitHub provider on a synthetic graph: squash, merge commit, rebase merge, direct pushes", () => {
   const sc = classificationScenario();
-  const make = () => {
+  const make = (h?: ConformanceHarness) => {
     const fake = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { pageSize: 2 });
-    return { fake, provider: new GitHubProvider({ page_size: 2, batch_size: 3, history_page_size: 2 }, { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch, now: () => Date.parse("2026-08-03T00:00:00Z") }) };
+    const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
+    return { fake, provider: new GitHubProvider({ page_size: 2, batch_size: 3, history_page_size: 2 }, { ...(h ? h.context(base) : base), now: () => Date.parse("2026-08-03T00:00:00Z") }) };
   };
   const ids = {
     squash: `github:${sc.repo}#1`,
@@ -87,7 +97,7 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
   it("classifies every case and passes the conformance kit", async () => {
     let last = make();
     const report = await runProviderConformance(
-      () => (last = make()).provider,
+      (_f, h) => (last = make(h)).provider,
       [
         {
           name: "synthetic acme/widgets 2026-08-01",
@@ -104,12 +114,20 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
             },
             changedLines: { [ids.squash]: 200, [ids.alice]: 7 },
             minPages: 12,
+            reviewers: { [ids.rebase]: [{ login: "dave", kind: "human" }, { login: "erin", kind: "human" }], [ids.squash]: Array.from({ length: 150 }, () => ({ login: "copilot-pull-request-reviewer[bot]", kind: "bot" as const })) },
+            prCommits: { [ids.rebase]: [OID("R2a"), OID("R2b"), OID("R2c")], [ids.merge]: [OID("M3"), OID("F3b")], [ids.squash]: [OID("S1")], [ids.unlinked]: [OID("S5")] },
+            mergeShas: { [ids.rebase]: OID("R2c"), [ids.merge]: OID("M3"), [ids.squash]: OID("S1"), [ids.alice]: OID("D2") },
+            bots: ["copilot-swe-agent[bot]", "github-merge-queue[bot]", "github-actions[bot]", "copilot-pull-request-reviewer[bot]"],
+            humans: ["alice", "maint", "dave", "carol"],
           },
           pagesServed: () => last.fake.served(),
+          http: true,
+          rateLimitFault: GITHUB_RATE_LIMIT,
         },
       ],
     );
     expect(report.ok, formatConformanceReport(report)).toBe(true);
+    expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
 
   it("halves the history page size while GitHub 502s on heavy pages, without losing commits", async () => {
