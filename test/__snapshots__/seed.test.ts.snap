@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`draws > golden values (any reimplementation must match) 1`] = `
+[
+  187,
+  215,
+  238,
+  307,
+  343,
+]
+`;
