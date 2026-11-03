@@ -1,0 +1,30 @@
+{
+  "name": "pr-rla-provider-gitea",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Example bring-your-own pr-rla provider for Gitea and Forgejo (Codeberg). Tutorial: docs/writing-a-provider.md",
+  "type": "module",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs"
+  ],
+  "keywords": [
+    "pr-rla",
+    "pr-rla-provider"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/conformance.test.mjs"
+  },
+  "peerDependencies": {
+    "pr-rla": "~0.1.0"
+  },
+  "devDependencies": {
+    "pr-rla": "file:../../.."
+  }
+}

@@ -1,0 +1,7322 @@
+{
+ "description": "Real gitea API responses for forgejo/docs, window 2026-10-01..2026-10-07 (UTC), recorded read-only without a token. Trimmed to the fields pr-rla reads; personal e-mail addresses and comment bodies scrubbed.",
+ "provider": "gitea",
+ "recordedAt": "2026-11-03T15:56:31.000Z",
+ "options": {
+  "base_url": "https://codeberg.org",
+  "bots": [
+   "viceice-bot",
+   "forgejo-website"
+  ]
+ },
+ "window": {
+  "opensAt": "2026-10-01T00:00:00Z",
+  "closesAt": "2026-10-08T00:00:00Z"
+ },
+ "repo": "forgejo/docs",
+ "expected": {
+  "ids": [
+   "gitea:forgejo/docs#2070",
+   "gitea:forgejo/docs#2200",
+   "gitea:forgejo/docs#2206",
+   "gitea:forgejo/docs#2214",
+   "gitea:forgejo/docs#2215",
+   "gitea:forgejo/docs#2218",
+   "gitea:forgejo/docs#2219",
+   "gitea:forgejo/docs#2221",
+   "gitea:forgejo/docs#2222"
+  ],
+  "pullRequests": 9,
+  "directPushes": [],
+  "defaultBranch": "next",
+  "diagnostics": [
+   {
+    "label": "PRs merged into other branches in window (excluded)",
+    "value": 6
+   },
+   {
+    "label": "default-branch commits in window",
+    "value": 9
+   },
+   {
+    "label": "commits linked to a merged PR",
+    "value": 9
+   },
+   {
+    "label": "rebased commits linked by author, author date and message",
+    "value": 0
+   },
+   {
+    "label": "direct pushes that are merge commits",
+    "value": 0
+   }
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "full_name": "forgejo/docs",
+    "default_branch": "next",
+    "html_url": "https://codeberg.org/forgejo/docs"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls?state=closed&sort=recentupdate&limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "link": "<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=2&sort=recentupdate&state=closed>; rel=\"next\",<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=40&sort=recentupdate&state=closed>; rel=\"last\"",
+    "x-total-count": "1977"
+   },
+   "response": [
+    {
+     "number": 2265,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2265",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-03T00:08:55+01:00",
+     "updated_at": "2026-11-03T00:08:58+01:00",
+     "merge_commit_sha": "d6ea6be31a362225649bb0717377054bd6c05080",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "1beec1c7f3baa8da8d7747de3ad4c33e309933eb"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2263,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2263",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-02T00:14:02+01:00",
+     "updated_at": "2026-11-02T00:14:03+01:00",
+     "merge_commit_sha": "dcdec379346caf10a02568de70ff5339ede9b844",
+     "additions": 40,
+     "deletions": 41,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "999172fad170f6ca861b4ba35fa2f82e73f31a9c"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2261,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2261",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-01T08:33:27+01:00",
+     "updated_at": "2026-11-01T08:33:28+01:00",
+     "merge_commit_sha": "f902a6bc58816d03d348e289fdf0dcf5cc6ebdae",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "68e11b9d4e9224f1ff06ebf60a66f5972bf6bc50"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2248,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2248",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-30T13:57:21+01:00",
+     "merge_commit_sha": null,
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "30275843a3539715da8d53ca09c98cdd1b11dcba"
+     },
+     "user": {
+      "id": 965829,
+      "login": "frju365"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2259,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2259",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:47:06+01:00",
+     "updated_at": "2026-10-30T04:47:06+01:00",
+     "merge_commit_sha": "b494da4f09f195dbba9553d2bed960977bcca009",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "643049805ff28625ff060e78cf010d45661cd4fd"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2257,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2257",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:08:27+01:00",
+     "updated_at": "2026-10-30T04:47:06+01:00",
+     "merge_commit_sha": "38ea8e5de9813d8561a1377028fc886eb0f72ee8",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c173659a4e7aee1e9ad51c789c9c26ee0b25248c"
+     },
+     "user": {
+      "id": 13593,
+      "login": "crystal"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2258,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2258",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:10:40+01:00",
+     "updated_at": "2026-10-30T04:36:11+01:00",
+     "merge_commit_sha": "6fb8a0c006f892cdf0983b0711b272f5ac645327",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "d997686a3cef412f460d0e226ac45020abc51f17"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2256,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2256",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-29T10:05:11+01:00",
+     "updated_at": "2026-10-29T10:05:15+01:00",
+     "merge_commit_sha": "6d4a14af6359b859c0854ecbf3ee9e27aa0ec0f6",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "b0567afc8b4e36b4b3c510b1dae6e50edca56868"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2254,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2254",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-27T07:43:27+01:00",
+     "updated_at": "2026-10-27T07:43:28+01:00",
+     "merge_commit_sha": "c065479557929b7623f3004bd44872f4cbb73424",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "20bd73d21924b3dd5e2dbcbf6566c7d4c8c4b8a1"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2251,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2251",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T16:48:52+01:00",
+     "updated_at": "2026-10-26T18:08:24+01:00",
+     "merge_commit_sha": "54a3d8656a1f60b86aef33659ae8334bfe099529",
+     "additions": 33,
+     "deletions": 30,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "03e738f779025dcd6613774131dab219cec890dc"
+     },
+     "user": {
+      "id": 1258781,
+      "login": "PatrickStarr"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2182,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2182",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T16:35:16+01:00",
+     "updated_at": "2026-10-26T16:35:18+01:00",
+     "merge_commit_sha": "e6ee5f85d6b754157e2cb93bcd459a351513391e",
+     "additions": 36,
+     "deletions": 2,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "7a983a1edaff137185c7605391876b7903f36244"
+     },
+     "user": {
+      "id": 288613,
+      "login": "magz"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2250,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2250",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T10:46:07+01:00",
+     "updated_at": "2026-10-26T10:46:14+01:00",
+     "merge_commit_sha": "89dd77091bdd2a9d3258d73a15f6b211a688ee0d",
+     "additions": 74,
+     "deletions": 74,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "94e3dfa26d58f39b2ab6ec33ed64b5cda6a00b16"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2246,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2246",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T23:06:08+02:00",
+     "updated_at": "2026-10-22T23:06:13+02:00",
+     "merge_commit_sha": "f725bc768c5c9c749e36ce2a2544f789b3ada52f",
+     "additions": 11,
+     "deletions": 11,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "0bed418fef7e51b150956e57c59aea81f007d22d"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2245,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2245",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T23:06:09+02:00",
+     "updated_at": "2026-10-22T23:06:12+02:00",
+     "merge_commit_sha": "65faeb1c07bbc43cbc3ac32aef19a7671500dd78",
+     "additions": 11,
+     "deletions": 11,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "81a65904f00f44a1bb929c95303cde989603963f"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2244,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2244",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T09:11:58+02:00",
+     "updated_at": "2026-10-22T09:11:59+02:00",
+     "merge_commit_sha": "cdbdb1ff5b0db4ea723d527f9a5040f3db48a3a5",
+     "additions": 2,
+     "deletions": 2,
+     "changed_files": 2,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "be1c5898e2ab4df8244467603d76bf43d00a3a39"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2243,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2243",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T09:08:34+02:00",
+     "updated_at": "2026-10-22T09:11:59+02:00",
+     "merge_commit_sha": "1906a99842d42ee1235923f8a1adde1326e3ac76",
+     "additions": 2,
+     "deletions": 2,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "94a5f733b1e097d4ae0fe728e979203b040f1b89"
+     },
+     "user": {
+      "id": 1579565,
+      "login": "SJaime23"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2163,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2163",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-21T13:11:48+02:00",
+     "updated_at": "2026-10-21T13:11:48+02:00",
+     "merge_commit_sha": "76e0690fbb68e02fb3fdda9adc9a12368c8f785b",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "869d2588c3941e8bef68c028acb241bf2ecccc5c"
+     },
+     "user": {
+      "id": 1280705,
+      "login": "famfo-cb"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1780,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1780",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-02-16T06:01:23+01:00",
+     "updated_at": "2026-10-21T10:17:29+02:00",
+     "merge_commit_sha": "dacec792e3bb45527f68af4b04405492992b08d9",
+     "additions": 3,
+     "deletions": 3,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "bd90d98095827a06e9ad636ada6325fde3c92d4e"
+     },
+     "user": {
+      "id": 157636,
+      "login": "famfo"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v14.0"
+      }
+     ]
+    },
+    {
+     "number": 2240,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2240",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-20T12:52:28+02:00",
+     "updated_at": "2026-10-20T12:59:59+02:00",
+     "merge_commit_sha": "e77b6628af9cd9d45f30204898d68f55a191ccb5",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "42ff0d60ac9942c53f7089c8739e3e7801a4ceb6"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2241,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2241",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-20T12:56:38+02:00",
+     "updated_at": "2026-10-20T12:56:39+02:00",
+     "merge_commit_sha": "af91e7700bc3dcc19edc07e2127033c882107c32",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "c6b8374234e0492996480919bfbdf1570d7c0130"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1740,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1740",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-03-02T06:16:56+01:00",
+     "updated_at": "2026-10-19T15:15:34+02:00",
+     "merge_commit_sha": "8a2b06e7a452043aac9eb3a95cf56e7e8e467719",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "d14893fa797cd414ba2e1c2aa54dfc8b3e276180"
+     },
+     "user": {
+      "id": 815899,
+      "login": "jaylinski"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2239,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2239",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-19T00:14:12+02:00",
+     "updated_at": "2026-10-19T00:14:14+02:00",
+     "merge_commit_sha": "4f5e2dde97f52399c163a1b59cd0ac9e537722b6",
+     "additions": 108,
+     "deletions": 108,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "22de90aa326853e46b0a233dc9ec61fdec98eca4"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2238,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2238",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-18T18:47:18+02:00",
+     "updated_at": "2026-10-18T18:47:22+02:00",
+     "merge_commit_sha": "052a05773c52b9807267dd93b4b47d462a68d18b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "0cfbdfd704ce3ea8e063cc242eef5f2c7a512fde"
+     },
+     "user": {
+      "id": 52700,
+      "login": "farooqkz"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 1122,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1122",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2025-04-11T15:25:49+02:00",
+     "updated_at": "2026-10-18T09:28:03+02:00",
+     "merge_commit_sha": "0df093be8a2a0705e76f6650736dc649ae42801b",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "61a0e82f23556817fa7a381198e80c7d0f914389"
+     },
+     "user": {
+      "id": 26734,
+      "login": "Gusted"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1094,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1094",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2025-07-06T18:24:06+02:00",
+     "updated_at": "2026-10-18T09:28:03+02:00",
+     "merge_commit_sha": "39eb13fc0b448fa1e88c39c7720340c3819f981d",
+     "additions": 1513,
+     "deletions": 1362,
+     "changed_files": 19,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "fc1a992d78a474ee76c4605994af5ad6933f94f8"
+     },
+     "user": {
+      "id": 163414,
+      "login": "Kwonunn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v11.0"
+      },
+      {
+       "name": "backport/v12.0"
+      }
+     ]
+    },
+    {
+     "number": 2237,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2237",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-17T22:13:17+02:00",
+     "updated_at": "2026-10-17T22:13:19+02:00",
+     "merge_commit_sha": "6bded37e2871e2aca936479111c135b345368d47",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6edb53d0b13f10c60ec1794a2dbfb2e0523f9286"
+     },
+     "user": {
+      "id": 1564781,
+      "login": "ManInDark"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2235,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2235",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:18:45+02:00",
+     "updated_at": "2026-10-16T09:18:46+02:00",
+     "merge_commit_sha": "a907dfed92cff01b38ab19d0f85956de41c3ce37",
+     "additions": 1,
+     "deletions": 12,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "f99e179581b5d82dcd87a812ac0a8fd103a70f99"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2234,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2234",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:16:24+02:00",
+     "updated_at": "2026-10-16T09:18:45+02:00",
+     "merge_commit_sha": "ecf876bb41d325da55ef5d0a1a954916497bb4bf",
+     "additions": 1,
+     "deletions": 12,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "b91435cd0e1179c272e2f50cc98f6bed47eda772"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2230,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2230",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:10:31+02:00",
+     "updated_at": "2026-10-16T09:10:34+02:00",
+     "merge_commit_sha": "30db931a444c665ece6fdf92dea4f4c0930dc143",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "e5f30774024295f3b58a4f98337a9b3727444788"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2233,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2233",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T00:27:32+02:00",
+     "updated_at": "2026-10-16T00:27:34+02:00",
+     "merge_commit_sha": "0371251dc0d7b059de9720641e7e73ab31ca1ec4",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6c8438f89f7de846409d1b93b81b01e6a785fd82"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2229,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2229",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-13T04:58:13+02:00",
+     "updated_at": "2026-10-13T04:58:18+02:00",
+     "merge_commit_sha": "f5f7932e35f9ca41ad4f799fab255055c8293c3a",
+     "additions": 105,
+     "deletions": 0,
+     "changed_files": 2,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "0825b2265cfdb406c7eabc170e3c66a96fcf2d3e"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2228,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2228",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-13T02:42:20+02:00",
+     "updated_at": "2026-10-13T04:58:18+02:00",
+     "merge_commit_sha": "6b64d95baa0d775f46fb872e16d88e8aad8f9b13",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "4ac141e02579f0a41041c467fb7c63d99fedca1f"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2064,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2064",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-12T21:29:10+02:00",
+     "updated_at": "2026-10-12T21:29:11+02:00",
+     "merge_commit_sha": "03fbb438ad40169aeb97d3f1d5e2e8e75a24c179",
+     "additions": 201,
+     "deletions": 0,
+     "changed_files": 12,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "571f5fcce7b3244f96889d90611a8d8590157013"
+     },
+     "user": {
+      "id": 91002,
+      "login": "patdyn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2227,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2227",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-12T08:25:19+02:00",
+     "updated_at": "2026-10-12T08:25:24+02:00",
+     "merge_commit_sha": "4ac70466ef6ab36d732ae328df0f27a7205f9ac5",
+     "additions": 66,
+     "deletions": 66,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "51f5a63d45b8ac2abb0bae61a8fc152a8bdf600c"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2223,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2223",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-09T08:24:17+02:00",
+     "updated_at": "2026-10-09T08:47:13+02:00",
+     "merge_commit_sha": "c39174987775cd9336844b22e68554df54d181a6",
+     "additions": 5,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "1e1df90077d595fd6c067d0f1a4a1759f4a1a5ea"
+     },
+     "user": {
+      "id": 889550,
+      "login": "kilisei"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2220,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2220",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-08T04:50:25+02:00",
+     "updated_at": "2026-10-08T04:50:26+02:00",
+     "merge_commit_sha": "700f148b6072e21a9c44cd4d7a7981eff0188427",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "9c0d4a994e84a3c2cad242e774ab820abe04b313"
+     },
+     "user": {
+      "id": 1301726,
+      "login": "romeroyonatan"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2218,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2218",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T11:33:34+02:00",
+     "updated_at": "2026-10-07T11:33:35+02:00",
+     "merge_commit_sha": "e86ffea24f64ecdd8840bf10e6b56ae367f73383",
+     "additions": 37,
+     "deletions": 36,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "690857c3ef26aeedb606475e4238ca6bd6ee27a2"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2222,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2222",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T10:43:33+02:00",
+     "updated_at": "2026-10-07T10:43:34+02:00",
+     "merge_commit_sha": "c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "d4de5318fd07429a2f802d1663adb1e189d2b165"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2221,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2221",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T00:40:34+02:00",
+     "updated_at": "2026-10-07T00:40:34+02:00",
+     "merge_commit_sha": "1aa4fecef5e9739c0131ddeb8f1011688e868c96",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6fd9417c7536fa960db99a13eafce9e5fda06c84"
+     },
+     "user": {
+      "id": 97503,
+      "login": "mavit"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2219,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2219",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-06T05:23:24+02:00",
+     "updated_at": "2026-10-06T05:23:24+02:00",
+     "merge_commit_sha": "9ab365d6de126d0e67c5d290d7fdc8c5a9076467",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6e3ce277e03ac4315ccb4646da10732b31628cd9"
+     },
+     "user": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2216,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2216",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-05T15:24:39+02:00",
+     "merge_commit_sha": null,
+     "additions": 0,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "649cf23148a865df934d2c73f7fb6aca6cec3714"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2217,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2217",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T10:04:35+02:00",
+     "updated_at": "2026-10-04T10:04:37+02:00",
+     "merge_commit_sha": "a94924bea7e05b17278652c1cc9c3c6459b7bc9d",
+     "additions": 4,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "cc90714c67fe92ffaa9a5f5adcfae4305f22b2f2"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2200,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2200",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T09:24:12+02:00",
+     "updated_at": "2026-10-04T10:04:37+02:00",
+     "merge_commit_sha": "1d574b3f0ad574ec3bea66672ddcd61789a1ad31",
+     "additions": 4,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c868a3742954c680b103c993659aced2cf996757"
+     },
+     "user": {
+      "id": 263874,
+      "login": "laraproto"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2070,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2070",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T09:30:56+02:00",
+     "updated_at": "2026-10-04T09:30:57+02:00",
+     "merge_commit_sha": "748d2adbfb74adb036a89c1c9e94923f3f4bc74b",
+     "additions": 2,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "a0845f785bfdf49d4b9a0768e861ef4029147aa4"
+     },
+     "user": {
+      "id": 75362,
+      "login": "Colin"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2215,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2215",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-03T13:36:33+02:00",
+     "updated_at": "2026-10-03T13:37:08+02:00",
+     "merge_commit_sha": "9a7dd0c5c32a17de02e4553576564ba86f3572c6",
+     "additions": 0,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "fcfe3df95cf7158d9d7f9fb542da46381b3aa9ae"
+     },
+     "user": {
+      "id": -2,
+      "login": "forgejo-actions"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2214,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2214",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-03T13:33:49+02:00",
+     "updated_at": "2026-10-03T13:33:50+02:00",
+     "merge_commit_sha": "04b1a0fe68ad44d66b6531d58ea1c3f215a1142b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "f7bff898303b50b2486b1416e00ff24cb8d0013b"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2211,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2211",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-01T16:06:22+02:00",
+     "merge_commit_sha": null,
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "9f0c5ef7009517c5f97a33e80f587c1b6419ff27"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2210,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2210",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T16:00:25+02:00",
+     "updated_at": "2026-10-01T16:00:32+02:00",
+     "merge_commit_sha": "e61f0a1ae8fd2f5ea0a4135e1318d9d696769f6b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "2f48606acdda350f7965e5e0d2ff874103f22989"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2196,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2196",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-29T02:25:53+02:00",
+     "updated_at": "2026-10-01T16:00:29+02:00",
+     "merge_commit_sha": "06fe797dc52b24165e51776e5b1a408245d1b044",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "31812c7a1c199074c72d84e1bb8b6e284b2c7d27"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "404"
+      },
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2209,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2209",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T15:59:48+02:00",
+     "updated_at": "2026-10-01T15:59:50+02:00",
+     "merge_commit_sha": "91859d62a9e334d05b777925c56e82caca2d3028",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "cfa6adf3728a82484dce03b16ba2b9be62bf8913"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=2&sort=recentupdate&state=closed",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "link": "<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=3&sort=recentupdate&state=closed>; rel=\"next\",<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=40&sort=recentupdate&state=closed>; rel=\"last\",<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=1&sort=recentupdate&state=closed>; rel=\"first\",<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=1&sort=recentupdate&state=closed>; rel=\"prev\"",
+    "x-total-count": "1977"
+   },
+   "response": [
+    {
+     "number": 2206,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2206",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T11:58:44+02:00",
+     "updated_at": "2026-10-01T15:59:50+02:00",
+     "merge_commit_sha": "afacb6e4e8fdff2c515e92d1135ce286a0d5daf4",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c93468d5cdb94a985cbf01039f8cb5fa34ae8bbf"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "404"
+      },
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      },
+      {
+       "name": "backport/v17.0"
+      },
+      {
+       "name": "good first issue"
+      }
+     ]
+    },
+    {
+     "number": 2212,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2212",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T12:41:45+02:00",
+     "updated_at": "2026-10-01T12:41:46+02:00",
+     "merge_commit_sha": "9f0c5ef7009517c5f97a33e80f587c1b6419ff27",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "c359a3ad9490aec0698b19a500c0ffe6dfef7977"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2000,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2000",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-06-07T21:40:15+02:00",
+     "updated_at": "2026-10-01T12:41:46+02:00",
+     "merge_commit_sha": "c7697f2b47339b5573e7bac35015677abc14df7d",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "89c782f1458333274ef9369590263432910b40eb"
+     },
+     "user": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      }
+     ]
+    },
+    {
+     "number": 2102,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2102",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-07-29T15:41:39+02:00",
+     "updated_at": "2026-10-01T12:28:59+02:00",
+     "merge_commit_sha": "55b68013c82b83212c59bbfc093d30d520789552",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "5f11de63e5081e678939bd8fa206cd41e873134d"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      }
+     ]
+    },
+    {
+     "number": 2208,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2208",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T12:19:06+02:00",
+     "updated_at": "2026-10-01T12:19:07+02:00",
+     "merge_commit_sha": "ee287bcd948f2dedc74cda8f7ff3d8a9b0aa3f37",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "21210a2ff05ef03eb0e9daf98acb99b235d60e9f"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2207,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2207",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T12:18:49+02:00",
+     "updated_at": "2026-10-01T12:18:50+02:00",
+     "merge_commit_sha": "e610f09918dcf7091a148d6b55ecaf6ddbae498d",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "b63cf72c23641a1cd4c56fad44c4c9051174b9c7"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2203,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2203",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-30T03:35:49+02:00",
+     "updated_at": "2026-09-30T03:35:50+02:00",
+     "merge_commit_sha": "6f58e530d162f3651f2c7406d084fce85f007f19",
+     "additions": 27,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "a6050a584347d506c70b9e03378226a56b301b4c"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2192,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2192",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-30T03:31:04+02:00",
+     "updated_at": "2026-09-30T03:35:50+02:00",
+     "merge_commit_sha": "bd003cfa920850db52f6fe8f5835455a6aa81063",
+     "additions": 27,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "7eb2b7f75a0f6e24606fc77ff80227c365384ce1"
+     },
+     "user": {
+      "id": 1502634,
+      "login": "OwenYu"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2204,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2204",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-30T03:34:30+02:00",
+     "updated_at": "2026-09-30T03:34:32+02:00",
+     "merge_commit_sha": "dbe6fd6bb8bf9b67cb04dac2cf10bd8d16083c08",
+     "additions": 27,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "d3d51ebdadcda785f1114b9d2dc5e347d22fba22"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2202,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2202",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-30T00:10:45+02:00",
+     "updated_at": "2026-09-30T00:10:48+02:00",
+     "merge_commit_sha": "c36bfb9c0ab72bbc7656edd2763de4c7b4348aeb",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "927d68de07c82c8a764d280c6ced7c739b56132b"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2197,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2197",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-29T03:48:11+02:00",
+     "updated_at": "2026-09-29T03:48:12+02:00",
+     "merge_commit_sha": "f66ac724455f01be1149f7292c3ae34f17d41538",
+     "additions": 26,
+     "deletions": 0,
+     "changed_files": 4,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c35797f2286f4f6d5441febdbbd1310b3eac1672"
+     },
+     "user": {
+      "id": 1053338,
+      "login": "sguiheux"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2199,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2199",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-29T03:45:57+02:00",
+     "updated_at": "2026-09-29T03:45:57+02:00",
+     "merge_commit_sha": "bcf0e2850028e4d690edf0da226c26a91035361d",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "9e11400fd408e7b5adf50f5aaa0eba3e839b8625"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2198,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2198",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-29T03:45:42+02:00",
+     "updated_at": "2026-09-29T03:45:43+02:00",
+     "merge_commit_sha": "501bc2e9ba31821a3ac90199ea600bd8125d94b9",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "85be08754603bfb57019d17d6150e2e21af55c86"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2193,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2193",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-28T13:13:57+02:00",
+     "updated_at": "2026-09-28T13:13:58+02:00",
+     "merge_commit_sha": "a7b11120ba39d4fffc0c81286e14cc4b86c3da08",
+     "additions": 136,
+     "deletions": 125,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "9e257bd4495998b7393bc434385264d370d8a901"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2191,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2191",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-27T08:58:59+02:00",
+     "updated_at": "2026-09-27T08:59:00+02:00",
+     "merge_commit_sha": "8f5dfcea1f5e79c318a753de91d9f57afe1d89de",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "072465b71cc2dcfc2f58b4690a023057c8cd2dcd"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2190,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2190",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-27T08:58:23+02:00",
+     "updated_at": "2026-09-27T08:58:24+02:00",
+     "merge_commit_sha": "b15d122e95e5787a8b577429728763e4086596bc",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "080397fac73b8003fbd75f9f467b0512a91b79e4"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2189,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2189",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-25T23:40:05+02:00",
+     "updated_at": "2026-09-25T23:40:06+02:00",
+     "merge_commit_sha": "60081a80a5417e90e64b9be43b9c02f926405864",
+     "additions": 67,
+     "deletions": 39,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "024d13f94f1611e59197ff8670a781b635b7cbe6"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2187,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2187",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-25T23:24:11+02:00",
+     "updated_at": "2026-09-25T23:40:06+02:00",
+     "merge_commit_sha": "d7e1f3f47b9e39e786bc5c32b0df3acdcba20b98",
+     "additions": 67,
+     "deletions": 39,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "e42fd9944a8cd528630b3a482a2a6dcfefae5670"
+     },
+     "user": {
+      "id": 32636,
+      "login": "oliverpool"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2188,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2188",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-24T21:02:53+02:00",
+     "updated_at": "2026-09-24T21:11:32+02:00",
+     "merge_commit_sha": "15f3997dd7573ce9f01ae34f18cb1ec8fee1ede6",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "914fc1d7d3c91384ba7bd4a62858dfb8433ff796"
+     },
+     "user": {
+      "id": 39134,
+      "login": "Beowulf"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1915,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1915",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-23T04:21:47+02:00",
+     "updated_at": "2026-09-23T04:21:50+02:00",
+     "merge_commit_sha": "5aecb63c2e91a126c45c8e1e446cfcc2195594c2",
+     "additions": 189,
+     "deletions": 0,
+     "changed_files": 3,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "b5333fc488f12d86469775c81b873ba3811295bd"
+     },
+     "user": {
+      "id": 381495,
+      "login": "slink"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2186,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2186",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-21T10:02:33+02:00",
+     "updated_at": "2026-09-21T10:02:35+02:00",
+     "merge_commit_sha": "1793fa64da661d0ede5271f8453a74171d299933",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "d10484d8d71c114d801580470acdcc16f1a4bf01"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2185,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2185",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-20T08:31:14+02:00",
+     "updated_at": "2026-09-20T08:31:16+02:00",
+     "merge_commit_sha": "ead6187bb4970295f32c4c1d7ebd5c8edf66aaf9",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "e8dba162891183d02b63c384f03219963b226c16"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2183,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2183",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-18T10:22:51+02:00",
+     "updated_at": "2026-09-18T10:50:49+02:00",
+     "merge_commit_sha": "8a28a4d911e7abb16a7918b8abd9739cd7a4b30f",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "4f81bb4c2c05861cdcd65ba49cbcdbd80f9584f8"
+     },
+     "user": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2178,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2178",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-16T21:04:15+02:00",
+     "updated_at": "2026-09-17T08:33:19+02:00",
+     "merge_commit_sha": "5c9bc67f8d2bda88b867163266b461efe0ce03a9",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "f5cfa86af774d8aa73aab2e56170de3b9b505cf5"
+     },
+     "user": {
+      "id": 943128,
+      "login": "omkar-foss"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2181,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2181",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-16T08:31:23+02:00",
+     "updated_at": "2026-09-16T08:31:24+02:00",
+     "merge_commit_sha": "200c7b910959bed34c6dc4f8571b5704830d16d1",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "57d91e25d7e38bb6a5d735708bed12ba7f61c561"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2180,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2180",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-14T08:22:58+02:00",
+     "updated_at": "2026-09-14T08:22:59+02:00",
+     "merge_commit_sha": "02dc213116dd90632d79b5b0b5079947ad556811",
+     "additions": 96,
+     "deletions": 96,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "890412f1bc3fe63a887c00ec9a521a13b47b6bc3"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2179,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2179",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-14T08:20:59+02:00",
+     "updated_at": "2026-09-14T08:21:00+02:00",
+     "merge_commit_sha": "7d34d735a331110120cb046a16a4f16d55be6b73",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "cb8fe0ea03292a3a516699c5c42211932bada6ad"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2176,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2176",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-12T19:01:30+02:00",
+     "updated_at": "2026-09-12T19:01:32+02:00",
+     "merge_commit_sha": "28300386afa884d287e07165192516a0352b36b8",
+     "additions": 28,
+     "deletions": 4,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "3c6688601cef86209b2ff41c4dd69387d932436e"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2175,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2175",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-12T18:54:04+02:00",
+     "updated_at": "2026-09-12T19:01:30+02:00",
+     "merge_commit_sha": "b99b3730c3c35e371e52fa54754fb7091907e385",
+     "additions": 28,
+     "deletions": 4,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "657e0a034c2e65f05a88a99b4fbea81793692ef1"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      }
+     ]
+    },
+    {
+     "number": 2177,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2177",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-12T18:57:06+02:00",
+     "updated_at": "2026-09-12T18:57:07+02:00",
+     "merge_commit_sha": "a5a9ef9eda36f46e5799fae00950fa591b0e2711",
+     "additions": 28,
+     "deletions": 4,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "b2f989ad8096c1146069702afa5e2c6058c236d4"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2174,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2174",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-11T14:58:40+02:00",
+     "updated_at": "2026-09-11T14:58:41+02:00",
+     "merge_commit_sha": "b1bbb7c9e199625e826d001507a978af23f6348b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "32f3dad33dc459696cb39ad874947af57e8dc6cc"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2172,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2172",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-11T14:43:07+02:00",
+     "updated_at": "2026-09-11T14:58:40+02:00",
+     "merge_commit_sha": "5bab168a9187bd0a4824b95b54081edc3b0017d0",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "66acd773ca4c0c3fa25178b401cd0c108baa86a8"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "404"
+      },
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      }
+     ]
+    },
+    {
+     "number": 2173,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2173",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-11T14:58:12+02:00",
+     "updated_at": "2026-09-11T14:58:13+02:00",
+     "merge_commit_sha": "a37123a6fb58f2edc4596def4a190000d85e03f3",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "ec57f79b92a699d55b526ee5b5c75381dbb4d059"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2171,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2171",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-10T16:54:10+02:00",
+     "updated_at": "2026-09-10T17:00:12+02:00",
+     "merge_commit_sha": "c5304db41ca319a63e87a3b264d9f7935902c600",
+     "additions": 74,
+     "deletions": 21,
+     "changed_files": 11,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "3612e47f81ef2707d2331c56835258d0b1df03a2"
+     },
+     "user": {
+      "id": 368322,
+      "login": "Crashdummy"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2164,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2164",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-09T11:59:17+02:00",
+     "updated_at": "2026-09-09T22:46:17+02:00",
+     "merge_commit_sha": "ff1db1aa023498ecf38d161f25d4d642a38b2c17",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "de1675a9664a6562248ee62a42812a8e37e65334"
+     },
+     "user": {
+      "id": 135189,
+      "login": "AverageHelper"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1623,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1623",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-09-09T21:18:42+02:00",
+     "merge_commit_sha": null,
+     "additions": 4,
+     "deletions": 4,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "9113cf757db0c78740f117a5f5a15c598158abe0"
+     },
+     "user": {
+      "id": 22193,
+      "login": "micxer"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2170,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2170",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-09T19:10:15+02:00",
+     "updated_at": "2026-09-09T19:10:16+02:00",
+     "merge_commit_sha": "bb1156e38de24f694f733b776853b8f7b16aa3c0",
+     "additions": 1,
+     "deletions": 5,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "55ca601089773c63b79df5dfd25ec80ef7260f44"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2167,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2167",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-09T18:27:33+02:00",
+     "updated_at": "2026-09-09T19:10:15+02:00",
+     "merge_commit_sha": "dbc38e6fa6a63dd2e4be66e49706635aa8bb1b6c",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "60cda5e0f650060f88100b97bdfc1a6f2a390ca7"
+     },
+     "user": {
+      "id": 1461442,
+      "login": "astecker"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      }
+     ]
+    },
+    {
+     "number": 2169,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2169",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-09T19:09:55+02:00",
+     "updated_at": "2026-09-09T19:09:56+02:00",
+     "merge_commit_sha": "d2993336cf4251e20465de0838a30dc2de37b623",
+     "additions": 1,
+     "deletions": 5,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "a9f0fc4bf2da7c2ff65e0307f883da1a09e0138a"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2168,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2168",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-09T09:44:03+02:00",
+     "updated_at": "2026-09-09T09:44:04+02:00",
+     "merge_commit_sha": "28f60c0b79c8928bb140e861b01e843e70b19dcf",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "abc65eea60407fe09adad7f4ac2c3dbbaea3aa35"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2166,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2166",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-07T09:34:29+02:00",
+     "updated_at": "2026-09-07T09:34:30+02:00",
+     "merge_commit_sha": "cacd11fa4e1345875bf896bafdbba52ef3f3c736",
+     "additions": 60,
+     "deletions": 60,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "3f767dccaa79bb27578b71b74091c13a6048562a"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2165,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2165",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-06T09:23:38+02:00",
+     "updated_at": "2026-09-06T09:23:39+02:00",
+     "merge_commit_sha": "96c986bad96e1eeb66871719c587dd4e8814c057",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "db5f40fb5b8e89db982c11b85c97990a5da37e73"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2162,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2162",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-02T11:25:52+02:00",
+     "updated_at": "2026-09-02T11:25:53+02:00",
+     "merge_commit_sha": "d1f2f5f835680f50207484fedc2faeccfade8bed",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "a3a66f283c522d2df7745f0fc20c992c93886331"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2160,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2160",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-31T12:50:57+02:00",
+     "updated_at": "2026-08-31T12:50:58+02:00",
+     "merge_commit_sha": "b0006a9e96120e04edd54eaac0b3c17c9a624369",
+     "additions": 37,
+     "deletions": 37,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "117e33ef7bcd965aff83cb66c9f28ad38abafec5"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2159,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2159",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-31T09:24:16+02:00",
+     "updated_at": "2026-08-31T09:24:17+02:00",
+     "merge_commit_sha": "8fa39b42b69902c93aa5c2f5135b5041be8fc1a8",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "4b622187bd21097cc4e385455d8dfaea8eaa7310"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2157,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2157",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-29T11:43:16+02:00",
+     "updated_at": "2026-08-29T11:43:17+02:00",
+     "merge_commit_sha": "d7561bb6a55774670338932d272f20ea3a73bbf8",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "74e18f2ed4dd2d383d00d717f260fdbbd03c2587"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2156,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2156",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-28T16:33:20+02:00",
+     "updated_at": "2026-08-28T16:33:23+02:00",
+     "merge_commit_sha": "9198640be515dd41c9fcf28fc1120276302ec11f",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v16.0"
+     },
+     "head": {
+      "sha": "86ab10186b21195b76a1a0174b6ee74548ddb902"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2155,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2155",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-28T16:30:55+02:00",
+     "updated_at": "2026-08-28T16:33:20+02:00",
+     "merge_commit_sha": "d476ee7c86c3a8ff45c043db389dc86504575023",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "2aaa0bc0ae18f11785aad8977d6e701fab4f699e"
+     },
+     "user": {
+      "id": 95530,
+      "login": "kdy"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v16.0"
+      }
+     ]
+    },
+    {
+     "number": 2154,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2154",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-08-28T16:33:06+02:00",
+     "updated_at": "2026-08-28T16:33:07+02:00",
+     "merge_commit_sha": "42cc3c20b6e1a3c5951b99effa4e99c1594c0646",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "9e0cadefc931659c0eb5d374ffeaa9cfe97c1c10"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2141,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2141",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-08-26T17:53:41+02:00",
+     "merge_commit_sha": null,
+     "additions": 58,
+     "deletions": 0,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "4e3aa6cf63ff30559a7bc65f759842c12224c1fc"
+     },
+     "user": {
+      "id": 750878,
+      "login": "limiting-factor"
+     },
+     "merged_by": null,
+     "labels": []
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls?state=closed&sort=recentupdate&limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "link": "<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=2&sort=recentupdate&state=closed>; rel=\"next\",<https://codeberg.org/api/v1/repos/forgejo/docs/pulls?limit=50&page=40&sort=recentupdate&state=closed>; rel=\"last\"",
+    "x-total-count": "1977"
+   },
+   "response": [
+    {
+     "number": 2265,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2265",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-03T00:08:55+01:00",
+     "updated_at": "2026-11-03T00:08:58+01:00",
+     "merge_commit_sha": "d6ea6be31a362225649bb0717377054bd6c05080",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "1beec1c7f3baa8da8d7747de3ad4c33e309933eb"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2263,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2263",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-02T00:14:02+01:00",
+     "updated_at": "2026-11-02T00:14:03+01:00",
+     "merge_commit_sha": "dcdec379346caf10a02568de70ff5339ede9b844",
+     "additions": 40,
+     "deletions": 41,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "999172fad170f6ca861b4ba35fa2f82e73f31a9c"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2261,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2261",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-11-01T08:33:27+01:00",
+     "updated_at": "2026-11-01T08:33:28+01:00",
+     "merge_commit_sha": "f902a6bc58816d03d348e289fdf0dcf5cc6ebdae",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "68e11b9d4e9224f1ff06ebf60a66f5972bf6bc50"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2248,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2248",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-30T13:57:21+01:00",
+     "merge_commit_sha": null,
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "30275843a3539715da8d53ca09c98cdd1b11dcba"
+     },
+     "user": {
+      "id": 965829,
+      "login": "frju365"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2259,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2259",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:47:06+01:00",
+     "updated_at": "2026-10-30T04:47:06+01:00",
+     "merge_commit_sha": "b494da4f09f195dbba9553d2bed960977bcca009",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "643049805ff28625ff060e78cf010d45661cd4fd"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2257,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2257",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:08:27+01:00",
+     "updated_at": "2026-10-30T04:47:06+01:00",
+     "merge_commit_sha": "38ea8e5de9813d8561a1377028fc886eb0f72ee8",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c173659a4e7aee1e9ad51c789c9c26ee0b25248c"
+     },
+     "user": {
+      "id": 13593,
+      "login": "crystal"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2258,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2258",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-30T04:10:40+01:00",
+     "updated_at": "2026-10-30T04:36:11+01:00",
+     "merge_commit_sha": "6fb8a0c006f892cdf0983b0711b272f5ac645327",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "d997686a3cef412f460d0e226ac45020abc51f17"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2256,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2256",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-29T10:05:11+01:00",
+     "updated_at": "2026-10-29T10:05:15+01:00",
+     "merge_commit_sha": "6d4a14af6359b859c0854ecbf3ee9e27aa0ec0f6",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "b0567afc8b4e36b4b3c510b1dae6e50edca56868"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2254,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2254",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-27T07:43:27+01:00",
+     "updated_at": "2026-10-27T07:43:28+01:00",
+     "merge_commit_sha": "c065479557929b7623f3004bd44872f4cbb73424",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "20bd73d21924b3dd5e2dbcbf6566c7d4c8c4b8a1"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2251,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2251",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T16:48:52+01:00",
+     "updated_at": "2026-10-26T18:08:24+01:00",
+     "merge_commit_sha": "54a3d8656a1f60b86aef33659ae8334bfe099529",
+     "additions": 33,
+     "deletions": 30,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "03e738f779025dcd6613774131dab219cec890dc"
+     },
+     "user": {
+      "id": 1258781,
+      "login": "PatrickStarr"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2182,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2182",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T16:35:16+01:00",
+     "updated_at": "2026-10-26T16:35:18+01:00",
+     "merge_commit_sha": "e6ee5f85d6b754157e2cb93bcd459a351513391e",
+     "additions": 36,
+     "deletions": 2,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "7a983a1edaff137185c7605391876b7903f36244"
+     },
+     "user": {
+      "id": 288613,
+      "login": "magz"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2250,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2250",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-26T10:46:07+01:00",
+     "updated_at": "2026-10-26T10:46:14+01:00",
+     "merge_commit_sha": "89dd77091bdd2a9d3258d73a15f6b211a688ee0d",
+     "additions": 74,
+     "deletions": 74,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "94e3dfa26d58f39b2ab6ec33ed64b5cda6a00b16"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2246,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2246",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T23:06:08+02:00",
+     "updated_at": "2026-10-22T23:06:13+02:00",
+     "merge_commit_sha": "f725bc768c5c9c749e36ce2a2544f789b3ada52f",
+     "additions": 11,
+     "deletions": 11,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "0bed418fef7e51b150956e57c59aea81f007d22d"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2245,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2245",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T23:06:09+02:00",
+     "updated_at": "2026-10-22T23:06:12+02:00",
+     "merge_commit_sha": "65faeb1c07bbc43cbc3ac32aef19a7671500dd78",
+     "additions": 11,
+     "deletions": 11,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "81a65904f00f44a1bb929c95303cde989603963f"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2244,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2244",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T09:11:58+02:00",
+     "updated_at": "2026-10-22T09:11:59+02:00",
+     "merge_commit_sha": "cdbdb1ff5b0db4ea723d527f9a5040f3db48a3a5",
+     "additions": 2,
+     "deletions": 2,
+     "changed_files": 2,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "be1c5898e2ab4df8244467603d76bf43d00a3a39"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2243,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2243",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-22T09:08:34+02:00",
+     "updated_at": "2026-10-22T09:11:59+02:00",
+     "merge_commit_sha": "1906a99842d42ee1235923f8a1adde1326e3ac76",
+     "additions": 2,
+     "deletions": 2,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "94a5f733b1e097d4ae0fe728e979203b040f1b89"
+     },
+     "user": {
+      "id": 1579565,
+      "login": "SJaime23"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2163,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2163",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-21T13:11:48+02:00",
+     "updated_at": "2026-10-21T13:11:48+02:00",
+     "merge_commit_sha": "76e0690fbb68e02fb3fdda9adc9a12368c8f785b",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "869d2588c3941e8bef68c028acb241bf2ecccc5c"
+     },
+     "user": {
+      "id": 1280705,
+      "login": "famfo-cb"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1780,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1780",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-02-16T06:01:23+01:00",
+     "updated_at": "2026-10-21T10:17:29+02:00",
+     "merge_commit_sha": "dacec792e3bb45527f68af4b04405492992b08d9",
+     "additions": 3,
+     "deletions": 3,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "bd90d98095827a06e9ad636ada6325fde3c92d4e"
+     },
+     "user": {
+      "id": 157636,
+      "login": "famfo"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v14.0"
+      }
+     ]
+    },
+    {
+     "number": 2240,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2240",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-20T12:52:28+02:00",
+     "updated_at": "2026-10-20T12:59:59+02:00",
+     "merge_commit_sha": "e77b6628af9cd9d45f30204898d68f55a191ccb5",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "42ff0d60ac9942c53f7089c8739e3e7801a4ceb6"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2241,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2241",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-20T12:56:38+02:00",
+     "updated_at": "2026-10-20T12:56:39+02:00",
+     "merge_commit_sha": "af91e7700bc3dcc19edc07e2127033c882107c32",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "c6b8374234e0492996480919bfbdf1570d7c0130"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1740,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1740",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-03-02T06:16:56+01:00",
+     "updated_at": "2026-10-19T15:15:34+02:00",
+     "merge_commit_sha": "8a2b06e7a452043aac9eb3a95cf56e7e8e467719",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "d14893fa797cd414ba2e1c2aa54dfc8b3e276180"
+     },
+     "user": {
+      "id": 815899,
+      "login": "jaylinski"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2239,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2239",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-19T00:14:12+02:00",
+     "updated_at": "2026-10-19T00:14:14+02:00",
+     "merge_commit_sha": "4f5e2dde97f52399c163a1b59cd0ac9e537722b6",
+     "additions": 108,
+     "deletions": 108,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "22de90aa326853e46b0a233dc9ec61fdec98eca4"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2238,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2238",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-18T18:47:18+02:00",
+     "updated_at": "2026-10-18T18:47:22+02:00",
+     "merge_commit_sha": "052a05773c52b9807267dd93b4b47d462a68d18b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "0cfbdfd704ce3ea8e063cc242eef5f2c7a512fde"
+     },
+     "user": {
+      "id": 52700,
+      "login": "farooqkz"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 1122,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1122",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2025-04-11T15:25:49+02:00",
+     "updated_at": "2026-10-18T09:28:03+02:00",
+     "merge_commit_sha": "0df093be8a2a0705e76f6650736dc649ae42801b",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "61a0e82f23556817fa7a381198e80c7d0f914389"
+     },
+     "user": {
+      "id": 26734,
+      "login": "Gusted"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 1094,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/1094",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2025-07-06T18:24:06+02:00",
+     "updated_at": "2026-10-18T09:28:03+02:00",
+     "merge_commit_sha": "39eb13fc0b448fa1e88c39c7720340c3819f981d",
+     "additions": 1513,
+     "deletions": 1362,
+     "changed_files": 19,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "fc1a992d78a474ee76c4605994af5ad6933f94f8"
+     },
+     "user": {
+      "id": 163414,
+      "login": "Kwonunn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v11.0"
+      },
+      {
+       "name": "backport/v12.0"
+      }
+     ]
+    },
+    {
+     "number": 2237,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2237",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-17T22:13:17+02:00",
+     "updated_at": "2026-10-17T22:13:19+02:00",
+     "merge_commit_sha": "6bded37e2871e2aca936479111c135b345368d47",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6edb53d0b13f10c60ec1794a2dbfb2e0523f9286"
+     },
+     "user": {
+      "id": 1564781,
+      "login": "ManInDark"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2235,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2235",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:18:45+02:00",
+     "updated_at": "2026-10-16T09:18:46+02:00",
+     "merge_commit_sha": "a907dfed92cff01b38ab19d0f85956de41c3ce37",
+     "additions": 1,
+     "deletions": 12,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "f99e179581b5d82dcd87a812ac0a8fd103a70f99"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2234,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2234",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:16:24+02:00",
+     "updated_at": "2026-10-16T09:18:45+02:00",
+     "merge_commit_sha": "ecf876bb41d325da55ef5d0a1a954916497bb4bf",
+     "additions": 1,
+     "deletions": 12,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "b91435cd0e1179c272e2f50cc98f6bed47eda772"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2230,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2230",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T09:10:31+02:00",
+     "updated_at": "2026-10-16T09:10:34+02:00",
+     "merge_commit_sha": "30db931a444c665ece6fdf92dea4f4c0930dc143",
+     "additions": 6,
+     "deletions": 6,
+     "changed_files": 2,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "e5f30774024295f3b58a4f98337a9b3727444788"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2233,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2233",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-16T00:27:32+02:00",
+     "updated_at": "2026-10-16T00:27:34+02:00",
+     "merge_commit_sha": "0371251dc0d7b059de9720641e7e73ab31ca1ec4",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6c8438f89f7de846409d1b93b81b01e6a785fd82"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2229,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2229",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-13T04:58:13+02:00",
+     "updated_at": "2026-10-13T04:58:18+02:00",
+     "merge_commit_sha": "f5f7932e35f9ca41ad4f799fab255055c8293c3a",
+     "additions": 105,
+     "deletions": 0,
+     "changed_files": 2,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "0825b2265cfdb406c7eabc170e3c66a96fcf2d3e"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2228,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2228",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-13T02:42:20+02:00",
+     "updated_at": "2026-10-13T04:58:18+02:00",
+     "merge_commit_sha": "6b64d95baa0d775f46fb872e16d88e8aad8f9b13",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "4ac141e02579f0a41041c467fb7c63d99fedca1f"
+     },
+     "user": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2064,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2064",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-12T21:29:10+02:00",
+     "updated_at": "2026-10-12T21:29:11+02:00",
+     "merge_commit_sha": "03fbb438ad40169aeb97d3f1d5e2e8e75a24c179",
+     "additions": 201,
+     "deletions": 0,
+     "changed_files": 12,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "571f5fcce7b3244f96889d90611a8d8590157013"
+     },
+     "user": {
+      "id": 91002,
+      "login": "patdyn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2227,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2227",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-12T08:25:19+02:00",
+     "updated_at": "2026-10-12T08:25:24+02:00",
+     "merge_commit_sha": "4ac70466ef6ab36d732ae328df0f27a7205f9ac5",
+     "additions": 66,
+     "deletions": 66,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "51f5a63d45b8ac2abb0bae61a8fc152a8bdf600c"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2223,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2223",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-09T08:24:17+02:00",
+     "updated_at": "2026-10-09T08:47:13+02:00",
+     "merge_commit_sha": "c39174987775cd9336844b22e68554df54d181a6",
+     "additions": 5,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "1e1df90077d595fd6c067d0f1a4a1759f4a1a5ea"
+     },
+     "user": {
+      "id": 889550,
+      "login": "kilisei"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2220,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2220",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-08T04:50:25+02:00",
+     "updated_at": "2026-10-08T04:50:26+02:00",
+     "merge_commit_sha": "700f148b6072e21a9c44cd4d7a7981eff0188427",
+     "additions": 1,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "9c0d4a994e84a3c2cad242e774ab820abe04b313"
+     },
+     "user": {
+      "id": 1301726,
+      "login": "romeroyonatan"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2218,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2218",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T11:33:34+02:00",
+     "updated_at": "2026-10-07T11:33:35+02:00",
+     "merge_commit_sha": "e86ffea24f64ecdd8840bf10e6b56ae367f73383",
+     "additions": 37,
+     "deletions": 36,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "690857c3ef26aeedb606475e4238ca6bd6ee27a2"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2222,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2222",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T10:43:33+02:00",
+     "updated_at": "2026-10-07T10:43:34+02:00",
+     "merge_commit_sha": "c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "d4de5318fd07429a2f802d1663adb1e189d2b165"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2221,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2221",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-07T00:40:34+02:00",
+     "updated_at": "2026-10-07T00:40:34+02:00",
+     "merge_commit_sha": "1aa4fecef5e9739c0131ddeb8f1011688e868c96",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6fd9417c7536fa960db99a13eafce9e5fda06c84"
+     },
+     "user": {
+      "id": 97503,
+      "login": "mavit"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2219,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2219",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-06T05:23:24+02:00",
+     "updated_at": "2026-10-06T05:23:24+02:00",
+     "merge_commit_sha": "9ab365d6de126d0e67c5d290d7fdc8c5a9076467",
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "6e3ce277e03ac4315ccb4646da10732b31628cd9"
+     },
+     "user": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2216,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2216",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-05T15:24:39+02:00",
+     "merge_commit_sha": null,
+     "additions": 0,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "649cf23148a865df934d2c73f7fb6aca6cec3714"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2217,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2217",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T10:04:35+02:00",
+     "updated_at": "2026-10-04T10:04:37+02:00",
+     "merge_commit_sha": "a94924bea7e05b17278652c1cc9c3c6459b7bc9d",
+     "additions": 4,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "cc90714c67fe92ffaa9a5f5adcfae4305f22b2f2"
+     },
+     "user": {
+      "id": 72688,
+      "login": "forgejo-website"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2200,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2200",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T09:24:12+02:00",
+     "updated_at": "2026-10-04T10:04:37+02:00",
+     "merge_commit_sha": "1d574b3f0ad574ec3bea66672ddcd61789a1ad31",
+     "additions": 4,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "c868a3742954c680b103c993659aced2cf996757"
+     },
+     "user": {
+      "id": 263874,
+      "login": "laraproto"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2070,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2070",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-04T09:30:56+02:00",
+     "updated_at": "2026-10-04T09:30:57+02:00",
+     "merge_commit_sha": "748d2adbfb74adb036a89c1c9e94923f3f4bc74b",
+     "additions": 2,
+     "deletions": 0,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "a0845f785bfdf49d4b9a0768e861ef4029147aa4"
+     },
+     "user": {
+      "id": 75362,
+      "login": "Colin"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2215,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2215",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-03T13:36:33+02:00",
+     "updated_at": "2026-10-03T13:37:08+02:00",
+     "merge_commit_sha": "9a7dd0c5c32a17de02e4553576564ba86f3572c6",
+     "additions": 0,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "fcfe3df95cf7158d9d7f9fb542da46381b3aa9ae"
+     },
+     "user": {
+      "id": -2,
+      "login": "forgejo-actions"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2214,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2214",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-03T13:33:49+02:00",
+     "updated_at": "2026-10-03T13:33:50+02:00",
+     "merge_commit_sha": "04b1a0fe68ad44d66b6531d58ea1c3f215a1142b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "f7bff898303b50b2486b1416e00ff24cb8d0013b"
+     },
+     "user": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2211,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2211",
+     "state": "closed",
+     "merged": false,
+     "merged_at": null,
+     "updated_at": "2026-10-01T16:06:22+02:00",
+     "merge_commit_sha": null,
+     "additions": 0,
+     "deletions": 0,
+     "changed_files": 0,
+     "base": {
+      "ref": "v15.0"
+     },
+     "head": {
+      "sha": "9f0c5ef7009517c5f97a33e80f587c1b6419ff27"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2210,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2210",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T16:00:25+02:00",
+     "updated_at": "2026-10-01T16:00:32+02:00",
+     "merge_commit_sha": "e61f0a1ae8fd2f5ea0a4135e1318d9d696769f6b",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "2f48606acdda350f7965e5e0d2ff874103f22989"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    },
+    {
+     "number": 2196,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2196",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-09-29T02:25:53+02:00",
+     "updated_at": "2026-10-01T16:00:29+02:00",
+     "merge_commit_sha": "06fe797dc52b24165e51776e5b1a408245d1b044",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "next"
+     },
+     "head": {
+      "sha": "31812c7a1c199074c72d84e1bb8b6e284b2c7d27"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": [
+      {
+       "name": "404"
+      },
+      {
+       "name": "backport/v15.0"
+      },
+      {
+       "name": "backport/v16.0"
+      },
+      {
+       "name": "backport/v17.0"
+      }
+     ]
+    },
+    {
+     "number": 2209,
+     "html_url": "https://codeberg.org/forgejo/docs/pulls/2209",
+     "state": "closed",
+     "merged": true,
+     "merged_at": "2026-10-01T15:59:48+02:00",
+     "updated_at": "2026-10-01T15:59:50+02:00",
+     "merge_commit_sha": "91859d62a9e334d05b777925c56e82caca2d3028",
+     "additions": 1,
+     "deletions": 1,
+     "changed_files": 1,
+     "base": {
+      "ref": "v17.0"
+     },
+     "head": {
+      "sha": "cfa6adf3728a82484dce03b16ba2b9be62bf8913"
+     },
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "merged_by": null,
+     "labels": []
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2070",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2070,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2070",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-04T09:30:56+02:00",
+    "updated_at": "2026-10-04T09:30:57+02:00",
+    "merge_commit_sha": "748d2adbfb74adb036a89c1c9e94923f3f4bc74b",
+    "additions": 2,
+    "deletions": 0,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "a0845f785bfdf49d4b9a0768e861ef4029147aa4"
+    },
+    "user": {
+     "id": 75362,
+     "login": "Colin"
+    },
+    "merged_by": {
+     "id": 26734,
+     "login": "Gusted"
+    },
+    "labels": [
+     {
+      "name": "backport/v17.0"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2070/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "2"
+   },
+   "response": [
+    {
+     "id": 1633891,
+     "state": "REQUEST_CHANGES",
+     "submitted_at": "2026-07-26T13:47:35+02:00",
+     "dismissed": false,
+     "stale": true,
+     "official": true,
+     "user": {
+      "id": 750878,
+      "login": "limiting-factor"
+     }
+    },
+    {
+     "id": 1892461,
+     "state": "APPROVED",
+     "submitted_at": "2026-09-20T11:33:18+02:00",
+     "dismissed": false,
+     "stale": true,
+     "official": true,
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2200",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2200,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2200",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-04T09:24:12+02:00",
+    "updated_at": "2026-10-04T10:04:37+02:00",
+    "merge_commit_sha": "1d574b3f0ad574ec3bea66672ddcd61789a1ad31",
+    "additions": 4,
+    "deletions": 1,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "c868a3742954c680b103c993659aced2cf996757"
+    },
+    "user": {
+     "id": 263874,
+     "login": "laraproto"
+    },
+    "merged_by": {
+     "id": 26734,
+     "login": "Gusted"
+    },
+    "labels": [
+     {
+      "name": "backport/v17.0"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2200/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2075847,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-04T09:23:50+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 26734,
+      "login": "Gusted"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2206",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2206,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2206",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-01T11:58:44+02:00",
+    "updated_at": "2026-10-01T15:59:50+02:00",
+    "merge_commit_sha": "afacb6e4e8fdff2c515e92d1135ce286a0d5daf4",
+    "additions": 1,
+    "deletions": 1,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "c93468d5cdb94a985cbf01039f8cb5fa34ae8bbf"
+    },
+    "user": {
+     "id": 55597,
+     "login": "mahlzahn"
+    },
+    "merged_by": {
+     "id": 55597,
+     "login": "mahlzahn"
+    },
+    "labels": [
+     {
+      "name": "404"
+     },
+     {
+      "name": "backport/v15.0"
+     },
+     {
+      "name": "backport/v16.0"
+     },
+     {
+      "name": "backport/v17.0"
+     },
+     {
+      "name": "good first issue"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2206/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2070324,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-01T10:43:37+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 468676,
+      "login": "aahlenst"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2214",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2214,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2214",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-03T13:33:49+02:00",
+    "updated_at": "2026-10-03T13:33:50+02:00",
+    "merge_commit_sha": "04b1a0fe68ad44d66b6531d58ea1c3f215a1142b",
+    "additions": 1,
+    "deletions": 1,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "f7bff898303b50b2486b1416e00ff24cb8d0013b"
+    },
+    "user": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "merged_by": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "labels": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2214/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2073924,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-03T13:33:46+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2215",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2215,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2215",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-03T13:36:33+02:00",
+    "updated_at": "2026-10-03T13:37:08+02:00",
+    "merge_commit_sha": "9a7dd0c5c32a17de02e4553576564ba86f3572c6",
+    "additions": 0,
+    "deletions": 1,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "fcfe3df95cf7158d9d7f9fb542da46381b3aa9ae"
+    },
+    "user": {
+     "id": -2,
+     "login": "forgejo-actions"
+    },
+    "merged_by": {
+     "id": 55597,
+     "login": "mahlzahn"
+    },
+    "labels": [
+     {
+      "name": "backport/v17.0"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2215/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2073759,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-03T11:19:31+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 468676,
+      "login": "aahlenst"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2218",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2218,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2218",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-07T11:33:34+02:00",
+    "updated_at": "2026-10-07T11:33:35+02:00",
+    "merge_commit_sha": "e86ffea24f64ecdd8840bf10e6b56ae367f73383",
+    "additions": 37,
+    "deletions": 36,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "690857c3ef26aeedb606475e4238ca6bd6ee27a2"
+    },
+    "user": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "merged_by": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "labels": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2218/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2086527,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-07T10:45:00+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2219",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2219,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2219",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-06T05:23:24+02:00",
+    "updated_at": "2026-10-06T05:23:24+02:00",
+    "merge_commit_sha": "9ab365d6de126d0e67c5d290d7fdc8c5a9076467",
+    "additions": 0,
+    "deletions": 0,
+    "changed_files": 0,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "6e3ce277e03ac4315ccb4646da10732b31628cd9"
+    },
+    "user": {
+     "id": 35856,
+     "login": "0ko"
+    },
+    "merged_by": {
+     "id": 35856,
+     "login": "0ko"
+    },
+    "labels": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2219/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2084130,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-05T22:49:48+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 468676,
+      "login": "aahlenst"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2219/files?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1",
+    "x-hasmore": "false"
+   },
+   "response": [
+    {
+     "filename": "docs/contributor/localization/english.md",
+     "additions": 7,
+     "deletions": 3
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2221",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2221,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2221",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-07T00:40:34+02:00",
+    "updated_at": "2026-10-07T00:40:34+02:00",
+    "merge_commit_sha": "1aa4fecef5e9739c0131ddeb8f1011688e868c96",
+    "additions": 0,
+    "deletions": 0,
+    "changed_files": 0,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "6fd9417c7536fa960db99a13eafce9e5fda06c84"
+    },
+    "user": {
+     "id": 97503,
+     "login": "mavit"
+    },
+    "merged_by": {
+     "id": 179,
+     "login": "fnetX"
+    },
+    "labels": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2221/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2085987,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-07T00:35:59+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 179,
+      "login": "fnetX"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2221/files?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1",
+    "x-hasmore": "false"
+   },
+   "response": [
+    {
+     "filename": "docs/user/git-cli/push-to-create.md",
+     "additions": 4,
+     "deletions": 6
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2222",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 2222,
+    "html_url": "https://codeberg.org/forgejo/docs/pulls/2222",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-07T10:43:33+02:00",
+    "updated_at": "2026-10-07T10:43:34+02:00",
+    "merge_commit_sha": "c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52",
+    "additions": 1,
+    "deletions": 1,
+    "changed_files": 1,
+    "base": {
+     "ref": "next"
+    },
+    "head": {
+     "sha": "d4de5318fd07429a2f802d1663adb1e189d2b165"
+    },
+    "user": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "merged_by": {
+     "id": 141082,
+     "login": "viceice-bot"
+    },
+    "labels": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/pulls/2222/reviews?limit=50",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "x-total-count": "1"
+   },
+   "response": [
+    {
+     "id": 2086518,
+     "state": "APPROVED",
+     "submitted_at": "2026-10-07T10:43:30+02:00",
+     "dismissed": false,
+     "stale": false,
+     "official": true,
+     "user": {
+      "id": 55597,
+      "login": "mahlzahn"
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/branches/next",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "name": "next",
+    "commit": {
+     "id": "d6ea6be31a362225649bb0717377054bd6c05080"
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/commits?sha=d6ea6be31a362225649bb0717377054bd6c05080&limit=50&stat=true&verification=false&files=false",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "link": "<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=2&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"next\",<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=30&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"last\"",
+    "x-total-count": "1466",
+    "x-hasmore": "true"
+   },
+   "response": [
+    {
+     "sha": "d6ea6be31a362225649bb0717377054bd6c05080",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/d6ea6be31a362225649bb0717377054bd6c05080",
+     "parents": [
+      {
+       "sha": "dcdec379346caf10a02568de70ff5339ede9b844"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.52.0 (#2265)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-11-03T00:08:49+01:00"
+      },
+      "committer": {
+       "date": "2026-11-03T00:08:49+01:00"
+      }
+     }
+    },
+    {
+     "sha": "dcdec379346caf10a02568de70ff5339ede9b844",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/dcdec379346caf10a02568de70ff5339ede9b844",
+     "parents": [
+      {
+       "sha": "f902a6bc58816d03d348e289fdf0dcf5cc6ebdae"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 40,
+      "deletions": 41
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2263)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-11-02T00:14:00+01:00"
+      },
+      "committer": {
+       "date": "2026-11-02T00:14:00+01:00"
+      }
+     }
+    },
+    {
+     "sha": "f902a6bc58816d03d348e289fdf0dcf5cc6ebdae",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/f902a6bc58816d03d348e289fdf0dcf5cc6ebdae",
+     "parents": [
+      {
+       "sha": "38ea8e5de9813d8561a1377028fc886eb0f72ee8"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency @mermaid-js/mermaid-cli to v11.17.1 (#2261)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-11-01T08:33:25+01:00"
+      },
+      "committer": {
+       "date": "2026-11-01T08:33:25+01:00"
+      }
+     }
+    },
+    {
+     "sha": "38ea8e5de9813d8561a1377028fc886eb0f72ee8",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/38ea8e5de9813d8561a1377028fc886eb0f72ee8",
+     "parents": [
+      {
+       "sha": "6d4a14af6359b859c0854ecbf3ee9e27aa0ec0f6"
+      }
+     ],
+     "author": {
+      "id": 13593,
+      "login": "crystal"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix api usage link (#2257)",
+      "author": {
+       "name": "crystal",
+       "email": "user-38ae2fc1@example.invalid",
+       "date": "2026-10-30T04:08:26+01:00"
+      },
+      "committer": {
+       "date": "2026-10-30T04:08:26+01:00"
+      }
+     }
+    },
+    {
+     "sha": "6d4a14af6359b859c0854ecbf3ee9e27aa0ec0f6",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/6d4a14af6359b859c0854ecbf3ee9e27aa0ec0f6",
+     "parents": [
+      {
+       "sha": "c065479557929b7623f3004bd44872f4cbb73424"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update pnpm to v10.34.9 (#2256)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-29T10:05:03+01:00"
+      },
+      "committer": {
+       "date": "2026-10-29T10:05:03+01:00"
+      }
+     }
+    },
+    {
+     "sha": "c065479557929b7623f3004bd44872f4cbb73424",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c065479557929b7623f3004bd44872f4cbb73424",
+     "parents": [
+      {
+       "sha": "54a3d8656a1f60b86aef33659ae8334bfe099529"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update pnpm to v10.34.8 (#2254)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-27T07:43:25+01:00"
+      },
+      "committer": {
+       "date": "2026-10-27T07:43:25+01:00"
+      }
+     }
+    },
+    {
+     "sha": "54a3d8656a1f60b86aef33659ae8334bfe099529",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/54a3d8656a1f60b86aef33659ae8334bfe099529",
+     "parents": [
+      {
+       "sha": "e6ee5f85d6b754157e2cb93bcd459a351513391e"
+      }
+     ],
+     "author": {
+      "id": 1258781,
+      "login": "PatrickStarr"
+     },
+     "stats": {
+      "additions": 33,
+      "deletions": 30
+     },
+     "commit": {
+      "message": "update docker.md to properly utilize the forgejo-data.volume file for podman (#2251)",
+      "author": {
+       "name": "patrickstarr",
+       "email": "user-8ae51f31@example.invalid",
+       "date": "2026-10-26T16:48:50+01:00"
+      },
+      "committer": {
+       "date": "2026-10-26T16:48:50+01:00"
+      }
+     }
+    },
+    {
+     "sha": "e6ee5f85d6b754157e2cb93bcd459a351513391e",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/e6ee5f85d6b754157e2cb93bcd459a351513391e",
+     "parents": [
+      {
+       "sha": "89dd77091bdd2a9d3258d73a15f6b211a688ee0d"
+      }
+     ],
+     "author": {
+      "id": 288613,
+      "login": "magz"
+     },
+     "stats": {
+      "additions": 36,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "docs: document new NixOS module (#2182)",
+      "author": {
+       "name": "magz",
+       "email": "user-1c17deee@example.invalid",
+       "date": "2026-10-26T16:35:14+01:00"
+      },
+      "committer": {
+       "date": "2026-10-26T16:35:14+01:00"
+      }
+     }
+    },
+    {
+     "sha": "89dd77091bdd2a9d3258d73a15f6b211a688ee0d",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/89dd77091bdd2a9d3258d73a15f6b211a688ee0d",
+     "parents": [
+      {
+       "sha": "65faeb1c07bbc43cbc3ac32aef19a7671500dd78"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 74,
+      "deletions": 74
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2250)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-26T10:46:03+01:00"
+      },
+      "committer": {
+       "date": "2026-10-26T10:46:03+01:00"
+      }
+     }
+    },
+    {
+     "sha": "65faeb1c07bbc43cbc3ac32aef19a7671500dd78",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/65faeb1c07bbc43cbc3ac32aef19a7671500dd78",
+     "parents": [
+      {
+       "sha": "1906a99842d42ee1235923f8a1adde1326e3ac76"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 11,
+      "deletions": 11
+     },
+     "commit": {
+      "message": "chore: update Forgejo version in docker instructions (#2245)",
+      "author": {
+       "name": "mahlzahn",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-10-22T23:06:05+02:00"
+      },
+      "committer": {
+       "date": "2026-10-22T23:06:05+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1906a99842d42ee1235923f8a1adde1326e3ac76",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1906a99842d42ee1235923f8a1adde1326e3ac76",
+     "parents": [
+      {
+       "sha": "76e0690fbb68e02fb3fdda9adc9a12368c8f785b"
+      }
+     ],
+     "author": {
+      "id": 1579565,
+      "login": "SJaime23"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "chore: update documented checkout version in some places (#2243)",
+      "author": {
+       "name": "SJaime23",
+       "email": "user-e7557fc1@example.invalid",
+       "date": "2026-10-22T09:08:32+02:00"
+      },
+      "committer": {
+       "date": "2026-10-22T09:08:32+02:00"
+      }
+     }
+    },
+    {
+     "sha": "76e0690fbb68e02fb3fdda9adc9a12368c8f785b",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/76e0690fbb68e02fb3fdda9adc9a12368c8f785b",
+     "parents": [
+      {
+       "sha": "e77b6628af9cd9d45f30204898d68f55a191ccb5"
+      }
+     ],
+     "author": {
+      "id": 1280705,
+      "login": "famfo-cb"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "admin: update INTERNAL_* documentation (#2163)",
+      "author": {
+       "name": "famfo",
+       "email": "user-d6cb75eb@example.invalid",
+       "date": "2026-10-21T13:11:46+02:00"
+      },
+      "committer": {
+       "date": "2026-10-21T13:11:46+02:00"
+      }
+     }
+    },
+    {
+     "sha": "e77b6628af9cd9d45f30204898d68f55a191ccb5",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/e77b6628af9cd9d45f30204898d68f55a191ccb5",
+     "parents": [
+      {
+       "sha": "4f5e2dde97f52399c163a1b59cd0ac9e537722b6"
+      }
+     ],
+     "author": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "docs: add SSH_SERVER_HOST_KEYS to backup docs (#2240)",
+      "author": {
+       "name": "Mathieu Fenniak",
+       "email": "user-103a1a83@example.invalid",
+       "date": "2026-10-20T12:52:26+02:00"
+      },
+      "committer": {
+       "date": "2026-10-20T12:52:26+02:00"
+      }
+     }
+    },
+    {
+     "sha": "4f5e2dde97f52399c163a1b59cd0ac9e537722b6",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/4f5e2dde97f52399c163a1b59cd0ac9e537722b6",
+     "parents": [
+      {
+       "sha": "052a05773c52b9807267dd93b4b47d462a68d18b"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 108,
+      "deletions": 108
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2239)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-19T00:14:10+02:00"
+      },
+      "committer": {
+       "date": "2026-10-19T00:14:10+02:00"
+      }
+     }
+    },
+    {
+     "sha": "052a05773c52b9807267dd93b4b47d462a68d18b",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/052a05773c52b9807267dd93b4b47d462a68d18b",
+     "parents": [
+      {
+       "sha": "6bded37e2871e2aca936479111c135b345368d47"
+      }
+     ],
+     "author": {
+      "id": 52700,
+      "login": "farooqkz"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "installation: use `install` instead of `cp` (#2238)",
+      "author": {
+       "name": "farooqkz",
+       "email": "user-6bff956d@example.invalid",
+       "date": "2026-10-18T18:47:16+02:00"
+      },
+      "committer": {
+       "date": "2026-10-18T18:47:16+02:00"
+      }
+     }
+    },
+    {
+     "sha": "6bded37e2871e2aca936479111c135b345368d47",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/6bded37e2871e2aca936479111c135b345368d47",
+     "parents": [
+      {
+       "sha": "ecf876bb41d325da55ef5d0a1a954916497bb4bf"
+      }
+     ],
+     "author": {
+      "id": 1564781,
+      "login": "ManInDark"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "docs: remove trailing \" (#2237)",
+      "author": {
+       "name": "ManInDark",
+       "email": "user-9fc30930@example.invalid",
+       "date": "2026-10-17T22:13:15+02:00"
+      },
+      "committer": {
+       "date": "2026-10-17T22:13:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ecf876bb41d325da55ef5d0a1a954916497bb4bf",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ecf876bb41d325da55ef5d0a1a954916497bb4bf",
+     "parents": [
+      {
+       "sha": "30db931a444c665ece6fdf92dea4f4c0930dc143"
+      }
+     ],
+     "author": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 12
+     },
+     "commit": {
+      "message": "chore: remove out-of-date backup advice (#2234)",
+      "author": {
+       "name": "Mathieu Fenniak",
+       "email": "user-103a1a83@example.invalid",
+       "date": "2026-10-16T09:16:20+02:00"
+      },
+      "committer": {
+       "date": "2026-10-16T09:16:20+02:00"
+      }
+     }
+    },
+    {
+     "sha": "30db931a444c665ece6fdf92dea4f4c0930dc143",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/30db931a444c665ece6fdf92dea4f4c0930dc143",
+     "parents": [
+      {
+       "sha": "0371251dc0d7b059de9720641e7e73ab31ca1ec4"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency prettier to v3.9.10 (#2230)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-16T09:10:27+02:00"
+      },
+      "committer": {
+       "date": "2026-10-16T09:10:27+02:00"
+      }
+     }
+    },
+    {
+     "sha": "0371251dc0d7b059de9720641e7e73ab31ca1ec4",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/0371251dc0d7b059de9720641e7e73ab31ca1ec4",
+     "parents": [
+      {
+       "sha": "6b64d95baa0d775f46fb872e16d88e8aad8f9b13"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update pnpm to v10.34.7 (#2233)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-16T00:27:30+02:00"
+      },
+      "committer": {
+       "date": "2026-10-16T00:27:30+02:00"
+      }
+     }
+    },
+    {
+     "sha": "6b64d95baa0d775f46fb872e16d88e8aad8f9b13",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/6b64d95baa0d775f46fb872e16d88e8aad8f9b13",
+     "parents": [
+      {
+       "sha": "03fbb438ad40169aeb97d3f1d5e2e8e75a24c179"
+      }
+     ],
+     "author": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "stats": {
+      "additions": 105,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "docs: document how to backup Forgejo (#2228)",
+      "author": {
+       "name": "Mathieu Fenniak",
+       "email": "user-103a1a83@example.invalid",
+       "date": "2026-10-13T02:42:19+02:00"
+      },
+      "committer": {
+       "date": "2026-10-13T02:42:19+02:00"
+      }
+     }
+    },
+    {
+     "sha": "03fbb438ad40169aeb97d3f1d5e2e8e75a24c179",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/03fbb438ad40169aeb97d3f1d5e2e8e75a24c179",
+     "parents": [
+      {
+       "sha": "4ac70466ef6ab36d732ae328df0f27a7205f9ac5"
+      }
+     ],
+     "author": {
+      "id": 91002,
+      "login": "patdyn"
+     },
+     "stats": {
+      "additions": 201,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "Docs for feat: Instance Wide Service Message forgejo/forgejo#11934 (#2064)",
+      "author": {
+       "name": "erik",
+       "email": "user-6f7685a1@example.invalid",
+       "date": "2026-10-12T21:29:08+02:00"
+      },
+      "committer": {
+       "date": "2026-10-12T21:29:08+02:00"
+      }
+     }
+    },
+    {
+     "sha": "4ac70466ef6ab36d732ae328df0f27a7205f9ac5",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/4ac70466ef6ab36d732ae328df0f27a7205f9ac5",
+     "parents": [
+      {
+       "sha": "c39174987775cd9336844b22e68554df54d181a6"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 66,
+      "deletions": 66
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2227)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-12T08:25:13+02:00"
+      },
+      "committer": {
+       "date": "2026-10-12T08:25:13+02:00"
+      }
+     }
+    },
+    {
+     "sha": "c39174987775cd9336844b22e68554df54d181a6",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c39174987775cd9336844b22e68554df54d181a6",
+     "parents": [
+      {
+       "sha": "700f148b6072e21a9c44cd4d7a7981eff0188427"
+      }
+     ],
+     "author": {
+      "id": 889550,
+      "login": "kilisei"
+     },
+     "stats": {
+      "additions": 5,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "docs(cheat-sheet): add font options (#2223)",
+      "author": {
+       "name": "kilisei",
+       "email": "user-2ea92e75@example.invalid",
+       "date": "2026-10-09T08:24:15+02:00"
+      },
+      "committer": {
+       "date": "2026-10-09T08:24:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "700f148b6072e21a9c44cd4d7a7981eff0188427",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/700f148b6072e21a9c44cd4d7a7981eff0188427",
+     "parents": [
+      {
+       "sha": "e86ffea24f64ecdd8840bf10e6b56ae367f73383"
+      }
+     ],
+     "author": {
+      "id": 1301726,
+      "login": "romeroyonatan"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "docs(storage): Document MINIO_IAM_ENDPOINT (#2220)",
+      "author": {
+       "name": "romeroyonatan",
+       "email": "user-ddf9b501@example.invalid",
+       "date": "2026-10-08T04:50:23+02:00"
+      },
+      "committer": {
+       "date": "2026-10-08T04:50:23+02:00"
+      }
+     }
+    },
+    {
+     "sha": "e86ffea24f64ecdd8840bf10e6b56ae367f73383",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/e86ffea24f64ecdd8840bf10e6b56ae367f73383",
+     "parents": [
+      {
+       "sha": "c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 37,
+      "deletions": 36
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2218)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-07T11:33:32+02:00"
+      },
+      "committer": {
+       "date": "2026-10-07T11:33:32+02:00"
+      }
+     }
+    },
+    {
+     "sha": "c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c6125155dbd33602f5dc253cc0ce1cd2e5d3fc52",
+     "parents": [
+      {
+       "sha": "1aa4fecef5e9739c0131ddeb8f1011688e868c96"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.51.1 (#2222)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-07T10:43:32+02:00"
+      },
+      "committer": {
+       "date": "2026-10-07T10:43:32+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1aa4fecef5e9739c0131ddeb8f1011688e868c96",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1aa4fecef5e9739c0131ddeb8f1011688e868c96",
+     "parents": [
+      {
+       "sha": "9ab365d6de126d0e67c5d290d7fdc8c5a9076467"
+      }
+     ],
+     "author": {
+      "id": 97503,
+      "login": "mavit"
+     },
+     "stats": {
+      "additions": 4,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Retitle `push-to-create.md` as “Push To Create” (#2221)",
+      "author": {
+       "name": "Peter Oliver",
+       "email": "user-5416a306@example.invalid",
+       "date": "2026-10-07T00:40:32+02:00"
+      },
+      "committer": {
+       "date": "2026-10-07T00:40:32+02:00"
+      }
+     }
+    },
+    {
+     "sha": "9ab365d6de126d0e67c5d290d7fdc8c5a9076467",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/9ab365d6de126d0e67c5d290d7fdc8c5a9076467",
+     "parents": [
+      {
+       "sha": "748d2adbfb74adb036a89c1c9e94923f3f4bc74b"
+      }
+     ],
+     "author": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "stats": {
+      "additions": 7,
+      "deletions": 3
+     },
+     "commit": {
+      "message": "feat: improve base localization string deletion paragraph (#2219)",
+      "author": {
+       "name": "0ko",
+       "email": "user-3392a27c@example.invalid",
+       "date": "2026-10-06T05:23:22+02:00"
+      },
+      "committer": {
+       "date": "2026-10-06T05:23:22+02:00"
+      }
+     }
+    },
+    {
+     "sha": "748d2adbfb74adb036a89c1c9e94923f3f4bc74b",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/748d2adbfb74adb036a89c1c9e94923f3f4bc74b",
+     "parents": [
+      {
+       "sha": "1d574b3f0ad574ec3bea66672ddcd61789a1ad31"
+      }
+     ],
+     "author": {
+      "id": 75362,
+      "login": "Colin"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "NuGet registry: Add info when credentials are required (#2070)",
+      "author": {
+       "name": "Colin",
+       "email": "user-d453ece2@example.invalid",
+       "date": "2026-10-04T09:30:55+02:00"
+      },
+      "committer": {
+       "date": "2026-10-04T09:30:55+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1d574b3f0ad574ec3bea66672ddcd61789a1ad31",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1d574b3f0ad574ec3bea66672ddcd61789a1ad31",
+     "parents": [
+      {
+       "sha": "9a7dd0c5c32a17de02e4553576564ba86f3572c6"
+      }
+     ],
+     "author": {
+      "id": 263874,
+      "login": "laraproto"
+     },
+     "stats": {
+      "additions": 4,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "update authorizedkeys recommendation to hint about correct paths (#2200)",
+      "author": {
+       "name": "laraproto",
+       "email": "user-bf7eb2c0@example.invalid",
+       "date": "2026-10-04T09:24:11+02:00"
+      },
+      "committer": {
+       "date": "2026-10-04T09:24:11+02:00"
+      }
+     }
+    },
+    {
+     "sha": "9a7dd0c5c32a17de02e4553576564ba86f3572c6",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/9a7dd0c5c32a17de02e4553576564ba86f3572c6",
+     "parents": [
+      {
+       "sha": "04b1a0fe68ad44d66b6531d58ea1c3f215a1142b"
+      }
+     ],
+     "author": null,
+     "stats": {
+      "additions": 0,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "admin: update CLI docs (#2215)",
+      "author": {
+       "name": "Forgejo Actions",
+       "email": "user-7de40c2d@example.invalid",
+       "date": "2026-10-03T13:36:28+02:00"
+      },
+      "committer": {
+       "date": "2026-10-03T13:36:28+02:00"
+      }
+     }
+    },
+    {
+     "sha": "04b1a0fe68ad44d66b6531d58ea1c3f215a1142b",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/04b1a0fe68ad44d66b6531d58ea1c3f215a1142b",
+     "parents": [
+      {
+       "sha": "afacb6e4e8fdff2c515e92d1135ce286a0d5daf4"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update pnpm to v10.34.6 (#2214)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-10-03T13:33:47+02:00"
+      },
+      "committer": {
+       "date": "2026-10-03T13:33:47+02:00"
+      }
+     }
+    },
+    {
+     "sha": "afacb6e4e8fdff2c515e92d1135ce286a0d5daf4",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/afacb6e4e8fdff2c515e92d1135ce286a0d5daf4",
+     "parents": [
+      {
+       "sha": "bd003cfa920850db52f6fe8f5835455a6aa81063"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: link to how to Forgejo Runner logging configuration that is not anymore in docs (#2206)",
+      "author": {
+       "name": "mahlzahn",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-10-01T11:58:42+02:00"
+      },
+      "committer": {
+       "date": "2026-10-01T11:58:42+02:00"
+      }
+     }
+    },
+    {
+     "sha": "bd003cfa920850db52f6fe8f5835455a6aa81063",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/bd003cfa920850db52f6fe8f5835455a6aa81063",
+     "parents": [
+      {
+       "sha": "c36bfb9c0ab72bbc7656edd2763de4c7b4348aeb"
+      }
+     ],
+     "author": {
+      "id": 1502634,
+      "login": "OwenYu"
+     },
+     "stats": {
+      "additions": 27,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "docs: describe how to access authenticated HTTP git repositories (#2192)",
+      "author": {
+       "name": "OwenYu",
+       "email": "user-9e6d7f0b@example.invalid",
+       "date": "2026-09-30T03:31:02+02:00"
+      },
+      "committer": {
+       "date": "2026-09-30T03:31:02+02:00"
+      }
+     }
+    },
+    {
+     "sha": "c36bfb9c0ab72bbc7656edd2763de4c7b4348aeb",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c36bfb9c0ab72bbc7656edd2763de4c7b4348aeb",
+     "parents": [
+      {
+       "sha": "f66ac724455f01be1149f7292c3ae34f17d41538"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency lint-staged to v17.6.0 (#2202)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-30T00:10:43+02:00"
+      },
+      "committer": {
+       "date": "2026-09-30T00:10:43+02:00"
+      }
+     }
+    },
+    {
+     "sha": "f66ac724455f01be1149f7292c3ae34f17d41538",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/f66ac724455f01be1149f7292c3ae34f17d41538",
+     "parents": [
+      {
+       "sha": "06fe797dc52b24165e51776e5b1a408245d1b044"
+      }
+     ],
+     "author": {
+      "id": 1053338,
+      "login": "sguiheux"
+     },
+     "stats": {
+      "additions": 26,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "doc: add code suggestion section (#2197)",
+      "author": {
+       "name": "steven.guiheux",
+       "email": "user-3dbd08a4@example.invalid",
+       "date": "2026-09-29T03:48:10+02:00"
+      },
+      "committer": {
+       "date": "2026-09-29T03:48:10+02:00"
+      }
+     }
+    },
+    {
+     "sha": "06fe797dc52b24165e51776e5b1a408245d1b044",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/06fe797dc52b24165e51776e5b1a408245d1b044",
+     "parents": [
+      {
+       "sha": "a7b11120ba39d4fffc0c81286e14cc4b86c3da08"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: correct link to scoped tokens (#2196)",
+      "author": {
+       "name": "mahlzahn",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-09-29T02:25:52+02:00"
+      },
+      "committer": {
+       "date": "2026-09-29T02:25:52+02:00"
+      }
+     }
+    },
+    {
+     "sha": "a7b11120ba39d4fffc0c81286e14cc4b86c3da08",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/a7b11120ba39d4fffc0c81286e14cc4b86c3da08",
+     "parents": [
+      {
+       "sha": "8f5dfcea1f5e79c318a753de91d9f57afe1d89de"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 136,
+      "deletions": 125
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2193)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-28T13:13:55+02:00"
+      },
+      "committer": {
+       "date": "2026-09-28T13:13:55+02:00"
+      }
+     }
+    },
+    {
+     "sha": "8f5dfcea1f5e79c318a753de91d9f57afe1d89de",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/8f5dfcea1f5e79c318a753de91d9f57afe1d89de",
+     "parents": [
+      {
+       "sha": "b15d122e95e5787a8b577429728763e4086596bc"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency prettier to v3.9.9 (#2191)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-27T08:58:58+02:00"
+      },
+      "committer": {
+       "date": "2026-09-27T08:58:58+02:00"
+      }
+     }
+    },
+    {
+     "sha": "b15d122e95e5787a8b577429728763e4086596bc",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/b15d122e95e5787a8b577429728763e4086596bc",
+     "parents": [
+      {
+       "sha": "d7e1f3f47b9e39e786bc5c32b0df3acdcba20b98"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.50.3 (#2190)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-27T08:58:21+02:00"
+      },
+      "committer": {
+       "date": "2026-09-27T08:58:21+02:00"
+      }
+     }
+    },
+    {
+     "sha": "d7e1f3f47b9e39e786bc5c32b0df3acdcba20b98",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/d7e1f3f47b9e39e786bc5c32b0df3acdcba20b98",
+     "parents": [
+      {
+       "sha": "5aecb63c2e91a126c45c8e1e446cfcc2195594c2"
+      }
+     ],
+     "author": {
+      "id": 32636,
+      "login": "oliverpool"
+     },
+     "stats": {
+      "additions": 67,
+      "deletions": 39
+     },
+     "commit": {
+      "message": "agit: re-organize explanation and examples (#2187)",
+      "author": {
+       "name": "oliverpool",
+       "email": "user-98aff989@example.invalid",
+       "date": "2026-09-25T23:24:09+02:00"
+      },
+      "committer": {
+       "date": "2026-09-25T23:24:09+02:00"
+      }
+     }
+    },
+    {
+     "sha": "5aecb63c2e91a126c45c8e1e446cfcc2195594c2",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/5aecb63c2e91a126c45c8e1e446cfcc2195594c2",
+     "parents": [
+      {
+       "sha": "1793fa64da661d0ede5271f8453a74171d299933"
+      }
+     ],
+     "author": {
+      "id": 381495,
+      "login": "slink"
+     },
+     "stats": {
+      "additions": 189,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "Document [pfx]KEYS_ACCEPTED and JWT key management / rotation (#1915)",
+      "author": {
+       "name": "Nils Goroll",
+       "email": "user-cac8e31e@example.invalid",
+       "date": "2026-09-23T04:21:46+02:00"
+      },
+      "committer": {
+       "date": "2026-09-23T04:21:46+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1793fa64da661d0ede5271f8453a74171d299933",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1793fa64da661d0ede5271f8453a74171d299933",
+     "parents": [
+      {
+       "sha": "ead6187bb4970295f32c4c1d7ebd5c8edf66aaf9"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency prettier to v3.9.8 (#2186)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-21T10:02:30+02:00"
+      },
+      "committer": {
+       "date": "2026-09-21T10:02:30+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ead6187bb4970295f32c4c1d7ebd5c8edf66aaf9",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ead6187bb4970295f32c4c1d7ebd5c8edf66aaf9",
+     "parents": [
+      {
+       "sha": "8a28a4d911e7abb16a7918b8abd9739cd7a4b30f"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency prettier to v3.9.7 (#2185)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-20T08:31:12+02:00"
+      },
+      "committer": {
+       "date": "2026-09-20T08:31:12+02:00"
+      }
+     }
+    },
+    {
+     "sha": "8a28a4d911e7abb16a7918b8abd9739cd7a4b30f",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/8a28a4d911e7abb16a7918b8abd9739cd7a4b30f",
+     "parents": [
+      {
+       "sha": "5c9bc67f8d2bda88b867163266b461efe0ce03a9"
+      }
+     ],
+     "author": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "stats": {
+      "additions": 10,
+      "deletions": 5
+     },
+     "commit": {
+      "message": "i18n: update Adding-a-new-language flow (#2183)",
+      "author": {
+       "name": "0ko",
+       "email": "user-3392a27c@example.invalid",
+       "date": "2026-09-18T10:22:49+02:00"
+      },
+      "committer": {
+       "date": "2026-09-18T10:22:49+02:00"
+      }
+     }
+    },
+    {
+     "sha": "5c9bc67f8d2bda88b867163266b461efe0ce03a9",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/5c9bc67f8d2bda88b867163266b461efe0ce03a9",
+     "parents": [
+      {
+       "sha": "200c7b910959bed34c6dc4f8571b5704830d16d1"
+      }
+     ],
+     "author": {
+      "id": 943128,
+      "login": "omkar-foss"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update APP_NAME docs in admin config cheat sheet (#2178)",
+      "author": {
+       "name": "Omkar P",
+       "email": "user-ded293c5@example.invalid",
+       "date": "2026-09-16T21:04:13+02:00"
+      },
+      "committer": {
+       "date": "2026-09-16T21:04:13+02:00"
+      }
+     }
+    },
+    {
+     "sha": "200c7b910959bed34c6dc4f8571b5704830d16d1",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/200c7b910959bed34c6dc4f8571b5704830d16d1",
+     "parents": [
+      {
+       "sha": "02dc213116dd90632d79b5b0b5079947ad556811"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.50.2 (#2181)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-16T08:31:22+02:00"
+      },
+      "committer": {
+       "date": "2026-09-16T08:31:22+02:00"
+      }
+     }
+    },
+    {
+     "sha": "02dc213116dd90632d79b5b0b5079947ad556811",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/02dc213116dd90632d79b5b0b5079947ad556811",
+     "parents": [
+      {
+       "sha": "7d34d735a331110120cb046a16a4f16d55be6b73"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 96,
+      "deletions": 96
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2180)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-14T08:22:57+02:00"
+      },
+      "committer": {
+       "date": "2026-09-14T08:22:57+02:00"
+      }
+     }
+    },
+    {
+     "sha": "7d34d735a331110120cb046a16a4f16d55be6b73",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/7d34d735a331110120cb046a16a4f16d55be6b73",
+     "parents": [
+      {
+       "sha": "b99b3730c3c35e371e52fa54754fb7091907e385"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency lint-staged to v17.5.1 (#2179)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-14T08:20:57+02:00"
+      },
+      "committer": {
+       "date": "2026-09-14T08:20:57+02:00"
+      }
+     }
+    },
+    {
+     "sha": "b99b3730c3c35e371e52fa54754fb7091907e385",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/b99b3730c3c35e371e52fa54754fb7091907e385",
+     "parents": [
+      {
+       "sha": "5bab168a9187bd0a4824b95b54081edc3b0017d0"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 28,
+      "deletions": 4
+     },
+     "commit": {
+      "message": "fix: RPM URLs with and without group (#2175)",
+      "author": {
+       "name": "mahlzahn",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-09-12T18:54:02+02:00"
+      },
+      "committer": {
+       "date": "2026-09-12T18:54:02+02:00"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=2&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {
+    "link": "<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=3&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"next\",<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=30&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"last\",<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=1&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"first\",<https://codeberg.org/api/v1/repos/forgejo/docs/commits?files=false&limit=50&page=1&sha=d6ea6be31a362225649bb0717377054bd6c05080&stat=true&verification=false>; rel=\"prev\"",
+    "x-total-count": "1466",
+    "x-hasmore": "true"
+   },
+   "response": [
+    {
+     "sha": "5bab168a9187bd0a4824b95b54081edc3b0017d0",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/5bab168a9187bd0a4824b95b54081edc3b0017d0",
+     "parents": [
+      {
+       "sha": "c5304db41ca319a63e87a3b264d9f7935902c600"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: link to user/api/versions (#2172)",
+      "author": {
+       "name": "Robert Wolff",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-09-11T14:43:06+02:00"
+      },
+      "committer": {
+       "date": "2026-09-11T14:43:06+02:00"
+      }
+     }
+    },
+    {
+     "sha": "c5304db41ca319a63e87a3b264d9f7935902c600",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c5304db41ca319a63e87a3b264d9f7935902c600",
+     "parents": [
+      {
+       "sha": "dbc38e6fa6a63dd2e4be66e49706635aa8bb1b6c"
+      }
+     ],
+     "author": {
+      "id": 368322,
+      "login": "Crashdummy"
+     },
+     "stats": {
+      "additions": 74,
+      "deletions": 21
+     },
+     "commit": {
+      "message": "doc: job summaries, including a sample on how to append step summaries to a job (#2171)",
+      "author": {
+       "name": "Crashdummy",
+       "email": "user-e1c02d89@example.invalid",
+       "date": "2026-09-10T16:54:09+02:00"
+      },
+      "committer": {
+       "date": "2026-09-10T16:54:09+02:00"
+      }
+     }
+    },
+    {
+     "sha": "dbc38e6fa6a63dd2e4be66e49706635aa8bb1b6c",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/dbc38e6fa6a63dd2e4be66e49706635aa8bb1b6c",
+     "parents": [
+      {
+       "sha": "ff1db1aa023498ecf38d161f25d4d642a38b2c17"
+      }
+     ],
+     "author": {
+      "id": 1461442,
+      "login": "astecker"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 5
+     },
+     "commit": {
+      "message": "fix: removed the remaining instructions to create a conf folder (#2167)",
+      "author": {
+       "name": "astecker",
+       "email": "user-da1b5326@example.invalid",
+       "date": "2026-09-09T18:27:31+02:00"
+      },
+      "committer": {
+       "date": "2026-09-09T18:27:31+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ff1db1aa023498ecf38d161f25d4d642a38b2c17",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ff1db1aa023498ecf38d161f25d4d642a38b2c17",
+     "parents": [
+      {
+       "sha": "28f60c0b79c8928bb140e861b01e843e70b19dcf"
+      }
+     ],
+     "author": {
+      "id": 135189,
+      "login": "AverageHelper"
+     },
+     "stats": {
+      "additions": 3,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "doc(funding): call out special behavior of the `.profile` repo (#2164)",
+      "author": {
+       "name": "AverageHelper",
+       "email": "user-11bc37d3@example.invalid",
+       "date": "2026-09-09T11:59:15+02:00"
+      },
+      "committer": {
+       "date": "2026-09-09T11:59:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "28f60c0b79c8928bb140e861b01e843e70b19dcf",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/28f60c0b79c8928bb140e861b01e843e70b19dcf",
+     "parents": [
+      {
+       "sha": "cacd11fa4e1345875bf896bafdbba52ef3f3c736"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency lint-staged to v17.5.0 (#2168)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-09T09:44:01+02:00"
+      },
+      "committer": {
+       "date": "2026-09-09T09:44:01+02:00"
+      }
+     }
+    },
+    {
+     "sha": "cacd11fa4e1345875bf896bafdbba52ef3f3c736",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/cacd11fa4e1345875bf896bafdbba52ef3f3c736",
+     "parents": [
+      {
+       "sha": "96c986bad96e1eeb66871719c587dd4e8814c057"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 60,
+      "deletions": 60
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2166)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-07T09:34:27+02:00"
+      },
+      "committer": {
+       "date": "2026-09-07T09:34:27+02:00"
+      }
+     }
+    },
+    {
+     "sha": "96c986bad96e1eeb66871719c587dd4e8814c057",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/96c986bad96e1eeb66871719c587dd4e8814c057",
+     "parents": [
+      {
+       "sha": "d1f2f5f835680f50207484fedc2faeccfade8bed"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency @mermaid-js/mermaid-cli to v11.17.0 (#2165)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-06T09:23:37+02:00"
+      },
+      "committer": {
+       "date": "2026-09-06T09:23:37+02:00"
+      }
+     }
+    },
+    {
+     "sha": "d1f2f5f835680f50207484fedc2faeccfade8bed",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/d1f2f5f835680f50207484fedc2faeccfade8bed",
+     "parents": [
+      {
+       "sha": "b0006a9e96120e04edd54eaac0b3c17c9a624369"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.50.1 (#2162)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-09-02T11:25:51+02:00"
+      },
+      "committer": {
+       "date": "2026-09-02T11:25:51+02:00"
+      }
+     }
+    },
+    {
+     "sha": "b0006a9e96120e04edd54eaac0b3c17c9a624369",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/b0006a9e96120e04edd54eaac0b3c17c9a624369",
+     "parents": [
+      {
+       "sha": "8fa39b42b69902c93aa5c2f5135b5041be8fc1a8"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 37,
+      "deletions": 37
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2160)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-31T12:50:56+02:00"
+      },
+      "committer": {
+       "date": "2026-08-31T12:50:56+02:00"
+      }
+     }
+    },
+    {
+     "sha": "8fa39b42b69902c93aa5c2f5135b5041be8fc1a8",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/8fa39b42b69902c93aa5c2f5135b5041be8fc1a8",
+     "parents": [
+      {
+       "sha": "d7561bb6a55774670338932d272f20ea3a73bbf8"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 6,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "Update dependency lint-staged to v17.4.1 (#2159)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-31T09:24:15+02:00"
+      },
+      "committer": {
+       "date": "2026-08-31T09:24:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "d7561bb6a55774670338932d272f20ea3a73bbf8",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/d7561bb6a55774670338932d272f20ea3a73bbf8",
+     "parents": [
+      {
+       "sha": "42cc3c20b6e1a3c5951b99effa4e99c1594c0646"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.50.0 (#2157)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-29T11:43:15+02:00"
+      },
+      "committer": {
+       "date": "2026-08-29T11:43:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "42cc3c20b6e1a3c5951b99effa4e99c1594c0646",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/42cc3c20b6e1a3c5951b99effa4e99c1594c0646",
+     "parents": [
+      {
+       "sha": "d476ee7c86c3a8ff45c043db389dc86504575023"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.49.1 (#2154)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-28T16:33:04+02:00"
+      },
+      "committer": {
+       "date": "2026-08-28T16:33:04+02:00"
+      }
+     }
+    },
+    {
+     "sha": "d476ee7c86c3a8ff45c043db389dc86504575023",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/d476ee7c86c3a8ff45c043db389dc86504575023",
+     "parents": [
+      {
+       "sha": "63f2f497bb3d75d6383e4abe240ff9e26a309b1b"
+      }
+     ],
+     "author": {
+      "id": 95530,
+      "login": "kdy"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: broken link to `forgejo.token` (#2155)",
+      "author": {
+       "name": "Kody",
+       "email": "user-430600f9@example.invalid",
+       "date": "2026-08-28T16:30:53+02:00"
+      },
+      "committer": {
+       "date": "2026-08-28T16:30:53+02:00"
+      }
+     }
+    },
+    {
+     "sha": "63f2f497bb3d75d6383e4abe240ff9e26a309b1b",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/63f2f497bb3d75d6383e4abe240ff9e26a309b1b",
+     "parents": [
+      {
+       "sha": "da0cfdd138bbad2b8ded2c25a36b3c1d50d51a6a"
+      }
+     ],
+     "author": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "fix: document `TMPDIR` environment variable (#2152)",
+      "author": {
+       "name": "Mathieu Fenniak",
+       "email": "user-103a1a83@example.invalid",
+       "date": "2026-08-26T16:00:45+02:00"
+      },
+      "committer": {
+       "date": "2026-08-26T16:00:45+02:00"
+      }
+     }
+    },
+    {
+     "sha": "da0cfdd138bbad2b8ded2c25a36b3c1d50d51a6a",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/da0cfdd138bbad2b8ded2c25a36b3c1d50d51a6a",
+     "parents": [
+      {
+       "sha": "816e71afef07826de232f85cd35bb71bd9533ba1"
+      }
+     ],
+     "author": {
+      "id": 1063889,
+      "login": "thayen"
+     },
+     "stats": {
+      "additions": 7,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Add documentation for Issue Indexer Connection Settings (#2151)",
+      "author": {
+       "name": "Thayen Burtenshaw",
+       "email": "user-a76c95b7@example.invalid",
+       "date": "2026-08-26T02:27:03+02:00"
+      },
+      "committer": {
+       "date": "2026-08-26T02:27:03+02:00"
+      }
+     }
+    },
+    {
+     "sha": "816e71afef07826de232f85cd35bb71bd9533ba1",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/816e71afef07826de232f85cd35bb71bd9533ba1",
+     "parents": [
+      {
+       "sha": "c32544fc20d04025dcb2105908ea95ded0d28de7"
+      }
+     ],
+     "author": {
+      "id": 135189,
+      "login": "AverageHelper"
+     },
+     "stats": {
+      "additions": 27,
+      "deletions": 12
+     },
+     "commit": {
+      "message": "doc: funding UI (#2142)",
+      "author": {
+       "name": "AverageHelper",
+       "email": "user-11bc37d3@example.invalid",
+       "date": "2026-08-25T00:16:30+02:00"
+      },
+      "committer": {
+       "date": "2026-08-25T00:16:30+02:00"
+      }
+     }
+    },
+    {
+     "sha": "c32544fc20d04025dcb2105908ea95ded0d28de7",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/c32544fc20d04025dcb2105908ea95ded0d28de7",
+     "parents": [
+      {
+       "sha": "99630c28d2993cffc954f581dd432b90d44d05b2"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 61,
+      "deletions": 48
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2149)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-24T23:26:12+02:00"
+      },
+      "committer": {
+       "date": "2026-08-24T23:26:12+02:00"
+      }
+     }
+    },
+    {
+     "sha": "99630c28d2993cffc954f581dd432b90d44d05b2",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/99630c28d2993cffc954f581dd432b90d44d05b2",
+     "parents": [
+      {
+       "sha": "5f06763472cd1c5a1c5d8726966cc254c8fb8c99"
+      }
+     ],
+     "author": null,
+     "stats": {
+      "additions": 1771,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "admin: update CLI docs (#2150)",
+      "author": {
+       "name": "Forgejo Actions",
+       "email": "user-7de40c2d@example.invalid",
+       "date": "2026-08-24T21:56:23+02:00"
+      },
+      "committer": {
+       "date": "2026-08-24T21:56:23+02:00"
+      }
+     }
+    },
+    {
+     "sha": "5f06763472cd1c5a1c5d8726966cc254c8fb8c99",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/5f06763472cd1c5a1c5d8726966cc254c8fb8c99",
+     "parents": [
+      {
+       "sha": "5355d9da0538203fb2c3912b3ff9125581763430"
+      }
+     ],
+     "author": {
+      "id": 26734,
+      "login": "Gusted"
+     },
+     "stats": {
+      "additions": 0,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "Remove f3 sections (#2148)",
+      "author": {
+       "name": "Gusted",
+       "email": "user-867f6e1d@example.invalid",
+       "date": "2026-08-23T18:32:02+02:00"
+      },
+      "committer": {
+       "date": "2026-08-23T18:32:02+02:00"
+      }
+     }
+    },
+    {
+     "sha": "5355d9da0538203fb2c3912b3ff9125581763430",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/5355d9da0538203fb2c3912b3ff9125581763430",
+     "parents": [
+      {
+       "sha": "abb3e6a24c7f3172c080029f406c0180b8e5552c"
+      }
+     ],
+     "author": {
+      "id": 222642,
+      "login": "mfenniak"
+     },
+     "stats": {
+      "additions": 0,
+      "deletions": 3
+     },
+     "commit": {
+      "message": "fix: remove 'retry-on all-retryable-errors' from HAProxy recommendation (#2144)",
+      "author": {
+       "name": "Mathieu Fenniak",
+       "email": "user-103a1a83@example.invalid",
+       "date": "2026-08-23T15:16:09+02:00"
+      },
+      "committer": {
+       "date": "2026-08-23T15:16:09+02:00"
+      }
+     }
+    },
+    {
+     "sha": "abb3e6a24c7f3172c080029f406c0180b8e5552c",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/abb3e6a24c7f3172c080029f406c0180b8e5552c",
+     "parents": [
+      {
+       "sha": "6fa6fac0dee37abd878badc66e7cfcf03316191f"
+      }
+     ],
+     "author": {
+      "id": 135189,
+      "login": "AverageHelper"
+     },
+     "stats": {
+      "additions": 0,
+      "deletions": 4
+     },
+     "commit": {
+      "message": "fix: remove dangling `f3` subcommand doc header (#2143)",
+      "author": {
+       "name": "AverageHelper",
+       "email": "user-11bc37d3@example.invalid",
+       "date": "2026-08-22T09:54:19+02:00"
+      },
+      "committer": {
+       "date": "2026-08-22T09:54:19+02:00"
+      }
+     }
+    },
+    {
+     "sha": "6fa6fac0dee37abd878badc66e7cfcf03316191f",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/6fa6fac0dee37abd878badc66e7cfcf03316191f",
+     "parents": [
+      {
+       "sha": "a28de074145805d8089f15d7a04e72bc5dbceefa"
+      }
+     ],
+     "author": {
+      "id": 135189,
+      "login": "AverageHelper"
+     },
+     "stats": {
+      "additions": 101,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "doc: add `funding` config section and user page (#2068)",
+      "author": {
+       "name": "AverageHelper",
+       "email": "user-11bc37d3@example.invalid",
+       "date": "2026-08-21T10:22:34+02:00"
+      },
+      "committer": {
+       "date": "2026-08-21T10:22:34+02:00"
+      }
+     }
+    },
+    {
+     "sha": "a28de074145805d8089f15d7a04e72bc5dbceefa",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/a28de074145805d8089f15d7a04e72bc5dbceefa",
+     "parents": [
+      {
+       "sha": "3b1065570a0d3c78b2ac6f85f5b8f43f1be42902"
+      }
+     ],
+     "author": null,
+     "stats": {
+      "additions": 17,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "Document nginx reverse proxy setup for HTTP, FastCGI via Unix socket. (#1978)",
+      "author": {
+       "name": "Maxim Cournoyer",
+       "email": "user-e5746deb@example.invalid",
+       "date": "2026-08-21T00:47:46+02:00"
+      },
+      "committer": {
+       "date": "2026-08-21T00:47:46+02:00"
+      }
+     }
+    },
+    {
+     "sha": "3b1065570a0d3c78b2ac6f85f5b8f43f1be42902",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/3b1065570a0d3c78b2ac6f85f5b8f43f1be42902",
+     "parents": [
+      {
+       "sha": "ba7bab190843ee417a27e3b4f134ed07ae792f1a"
+      }
+     ],
+     "author": null,
+     "stats": {
+      "additions": 0,
+      "deletions": 1856
+     },
+     "commit": {
+      "message": "admin: update CLI docs (#2140)",
+      "author": {
+       "name": "Forgejo Actions",
+       "email": "user-7de40c2d@example.invalid",
+       "date": "2026-08-20T17:05:16+02:00"
+      },
+      "committer": {
+       "date": "2026-08-20T17:05:16+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ba7bab190843ee417a27e3b4f134ed07ae792f1a",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ba7bab190843ee417a27e3b4f134ed07ae792f1a",
+     "parents": [
+      {
+       "sha": "88890a0e64ca7aa3e6b6ed33721950dfd122c002"
+      }
+     ],
+     "author": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "stats": {
+      "additions": 229,
+      "deletions": 11
+     },
+     "commit": {
+      "message": "contributor: improve examples in translatability section of localization (#2137)",
+      "author": {
+       "name": "0ko",
+       "email": "user-3392a27c@example.invalid",
+       "date": "2026-08-20T13:28:42+02:00"
+      },
+      "committer": {
+       "date": "2026-08-20T13:28:42+02:00"
+      }
+     }
+    },
+    {
+     "sha": "88890a0e64ca7aa3e6b6ed33721950dfd122c002",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/88890a0e64ca7aa3e6b6ed33721950dfd122c002",
+     "parents": [
+      {
+       "sha": "584184c088699e34c1de8c791a9683872c3a557d"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 54,
+      "deletions": 54
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2135)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-18T10:43:07+02:00"
+      },
+      "committer": {
+       "date": "2026-08-18T10:43:07+02:00"
+      }
+     }
+    },
+    {
+     "sha": "584184c088699e34c1de8c791a9683872c3a557d",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/584184c088699e34c1de8c791a9683872c3a557d",
+     "parents": [
+      {
+       "sha": "bd78694ffd6d27a1c65fff746da9eabf89832245"
+      }
+     ],
+     "author": {
+      "id": 1374791,
+      "login": "RicardoCino"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "fix: capitalize projects board headers to be consistent with other UI headers (#2136)",
+      "author": {
+       "name": "Ricardo Cino",
+       "email": "user-c3289f10@example.invalid",
+       "date": "2026-08-18T09:03:47+02:00"
+      },
+      "committer": {
+       "date": "2026-08-18T09:03:47+02:00"
+      }
+     }
+    },
+    {
+     "sha": "bd78694ffd6d27a1c65fff746da9eabf89832245",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/bd78694ffd6d27a1c65fff746da9eabf89832245",
+     "parents": [
+      {
+       "sha": "4e873862c7d996282303af8ef075e772e9deb140"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update pnpm to v10.34.5 (#2134)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-14T01:17:54+02:00"
+      },
+      "committer": {
+       "date": "2026-08-14T01:17:54+02:00"
+      }
+     }
+    },
+    {
+     "sha": "4e873862c7d996282303af8ef075e772e9deb140",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/4e873862c7d996282303af8ef075e772e9deb140",
+     "parents": [
+      {
+       "sha": "60ad2e8d2a6ea215fedeacb5cd9093721941e1d6"
+      }
+     ],
+     "author": {
+      "id": 35856,
+      "login": "0ko"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "admin: improve sqlite3 description (#2131)",
+      "author": {
+       "name": "0ko",
+       "email": "user-3392a27c@example.invalid",
+       "date": "2026-08-12T15:21:05+02:00"
+      },
+      "committer": {
+       "date": "2026-08-12T15:21:05+02:00"
+      }
+     }
+    },
+    {
+     "sha": "60ad2e8d2a6ea215fedeacb5cd9093721941e1d6",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/60ad2e8d2a6ea215fedeacb5cd9093721941e1d6",
+     "parents": [
+      {
+       "sha": "1c99936cb3ec29fbfb5cc3ced9dd626fdcc55e32"
+      }
+     ],
+     "author": {
+      "id": 468676,
+      "login": "aahlenst"
+     },
+     "stats": {
+      "additions": 4,
+      "deletions": 4
+     },
+     "commit": {
+      "message": "docs: remove mention of run recovery notifications (#2129)",
+      "author": {
+       "name": "Andreas Ahlenstorf",
+       "email": "user-d6491fbb@example.invalid",
+       "date": "2026-08-11T23:42:19+02:00"
+      },
+      "committer": {
+       "date": "2026-08-11T23:42:19+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1c99936cb3ec29fbfb5cc3ced9dd626fdcc55e32",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1c99936cb3ec29fbfb5cc3ced9dd626fdcc55e32",
+     "parents": [
+      {
+       "sha": "0c681a16db0e7a93e1d60f4f91cb0b20d74079a4"
+      }
+     ],
+     "author": {
+      "id": 94198,
+      "login": "wetneb"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "feat: setting for expiration of team memberships (#2086)",
+      "author": {
+       "name": "Antonin Delpeuch",
+       "email": "user-b9cba584@example.invalid",
+       "date": "2026-08-10T16:24:15+02:00"
+      },
+      "committer": {
+       "date": "2026-08-10T16:24:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "0c681a16db0e7a93e1d60f4f91cb0b20d74079a4",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/0c681a16db0e7a93e1d60f4f91cb0b20d74079a4",
+     "parents": [
+      {
+       "sha": "1cae3337e962dbe4d6c5ea79d61292347c0d42af"
+      }
+     ],
+     "author": {
+      "id": 26734,
+      "login": "Gusted"
+     },
+     "stats": {
+      "additions": 15,
+      "deletions": 5
+     },
+     "commit": {
+      "message": "upgrade: cleanup of `pulls` directory (#2115)",
+      "author": {
+       "name": "Gusted",
+       "email": "user-5de63927@example.invalid",
+       "date": "2026-08-10T04:00:00+02:00"
+      },
+      "committer": {
+       "date": "2026-08-10T04:00:00+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1cae3337e962dbe4d6c5ea79d61292347c0d42af",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1cae3337e962dbe4d6c5ea79d61292347c0d42af",
+     "parents": [
+      {
+       "sha": "34c642144cd02f1f535ab27645ead513c27bc099"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 37,
+      "deletions": 37
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2127)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-10T01:14:21+02:00"
+      },
+      "committer": {
+       "date": "2026-08-10T01:14:21+02:00"
+      }
+     }
+    },
+    {
+     "sha": "34c642144cd02f1f535ab27645ead513c27bc099",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/34c642144cd02f1f535ab27645ead513c27bc099",
+     "parents": [
+      {
+       "sha": "ffc3cabc3a739afc726531612d2ab30cebdc8f42"
+      }
+     ],
+     "author": null,
+     "stats": {
+      "additions": 2,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "admin: update CLI docs (#2125)",
+      "author": {
+       "name": "Forgejo Actions",
+       "email": "user-7de40c2d@example.invalid",
+       "date": "2026-08-09T12:14:42+02:00"
+      },
+      "committer": {
+       "date": "2026-08-09T12:14:42+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ffc3cabc3a739afc726531612d2ab30cebdc8f42",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ffc3cabc3a739afc726531612d2ab30cebdc8f42",
+     "parents": [
+      {
+       "sha": "e4b84b7d03f045850d9685c9a79a5ad69a97c78c"
+      }
+     ],
+     "author": {
+      "id": 750878,
+      "login": "limiting-factor"
+     },
+     "stats": {
+      "additions": 8,
+      "deletions": 4
+     },
+     "commit": {
+      "message": "FILE_NAME in the configuration file defaults to forgejo.log (#2018)",
+      "author": {
+       "name": "limiting-factor",
+       "email": "user-6757473d@example.invalid",
+       "date": "2026-08-09T12:08:11+02:00"
+      },
+      "committer": {
+       "date": "2026-08-09T12:08:11+02:00"
+      }
+     }
+    },
+    {
+     "sha": "e4b84b7d03f045850d9685c9a79a5ad69a97c78c",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/e4b84b7d03f045850d9685c9a79a5ad69a97c78c",
+     "parents": [
+      {
+       "sha": "87341716e16d1e21e473850d18ea7292a4e8f258"
+      }
+     ],
+     "author": {
+      "id": 1375973,
+      "login": "mottlecah"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: correct link to admin cheat sheet (#2124)",
+      "author": {
+       "name": "mottlecah",
+       "email": "user-f37ed7b8@example.invalid",
+       "date": "2026-08-08T09:59:38+02:00"
+      },
+      "committer": {
+       "date": "2026-08-08T09:59:38+02:00"
+      }
+     }
+    },
+    {
+     "sha": "87341716e16d1e21e473850d18ea7292a4e8f258",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/87341716e16d1e21e473850d18ea7292a4e8f258",
+     "parents": [
+      {
+       "sha": "1b1e48a42c7da8d42f10c247b46f51502cf3cb09"
+      }
+     ],
+     "author": {
+      "id": 94198,
+      "login": "wetneb"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "feat: new setting to add members by invitations (#1991)",
+      "author": {
+       "name": "Antonin Delpeuch",
+       "email": "user-b9cba584@example.invalid",
+       "date": "2026-08-07T19:42:45+02:00"
+      },
+      "committer": {
+       "date": "2026-08-07T19:42:45+02:00"
+      }
+     }
+    },
+    {
+     "sha": "1b1e48a42c7da8d42f10c247b46f51502cf3cb09",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/1b1e48a42c7da8d42f10c247b46f51502cf3cb09",
+     "parents": [
+      {
+       "sha": "76e43b4ad816a3dbc479da0f9180c63382bcd9e1"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 8,
+      "deletions": 135
+     },
+     "commit": {
+      "message": "Update dependency lint-staged to v17",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-07T07:31:48Z"
+      },
+      "committer": {
+       "date": "2026-08-07T07:31:48Z"
+      }
+     }
+    },
+    {
+     "sha": "76e43b4ad816a3dbc479da0f9180c63382bcd9e1",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/76e43b4ad816a3dbc479da0f9180c63382bcd9e1",
+     "parents": [
+      {
+       "sha": "396dcebc279710d91b872f848b4f8e82519a9b33"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update data.forgejo.org/oci/ci Docker tag to v2",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-07T07:25:55Z"
+      },
+      "committer": {
+       "date": "2026-08-07T07:25:55Z"
+      }
+     }
+    },
+    {
+     "sha": "396dcebc279710d91b872f848b4f8e82519a9b33",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/396dcebc279710d91b872f848b4f8e82519a9b33",
+     "parents": [
+      {
+       "sha": "0755bc45c30ca9525b7ac5b1bf78ad8d24f72600"
+      }
+     ],
+     "author": {
+      "id": 430831,
+      "login": "0xllx0"
+     },
+     "stats": {
+      "additions": 18,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "installation: add note about Podman permissions (#2118)",
+      "author": {
+       "name": "elle",
+       "email": "user-f79b5ac7@example.invalid",
+       "date": "2026-08-06T21:40:11+02:00"
+      },
+      "committer": {
+       "date": "2026-08-06T21:40:11+02:00"
+      }
+     }
+    },
+    {
+     "sha": "0755bc45c30ca9525b7ac5b1bf78ad8d24f72600",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/0755bc45c30ca9525b7ac5b1bf78ad8d24f72600",
+     "parents": [
+      {
+       "sha": "0637bd6c5bc468a8a46ad6b79b9f493a30b04199"
+      }
+     ],
+     "author": {
+      "id": 468676,
+      "login": "aahlenst"
+     },
+     "stats": {
+      "additions": 7,
+      "deletions": 7
+     },
+     "commit": {
+      "message": "docs: update references to Forgejo Runner from v12 to v13 (#2114)",
+      "author": {
+       "name": "Andreas Ahlenstorf",
+       "email": "user-d6491fbb@example.invalid",
+       "date": "2026-08-06T15:12:06+02:00"
+      },
+      "committer": {
+       "date": "2026-08-06T15:12:06+02:00"
+      }
+     }
+    },
+    {
+     "sha": "0637bd6c5bc468a8a46ad6b79b9f493a30b04199",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/0637bd6c5bc468a8a46ad6b79b9f493a30b04199",
+     "parents": [
+      {
+       "sha": "547d3eadfa35c2cbe95c2f54064e2c22eb5a64e9"
+      }
+     ],
+     "author": {
+      "id": 1166186,
+      "login": "makkes"
+     },
+     "stats": {
+      "additions": 44,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "Document workflow-level and job-level defaults (#2111)",
+      "author": {
+       "name": "Max Jonas Werner",
+       "email": "user-35b43ffe@example.invalid",
+       "date": "2026-08-05T15:31:30+02:00"
+      },
+      "committer": {
+       "date": "2026-08-05T15:31:30+02:00"
+      }
+     }
+    },
+    {
+     "sha": "547d3eadfa35c2cbe95c2f54064e2c22eb5a64e9",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/547d3eadfa35c2cbe95c2f54064e2c22eb5a64e9",
+     "parents": [
+      {
+       "sha": "ae6af31df4d354bbaf32fa366df2b8cfc10d0ef4"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "Update https://data.forgejo.org/crate-ci/typos action to v1.49.0 (#2109)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-04T10:28:22+02:00"
+      },
+      "committer": {
+       "date": "2026-08-04T10:28:22+02:00"
+      }
+     }
+    },
+    {
+     "sha": "ae6af31df4d354bbaf32fa366df2b8cfc10d0ef4",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/ae6af31df4d354bbaf32fa366df2b8cfc10d0ef4",
+     "parents": [
+      {
+       "sha": "03294daa6b81990cd33f0caf11aa2fda43f1bd84"
+      }
+     ],
+     "author": {
+      "id": 430831,
+      "login": "0xllx0"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 0
+     },
+     "commit": {
+      "message": "federation: `INSECURE_ALLOW_INVALID_HOSTS` docs (#2105)",
+      "author": {
+       "name": "elle",
+       "email": "user-f79b5ac7@example.invalid",
+       "date": "2026-08-03T20:33:57+02:00"
+      },
+      "committer": {
+       "date": "2026-08-03T20:33:57+02:00"
+      }
+     }
+    },
+    {
+     "sha": "03294daa6b81990cd33f0caf11aa2fda43f1bd84",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/03294daa6b81990cd33f0caf11aa2fda43f1bd84",
+     "parents": [
+      {
+       "sha": "05feb69868df8eb2bc391bcae495c509c4403d45"
+      }
+     ],
+     "author": {
+      "id": 141082,
+      "login": "viceice-bot"
+     },
+     "stats": {
+      "additions": 67,
+      "deletions": 67
+     },
+     "commit": {
+      "message": "Lock file maintenance (#2107)",
+      "author": {
+       "name": "Renovate Bot",
+       "email": "user-27c88497@example.invalid",
+       "date": "2026-08-03T09:47:51+02:00"
+      },
+      "committer": {
+       "date": "2026-08-03T09:47:51+02:00"
+      }
+     }
+    },
+    {
+     "sha": "05feb69868df8eb2bc391bcae495c509c4403d45",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/05feb69868df8eb2bc391bcae495c509c4403d45",
+     "parents": [
+      {
+       "sha": "55b68013c82b83212c59bbfc093d30d520789552"
+      }
+     ],
+     "author": {
+      "id": 704838,
+      "login": "netsgnut"
+     },
+     "stats": {
+      "additions": 2,
+      "deletions": 2
+     },
+     "commit": {
+      "message": "config: remove reference to a defunct avatar service (#2100)",
+      "author": {
+       "name": "netsgnut",
+       "email": "user-3c8102e3@example.invalid",
+       "date": "2026-08-02T16:41:35+02:00"
+      },
+      "committer": {
+       "date": "2026-08-02T16:41:35+02:00"
+      }
+     }
+    },
+    {
+     "sha": "55b68013c82b83212c59bbfc093d30d520789552",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/55b68013c82b83212c59bbfc093d30d520789552",
+     "parents": [
+      {
+       "sha": "b331dcaed2b1bc1ff00c17b8e725a90b67903113"
+      }
+     ],
+     "author": {
+      "id": 55597,
+      "login": "mahlzahn"
+     },
+     "stats": {
+      "additions": 1,
+      "deletions": 1
+     },
+     "commit": {
+      "message": "fix: remove redirect (#2102)",
+      "author": {
+       "name": "Robert Wolff",
+       "email": "user-c0676c92@example.invalid",
+       "date": "2026-07-29T15:41:15+02:00"
+      },
+      "committer": {
+       "date": "2026-07-29T15:41:15+02:00"
+      }
+     }
+    },
+    {
+     "sha": "b331dcaed2b1bc1ff00c17b8e725a90b67903113",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/b331dcaed2b1bc1ff00c17b8e725a90b67903113",
+     "parents": [
+      {
+       "sha": "72e56f503a0df390fb91bd8788b0586fc6da507f"
+      }
+     ],
+     "author": {
+      "id": 26734,
+      "login": "Gusted"
+     },
+     "stats": {
+      "additions": 43,
+      "deletions": 36
+     },
+     "commit": {
+      "message": "config: improve TLS settings documentation (#2089)",
+      "author": {
+       "name": "Gusted",
+       "email": "user-5de63927@example.invalid",
+       "date": "2026-07-28T06:08:05+02:00"
+      },
+      "committer": {
+       "date": "2026-07-28T06:08:05+02:00"
+      }
+     }
+    },
+    {
+     "sha": "72e56f503a0df390fb91bd8788b0586fc6da507f",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/72e56f503a0df390fb91bd8788b0586fc6da507f",
+     "parents": [
+      {
+       "sha": "a0612c78d055eefb9a8519d3cb303ea451af3319"
+      }
+     ],
+     "author": {
+      "id": 750878,
+      "login": "limiting-factor"
+     },
+     "stats": {
+      "additions": 22,
+      "deletions": 6
+     },
+     "commit": {
+      "message": "user/actions: add the on.issue_comment event to the reference (#2085)",
+      "author": {
+       "name": "limiting-factor",
+       "email": "user-6757473d@example.invalid",
+       "date": "2026-07-27T10:06:34+02:00"
+      },
+      "committer": {
+       "date": "2026-07-27T10:06:34+02:00"
+      }
+     }
+    },
+    {
+     "sha": "a0612c78d055eefb9a8519d3cb303ea451af3319",
+     "html_url": "https://codeberg.org/forgejo/docs/commit/a0612c78d055eefb9a8519d3cb303ea451af3319",
+     "parents": [
+      {
+       "sha": "7139a7207db399956c7a6b3a91b7a5ab08c847e6"
+      }
+     ],
+     "author": {
+      "id": 750878,
+      "login": "limiting-factor"
+     },
+     "stats": {
+      "additions": 0,
+      "deletions": 5
+     },
+     "commit": {
+      "message": "meta: do not check the CLI, it is the job of cli.yml (#2095)",
+      "author": {
+       "name": "limiting-factor",
+       "email": "user-6757473d@example.invalid",
+       "date": "2026-07-27T09:36:43+02:00"
+      },
+      "committer": {
+       "date": "2026-07-27T09:36:43+02:00"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

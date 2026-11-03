@@ -1,0 +1,35 @@
+# A read-only Forgejo population through the EXTERNAL Gitea plugin: forgejo/docs on Codeberg,
+# October 2026, every change that landed on its default branch (next). No token needed.
+# The plugin resolves pr-rla/provider from its own node_modules, so link it once:
+#   (cd examples/providers/gitea && npm install)
+#   pr-rla -C examples/codeberg-forgejo-docs-2026-10 freeze --dry-run
+provider:
+  use: ../providers/gitea/index.mjs        # a path, relative to this file; or a package name
+  options:
+    base_url: https://codeberg.org
+    bots: [viceice-bot, forgejo-website]   # Gitea has no bot flag: Renovate and the backport bot
+repo: forgejo/docs
+
+window:
+  name: 2026-10
+  start: 2026-10-01
+  end: 2026-10-31
+
+selector:
+  kinds: [pull_request, direct_push]
+  authors: any
+  labels: []
+  unreviewed: no-human-review
+  merged_by: any
+  max_changed_lines: 200
+  exclude_generated: true
+
+audit:
+  claim: D
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  min_population: 150
+
+protocol: ../../docs/design/review-protocol.example.md
+ledger: git-file

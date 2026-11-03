@@ -92,12 +92,14 @@ const bitbucket = (url, b) => {
 const gtUser = (u) => (u ? pick(u, ["id", "login"]) : u);
 const gitea = (url, b) => {
   const p = new URL(url).pathname;
-  const pr = (x) => ({ ...pick(x, ["number", "html_url", "state", "merged", "merged_at", "updated_at", "merge_commit_sha", "additions", "deletions"]), base: { ref: x.base.ref }, head: { sha: x.head?.sha }, user: gtUser(x.user), merged_by: gtUser(x.merged_by), labels: (x.labels ?? []).map((l) => ({ name: l.name })) });
+  const pr = (x) => ({ ...pick(x, ["number", "html_url", "state", "merged", "merged_at", "updated_at", "merge_commit_sha", "additions", "deletions", "changed_files"]), base: { ref: x.base.ref }, head: { sha: x.head?.sha }, user: gtUser(x.user), merged_by: gtUser(x.merged_by), labels: (x.labels ?? []).map((l) => ({ name: l.name })) });
   const commit = (c) => ({ sha: c.sha, html_url: c.html_url, parents: c.parents?.map((x) => ({ sha: x.sha })), author: gtUser(c.author), stats: c.stats ? pick(c.stats, ["additions", "deletions"]) : undefined, commit: { message: c.commit.message.split("\n")[0], author: { name: c.commit.author.name, email: email(c.commit.author.email), date: c.commit.author.date }, committer: { date: c.commit.committer.date } } });
   if (/\/pulls$/.test(p)) return b.map(pr);
   if (/\/pulls\/\d+$/.test(p)) return pr(b);
+  if (/\/pulls\/\d+\/files$/.test(p)) return b.map((f) => pick(f, ["filename", "additions", "deletions"]));
   if (/\/reviews$/.test(p)) return b.map((r) => ({ ...pick(r, ["id", "state", "submitted_at", "dismissed", "stale", "official"]), user: gtUser(r.user) }));
   if (/\/pulls\/\d+\/commits$/.test(p) || /\/commits$/.test(p)) return b.map(commit);
+  if (/\/branches\/[^/]+$/.test(p)) return { name: b.name, commit: { id: b.commit.id } };
   if (/^\/api\/v1\/repos\/[^/]+\/[^/]+$/.test(p)) return pick(b, ["full_name", "default_branch", "html_url"]);
   return b;
 };
