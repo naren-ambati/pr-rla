@@ -1,0 +1,13 @@
+{
+  "schema": "pr-rla/changes/v1",
+  "repo": "acme/widgets",
+  "defaultBranch": "main",
+  "limitations": ["exported from a self-hosted SCM by a script; reviews as of export time"],
+  "changes": [
+    { "id": "gitea:acme/widgets#11", "kind": "pull_request", "repo": "acme/widgets", "url": "https://git.example.com/acme/widgets/pulls/11", "mergeSha": "1111111111111111111111111111111111111111", "mergedAt": "2026-08-01T09:00:00Z", "author": { "login": "renovate[bot]", "kind": "bot" }, "mergedBy": { "login": "maint", "kind": "human" }, "reviews": [{ "author": { "login": "ci[bot]", "kind": "bot" }, "state": "APPROVED", "submittedAt": "2026-08-01T08:59:00Z" }], "changedLines": 12, "labels": ["deps"] },
+    { "id": "gitea:acme/widgets#12", "kind": "pull_request", "repo": "acme/widgets", "url": "https://git.example.com/acme/widgets/pulls/12", "mergeSha": "2222222222222222222222222222222222222222", "mergedAt": "2026-08-01T10:00:00Z", "author": { "login": "alice", "kind": "human" }, "mergedBy": { "login": "alice", "kind": "human" }, "reviews": [{ "author": { "login": "bob", "kind": "human" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-08-01T09:30:00Z" }, { "author": { "login": "bob", "kind": "human" }, "state": "APPROVED", "submittedAt": "2026-08-01T09:50:00Z" }], "changedLines": 340, "labels": [] },
+    { "id": "gitea:acme/widgets#13", "kind": "pull_request", "repo": "acme/widgets", "url": "https://git.example.com/acme/widgets/pulls/13", "mergeSha": "3333333333333333333333333333333333333333", "mergedAt": "2026-08-01T11:00:00Z", "author": { "login": "claude[bot]", "kind": "bot" }, "mergedBy": { "login": "maint", "kind": "human" }, "reviews": [], "changedLines": 48, "labels": ["agent"] },
+    { "id": "gitea:acme/widgets@4444444444444444444444444444444444444444", "kind": "direct_push", "repo": "acme/widgets", "url": "https://git.example.com/acme/widgets/commit/4444444444444444444444444444444444444444", "mergeSha": "4444444444444444444444444444444444444444", "mergedAt": "2026-08-01T12:00:00Z", "author": { "login": "maint", "kind": "human" }, "mergedBy": null, "reviews": [], "changedLines": 3, "labels": [] },
+    { "id": "gitea:acme/widgets#10", "kind": "pull_request", "repo": "acme/widgets", "url": "https://git.example.com/acme/widgets/pulls/10", "mergeSha": "5555555555555555555555555555555555555555", "mergedAt": "2026-07-31T23:59:59Z", "author": { "login": "claude[bot]", "kind": "bot" }, "mergedBy": { "login": "maint", "kind": "human" }, "reviews": [], "changedLines": 5, "labels": [] }
+  ]
+}
