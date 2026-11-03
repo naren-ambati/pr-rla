@@ -90,7 +90,7 @@ Package exports:
 
 Built-in providers:
 
-- `github`: REST pulls sorted by update time and filtered by `merged_at`, re-scanning the head of the list for PRs updated mid-walk. Reviews come from GraphQL in batches of 40. Direct pushes come from a first-parent walk of the default branch.
+- `github`: REST pulls sorted by update time and filtered by `merged_at`, re-scanning the head of the list for PRs updated mid-walk. Reviews come from GraphQL in batches of 40. Direct pushes are default-branch commits in the window that no merged PR introduced.
 - `json-file`: normalized changes exported from any SCM.
 
 Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended).
@@ -100,7 +100,7 @@ Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the
 1. Copy [`examples/provider-template.mjs`](examples/provider-template.mjs). Export `defineProvider({ providerApiVersion: 1, name, create(options, ctx) })`.
 2. `listChanges({ repo, window, kinds })` returns every change that landed on the default branch in `[opensAt, closesAt)`:
    - merged PRs/MRs into the default branch, with all reviews;
-   - first-parent commits that no merged PR introduced, as `direct_push` with `reviews: []` and `mergedBy: null`. Match both the SCM's commit→PR link and each PR's merge/squash SHA; GitHub's link was missing for one real merge commit in the recorded fixture.
+   - default-branch commits (all ancestors, not only first parents) that no merged PR introduced, as `direct_push` with `reviews: []` and `mergedBy: null`. Match both the SCM's commit→PR link and each PR's merge/squash SHA; GitHub's link was missing for one real merge commit in the recorded fixture.
    - Never return one commit for two changes. A rebase merge's commits all belong to its PR.
 3. Record real API responses and run `assertProviderConformance(provider, fixtures)` from `pr-rla/testing`.
 4. Reference it from `.pr-rla.yml`: `provider: { use: ./my-provider.mjs, options: {...} }` or `provider: { use: pr-rla-provider-gitlab }`. A provider declaring another API version is refused with a clear error.
@@ -112,7 +112,7 @@ Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the
 - **Direct pushes on GitHub.**
   - The commit author is not the pusher, and GitHub's commit APIs do not expose the pusher. Every manifest records this.
   - The window applies to the commit date.
-  - The first-parent walk stops at the first commit dated before the window.
+  - A direct-push merge commit (e.g. a `git pull` merge pushed to main) is its own change, and its size is GitHub's diff against its first parent.
 - **GitHub review states are read at freeze time.** Labels can change later, so a label-based stratum may not re-verify.
 - **One repo per audit.** There is no org-pooled freeze yet.
 - **Timestamps are self-asserted** without a log: the signer's clock and the git commit times.

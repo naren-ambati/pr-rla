@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
 import github, { GitHubProvider } from "../src/providers/github/index.js";
-import { classifyFirstParent, type HistoryNode } from "../src/providers/github/history.js";
+import { classifyHistory, type HistoryNode } from "../src/providers/github/history.js";
 import { normalizeActor, normalizeCommitAuthor, normalizeReviews } from "../src/providers/github/normalize.js";
 import { prBatchQuery } from "../src/providers/github/queries.js";
 import type { ProviderContext } from "../src/sdk/provider.js";
@@ -127,57 +127,68 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
     expect(r.changes.find((c) => c.id === ids.squash)!.reviews).toHaveLength(150);
   });
 
-  it("a rebase merge's three commits map to one PR; a merge commit's PR commits are never walked", async () => {
+  it("a rebase merge's three commits map to one PR; a merge-commit PR's branch commits belong to it", async () => {
     const r = await make().provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["direct_push"] });
     expect(r.changes.map((c) => c.id).sort()).toEqual([ids.alice, ids.bot].sort());
-    expect(r.diagnostics).toContainEqual({ label: "first-parent commits walked in window", value: 8 });
-    expect(r.diagnostics).toContainEqual({ label: "first-parent commits linked to a merged PR", value: 6 });
+    expect(r.diagnostics).toContainEqual({ label: "default-branch commits in window", value: 9 });
+    expect(r.diagnostics).toContainEqual({ label: "commits linked to a merged PR", value: 7 });
+    expect(r.diagnostics).toContainEqual({ label: "direct pushes that are merge commits", value: 0 });
   });
 });
 
-describe("first-parent classifier (pure)", () => {
+describe("history classifier (pure)", () => {
   const W = { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" };
   const n = (oid: string, date: string, parents: string[], prs: HistoryNode["associatedPullRequests"] = []): HistoryNode => ({ oid, committedDate: `2026-08-01T${date}:00Z`, parents, associatedPullRequests: prs });
   const merged = (number: number, baseRefName = "main") => ({ number, merged: true, baseRefName });
+  const run = (nodes: HistoryNode[], m?: Map<string, number>) => classifyHistory(nodes, W, "main", m);
 
   it("squash merge: one commit, one PR", () => {
-    const r = classifyFirstParent([n("s", "10:00", ["x"], [merged(1)])], "s", W, "main");
+    const r = run([n("s", "10:00", ["x"], [merged(1)])]);
     expect([...r.prCommits]).toEqual([[1, ["s"]]]);
     expect(r.directPushes).toEqual([]);
   });
 
-  it("merge commit: the PR's branch commits on parent 2 are not counted", () => {
-    const r = classifyFirstParent([n("m", "10:00", ["base", "f2"], [merged(2)]), n("f2", "09:00", ["f1"], [merged(2)]), n("f1", "08:00", ["base"], [merged(2)]), n("base", "07:00", [])], "m", W, "main");
-    expect([...r.prCommits]).toEqual([[2, ["m"]]]);
+  it("merge commit: the merge commit and the PR's branch commits all belong to the PR", () => {
+    const r = run([n("m", "10:00", ["base", "f2"], [merged(2)]), n("f2", "09:00", ["f1"], [merged(2)]), n("f1", "08:00", ["base"], [merged(2)]), n("base", "07:00", [])]);
+    expect([...r.prCommits]).toEqual([[2, ["m", "f2", "f1"]]]);
     expect(r.directPushes).toEqual(["base"]);
   });
 
   it("rebase merge: every rebased commit maps to the same PR", () => {
-    const r = classifyFirstParent([n("r3", "10:03", ["r2"], [merged(3)]), n("r2", "10:02", ["r1"], [merged(3)]), n("r1", "10:01", [], [merged(3)])], "r3", W, "main");
+    const r = run([n("r3", "10:03", ["r2"], [merged(3)]), n("r2", "10:02", ["r1"], [merged(3)]), n("r1", "10:01", [], [merged(3)])]);
     expect([...r.prCommits]).toEqual([[3, ["r3", "r2", "r1"]]]);
     expect(r.directPushes).toEqual([]);
   });
 
   it("direct push: no merged PR into the default branch (open PRs and other bases do not count)", () => {
-    const r = classifyFirstParent([n("a", "10:00", ["b"], [{ number: 4, merged: false, baseRefName: "main" }]), n("b", "09:00", [], [merged(5, "release")])], "a", W, "main");
+    const r = run([n("a", "10:00", ["b"], [{ number: 4, merged: false, baseRefName: "main" }]), n("b", "09:00", [], [merged(5, "release")])]);
     expect(r.directPushes).toEqual(["a", "b"]);
   });
 
   it("merge-commit-sha fallback when GitHub has no association", () => {
-    const r = classifyFirstParent([n("s", "10:00", [])], "s", W, "main", new Map([["s", 9]]));
+    const r = run([n("s", "10:00", [])], new Map([["s", 9]]));
     expect([...r.prCommits]).toEqual([[9, ["s"]]]);
     expect(r.directPushes).toEqual([]);
   });
 
-  it("stops before the window and skips commits after it", () => {
-    const r = classifyFirstParent(
-      [{ oid: "late", committedDate: "2026-08-02T01:00:00Z", parents: ["in"], associatedPullRequests: [] }, n("in", "05:00", ["old"]), { oid: "old", committedDate: "2026-07-31T23:00:00Z", parents: [], associatedPullRequests: [] }],
-      "late",
-      W,
-      "main",
-    );
+  it("foxtrot merge (a `git pull` merge pushed to main, as on gh-aw): nothing on the real mainline is missed", () => {
+    // M = "Merge branch 'main' of …": first parent L is local work, second parent O is the real main.
+    const r = run([
+      n("M", "12:00", ["L", "O"]),
+      n("L", "11:59", ["B"]),
+      n("O", "11:00", ["X"], [merged(9)]),
+      n("X", "10:00", ["B"]), // someone else's direct push on the mainline: a first-parent walk from M would skip it
+      n("B", "09:00", [], [merged(8)]),
+    ]);
+    expect(r.directPushes).toEqual(["M", "L", "X"]);
+    expect(r.directPushMerges).toEqual(["M"]);
+    expect([...r.prCommits.keys()].sort()).toEqual([8, 9]);
+  });
+
+  it("only commits dated inside the window count", () => {
+    const r = run([{ oid: "late", committedDate: "2026-08-02T01:00:00Z", parents: ["in"], associatedPullRequests: [] }, n("in", "05:00", ["old"]), { oid: "old", committedDate: "2026-07-31T23:00:00Z", parents: [], associatedPullRequests: [] }]);
     expect(r.directPushes).toEqual(["in"]);
-    expect(r.stop).toBe("before-window");
+    expect(r.inWindow).toBe(1);
   });
 });
 

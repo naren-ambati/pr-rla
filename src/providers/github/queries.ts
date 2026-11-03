@@ -41,7 +41,3 @@ export function historyQuery(pageSize: number): string {
   }
 }`;
 }
-
-export const COMMIT_QUERY = `query($owner: String!, $name: String!, $oid: GitObjectID!) {
-  repository(owner: $owner, name: $name) { object(oid: $oid) { ... on Commit { ${COMMIT_FIELDS} } } }
-}`;

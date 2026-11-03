@@ -7,10 +7,10 @@ import {
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
-import { classifyFirstParent, type HistoryNode } from "./history.js";
+import { classifyHistory, type HistoryNode } from "./history.js";
 import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
-import { COMMIT_QUERY, HEAD_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
+import { HEAD_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
 
 export interface GitHubProviderOptions {
   /** Env var holding the token (default GITHUB_TOKEN, then GH_TOKEN). */
@@ -36,7 +36,7 @@ interface RestPull {
 export const GITHUB_LIMITATIONS = [
   "direct_push: GitHub's commit APIs do not expose the pusher; `author` is the commit author (commit author != pusher) and mergedBy is null.",
   "direct_push: the window is applied to the commit's committedDate, not the push time.",
-  "direct_push: detected by walking the default branch's first-parent chain; the walk stops at the first first-parent commit dated before the window opens.",
+  "direct_push: every commit reachable from the default branch, dated in the window, that no merged PR into that branch introduced (GitHub's commit->PR link, or the PR's merge commit SHA). A direct-push merge commit's changedLines are GitHub's diff against its first parent.",
   "pull_request: only PRs merged into the default branch count; reviews are as of freeze time.",
 ];
 
@@ -77,11 +77,11 @@ export class GitHubProvider implements ScmProvider {
       for (const pr of prs) changes.push(pr);
     }
     if (req.kinds.includes("direct_push")) {
-      const { directPushes, linkedPrs, walked, stop } = await this.walkHistory(owner, name, req, ref.name, ref.target.oid, listed.mergeCommits);
+      const { directPushes, linkedPrs, inWindow, merges } = await this.walkHistory(owner, name, req, ref.name, ref.target.oid, listed.mergeCommits);
       changes.push(...directPushes.map((c) => normalizeDirectPush(req.repo, c)));
-      diagnostics.push({ label: "first-parent commits walked in window", value: walked });
-      diagnostics.push({ label: "first-parent commits linked to a merged PR", value: linkedPrs });
-      if (stop !== "before-window") this.ctx.log(`github: first-parent walk ended at ${stop}`);
+      diagnostics.push({ label: "default-branch commits in window", value: inWindow });
+      diagnostics.push({ label: "commits linked to a merged PR", value: linkedPrs });
+      diagnostics.push({ label: "direct pushes that are merge commits", value: merges });
     }
     return { changes, defaultBranch: ref.name, limitations: GITHUB_LIMITATIONS, diagnostics };
   }
@@ -180,33 +180,13 @@ export class GitHubProvider implements ScmProvider {
       parents: c.parents.nodes.map((p) => p.oid),
       associatedPullRequests: c.associatedPullRequests.nodes,
     });
-    let result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch, mergeCommits);
-    // A first-parent commit dated before `since` is absent from the pages: fetch it and continue.
-    for (let extra = 0; result.stop === "missing-parent" && extra < 50; extra++) {
-      const missing = this.findMissingParent([...nodes.values()].map(toNode), headOid);
-      if (!missing) break;
-      const d = await this.http.graphql<{ repository: { object: GqlHistoryCommit | null } }>(COMMIT_QUERY, { owner, name, oid: missing });
-      if (!d.repository.object) break;
-      nodes.set(missing, d.repository.object);
-      result = classifyFirstParent([...nodes.values()].map(toNode), headOid, req.window, defaultBranch, mergeCommits);
-    }
+    const result = classifyHistory([...nodes.values()].map(toNode), req.window, defaultBranch, mergeCommits);
     return {
       directPushes: result.directPushes.map((oid) => nodes.get(oid)!),
       linkedPrs: [...result.prCommits.values()].reduce((a, v) => a + v.length, 0),
-      walked: result.walkedInWindow,
-      stop: result.stop,
+      inWindow: result.inWindow,
+      merges: result.directPushMerges.length,
     };
-  }
-
-  private findMissingParent(nodes: HistoryNode[], headOid: string): string | null {
-    const byOid = new Map(nodes.map((n) => [n.oid, n]));
-    let cur: string | undefined = headOid;
-    while (cur) {
-      const n = byOid.get(cur);
-      if (!n) return cur;
-      cur = n.parents[0];
-    }
-    return null;
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */
@@ -233,6 +213,6 @@ export class GitHubProvider implements ScmProvider {
 export default defineProvider<GitHubProviderOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "github",
-  description: "GitHub.com / GHES: REST pulls + GraphQL reviews (batches of 40) + first-parent history for direct pushes",
+  description: "GitHub.com / GHES: REST pulls + GraphQL reviews (batches of 40) + default-branch history for direct pushes",
   create: (options, ctx) => new GitHubProvider(options ?? {}, ctx),
 });

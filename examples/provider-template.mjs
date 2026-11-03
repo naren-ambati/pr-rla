@@ -8,7 +8,8 @@
 //   1. list merge requests merged into the default branch in [opensAt, closesAt) (paginate fully);
 //   2. read every review/approval with its state, author and time; map to APPROVED / CHANGES_REQUESTED /
 //      COMMENTED / DISMISSED, authors to { login, kind: "human" | "bot" } (bots carry a "[bot]" suffix);
-//   3. walk the default branch's FIRST-PARENT history in the window; a commit that no merged MR into that
+//   3. read the default branch's history in the window (all ancestors, not only first parents: a pushed
+//      `git pull` merge puts the real mainline on the second parent); a commit that no merged MR into that
 //      branch introduced (check both the SCM's commit->MR link and each MR's merge/squash commit SHA)
 //      is a direct_push with reviews: [] and mergedBy: null;
 //   4. never return the same commit for two changes (rebase merges: all rebased commits belong to one MR).

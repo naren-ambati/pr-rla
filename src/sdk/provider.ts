@@ -43,7 +43,7 @@ export const CHANGE_KINDS: readonly ChangeKind[] = ["pull_request", "direct_push
  * - `pull_request`: a merged PR/MR into the default branch. All commits the
  *   merge brought in (merge commit, squash commit, or every rebased commit)
  *   belong to this one record.
- * - `direct_push`: a first-parent commit on the default branch with no merged
+ * - `direct_push`: a commit that reached the default branch with no merged
  *   PR into that branch. It has no reviews by definition and `mergedBy: null`
  *   (most SCM APIs do not expose the pusher; `author` is the commit author).
  */
