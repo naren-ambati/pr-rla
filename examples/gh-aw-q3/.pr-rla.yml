@@ -1,0 +1,29 @@
+# The demo population from docs/design/spec.md: github/gh-aw, Q3 2026, Copilot coding-agent
+# changes with no recorded human review and <= 200 changed lines. Read-only:
+#   GITHUB_TOKEN=$(gh auth token) pr-rla -C examples/gh-aw-q3 freeze --dry-run
+provider: github
+repo: github/gh-aw
+
+window:
+  name: 2026-q3
+  start: 2026-07-01
+  end: 2026-09-30
+
+selector:
+  kinds: [pull_request, direct_push]
+  authors: ["copilot-swe-agent[bot]"]
+  labels: []
+  unreviewed: no-human-review
+  merged_by: any
+  max_changed_lines: 200
+  exclude_generated: true
+
+audit:
+  claim: D
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  min_population: 150
+
+protocol: ../../docs/design/review-protocol.example.md
+ledger: git-file

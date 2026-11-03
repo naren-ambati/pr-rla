@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { auditMode, beaconParams, derivedRoundFor, type RegistrationRecord, type SignedRecord } from "../core/records.js";
-import { loadOrCreateKey, signRecord } from "../core/signing.js";
+import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
 import { stoppingTable, effectiveCap } from "../core/sprt.js";
 import { CommandError, configFor, isoNow, pct, protocolSha256, writeJson, type CommandContext } from "./context.js";
@@ -30,7 +30,8 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   };
   if (!opts.dryRun && existsSync(paths.registration) && !opts.force)
     throw new CommandError(`${paths.registration} exists. A new registration replaces the selector; use --force only if the old one was never shown to anyone.`);
-  const key = loadOrCreateKey(resolve(config.dir, opts.key ?? config.signingKey));
+  // A dry run writes nothing, not even a key: it signs with a throwaway in-memory key.
+  const key = opts.dryRun ? ephemeralKey() : loadOrCreateKey(resolve(config.dir, opts.key ?? config.signingKey));
   let signed: SignedRecord<RegistrationRecord> = signRecord(record, key);
   if (opts.submit && !opts.dryRun) signed = await submitSigned(ctx, signed, submitUrl(config, opts.rekorUrl));
   const mode = auditMode(signed);

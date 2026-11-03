@@ -82,3 +82,15 @@ describe("architecture boundaries", () => {
     expect(importsOf("testing").filter((i) => !/^\.\.\/(sdk|core\/canonical)|^\.\//.test(i.spec))).toEqual([]);
   });
 });
+
+describe("config", () => {
+  it("explains the unquoted [bot] YAML trap", async () => {
+    const { parseConfig } = await import("../src/config.js");
+    expect(() => parseConfig("repo: o/r\nwindow: { start: 2026-07-01, end: 2026-09-30 }\nselector:\n  authors: [copilot-swe-agent[bot]]\n", "/x/.pr-rla.yml")).toThrow(/quote logins that contain \[bot\]/);
+    const c = parseConfig('repo: o/r\nwindow: { start: 2026-07-01, end: 2026-09-30 }\nselector:\n  authors: ["copilot-swe-agent[bot]"]\n', "/x/.pr-rla.yml");
+    expect(c.selector.authors).toEqual(["copilot-swe-agent[bot]"]);
+    expect(c.window).toMatchObject({ name: "2026-07-01_2026-09-30", opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" });
+    expect(c.parameters).toEqual({ claim: "D", p0: 0.1, p1: 0.02, alpha: 0.05, cap: null, minPopulation: 150 });
+    expect(() => parseConfig("repo: o/r\nwindow: { start: 2026-07-01, end: 2026-09-30 }\naudit: { claim: T }\n", "/x/.pr-rla.yml")).toThrow(/claim T/);
+  });
+});

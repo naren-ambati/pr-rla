@@ -23,6 +23,12 @@ export function loadOrCreateKey(path: string): SigningKey {
   };
 }
 
+/** An unsaved key, for dry runs. */
+export function ephemeralKey(): SigningKey {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  return { privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(), publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString() };
+}
+
 export function signRecord<T>(record: T, key: SigningKey): SignedRecord<T> {
   const bytes = Buffer.from(canonicalJson(record));
   const signature = sign("sha256", bytes, createPrivateKey(key.privateKeyPem)).toString("base64");

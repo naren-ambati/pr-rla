@@ -53,7 +53,13 @@ function num(v: unknown, name: string, dflt: number): number {
 }
 
 export function parseConfig(text: string, configPath: string, overrides: { fromFile?: string } = {}): PrRlaConfig {
-  const raw = (parse(text) ?? {}) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+  try {
+    raw = (parse(text) ?? {}) as Record<string, unknown>;
+  } catch (e) {
+    const hint = text.includes("[bot]") ? ' (quote logins that contain [bot], e.g. authors: ["copilot-swe-agent[bot]"])' : "";
+    throw new Error(`${configPath}: ${(e as Error).message.split("\n")[0]}${hint}`);
+  }
   const dir = dirname(resolve(configPath));
   let provider = normalizePluginSpec(raw.provider, "provider", "github");
   if (overrides.fromFile) provider = { use: "json-file", options: { path: resolve(process.cwd(), overrides.fromFile) } };
@@ -111,7 +117,7 @@ window:
 
 selector:
   kinds: [pull_request, direct_push]
-  authors: any                  # or a list, e.g. [copilot-swe-agent[bot], claude[bot]]
+  authors: any                  # or a quoted list, e.g. ["copilot-swe-agent[bot]", "claude[bot]"]
   labels: []                    # a change must carry all of these
   unreviewed: no-human-review   # no-human-review | no-review | any
   merged_by: any                # human | bot | any (direct pushes only match any)

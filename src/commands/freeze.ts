@@ -22,6 +22,8 @@ export interface FreezeOptions {
   rekorUrl?: string;
   key?: string;
   json?: boolean;
+  /** --dry-run only: write the full listing and the would-be manifest entries to this file for inspection. */
+  out?: string;
 }
 
 export function summarizePopulation(pop: Population, sel: Selector, defaultBranch: string): { lines: string[]; summary: string } {
@@ -93,7 +95,13 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     for (const l of pop.listed.limitations) ctx.out(`  limitation: ${l}`);
     if (N < parameters.minPopulation) ctx.out(`population ${fmt(N)} < ${parameters.minPopulation}: review all ${fmt(N)} instead`);
   }
-  if (opts.dryRun) return 0;
+  if (opts.dryRun) {
+    if (opts.out) {
+      writeJson(resolve(ctx.cwd, opts.out), { repo: config.repo, window, frozenAt, selector, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.listed.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
+      ctx.out(`wrote the dry-run population to ${opts.out}`);
+    }
+    return 0;
+  }
 
   const body: Omit<Manifest, "sha256"> = {
     schema: "pr-rla/manifest/v1",

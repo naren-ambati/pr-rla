@@ -65,6 +65,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--rekor-url <url>", "Rekor log URL")
     .option("--key <path>", "signing key")
     .option("--json", "machine-readable output")
+    .option("--out <file>", "with --dry-run: write the full listing and would-be manifest ids to <file>")
     .action(function (this: Command) {
       return run((ctx) => freezeCommand(ctx, this.opts()))();
     });
