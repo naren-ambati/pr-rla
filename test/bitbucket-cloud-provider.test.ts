@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BitbucketCloudProvider } from "../src/providers/bitbucket-cloud/index.js";
+import { BitbucketCloudProvider, rebasedCopies } from "../src/providers/bitbucket-cloud/index.js";
 import { buildReviews, normalizeCommitAuthor, normalizeUser } from "../src/providers/bitbucket-cloud/normalize.js";
 import { loadProviderDefinition } from "../src/registry.js";
 import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
 import { fakeBitbucketCloud } from "./helpers/fake-bitbucket-cloud.js";
+import { readJsonFixture } from "./helpers/fixtures.js";
+import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
 import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
 
 /** Bitbucket Cloud's 429 carries no rate-limit headers at all (seen live), so only backoff applies. */
@@ -76,6 +78,21 @@ describe("Bitbucket Cloud provider on a synthetic repository: every merge strate
     expect(r.changes.find((c) => c.id === x.ids.atOpen)?.mergedAt).toBe("2026-08-01T00:00:02Z");
   });
 
+  it("skips the listing re-scan after a single-page walk (one response is one snapshot), not after a multi-page one", async () => {
+    const listings = async (pageLen: number) => {
+      const fake = fakeBitbucketCloud(sc, { pageLen });
+      let n = 0;
+      const f = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).includes("/pullrequests?")) n++;
+        return fake.fetch(input, init);
+      }) as typeof fetch;
+      await new BitbucketCloudProvider({}, { cwd: ".", env: {}, log: () => {}, fetch: f }).listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
+      return n;
+    };
+    expect(await listings(50)).toBe(1);
+    expect(await listings(3)).toBeGreaterThan(4);
+  });
+
   it("is registered as bitbucket-cloud, alias bitbucket", async () => {
     expect((await loadProviderDefinition("bitbucket-cloud", ".")).name).toBe("bitbucket-cloud");
     expect((await loadProviderDefinition("bitbucket", ".")).name).toBe("bitbucket-cloud");
@@ -83,6 +100,27 @@ describe("Bitbucket Cloud provider on a synthetic repository: every merge strate
 });
 
 describe("Bitbucket Cloud normalizers (pure)", () => {
+  it("rebased copies: only the merge commit's chain, never a look-alike elsewhere (the bamboo-specs release-plugin case)", () => {
+    const sha = (t: string) => t.repeat(40).slice(0, 40);
+    const commit = (t: string, parents: string[], message = `msg ${t}`, raw = "Dev <dev@example.com>") => ({ hash: sha(t), date: "2026-10-29T00:00:00+00:00", parents: parents.map((p) => ({ hash: sha(p) })), message, author: { raw } });
+    const plugin = "[maven-release-plugin] prepare for next development iteration";
+    const agent = "bambooagent <build-agent@atlassian.com>";
+    // master: p (a direct push by the release plugin) <- m, a PR merge commit whose second parent b is the PR's
+    // branch, which carries b2: the same author and message as p, on the release branch.
+    const hist = [commit("m", ["p", "b"]), commit("p", ["0"], plugin, agent), commit("b", ["b2"]), commit("b2", ["0"], plugin, agent)];
+    const short = new Map(hist.map((c) => [c.hash.slice(0, 12), c]));
+    const full = new Map(hist.map((c) => [c.hash, c]));
+    const pr = { id: 738, updated_on: "", destination: { branch: { name: "master" } }, merge_commit: { hash: sha("m").slice(0, 12) }, source: { commit: { hash: sha("b").slice(0, 12) } }, author: null };
+    expect(rebasedCopies(pr, [hist[2]!, hist[3]!], short, full)).toEqual([]); // a plain merge rewrites nothing
+    // Rebase + fast-forward: copies r1, r2 of o1, o2 sit on the chain from the merge commit r2.
+    const ff = [commit("r", ["q"], "work b"), commit("q", ["p"], "work a")];
+    const ffShort = new Map([...ff, ...hist].map((c) => [c.hash.slice(0, 12), c]));
+    const ffFull = new Map([...ff, ...hist].map((c) => [c.hash, c]));
+    const listed = [commit("o", ["0"], "work a"), commit("n", ["o"], "work b")];
+    const ffPr = { ...pr, merge_commit: { hash: sha("r").slice(0, 12) }, source: { commit: { hash: sha("n").slice(0, 12) } } };
+    expect(rebasedCopies(ffPr, listed, ffShort, ffFull).map((c) => c.hash)).toEqual([sha("r"), sha("q")]);
+  });
+
   it("bot detection: app_user and team are bots; users are human under their nickname", () => {
     expect(normalizeUser({ type: "app_user", display_name: "atlassian-renovate-bot", uuid: "{u}" })).toEqual(bot("atlassian-renovate-bot"));
     expect(normalizeUser({ type: "team", display_name: "Acme", uuid: "{t}" })).toEqual(bot("Acme"));
@@ -114,5 +152,50 @@ describe("Bitbucket Cloud normalizers (pure)", () => {
       "filip COMMENTED 2026-11-03T10:00:00Z",
       "alexey APPROVED 2026-11-03T12:00:20Z",
     ]);
+  });
+});
+
+describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs, 2026-10-27..31 (recorded during the live dry run)", () => {
+  type Rec = Recording & { options: Record<string, unknown>; repo: string; window: { opensAt: string; closesAt: string }; expected: { ids: string[]; diagnostics: unknown[] } };
+  const rec = readJsonFixture<Rec>("bitbucket-cloud", "bamboo-specs-2026-10-27.json");
+  const id = (n: number) => `bitbucket-cloud:atlassian/bamboo-specs#${n}`;
+  const push = (sha: string) => `bitbucket-cloud:atlassian/bamboo-specs@${sha}`;
+  // Expected from a git clone of master, independently of the API: 14 commits in the window = 4 PR merge
+  // commits + 6 commits PR #738 (merge_130_to_master) brought in + 4 maven-release-plugin pushes.
+  const pushes = ["71f90c5c33c7d527f715a2ec9c620ab1ed3ee7ac", "7748da302acddf0542b958006b429c040c431e58", "0912c19f1530edcc5cd10ff1b1a7cf175843f1af", "4ca76a3792ab5661cd194e12924b5747edd50525"];
+  const pr738 = ["6e3b780a3c2593924a5653a6915f8f27fff4e9a9", "dc124f98defe2a5dc3a18298fbb56e3df86cf7f0", "5a4688aaec3463d6000e9e7ac5ef7b77f47b6b27", "85f9fd3d8104fb7604ef7598cde364891764b3e3", "f5410698a1973004bdebc8385c0d9d138244dd13", "c4f2190e302f480fe40940a951443cc830d5d86e", "821a7d32ffee6ed86311f2684833b174c4ef0c55", "efb922309aa75b3d829862af376e9ecd226b0d8e"];
+  let last = replayFetch(rec);
+  const make = (h?: ConformanceHarness) => {
+    last = replayFetch(rec);
+    const base = { cwd: ".", env: {}, log: () => {}, fetch: last as typeof fetch };
+    return new BitbucketCloudProvider(rec.options, { ...(h ? h.context(base) : base), now: () => Date.parse(rec.recordedAt) });
+  };
+
+  it("passes the conformance kit on real data: the 4 PRs and 4 direct pushes git shows", async () => {
+    const report = await runProviderConformance((_f, h) => make(h), [
+      {
+        name: "atlassian/bamboo-specs 2026-10-27..31",
+        request: { repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] },
+        expect: {
+          ids: [...[738, 739, 740, 741].map(id), ...pushes.map(push)],
+          directPushes: pushes.map(push),
+          prCommits: { [id(738)]: ["aff17cc641d12ccc03525f0f2235034b42a31f67", ...pr738] },
+          mergeShas: { [id(738)]: "aff17cc641d12ccc03525f0f2235034b42a31f67", [id(741)]: "8935e1d909ea1846e6bf0f3b73a09f556380ecd0" },
+          changedLines: Object.fromEntries(pushes.map((s) => [push(s), 24])),
+          bots: ["atlassian-renovate-bot[bot]"],
+          minPages: 15,
+        },
+        pagesServed: () => last.served(),
+        http: true,
+      },
+    ]);
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
+  });
+
+  it("14 commits in the window, 10 linked to PRs; the PRs merged after the window were read for attribution only", async () => {
+    const r = await make().listChanges({ repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] });
+    expect(r.diagnostics).toEqual(rec.expected.diagnostics);
+    expect(r.diagnostics).toContainEqual({ label: "default-branch commits in window", value: 14 });
+    expect(r.diagnostics).toContainEqual({ label: "commits linked to a merged PR", value: 10 });
   });
 });

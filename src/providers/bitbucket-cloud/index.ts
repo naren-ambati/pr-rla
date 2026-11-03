@@ -160,7 +160,9 @@ export class BitbucketCloudProvider implements ScmProvider {
     const changes: ChangeRecord[] = [];
     const diagnostics: { label: string; value: number }[] = [];
     const fullSha = new Map<string, string>();
-    const history = req.kinds.includes("direct_push") ? await this.history(base, branch, opens, req.signal) : [];
+    // Walked for PRs too: merge_commit.hash is abbreviated, and 2-3 history pages resolve every merge
+    // commit since the window opened, where one /commit lookup per PR would cost more.
+    const history = await this.history(base, branch, opens, req.signal);
     for (const c of history) fullSha.set(c.hash.slice(0, 12), c.hash);
 
     if (req.kinds.includes("pull_request")) {
