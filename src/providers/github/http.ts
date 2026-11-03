@@ -1,4 +1,4 @@
-/** Minimal GitHub REST + GraphQL transport over fetch, with retries for 5xx and secondary rate limits. */
+/** Minimal GitHub REST + GraphQL transport over fetch, with retries for 5xx, secondary rate limits, truncated bodies and GraphQL timeouts. */
 
 export interface GitHubHttpOptions {
   token?: string;
@@ -18,6 +18,9 @@ export class GitHubHttpError extends Error {
   }
 }
 
+/** GraphQL errors GitHub documents as transient (timeouts, internal errors, rate limits). */
+const TRANSIENT_GRAPHQL = /something went wrong|timeout|timed out|rate limit|abuse|secondary|try again/i;
+
 export class GitHubHttp {
   readonly apiUrl: string;
   readonly graphqlUrl: string;
@@ -33,26 +36,46 @@ export class GitHubHttp {
     return h;
   }
 
-  private async send(url: string, init: RequestInit): Promise<Response> {
+  /**
+   * One request with retries. `accept(body)` returns null to accept the parsed
+   * body, or a reason string to retry (e.g. a transient GraphQL error).
+   */
+  private async request<T>(url: string, init: RequestInit, accept: (body: unknown) => string | null = () => null): Promise<{ body: T; res: Response }> {
     const max = this.o.maxRetries ?? 6;
     const sleep = this.o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+    const short = url.replace(this.apiUrl, "");
     for (let attempt = 0; ; attempt++) {
       this.requestCount++;
-      let res: Response;
+      let wait = 1000 * 2 ** attempt;
+      let reason: string;
       try {
-        res = await this.o.fetch(url, init);
+        const res = await this.o.fetch(url, init);
+        const retryable = res.status >= 500 || res.status === 429 || (res.status === 403 && (res.headers.get("retry-after") !== null || res.headers.get("x-ratelimit-remaining") === "0"));
+        if (!res.ok && !retryable) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
+        if (retryable) {
+          reason = `HTTP ${res.status}`;
+          const after = Number(res.headers.get("retry-after"));
+          const reset = Number(res.headers.get("x-ratelimit-reset"));
+          if (Number.isFinite(after) && after > 0) wait = after * 1000;
+          if (res.headers.get("x-ratelimit-remaining") === "0" && Number.isFinite(reset) && reset > 0) wait = Math.max(wait, reset * 1000 - Date.now() + 1000);
+        } else {
+          const text = await res.text();
+          let body: unknown;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = undefined;
+          }
+          const why = body === undefined ? `truncated or non-JSON body (${text.length} bytes)` : accept(body);
+          if (why === null) return { body: body as T, res };
+          reason = why;
+        }
       } catch (e) {
-        if (attempt >= max) throw e;
-        await sleep(1000 * 2 ** attempt);
-        continue;
+        if (e instanceof GitHubHttpError) throw e;
+        reason = (e as Error).message;
       }
-      const retryable = res.status >= 500 || res.status === 429 || (res.status === 403 && (res.headers.get("retry-after") !== null || res.headers.get("x-ratelimit-remaining") === "0"));
-      if (!retryable || attempt >= max) return res;
-      const after = Number(res.headers.get("retry-after"));
-      const reset = Number(res.headers.get("x-ratelimit-reset"));
-      let wait = Number.isFinite(after) && after > 0 ? after * 1000 : 1000 * 2 ** attempt;
-      if (res.headers.get("x-ratelimit-remaining") === "0" && Number.isFinite(reset) && reset > 0) wait = Math.max(wait, reset * 1000 - Date.now() + 1000);
-      this.o.log?.(`github: HTTP ${res.status} on ${url.replace(this.apiUrl, "")}; retrying in ${Math.round(wait / 1000)}s`);
+      if (attempt >= max) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${attempt + 1} attempts (${reason})`, 0);
+      this.o.log?.(`github: ${reason} on ${short}; retrying in ${Math.round(wait / 1000)}s`);
       await sleep(Math.min(wait, 15 * 60 * 1000));
     }
   }
@@ -60,17 +83,18 @@ export class GitHubHttp {
   /** GET a REST path (or absolute URL). Returns parsed JSON and the rel="next" link if any. */
   async rest<T>(pathOrUrl: string): Promise<{ data: T; next: string | null }> {
     const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${this.apiUrl}${pathOrUrl}`;
-    const res = await this.send(url, { headers: this.headers() });
-    if (!res.ok) throw new GitHubHttpError(`GitHub GET ${url.replace(this.apiUrl, "")}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
-    const link = res.headers.get("link") ?? "";
-    const next = /<([^>]+)>;\s*rel="next"/.exec(link)?.[1] ?? null;
-    return { data: (await res.json()) as T, next };
+    const { body, res } = await this.request<T>(url, { headers: this.headers() });
+    const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get("link") ?? "")?.[1] ?? null;
+    return { data: body, next };
   }
 
   async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-    const res = await this.send(this.graphqlUrl, { method: "POST", headers: this.headers({ "content-type": "application/json" }), body: JSON.stringify({ query, variables }) });
-    if (!res.ok) throw new GitHubHttpError(`GitHub GraphQL: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
-    const body = (await res.json()) as { data?: T; errors?: { message: string; type?: string }[] };
+    type G = { data?: T; errors?: { message: string; type?: string }[] };
+    const { body } = await this.request<G>(this.graphqlUrl, { method: "POST", headers: this.headers({ "content-type": "application/json" }), body: JSON.stringify({ query, variables }) }, (b) => {
+      const errs = (b as G).errors ?? [];
+      if (errs.length && errs.every((e) => TRANSIENT_GRAPHQL.test(e.message) || e.type === "RATE_LIMITED")) return `GraphQL: ${errs[0]!.message}`;
+      return null;
+    });
     if (body.errors?.length) throw new GitHubHttpError(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`, 200);
     if (!body.data) throw new GitHubHttpError("GitHub GraphQL: empty response", 200);
     return body.data;
