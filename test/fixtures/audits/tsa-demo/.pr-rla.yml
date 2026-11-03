@@ -1,0 +1,12 @@
+# Fixture audit for the trusted-time demo (bolt 1). Its registration was made live on 2026-11-03 against the
+# four default timestamp authorities, by scripts/record-tsa-fixtures.mjs; the responses are recorded in
+# test/fixtures/tsa/recorded-2026-11-03.json and replayed offline by test/timestamps-recorded.test.ts.
+# Editing anything here changes the registration digest, and the recorded tokens no longer match it.
+provider: { use: json-file, options: { path: changes.json } }
+repo: acme/widgets
+window: { name: demo-2026-q4, start: 2026-11-09, end: 2026-12-20 }
+selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }
+audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }
+timestamping:
+  authorities: [sigstore, digicert, globalsign, microsoft]
+  min_tokens: 2
