@@ -2,7 +2,20 @@
 
 Risk-limiting audits for code changes that landed on a default branch with no recorded human review, such as agent PRs merged on a bare click or direct pushes. pr-rla freezes the list of changes for a window, draws a publicly seeded random sample that anyone can re-derive, and runs a sequential test on your deep-review verdicts. It then certifies a bounded defect-rate claim, says how many more reviews it needs, or tells you to review everything.
 
-Status: v0.1 (claim D only). The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
+Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
+
+## Supported source-control systems
+
+| Provider | Cloud / self-hosted | Merge strategies classified | Direct pushes | Live-verified |
+|---|---|---|---|---|
+| [`github`](docs/providers/github.md) | github.com; GitHub Enterprise Server (`base_url`) | merge commit, squash, rebase, fast-forward | yes | **yes** (github.com: github/gh-aw Q3 2026). GHES: no, fake server only |
+| [`gitlab`](docs/providers/gitlab.md) | gitlab.com; self-managed (`base_url`) | merge commit, squash, squash + merge commit, fast-forward / semi-linear rebase | yes | **yes** (gitlab.com: gitlab-org/cli, Oct 2026). Self-managed: recorded gitlab.freedesktop.org responses |
+| [`bitbucket-cloud`](docs/providers/bitbucket-cloud.md) | bitbucket.org | merge commit, squash, fast-forward, rebase (copies on the merge commit's chain) | yes | **yes** (atlassian/bamboo-specs, 2026-10-27..31) |
+| [`bitbucket-data-center`](docs/providers/bitbucket-data-center.md) | self-hosted Data Center / Server | merge commit, squash, fast-forward, rebase (by author + time + message) | yes | **no**: no public instance; fake server from the documented shapes |
+| [`gitea`](docs/writing-a-provider.md) (external plugin, [`examples/providers/gitea`](examples/providers/gitea)) | Gitea, Forgejo, Codeberg; self-hosted (`base_url`) | merge commit, squash, rebase (by author + date + message), fast-forward | yes | **yes** (Codeberg: forgejo/docs, Oct 2026) |
+| `json-file` | any (normalized export) | as exported | as exported | n/a |
+
+Every provider passes the same conformance kit (`pr-rla/testing`); the HTTP ones also pass it under injected 5xx and 429 faults. Writing your own: [`docs/writing-a-provider.md`](docs/writing-a-provider.md).
 
 ## The election-audit idea in five lines
 
@@ -88,29 +101,37 @@ Package exports:
 
 - `pr-rla/provider`: `ScmProvider`, `ChangeRecord` and related types, `PROVIDER_API_VERSION` (1), `defineProvider()`.
 - `pr-rla/ledger`: `Ledger`, `VerdictEvent`, `LEDGER_API_VERSION` (1), `defineLedger()`.
-- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, no double counting, stable sorted ids, review-state mapping, actors, pagination and kind filtering.
+- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected.
 
-Built-in providers:
+Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
-- `github`: REST pulls sorted by update time and filtered by `merged_at`, re-scanning the head of the list for PRs updated mid-walk. Reviews come from GraphQL in batches of 40. Direct pushes are default-branch commits in the window that no merged PR introduced.
+- `github`: REST pulls sorted by update time and filtered by `merged_at`, re-scanning the head of the list for PRs updated mid-walk. Reviews come from GraphQL in batches of 40. Direct pushes are default-branch commits in the window that no merged PR introduced. `base_url` selects GitHub Enterprise Server.
+- `gitlab`: REST merge requests, approvals and reviewer states; review notes, bot flags and diff stats through GraphQL (which serves notes on public projects without a token); `base_url` for self-managed.
+- `bitbucket-cloud` (alias `bitbucket`): merged PRs with participants, activity for merge time and reviews, diffstat for size.
+- `bitbucket-data-center` (aliases `bitbucket-server`, `bitbucket-dc`): REST 1.0, unverified against a live server.
 - `json-file`: normalized changes exported from any SCM.
+
+External: [`examples/providers/gitea`](examples/providers/gitea) (`pr-rla-provider-gitea`) for Gitea and Forgejo, loaded by path or package name.
 
 Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended).
 
-### Adding a provider (GitLab, Bitbucket, Gitea, …)
+### Adding a provider (Gerrit, Azure Repos, …)
 
-1. Copy [`examples/provider-template.mjs`](examples/provider-template.mjs). Export `defineProvider({ providerApiVersion: 1, name, create(options, ctx) })`.
+The full walkthrough, with the Gitea plugin as the worked example, is [`docs/writing-a-provider.md`](docs/writing-a-provider.md). In short:
+
+1. Start from [`examples/providers/gitea/`](examples/providers/gitea/) (a complete plugin) or [`examples/provider-template.mjs`](examples/provider-template.mjs) (a skeleton). Export `defineProvider({ providerApiVersion: 1, name, create(options, ctx) })`, and send every request through `ctx.fetch` and every wait through `ctx.sleep`.
 2. `listChanges({ repo, window, kinds })` returns every change that landed on the default branch in `[opensAt, closesAt)`:
    - merged PRs/MRs into the default branch, with all reviews;
    - default-branch commits (all ancestors, not only first parents) that no merged PR introduced, as `direct_push` with `reviews: []` and `mergedBy: null`. Match both the SCM's commit→PR link and each PR's merge/squash SHA; GitHub's link was missing for one real merge commit in the recorded fixture.
    - Never return one commit for two changes. A rebase merge's commits all belong to its PR.
-3. Record real API responses and run `assertProviderConformance(provider, fixtures)` from `pr-rla/testing`.
+3. Record real API responses (`scripts/record-fixture.mjs`) and run `assertProviderConformance((fixture, harness) => …, fixtures)` from `pr-rla/testing`.
 4. Reference it from `.pr-rla.yml`: `provider: { use: ./my-provider.mjs, options: {...} }` or `provider: { use: pr-rla-provider-gitlab }`. A provider declaring another API version is refused with a clear error.
 
 ## Limitations (v0.1)
 
 - **Claim D only.** It bounds what reviewers detect under the protocol; claim T, fixed attribute plans, stratified audits and sampling without replacement are not built.
 - **Transparency log.** Exercised only against a local mock log. No Rekor production or staging entry has ever been created, so a real `--submit` is unverified, and Rekor v2 logs (no `integratedTime`) are not supported.
+- **Bots on regular accounts.** Every SCM's bot detection rests on its own account type or flag. Service accounts that run as ordinary users count as human: GitHub's `Copilot` commit author, GitLab's `gitlab-bot` and `marge-bot`, Bitbucket's `bamboo_hg_user`. On Gitea, which has no flag at all, they count as human unless they are listed in the provider's `bots` option.
 - **Direct pushes on GitHub.**
   - The commit author is not the pusher, and GitHub's commit APIs do not expose the pusher. Every manifest records this.
   - The window applies to the commit date.
