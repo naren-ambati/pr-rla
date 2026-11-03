@@ -38,8 +38,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "asn1js": "4.0.0",
     "commander": "^15.0.0",
     "drand-client": "1.4.2",
+    "pkijs": "4.0.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
