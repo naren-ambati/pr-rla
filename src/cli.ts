@@ -39,7 +39,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .command("init")
     .description("write .pr-rla.yml, review-protocol.md and audit/")
     .option("--repo <owner/name>", "repository to audit")
-    .option("--provider <name>", "github | json-file | ./path.mjs | package", "github")
+    .option("--provider <name>", "github | gitlab | bitbucket-cloud | bitbucket-data-center | json-file | ./path.mjs | package", "github")
     .option("--force", "overwrite an existing .pr-rla.yml")
     .action(function (this: Command) {
       return run((ctx) => initCommand(ctx, this.opts()))();

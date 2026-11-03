@@ -4,7 +4,9 @@
 //     use: ./examples/provider-template.mjs     # or a package name, e.g. pr-rla-provider-gitlab
 //     options: { changes: [...] }
 //
-// A real adapter (GitLab, Bitbucket, Gitea, Gerrit...) replaces listChanges() with API calls:
+// GitHub, GitLab and Bitbucket are built in; examples/providers/gitea is a complete external plugin and
+// docs/writing-a-provider.md walks through it. A real adapter (Gerrit, Azure Repos, ...) replaces listChanges()
+// with API calls made through ctx.fetch (waits through ctx.sleep, so the conformance kit can inject faults):
 //   1. list merge requests merged into the default branch in [opensAt, closesAt) (paginate fully);
 //   2. read every review/approval with its state, author and time; map to APPROVED / CHANGES_REQUESTED /
 //      COMMENTED / DISMISSED, authors to { login, kind: "human" | "bot" } (bots carry a "[bot]" suffix);

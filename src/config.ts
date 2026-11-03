@@ -107,7 +107,7 @@ export function loadConfig(path: string, overrides: { fromFile?: string } = {}):
 }
 
 export const CONFIG_TEMPLATE = (repo: string, provider: string) => `# pr-rla configuration. Everything under selector/window/audit is frozen by "pr-rla register".
-provider: ${provider}            # github | json-file | ./my-provider.mjs | { use: <name|path|package>, options: {...} }
+provider: ${provider}            # github | gitlab | bitbucket-cloud | bitbucket-data-center | json-file | ./my-provider.mjs | { use: <name|path|package>, options: {...} }
 repo: ${repo}
 
 window:

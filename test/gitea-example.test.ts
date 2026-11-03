@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfig } from "../src/config.js";
@@ -93,6 +94,17 @@ describe("external Gitea/Forgejo plugin, loaded from .pr-rla.yml through the reg
       { label: "direct pushes that are merge commits", value: 0 },
     ]);
     expect(r.changes.map((c) => c.id)).not.toContain(`gitea:${sc.repo}@${OID("P9a")}`);
+  });
+
+  it("also loads by package name (pr-rla-provider-gitea) from the audit repo's node_modules", async () => {
+    const audit = mkdtempSync(join(tmpdir(), "prrla-gitea-pkg-"));
+    mkdirSync(join(audit, "node_modules"));
+    symlinkSync(join(ROOT, "examples", "providers", "gitea"), join(audit, "node_modules", "pr-rla-provider-gitea"));
+    const config = parseConfig("provider: { use: pr-rla-provider-gitea, options: { base_url: https://forge.example.com } }\nrepo: acme/widgets\nwindow: { start: 2026-08-01, end: 2026-08-01 }\n", join(audit, ".pr-rla.yml"));
+    const p = await createProvider(config.provider, { cwd: config.dir, env: {}, log: () => {}, fetch: fakeGitea(sc).fetch });
+    expect(p.name).toBe("gitea");
+    const r = await p.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
+    expect(r.changes.map((c) => c.id).sort()).toEqual([...x.pullRequests].sort());
   });
 
   it("is a standalone package that imports only the public SDK, and the core never imports it", () => {
