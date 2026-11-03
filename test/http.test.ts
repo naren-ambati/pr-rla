@@ -44,6 +44,17 @@ describe("shared HTTP client (GitLab, Bitbucket)", () => {
     expect(e.message).toBe("bitbucket-cloud GET /x: gave up after 3 attempts (HTTP 429). Set BITBUCKET_TOKEN.");
   });
 
+  it("gives up early on a 429 that says nothing about when to come back, when told to", async () => {
+    const { f, calls } = seq(Array(10).fill(raw("Rate limit for this resource has been exceeded", 429)));
+    const c = new HttpClient({ provider: "bitbucket-cloud", baseUrl: "https://scm.example", fetch: f, sleep: async () => {}, maxBlindRateLimitRetries: 2, rateLimitHint: "Set BITBUCKET_TOKEN." });
+    await expect(c.get("/x")).rejects.toThrow(/gave up after 3 attempts \(HTTP 429\)\. Set BITBUCKET_TOKEN\./);
+    expect(calls).toHaveLength(3);
+    // A 429 WITH Retry-After is still retried up to maxRetries.
+    const told = seq([...Array(4).fill(raw("slow down", 429, { "retry-after": "1" })), json({ ok: 1 })]);
+    const c2 = new HttpClient({ provider: "bitbucket-cloud", baseUrl: "https://scm.example", fetch: told.f, sleep: async () => {}, maxBlindRateLimitRetries: 2 });
+    expect((await c2.get<{ ok: number }>("/x")).data).toEqual({ ok: 1 });
+  });
+
   it("waits for the reset before the next request when a success reports zero remaining", async () => {
     const reset = Math.floor(Date.now() / 1000) + 30;
     const { f } = seq([json([], 200, { "ratelimit-remaining": "0", "ratelimit-reset": String(reset) }), json([1])]);

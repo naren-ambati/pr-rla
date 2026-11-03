@@ -24,6 +24,12 @@ export interface HttpClientOptions {
   maxRetries?: number;
   /** Appended to the error when retries run out on a rate limit, e.g. "set GITLAB_TOKEN". */
   rateLimitHint?: string;
+  /**
+   * Retries for a 429 that says nothing about when to come back (no Retry-After or reset header).
+   * Bitbucket Cloud's anonymous limit is hourly: a minute of backoff cannot outlast it and only burns
+   * requests, so it gives up early with the hint. Default: maxRetries.
+   */
+  maxBlindRateLimitRetries?: number;
 }
 
 export class HttpError extends Error {
@@ -108,6 +114,8 @@ export class HttpClient {
       ...(opts.signal ? { signal: opts.signal } : {}),
     };
     let rateLimited = false;
+    let blind = 0;
+    let giveUp = false;
     for (let attempt = 0; ; attempt++) {
       opts.signal?.throwIfAborted();
       const hold = this.notBefore - Date.now();
@@ -141,6 +149,7 @@ export class HttpClient {
           reason = `HTTP ${res.status}`;
           const told = waitFromHeaders(res.headers, Date.now());
           if (told !== null) wait = told;
+          else if (isRateLimited(res) && ++blind > (this.o.maxBlindRateLimitRetries ?? max)) giveUp = true;
           await res.body?.cancel().catch(() => {});
         } else {
           const text = (await res.text()).slice(0, 300);
@@ -150,7 +159,7 @@ export class HttpClient {
         if (e instanceof HttpError || (e as Error).name === "AbortError") throw e;
         reason = (e as Error).message;
       }
-      if (attempt >= max) {
+      if (attempt >= max || giveUp) {
         const hint = rateLimited && this.o.rateLimitHint ? ` ${this.o.rateLimitHint}` : "";
         throw new HttpError(`${this.o.provider} ${method} ${short}: gave up after ${attempt + 1} attempts (${reason}).${hint}`, GAVE_UP, url);
       }

@@ -40,7 +40,7 @@ export const BITBUCKET_CLOUD_LIMITATIONS = [
   "bots: app_user and team accounts (access tokens, apps) are bots; a bot running on a regular user account is counted as human.",
 ];
 
-const RATE_HINT = "Unauthenticated Bitbucket Cloud API access is limited to about 60 requests per hour; set BITBUCKET_TOKEN (an access token with repository and pull request read scopes).";
+const RATE_HINT = "Unauthenticated Bitbucket Cloud API access allows only about 50-60 requests an hour; set BITBUCKET_TOKEN (an access token with repository and pull request read scopes), or retry in an hour.";
 const USER_FIELDS = "type,uuid,account_id,nickname,display_name";
 const PR_FIELDS = [
   "next",
@@ -108,6 +108,7 @@ export class BitbucketCloudProvider implements ScmProvider {
       log: ctx.log,
       ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
       rateLimitHint: RATE_HINT,
+      maxBlindRateLimitRetries: 2,
     });
     this.slackMs = (opts.listing_slack_hours ?? 24) * 3_600_000;
   }
