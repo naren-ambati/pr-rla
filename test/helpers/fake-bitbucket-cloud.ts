@@ -58,7 +58,8 @@ export function fakeBitbucketCloud(sc: ScmScenario, opts: { pageLen?: number } =
     updated_on: p.updatedAt.replace("Z", ".154292+00:00"),
     closed_on: null,
     destination: { branch: { name: p.base } },
-    source: { commit: { hash: short(p.head) } },
+    // Bitbucket lists the rebased PR's original commits, so its source head is the original head too.
+    source: { commit: { hash: short(p.strategy === "rebase" ? p.listed[p.listed.length - 1]! : p.head) } },
     merge_commit: { hash: short(landedAs(p)) },
     author: user(p.author),
     closed_by: user(p.mergedBy),

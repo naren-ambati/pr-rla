@@ -65,6 +65,30 @@ interface Page<T> {
   next?: string;
 }
 
+/**
+ * The rebased copies a PR brought in, when its merge rewrote SHAs ("Rebase, fast forward" or "Rebase,
+ * merge") and Bitbucket lists the PR's original commits. Copies can only be the first-parent chain from
+ * the merge commit (rebase + fast-forward: one parent, and not the source head) or from its second parent
+ * (rebase + merge commit, when that parent is not a listed commit), at most as long as the PR's commit
+ * list, and each must keep a listed commit's author and message. Matching on author + message alone
+ * claimed two direct pushes on atlassian/bamboo-specs: the Maven release plugin writes identical
+ * "prepare for next development iteration" commits on master and on the release branch PR #738 merged.
+ */
+export function rebasedCopies(pr: BbPullRequest, listed: readonly BbCommit[], byShortSha: ReadonlyMap<string, BbCommit>, byFullSha: ReadonlyMap<string, BbCommit>): BbCommit[] {
+  const merge = pr.merge_commit?.hash ? byShortSha.get(pr.merge_commit.hash.slice(0, 12)) : undefined;
+  if (!merge || listed.length === 0) return [];
+  const listedShas = new Set(listed.map((c) => c.hash));
+  let start: BbCommit | undefined;
+  if (merge.parents.length === 1 && pr.source?.commit?.hash && !merge.hash.startsWith(pr.source.commit.hash.slice(0, 12))) start = merge;
+  else if (merge.parents.length === 2 && !listedShas.has(merge.parents[1]!.hash)) start = byFullSha.get(merge.parents[1]!.hash);
+  const keys = new Set(listed.map(rebaseKey));
+  const out: BbCommit[] = [];
+  for (let c = start, n = 0; c && n < listed.length; c = c.parents[0] ? byFullSha.get(c.parents[0].hash) : undefined, n++) {
+    if (!listedShas.has(c.hash) && keys.has(rebaseKey(c))) out.push(c);
+  }
+  return out;
+}
+
 export class BitbucketCloudProvider implements ScmProvider {
   readonly apiVersion = PROVIDER_API_VERSION;
   readonly name = "bitbucket-cloud";
@@ -163,15 +187,22 @@ export class BitbucketCloudProvider implements ScmProvider {
         seen.add(c.hash);
         return true;
       });
-      const order = [...merged].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.pr.id - b.pr.id).map((m) => m.pr.id);
+      const order = [...merged].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.pr.id - b.pr.id);
+      const byShortSha = new Map(history.map((c) => [c.hash.slice(0, 12), c]));
+      const byFullSha = new Map(history.map((c) => [c.hash, c]));
+      let byRebase = 0;
       const res = await attributeCommits({
         commits: inWin,
         sha: (c) => c.hash,
         known,
         prefixLength: 12,
-        prs: order,
-        readCommits: async (id) => (await this.paged<BbCommit>(`${base}/pullrequests/${id}/commits?pagelen=100&fields=${COMMIT_FIELDS}`, req.signal)).map((c) => ({ sha: c.hash, key: rebaseKey(c) })),
-        rebaseKey,
+        prs: order.map((m) => m.pr.id),
+        readCommits: async (id) => {
+          const listed = await this.paged<BbCommit>(`${base}/pullrequests/${id}/commits?pagelen=100&fields=${COMMIT_FIELDS}`, req.signal);
+          const copies = rebasedCopies(order.find((m) => m.pr.id === id)!.pr, listed, byShortSha, byFullSha);
+          byRebase += copies.filter((c) => inWin.includes(c) && !known.has(c.hash.slice(0, 12))).length;
+          return [...listed, ...copies].map((c) => ({ sha: c.hash }));
+        },
       });
       for (const c of res.pushes) {
         const stats = await this.paged<{ lines_added: number; lines_removed: number }>(`${base}/diffstat/${c.hash}?pagelen=500&fields=next,values.lines_added,values.lines_removed`, req.signal);
@@ -180,7 +211,7 @@ export class BitbucketCloudProvider implements ScmProvider {
       diagnostics.push(
         { label: "default-branch commits in window", value: inWin.length },
         { label: "commits linked to a merged PR", value: res.linked },
-        { label: "rebased commits linked by author and message", value: res.byRebase },
+        { label: "rebased commits linked by author and message", value: byRebase },
         { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
