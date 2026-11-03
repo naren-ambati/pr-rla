@@ -1,5 +1,7 @@
 # pr-rla phases 3–4: refined design
 
+> **Where things are in this repo.** The refined design is this folder. The original draft it refines (README and 01–07) is in [`draft/`](draft/). The approved AI-DLC stage documents it builds on are in [`stages/`](stages/): intent statement, scope, constraint register, RAID log, requirements (FR1–FR10, NFR1–NFR19), domain components and decisions, and `founder-decisions.md`, the founder's answers file. References below to `pr-rla/docs/design/phase-3-4/` mean `draft/`. References to the AI-DLC workflow record mean `stages/`.
+
 This is the finished design review of the draft in `pr-rla/docs/design/phase-3-4/` (README and 01–07). It refines that draft against the founder's vision, technical environment and decisions. It does not start from a blank page. Every document records what it **kept**, **changed** and **added** against the draft, and why.
 
 **Design only.** This stops before code generation. Implementation is done separately.
