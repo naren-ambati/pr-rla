@@ -2,7 +2,7 @@
 
 Risk-limiting audits for code changes that landed on a default branch with no recorded human review, such as agent PRs merged on a bare click or direct pushes. pr-rla freezes the list of changes for a window, draws a publicly seeded random sample that anyone can re-derive, and runs a sequential test on your deep-review verdicts. It then certifies a bounded defect-rate claim, says how many more reviews it needs, or tells you to review everything.
 
-Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
+Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. Phase 3, bolt 1: trusted time (RFC 3161 tokens from k-of-n timestamp authorities, record schema v2). The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
 
 ## Supported source-control systems
 
@@ -38,7 +38,7 @@ pr-rla init --repo github/gh-aw               # writes .pr-rla.yml, review-proto
 export GITHUB_TOKEN=$(gh auth token)          # read-only use
 
 pr-rla freeze --dry-run                       # see the population before fixing anything
-pr-rla register                               # fixes selector + window + parameters + protocol hash
+pr-rla register                               # fixes selector + window + parameters + protocol hash; time-stamped by 4 TSAs (hash only)
 pr-rla freeze                                 # after the window closes: writes audit/<window>.manifest.json
 pr-rla sample                                 # after seed round R publishes: BLS-verifies R, writes the draws
 pr-rla record 1 pass --reviewer you           # one verdict per draw, in draw order; commit after each
@@ -61,15 +61,17 @@ On 2026-11-03 it printed `2,947 landed · 2,717 no recorded human review (merged
 
 | Step | What is fixed | How |
 |---|---|---|
-| `register` | the selector (stratum), window, p0/p1/α, cap, minimum N and the SHA-256 of `review-protocol.md` | an ECDSA-signed record; optionally a Rekor `hashedrekord` entry |
-| `freeze` | the population: every change id + merge SHA, sorted, with review states as of freeze time | `audit/<window>.manifest.json` with its SHA-256, plus a signed commitment naming N and the seed round |
+| `register` | the selector (stratum), window, p0/p1/α, cap, minimum N and the SHA-256 of `review-protocol.md` | an ECDSA-signed record (schema v2) carrying RFC 3161 tokens over its SHA-256 from k = 2 of 4 timestamp authorities; optionally a Rekor entry |
+| `freeze` | the population: every change id + merge SHA, sorted, with review states as of freeze time | `audit/<window>.manifest.json` with its SHA-256, plus a signed, time-stamped commitment naming N and the seed round |
 | seed round R | derived, not chosen: the first drand quicknet round ≥ 24 h after the later of window close and registration | rounds publish at 1692803367 + 3·(R−1) s |
 | `sample` | draw *i* = SHA-256(randomness ‖ manifest-hash ‖ uint64be(*i*)) mod N | BLS signature checked with `drand-client` against the pinned quicknet key |
 | `status` | only the longest fully labelled prefix of draws counts; a change drawn twice reuses its first verdict | reviewers cannot label easy draws first |
 
-`verify` checks: (1) the registration and whether it is PROSPECTIVE or RETROSPECTIVE; (2) that the manifest was logged before R published; (3) that R is the derived round; (4) R's BLS signature; (5) the population, rebuilt from the SCM with the registered selector and diffed against the manifest; (6) every draw; (7) the verdict events and the ledger's own history. A manifest with changes removed fails check 5, a re-rolled round fails check 3, and a manifest written after the seed was public fails check 2.
+`verify` checks: (1) the registration, its timestamp tokens, and whether it is PROSPECTIVE or RETROSPECTIVE; (2) that the manifest was time-stamped before R published; (3) that R is the derived round; (4) R's BLS signature; (5) the population, rebuilt from the SCM with the registered selector and diffed against the manifest; (6) every draw; (7) the verdict events and the ledger's own history. A manifest with changes removed fails check 5, a re-rolled round fails check 3, and a manifest written after the seed was public fails check 2.
 
-Transparency log: pr-rla builds and verifies Rekor `hashedrekord` entries (SET and RFC 6962 inclusion proof). It never submits anywhere unless you pass `--submit --rekor-url <url>`, because entries in a public log are public and permanent. Without a log entry, every output says `TIMESTAMP NOT TAMPER-PROOF`.
+Trusted time (schema v2 records): `register` and `freeze` send each configured timestamp authority one RFC 3161 request holding only the record's SHA-256 digest and a nonce, and store the tokens in the record. `verify` checks every token offline against the trust bundle shipped in the package (`src/timestamp/trust-bundle.json`): the CMS signature, the imprint and nonce, the signer's ESSCertID and its critical `timeStamping` EKU, the chain to a pinned anchor valid at genTime, and agreement with the record's signed time within 10 minutes plus the token's accuracy. Tokens from one operator count once, and k = 2 operators must agree; otherwise every output says `TIMESTAMP NOT TAMPER-PROOF (n of 2)`, and `register`/`freeze` exit 5 with the command to run again. `init` writes Sigstore, DigiCert, GlobalSign and Microsoft; GitHub, SwissSign, Sectigo and FreeTSA are bundled too, off by default. The signed `registeredAt` stays the seed input: tokens bound it, they do not replace it. Parsing uses pkijs + asn1js ([`BUILD-NOTES.md`](BUILD-NOTES.md), bolt 1). v1 records keep verifying through their Rekor `integratedTime`.
+
+Transparency log: pr-rla builds and verifies Rekor v1 `hashedrekord` entries (SET and RFC 6962 inclusion proof) and Rekor v2 entries (inclusion proof and signed checkpoint; v2 carries no time). It never submits anywhere unless you pass `--submit --rekor-url <url>`, because entries in a public log are public and permanent; `--rekor-api v2` also prints that the v2 client is unverified against the production log and needs `--yes`. No entry has ever been written to a real log.
 
 ## Architecture: bring-your-own providers and ledgers
 
@@ -130,7 +132,7 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 ## Limitations (v0.1)
 
 - **Claim D only.** It bounds what reviewers detect under the protocol; claim T, fixed attribute plans, stratified audits and sampling without replacement are not built.
-- **Transparency log.** Exercised only against a local mock log. No Rekor production or staging entry has ever been created, so a real `--submit` is unverified, and Rekor v2 logs (no `integratedTime`) are not supported.
+- **Transparency log.** Exercised only against local mock logs (v1 and v2). No Rekor production or staging entry has ever been created, so a real `--submit` is unverified on both APIs.
 - **Bots on regular accounts.** Every SCM's bot detection rests on its own account type or flag. Service accounts that run as ordinary users count as human: GitHub's `Copilot` commit author, GitLab's `gitlab-bot` and `marge-bot`, Bitbucket's `bamboo_hg_user`. On Gitea, which has no flag at all, they count as human unless they are listed in the provider's `bots` option.
 - **Direct pushes on GitHub.**
   - The commit author is not the pusher, and GitHub's commit APIs do not expose the pusher. Every manifest records this.
@@ -139,5 +141,5 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
   - A direct-push merge commit (e.g. a `git pull` merge pushed to main) is its own change, and its size is GitHub's diff against its first parent.
 - **GitHub review states are read at freeze time.** Labels can change later, so a label-based stratum may not re-verify.
 - **One repo per audit.** There is no org-pooled freeze yet.
-- **Timestamps are self-asserted** without a log: the signer's clock and the git commit times.
+- **Timestamps** are tamper-evident only when k = 2 timestamp-authority operators agree; with fewer (or none configured) they are the signer's clock, and every output says so. Three of the eight bundled anchors (Microsoft's, pinned at its intermediate, SwissSign's and FreeTSA's) were taken from the authorities' own responses (trust on first use): see BUILD-NOTES, bolt 1.
 - **One registration per audit is a procedural control.** `verify` cannot prove that no other registration exists: hand your auditor the registration before the window opens.
