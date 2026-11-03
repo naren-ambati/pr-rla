@@ -3,7 +3,13 @@ import { sortChanges, type ManifestEntry } from "./records.js";
 import { applySelector, reviewsAsOf, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
+/** Added to every manifest whose selector includes direct pushes, whatever the provider says. */
+export const DIRECT_PUSH_LIMITATION =
+  "direct_push: `author` is the commit author, which is not necessarily who pushed it (commit author != pusher); mergedBy is null because SCM commit APIs do not expose the pusher.";
+
 export interface Population {
+  /** Provider limitations plus core ones, de-duplicated. */
+  limitations: string[];
   listed: ListChangesResult;
   selection: SelectionResult;
   /** Sorted by id; reviews trimmed to the cutoff. */
@@ -37,5 +43,6 @@ export async function buildPopulation(provider: ScmProvider, args: { repo: strin
   const entries = sortChanges(selection.selected.map((c) => ({ ...c, reviews: reviewsAsOf(c, args.cutoffIso) })));
   const byKind = { pull_request: 0, direct_push: 0 };
   for (const c of listed.changes) byKind[c.kind]++;
-  return { listed, selection, entries, byKind };
+  const limitations = [...new Set([...listed.limitations, ...(args.selector.kinds.includes("direct_push") ? [DIRECT_PUSH_LIMITATION] : [])])];
+  return { limitations, listed, selection, entries, byKind };
 }

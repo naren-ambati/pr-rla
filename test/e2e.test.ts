@@ -81,6 +81,7 @@ describe("an honest retrospective audit, end to end (json-file provider, mock Re
     expect(m.N).toBe(400);
     expect(manifestSha256(m)).toBe(m.sha256);
     expect(m.changes.map((c) => c.id)).toEqual([...m.changes.map((c) => c.id)].sort());
+    expect(m.limitations.join(" ")).toMatch(/commit author != pusher/);
     expect(readJ<SignedRecord<ManifestCommitmentRecord>>(honest, `${W}/manifest-commitment.json`).record.seedRound).toBe(R);
   });
 

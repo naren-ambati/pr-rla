@@ -84,7 +84,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     }
   }
   if (opts.json) {
-    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo: config.repo, window, frozenAt, N, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.listed.limitations, summary }, null, 2));
+    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo: config.repo, window, frozenAt, N, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, summary }, null, 2));
   } else {
     ctx.out(`${opts.dryRun ? "[dry run] " : ""}${config.repo} · window ${window.name} (${window.start}..${window.end} UTC) · provider ${provider.name} · reviews as of ${frozenAt}`);
     lines.forEach((l) => ctx.out(l));
@@ -92,12 +92,12 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     ctx.out(summary);
     if (native.length) ctx.out(`provider-native, for comparison only (not used): ${native.map((n) => `${n.label} ${fmt(n.value)}`).join(" · ")}`);
     for (const d of pop.listed.diagnostics ?? []) ctx.out(`  diagnostic: ${d.label}: ${fmt(d.value)}`);
-    for (const l of pop.listed.limitations) ctx.out(`  limitation: ${l}`);
+    for (const l of pop.limitations) ctx.out(`  limitation: ${l}`);
     if (N < parameters.minPopulation) ctx.out(`population ${fmt(N)} < ${parameters.minPopulation}: review all ${fmt(N)} instead`);
   }
   if (opts.dryRun) {
     if (opts.out) {
-      writeJson(resolve(ctx.cwd, opts.out), { repo: config.repo, window, frozenAt, selector, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.listed.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
+      writeJson(resolve(ctx.cwd, opts.out), { repo: config.repo, window, frozenAt, selector, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
       ctx.out(`wrote the dry-run population to ${opts.out}`);
     }
     return 0;
@@ -115,7 +115,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     parameters,
     protocolSha256: protocol,
     funnel: pop.selection.funnel,
-    limitations: pop.listed.limitations,
+    limitations: pop.limitations,
     N,
     changes: pop.entries,
   };
