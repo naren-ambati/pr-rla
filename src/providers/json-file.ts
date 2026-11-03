@@ -77,6 +77,7 @@ export default defineProvider<JsonFileProviderOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "json-file",
   description: "Normalized ChangeRecords exported from any SCM (pr-rla/changes/v1)",
+  hosts: () => [],
   create(options: JsonFileProviderOptions, ctx: ProviderContext) {
     if (!options || typeof options.path !== "string") throw new Error('json-file provider needs options.path (or --from-file <path>)');
     return new JsonFileProvider(isAbsolute(options.path) ? options.path : resolve(ctx.cwd, options.path));

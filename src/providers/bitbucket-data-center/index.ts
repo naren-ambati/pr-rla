@@ -64,6 +64,7 @@ export class BitbucketDataCenterProvider implements ScmProvider {
       headers: token ? { authorization: `Bearer ${token}` } : {},
       fetch: ctx.fetch,
       log: ctx.log,
+      maxRetries: 0, // ctx.fetch is the fetch broker, the only retrier (contracts.md §2)
       ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
       rateLimitHint: `The server is rate limiting this client; use ${opts.token_env ?? "BITBUCKET_DC_TOKEN"} with a token whose user is exempt, or retry later.`,
     });
@@ -179,5 +180,6 @@ export default defineProvider<BitbucketDataCenterOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "bitbucket-data-center",
   description: "Bitbucket Data Center / Server REST 1.0 (unverified against a live server): merged PRs, activities, reviewers, diffs and default-branch commits",
+  hosts: (options) => (options?.base_url ? [new URL(options.base_url).host] : []),
   create: (options, ctx) => new BitbucketDataCenterProvider(options, ctx),
 });

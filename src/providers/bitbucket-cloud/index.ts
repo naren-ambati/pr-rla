@@ -106,6 +106,7 @@ export class BitbucketCloudProvider implements ScmProvider {
       headers: auth ? { authorization: auth } : {},
       fetch: ctx.fetch,
       log: ctx.log,
+      maxRetries: 0, // ctx.fetch is the fetch broker, the only retrier (contracts.md §2)
       ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
       rateLimitHint: RATE_HINT,
       maxBlindRateLimitRetries: 2,
@@ -259,5 +260,6 @@ export default defineProvider<BitbucketCloudOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "bitbucket-cloud",
   description: "Bitbucket Cloud: merged PRs, activity, participants and diffstat, plus main-branch history for direct pushes",
+  hosts: (options) => [new URL(options?.api_url ?? "https://api.bitbucket.org/2.0").host],
   create: (options, ctx) => new BitbucketCloudProvider(options ?? {}, ctx),
 });

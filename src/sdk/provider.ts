@@ -123,10 +123,28 @@ export interface ScmProvider {
   nativeCounts?(request: ListChangesRequest, selector: Readonly<Record<string, unknown>>): Promise<{ label: string; value: number }[]>;
 }
 
+/** An environment variable a plugin may receive, and the hosts its value may be sent to. */
+export interface PluginCredential {
+  env: string;
+  hosts: string[];
+}
+
 export interface ProviderDefinition<Options = Record<string, unknown>> {
   readonly providerApiVersion: number;
   readonly name: string;
   readonly description?: string;
+  /**
+   * Optional (added in phase 3, same API version): the hosts this provider contacts with
+   * these options. The fetch broker allows only these for an isolated plugin, and gives
+   * a built-in provider's hosts its service's default rate budget.
+   */
+  readonly hosts?: (options: Options) => string[];
+  /**
+   * Optional (phase 3): credentials the provider may use. It sends `prrla-cred:<ENV>` in a
+   * header (or `prrla-basic:<USER_ENV>:<TOKEN_ENV>` as Authorization) and the broker swaps
+   * in the value only for these hosts.
+   */
+  readonly credentials?: readonly PluginCredential[];
   create(options: Options, context: ProviderContext): ScmProvider | Promise<ScmProvider>;
 }
 
@@ -163,6 +181,19 @@ export function assertProviderDefinition(value: unknown, source: string): assert
   if (typeof def.create !== "function") {
     throw new Error(`${source}: provider "${def.name}" has no create() function`);
   }
+  const problem = pluginGrantProblems(def);
+  if (problem) throw new Error(`${source}: provider "${def.name}" ${problem}`);
+}
+
+/** Checks the optional `hosts`, `credentials` and `writePaths` fields of a plugin definition. */
+export function pluginGrantProblems(def: { hosts?: unknown; credentials?: unknown; writePaths?: unknown }): string | null {
+  if (def.hosts !== undefined && typeof def.hosts !== "function") return "hosts must be a function of the options returning host names";
+  if (def.writePaths !== undefined && typeof def.writePaths !== "function") return "writePaths must be a function of the options returning host/path prefixes";
+  if (def.credentials !== undefined) {
+    const ok = Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c === "object" && typeof (c as PluginCredential).env === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test((c as PluginCredential).env) && Array.isArray((c as PluginCredential).hosts) && (c as PluginCredential).hosts.every((h) => typeof h === "string" && h.length > 0));
+    if (!ok) return 'credentials must be a list of { env: "NAME", hosts: ["host", …] }';
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

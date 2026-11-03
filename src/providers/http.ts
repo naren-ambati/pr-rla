@@ -1,3 +1,8 @@
+import { BrokerError, type BrokerInit } from "../net/contract.js";
+import { DEFAULT_MAX_RETRIES, exhaustion, isRateLimited, waitFromHeaders, type RetryHints } from "../sdk/http.js";
+
+export { waitFromHeaders } from "../sdk/http.js";
+
 /**
  * JSON-over-HTTP transport shared by the built-in GitLab and Bitbucket
  * providers. Retries network errors, 5xx, 429 (and 403 rate limits), and 2xx
@@ -9,6 +14,11 @@
  * - the IETF structured form `RateLimit: "policy";r=0;t=30` (Forgejo/Codeberg).
  * A success that reports zero remaining requests delays the next request until
  * the reset, so a long walk does not run into the limit.
+ *
+ * Behind the fetch broker the built-ins construct it with `maxRetries: 0`: it then
+ * makes one attempt per request and hands its rules (attempt limit, blind-429 limit,
+ * JSON acceptance) to the broker in each request's `retry`, so the broker is the only
+ * retrier (contracts.md §2 step 6). The policy itself is src/sdk/http.ts.
  */
 
 export interface HttpClientOptions {
@@ -20,7 +30,7 @@ export interface HttpClientOptions {
   fetch: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   log?: (message: string) => void;
-  /** Retries per request (default 6). */
+  /** Retries per request (default 6). The built-ins pass 0: the broker retries. */
   maxRetries?: number;
   /** Appended to the error when retries run out on a rate limit, e.g. "set GITLAB_TOKEN". */
   rateLimitHint?: string;
@@ -54,37 +64,9 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Returns a reason to retry a parsed 2xx body (e.g. a transient GraphQL error), or null to accept it. */
   accept?: (body: unknown) => string | null;
+  /** Retries for this request, when fewer than the client's. */
+  maxRetries?: number;
 }
-
-/** Milliseconds the response's rate-limit headers ask the client to wait, or null if they say nothing. */
-export function waitFromHeaders(headers: Headers, nowMs: number, { onlyIfExhausted = false } = {}): number | null {
-  const waits: number[] = [];
-  const ra = headers.get("retry-after");
-  if (ra !== null && !onlyIfExhausted) {
-    const s = Number(ra);
-    if (Number.isFinite(s)) waits.push(Math.max(0, s) * 1000);
-    else if (!Number.isNaN(Date.parse(ra))) waits.push(Math.max(0, Date.parse(ra) - nowMs));
-  }
-  const remaining = headers.get("ratelimit-remaining") ?? headers.get("x-ratelimit-remaining");
-  const reset = Number(headers.get("ratelimit-reset") ?? headers.get("x-ratelimit-reset"));
-  if (remaining !== null && Number(remaining) <= 0 && Number.isFinite(reset) && reset > 0) {
-    waits.push(reset > 1e9 ? Math.max(0, reset * 1000 - nowMs) + 1000 : reset * 1000);
-  }
-  const structured = headers.get("ratelimit");
-  if (structured) {
-    const r = /(?:^|[;,\s])r=(\d+)/.exec(structured);
-    const t = /(?:^|[;,\s])t=(\d+)/.exec(structured);
-    if (r && t && Number(r[1]) === 0) waits.push(Number(t[1]) * 1000);
-  }
-  return waits.length ? Math.max(...waits) : null;
-}
-
-const isRateLimited = (res: Response) => {
-  if (res.status === 429) return true;
-  if (res.status !== 403) return false;
-  const remaining = res.headers.get("ratelimit-remaining") ?? res.headers.get("x-ratelimit-remaining");
-  return res.headers.get("retry-after") !== null || remaining === "0";
-};
 
 export class HttpClient {
   requestCount = 0;
@@ -106,12 +88,21 @@ export class HttpClient {
     const url = this.url(pathOrUrl);
     const short = url.startsWith(this.baseUrl) ? url.slice(this.baseUrl.length) : url;
     const method = opts.method ?? "GET";
-    const max = this.o.maxRetries ?? 6;
-    const init: RequestInit = {
+    const own = this.o.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const max = Math.min(own, opts.maxRetries ?? own);
+    const retry: RetryHints = {
+      acceptJson: (b) => opts.accept?.(b) ?? null,
+      ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+      ...(this.o.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: this.o.maxBlindRateLimitRetries } : {}),
+    };
+    // The BrokerInit fields are ignored by a plain fetch and read by the broker.
+    const init: RequestInit & Pick<BrokerInit, "destination" | "retry"> = {
       method,
       headers: { accept: "application/json", "user-agent": "pr-rla/0.2", ...this.o.headers, ...opts.headers, ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
       ...(opts.body !== undefined ? { body: opts.body } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      destination: "scm",
+      retry,
     };
     let rateLimited = false;
     let blind = 0;
@@ -157,6 +148,12 @@ export class HttpClient {
         }
       } catch (e) {
         if (e instanceof HttpError || (e as Error).name === "AbortError") throw e;
+        const gaveUp = exhaustion(e);
+        if (gaveUp) {
+          const hint = gaveUp.rateLimited && this.o.rateLimitHint ? ` ${this.o.rateLimitHint}` : "";
+          throw new HttpError(`${this.o.provider} ${method} ${short}: gave up after ${gaveUp.attempts} attempts (${gaveUp.problem}).${hint}`, GAVE_UP, url);
+        }
+        if (e instanceof BrokerError) throw e;
         reason = (e as Error).message;
       }
       if (attempt >= max || giveUp) {

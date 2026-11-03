@@ -1,4 +1,12 @@
-/** Minimal GitHub REST + GraphQL transport over fetch, with retries for 5xx, secondary rate limits, truncated bodies and GraphQL timeouts. */
+import { BrokerError, type BrokerInit } from "../../net/contract.js";
+import { DEFAULT_MAX_RETRIES, exhaustion, type RetryHints } from "../../sdk/http.js";
+
+/**
+ * Minimal GitHub REST + GraphQL transport over fetch, with retries for 5xx, secondary rate limits,
+ * truncated bodies and GraphQL timeouts. Behind the fetch broker the provider constructs it with
+ * `maxRetries: 0` and each request hands its rules to the broker (`retry`), so the broker is the
+ * only retrier; constructed with retries and a plain fetch, it retries itself as in phase 2.
+ */
 
 export interface GitHubHttpOptions {
   token?: string;
@@ -43,8 +51,12 @@ export class GitHubHttp {
    * One request with retries. `accept(body)` returns null to accept the parsed
    * body, or a reason string to retry (e.g. a transient GraphQL error).
    */
-  private async request<T>(url: string, init: RequestInit, accept: (body: unknown) => string | null = () => null, maxRetries?: number): Promise<{ body: T; res: Response }> {
-    const max = maxRetries ?? this.o.maxRetries ?? 6;
+  private async request<T>(url: string, base: RequestInit, accept: (body: unknown) => string | null = () => null, maxRetries?: number): Promise<{ body: T; res: Response }> {
+    const own = this.o.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const max = Math.min(own, maxRetries ?? own);
+    const retry: RetryHints = { acceptJson: accept, ...(maxRetries !== undefined ? { maxRetries } : {}) };
+    // The BrokerInit fields are ignored by a plain fetch and read by the broker.
+    const init: RequestInit & Pick<BrokerInit, "destination" | "retry"> = { ...base, destination: "scm", retry };
     const sleep = this.o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
     const short = url.replace(this.apiUrl, "");
     for (let attempt = 0; ; attempt++) {
@@ -75,6 +87,9 @@ export class GitHubHttp {
         }
       } catch (e) {
         if (e instanceof GitHubHttpError) throw e;
+        const gaveUp = exhaustion(e);
+        if (gaveUp) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${gaveUp.attempts} attempts (${gaveUp.problem})`, GAVE_UP);
+        if (e instanceof BrokerError) throw e;
         reason = (e as Error).message;
       }
       if (attempt >= max) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${attempt + 1} attempts (${reason})`, GAVE_UP);

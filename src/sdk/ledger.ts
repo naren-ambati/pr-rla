@@ -64,10 +64,25 @@ export interface Ledger {
   verifyIntegrity?(): Promise<LedgerIntegrityReport>;
 }
 
+/** An environment variable a plugin may receive, and the hosts its value may be sent to. */
+export interface LedgerCredential {
+  env: string;
+  hosts: string[];
+}
+
 export interface LedgerDefinition<Options = Record<string, unknown>> {
   readonly ledgerApiVersion: number;
   readonly name: string;
   readonly description?: string;
+  /** Optional (phase 3, same API version): the hosts this ledger contacts with these options. */
+  readonly hosts?: (options: Options) => string[];
+  /**
+   * Optional (phase 3): `host/path-prefix` entries where this ledger may send non-read requests,
+   * e.g. `api.github.com/repos/acme/audit/`. The fetch broker refuses any other write.
+   */
+  readonly writePaths?: (options: Options) => string[];
+  /** Optional (phase 3): credentials, sent as `prrla-cred:<ENV>` placeholders and swapped only for these hosts. */
+  readonly credentials?: readonly LedgerCredential[];
   create(options: Options, context: LedgerContext): Ledger | Promise<Ledger>;
 }
 
@@ -97,6 +112,10 @@ export function assertLedgerDefinition(value: unknown, source: string): asserts 
     throw new LedgerApiVersionError(def.name, def.ledgerApiVersion);
   }
   if (typeof def.create !== "function") throw new Error(`${source}: ledger "${def.name}" has no create() function`);
+  if (def.hosts !== undefined && typeof def.hosts !== "function") throw new Error(`${source}: ledger "${def.name}" hosts must be a function of the options`);
+  if (def.writePaths !== undefined && typeof def.writePaths !== "function") throw new Error(`${source}: ledger "${def.name}" writePaths must be a function of the options`);
+  if (def.credentials !== undefined && !(Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c.env === "string" && Array.isArray(c.hosts))))
+    throw new Error(`${source}: ledger "${def.name}" credentials must be a list of { env, hosts }`);
 }
 
 export function verdictEventProblems(value: unknown): string[] {

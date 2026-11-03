@@ -68,7 +68,8 @@ export class GitHubProvider implements ScmProvider {
   constructor(opts: GitHubProviderOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
     const urls = githubEndpoints(opts);
     const token = (opts.token_env ? ctx.env[opts.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN ?? (urls.enterprise ? ctx.env.GH_ENTERPRISE_TOKEN : undefined);
-    this.http = new GitHubHttp({ token, apiUrl: urls.apiUrl, graphqlUrl: urls.graphqlUrl, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
+    // maxRetries 0: ctx.fetch is the fetch broker, the only retrier (contracts.md §2).
+    this.http = new GitHubHttp({ token, apiUrl: urls.apiUrl, graphqlUrl: urls.graphqlUrl, fetch: ctx.fetch, log: ctx.log, maxRetries: 0, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
     this.pageSize = Math.min(100, opts.page_size ?? 100);
     this.batchSize = opts.batch_size ?? 40;
     this.historyPageSize = opts.history_page_size ?? 50;
@@ -232,5 +233,9 @@ export default defineProvider<GitHubProviderOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "github",
   description: "GitHub.com and GitHub Enterprise Server (base_url): REST pulls + GraphQL reviews (batches of 40) + default-branch history for direct pushes",
+  hosts: (options) => {
+    const urls = githubEndpoints(options ?? {});
+    return [...new Set([new URL(urls.apiUrl).host, new URL(urls.graphqlUrl).host])];
+  },
   create: (options, ctx) => new GitHubProvider(options ?? {}, ctx),
 });

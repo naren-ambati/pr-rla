@@ -71,6 +71,7 @@ export class GitLabProvider implements ScmProvider {
       headers: token ? { authorization: `Bearer ${token}` } : {},
       fetch: ctx.fetch,
       log: ctx.log,
+      maxRetries: 0, // ctx.fetch is the fetch broker, the only retrier (contracts.md §2)
       ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
       rateLimitHint: `Unauthenticated gitlab.com API access is limited per IP; set ${opts.token_env ?? "GITLAB_TOKEN"} to a token with read_api.`,
     });
@@ -250,5 +251,6 @@ export default defineProvider<GitLabProviderOptions>({
   providerApiVersion: PROVIDER_API_VERSION,
   name: "gitlab",
   description: "gitlab.com / self-managed GitLab: REST merge requests, approvals and commits + GraphQL review notes, bot flags and diff stats",
+  hosts: (options) => [new URL((options?.base_url ?? "https://gitlab.com").replace(/\/+$/, "")).host],
   create: (options, ctx) => new GitLabProvider(options ?? {}, ctx),
 });

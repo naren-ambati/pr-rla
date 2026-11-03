@@ -1,4 +1,5 @@
 import { canonicalJson } from "../core/canonical.js";
+import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   SUPPORTED_PROVIDER_API_VERSIONS,
   changeRecordProblems,
@@ -66,6 +67,13 @@ export interface ConformanceFixture {
  * Handed to a provider factory. Route the provider's HTTP through `wrapFetch`
  * and its retry waits through `sleep` (or use `context()`), so the kit can count
  * requests and inject transient faults (5xx, 429 with Retry-After).
+ *
+ * The wrapped fetch is broker-shaped: a request that passes the broker contract
+ * (`destination` in its init, as the built-ins do) is retried by the harness with the
+ * broker's policy (src/sdk/http.ts), as the fetch broker retries it in a real run; such a
+ * provider passes by recovering with the harness's retries. A request made as plain
+ * `fetch(url, init)` reaches the faults directly, so a provider that brings its own
+ * retries is tested on them, as in phase 2.
  */
 export interface ConformanceHarness {
   wrapFetch(inner: typeof fetch): typeof fetch;
@@ -137,19 +145,60 @@ interface Harness extends ConformanceHarness {
   log: { url: string; method: string; sleptAfter: number; at: number }[];
 }
 
+/**
+ * The broker's retry step (contracts.md §2 step 6) over the harness's logged fetch, for
+ * requests that speak the broker contract: retryable responses and errors are retried up to
+ * the request's limit, waiting as long as the rate-limit headers say, else with backoff.
+ */
+async function brokerShaped(send: (input: string | URL | Request, init: RequestInit) => Promise<Response>, input: string | URL | Request, init: RequestInit & { destination: string; retry?: RetryHints | false }, sleep: (ms: number) => Promise<void>): Promise<Response> {
+  const { destination: _d, retry, pluginId: _p, idempotent: _i, ...req } = init as typeof init & { pluginId?: string; idempotent?: boolean };
+  if (retry === false) return send(input, req);
+  const hints = retry ?? {};
+  const max = hints.maxRetries ?? DEFAULT_MAX_RETRIES;
+  let errors = 0;
+  let blind = 0;
+  let waits = 0;
+  for (let attempt = 1; ; attempt++) {
+    let problem: string;
+    let told: number | null = null;
+    let rateLimited = false;
+    try {
+      const res = await send(input, req);
+      if (res.ok && hints.acceptJson) {
+        const checked = await checkJsonBody(res, hints.acceptJson);
+        if (checked.problem === null) return checked.response;
+        problem = checked.problem;
+      } else if (!isRetryableStatus(res)) return res;
+      else {
+        problem = `HTTP ${res.status}`;
+        rateLimited = isRateLimited(res);
+        told = waitFromHeaders(res.headers, Date.now());
+        await res.body?.cancel().catch(() => {});
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw e;
+      problem = (e as Error).message;
+    }
+    const giveUp = told !== null ? ++waits > max : ++errors > max || (rateLimited && ++blind > (hints.maxBlindRateLimitRetries ?? max));
+    if (giveUp) throw Object.assign(new Error(`conformance harness: gave up after ${attempt} attempts (${problem})`), { code: RETRIES_EXHAUSTED, attempts: attempt, lastProblem: problem, rateLimited });
+    await sleep(told ?? backoffMs(errors, 0.5));
+  }
+}
+
 function makeHarness(faults: readonly Fault[] = []): Harness {
   const log: Harness["log"] = [];
   const h: Harness = {
     log,
     requests: () => log.length,
     wrapFetch(inner) {
-      return (async (input: string | URL | Request, init?: RequestInit) => {
+      const logged = async (input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         log.push({ url, method: (init?.method ?? "GET").toUpperCase(), sleptAfter: 0, at: Date.now() });
         const fault = faults.find((f) => f.call === log.length);
         if (fault) return fault.response();
         return inner(input as string, init);
-      }) as typeof fetch;
+      };
+      return (async (input: string | URL | Request, init?: RequestInit) => (isBrokerInit(init) ? brokerShaped(logged, input, init, h.sleep) : logged(input, init))) as typeof fetch;
     },
     async sleep(ms) {
       const last = log[log.length - 1];

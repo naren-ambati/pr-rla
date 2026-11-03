@@ -117,6 +117,10 @@ It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`,
 
 The provider must retry each one, wait at least as long as the headers say, and return exactly the same records.
 
+**Behind the fetch broker.** In a real run `ctx.fetch` is pr-rla's fetch broker: every request passes its read-only guard (a provider may send only `GET`, `HEAD` and GraphQL queries), a per-host rate budget shared with every other caller, and a 30 s timeout. A request made as plain `fetch(url, init)`, as this example makes them, gets one attempt and the provider retries it, as above. A provider may instead hand retries to the broker by passing `destination: "scm"` (and optionally `retry: { maxRetries, acceptJson }`) in the init, as the built-in providers do; the kit's harness then retries that request with the broker's policy, and the provider passes by recovering through it.
+
+Two optional definition fields tell the broker what the provider reaches: `hosts(options)` (the hosts it contacts) and `credentials` (`[{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }]`). A header value `prrla-cred:GITEA_TOKEN` is then replaced with the token for those hosts only; a request to any other host carrying it is refused unsent.
+
 Two kinds of fixture are worth having:
 - **Recorded real responses.** `node scripts/record-fixture.mjs ./examples/providers/gitea/index.mjs forgejo/docs 2026-10-01 2026-10-07 out.json '{"base_url":"https://codeberg.org"}'` records read-only responses. It trims them to the fields pr-rla reads, scrubs personal e-mail addresses and never records tokens. The example ships one: [`fixtures/codeberg-forgejo-docs-2026-10-01.json`](../examples/providers/gitea/fixtures/codeberg-forgejo-docs-2026-10-01.json).
 - **A synthetic graph** with every merge strategy, because real windows rarely contain them all. pr-rla's own tests render one shared history (`test/helpers/scm-scenario.ts`) through a fake server per SCM (`test/helpers/fake-gitea.ts` for this provider).
