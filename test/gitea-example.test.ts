@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseConfig } from "../src/config.js";
 import { createProvider } from "../src/registry.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
@@ -166,5 +166,37 @@ describe("external Gitea plugin on recorded Codeberg responses: forgejo/docs, 20
     expect(r.diagnostics).toEqual(rec.expected.diagnostics);
     expect(r.diagnostics).toContainEqual({ label: "PRs merged into other branches in window (excluded)", value: 6 });
     expect(r.defaultBranch).toBe("next");
+  });
+});
+
+describe("Gitea plugin normalizers (pure, exported by the plugin)", () => {
+  it("bots: the Actions user, [bot] logins and options.bots; ghost is human", async () => {
+    const { actor, commitAuthor, reviews, retryWait } = (await import(pathToFileURL(join(ROOT, "examples", "providers", "gitea", "index.mjs")).href)) as {
+      actor: (u: unknown, bots: Set<string>) => { login: string; kind: string };
+      commitAuthor: (c: unknown, bots: Set<string>) => { login: string; kind: string };
+      reviews: (l: unknown[], bots: Set<string>) => { state: string; author: { login: string } }[];
+      retryWait: (h: Headers, attempt: number, now?: number) => number;
+    };
+    const bots = new Set(["viceice-bot"]);
+    expect(actor({ id: -2, login: "forgejo-actions" }, bots)).toEqual(bot("forgejo-actions"));
+    expect(actor({ id: 5, login: "viceice-bot" }, bots)).toEqual(bot("viceice-bot"));
+    expect(actor({ id: 6, login: "dependabot[bot]" }, bots)).toEqual(bot("dependabot"));
+    expect(actor({ id: 7, login: "mahlzahn" }, bots)).toEqual(human("mahlzahn"));
+    expect(actor({ id: -1, login: "Ghost" }, bots)).toEqual(human("ghost"));
+    expect(commitAuthor({ author: null, commit: { author: { name: "Jo", email: "jo@example.com" } } }, bots)).toEqual(human("git:jo@example.com"));
+    const r = reviews(
+      [
+        { state: "APPROVED", submitted_at: "2026-10-02T10:00:00+02:00", dismissed: true, user: { id: 1, login: "a" } },
+        { state: "REQUEST_CHANGES", submitted_at: "2026-10-01T10:00:00+02:00", dismissed: false, user: { id: 2, login: "b" } },
+        { state: "COMMENT", submitted_at: "2026-10-03T10:00:00+02:00", dismissed: false, user: { id: 3, login: "c" } },
+        { state: "PENDING", submitted_at: null, dismissed: false, user: { id: 4, login: "d" } },
+        { state: "REQUEST_REVIEW", submitted_at: null, dismissed: false, user: { id: 5, login: "e" } },
+      ],
+      bots,
+    );
+    expect(r.map((x) => `${x.author.login} ${x.state}`)).toEqual(["b CHANGES_REQUESTED", "a DISMISSED", "c COMMENTED"]);
+    expect(retryWait(new Headers({ "retry-after": "7" }), 0)).toBe(7000);
+    expect(retryWait(new Headers({ ratelimit: '"baseline";r=0;t=45' }), 0)).toBe(45_000);
+    expect(retryWait(new Headers({}), 3)).toBe(8000);
   });
 });
