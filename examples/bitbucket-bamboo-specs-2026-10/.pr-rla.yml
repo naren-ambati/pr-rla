@@ -1,0 +1,30 @@
+# A read-only Bitbucket Cloud population: atlassian/bamboo-specs, 2026-10-20..31, every change that
+# landed on master (merged PRs and direct pushes). Works without a token, but unauthenticated
+# Bitbucket Cloud access allows only about 60 requests an hour; this window needs about 50.
+#   pr-rla -C examples/bitbucket-bamboo-specs-2026-10 freeze --dry-run
+provider: bitbucket-cloud
+repo: atlassian/bamboo-specs
+
+window:
+  name: 2026-10-late
+  start: 2026-10-20
+  end: 2026-10-31
+
+selector:
+  kinds: [pull_request, direct_push]
+  authors: any
+  labels: []
+  unreviewed: no-human-review
+  merged_by: any
+  max_changed_lines: 200
+  exclude_generated: true
+
+audit:
+  claim: D
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  min_population: 150
+
+protocol: ../../docs/design/review-protocol.example.md
+ledger: git-file

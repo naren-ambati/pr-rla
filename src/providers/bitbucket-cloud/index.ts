@@ -1,0 +1,236 @@
+import {
+  PROVIDER_API_VERSION,
+  defineProvider,
+  type ChangeRecord,
+  type ListChangesRequest,
+  type ListChangesResult,
+  type ProviderContext,
+  type ScmProvider,
+} from "../../sdk/provider.js";
+import { HttpClient, isoUtcSeconds } from "../http.js";
+import {
+  buildReviews,
+  mergeEvent,
+  normalizeDirectPush,
+  normalizePullRequest,
+  rebaseKey,
+  type BbActivity,
+  type BbCommit,
+  type BbPullRequest,
+} from "./normalize.js";
+
+export interface BitbucketCloudOptions {
+  /** API root (default https://api.bitbucket.org/2.0). */
+  api_url?: string;
+  /** Env var with an access token or OAuth token, sent as Bearer (default BITBUCKET_TOKEN). */
+  token_env?: string;
+  /** Env var with the Atlassian account e-mail; when set, the token is an API token sent with Basic auth (default BITBUCKET_USERNAME). */
+  username_env?: string;
+  /** Hours before the window opens to start listing PRs by update time (default 24). */
+  listing_slack_hours?: number;
+}
+
+export const BITBUCKET_CLOUD_LIMITATIONS = [
+  "direct_push: Bitbucket's commit API does not expose the pusher; `author` is the commit author (commit author != pusher) and mergedBy is null.",
+  "direct_push: the window is applied to the commit date Bitbucket reports (the committer date), not the push time.",
+  "direct_push: every commit reachable from the main branch (all parents), dated in the window, that no merged PR into that branch brought in (its merge commit or its listed commits, or a rebased copy of one with the same author and message).",
+  "pull_request: merge time and merger come from the PR's MERGED activity (Bitbucket leaves closed_on empty on merged PRs); changedLines are the PR diffstat (lines added + removed).",
+  "pull_request: a withdrawn approval disappears from Bitbucket's activity, so it is not reported as DISMISSED.",
+  "bots: app_user and team accounts (access tokens, apps) are bots; a bot running on a regular user account is counted as human.",
+];
+
+const RATE_HINT = "Unauthenticated Bitbucket Cloud API access is limited to about 60 requests per hour; set BITBUCKET_TOKEN (an access token with repository and pull request read scopes).";
+const USER_FIELDS = "type,uuid,account_id,nickname,display_name";
+const PR_FIELDS = [
+  "next",
+  "values.id",
+  "values.updated_on",
+  "values.destination.branch.name",
+  "values.source.commit.hash",
+  "values.merge_commit.hash",
+  "values.links.html.href",
+  ...USER_FIELDS.split(",").map((f) => `values.author.${f}`),
+  ...USER_FIELDS.split(",").map((f) => `values.closed_by.${f}`),
+  "values.participants.role",
+  "values.participants.approved",
+  "values.participants.state",
+  "values.participants.participated_on",
+  ...USER_FIELDS.split(",").map((f) => `values.participants.user.${f}`),
+].join(",");
+const COMMIT_FIELDS = ["next", "values.hash", "values.date", "values.parents.hash", "values.message", "values.links.html.href", "values.author.raw", ...USER_FIELDS.split(",").map((f) => `values.author.user.${f}`)].join(",");
+
+interface Page<T> {
+  values: T[];
+  next?: string;
+}
+
+export class BitbucketCloudProvider implements ScmProvider {
+  readonly apiVersion = PROVIDER_API_VERSION;
+  readonly name = "bitbucket-cloud";
+  readonly http: HttpClient;
+  private readonly slackMs: number;
+  private readonly webBase = "https://bitbucket.org";
+
+  constructor(opts: BitbucketCloudOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
+    const token = ctx.env[opts.token_env ?? "BITBUCKET_TOKEN"];
+    const user = ctx.env[opts.username_env ?? "BITBUCKET_USERNAME"];
+    const auth = token ? (user ? `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}` : `Bearer ${token}`) : undefined;
+    this.http = new HttpClient({
+      provider: "bitbucket-cloud",
+      baseUrl: opts.api_url ?? "https://api.bitbucket.org/2.0",
+      headers: auth ? { authorization: auth } : {},
+      fetch: ctx.fetch,
+      log: ctx.log,
+      ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+      rateLimitHint: RATE_HINT,
+    });
+    this.slackMs = (opts.listing_slack_hours ?? 24) * 3_600_000;
+  }
+
+  private split(repo: string) {
+    const m = /^([^/\s]+)\/([^/\s]+)$/.exec(repo);
+    if (!m) throw new Error(`bitbucket-cloud repo must be "workspace/repo_slug" (got "${repo}")`);
+    return `/repositories/${encodeURIComponent(m[1]!)}/${encodeURIComponent(m[2]!)}`;
+  }
+
+  /** Follows `next` links; `each` returns false to stop early. */
+  private async paged<T>(first: string, signal?: AbortSignal, each?: (page: T[]) => boolean | void): Promise<T[]> {
+    const out: T[] = [];
+    let url: string | undefined = first;
+    while (url) {
+      signal?.throwIfAborted();
+      const { data }: { data: Page<T> } = await this.http.get<Page<T>>(url, signal);
+      out.push(...data.values);
+      if (each?.(data.values) === false) break;
+      url = data.next;
+    }
+    return out;
+  }
+
+  async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {
+    const base = this.split(req.repo);
+    const { data: repo } = await this.http.get<{ mainbranch?: { name: string } | null }>(`${base}?fields=mainbranch.name`, req.signal);
+    const branch = repo.mainbranch?.name;
+    if (!branch) throw new Error(`bitbucket-cloud: ${req.repo} has no main branch`);
+    const opens = Date.parse(req.window.opensAt);
+    const closes = Date.parse(req.window.closesAt);
+
+    const listed = await this.listMergedPrs(base, opens, req.signal);
+    const candidates = [...listed.values()].filter((p) => p.destination.branch.name === branch).sort((a, b) => a.id - b.id);
+    const otherBase = [...listed.values()].filter((p) => p.destination.branch.name !== branch && Date.parse(p.updated_on) >= opens && Date.parse(p.updated_on) < closes).length;
+
+    // Merge time is only in the activity, so read it for every PR merged into the main branch that was updated since the window opened.
+    const merged: { pr: BbPullRequest; activity: BbActivity[]; at: string; by: BbPullRequest["closed_by"] }[] = [];
+    let noMergeEvent = 0;
+    for (const pr of candidates) {
+      const activity = await this.paged<BbActivity>(`${base}/pullrequests/${pr.id}/activity?pagelen=50`, req.signal);
+      const ev = mergeEvent(activity);
+      if (!ev) noMergeEvent++;
+      const at = ev?.at ?? pr.updated_on;
+      if (Date.parse(at) >= opens) merged.push({ pr, activity, at, by: ev?.by ?? pr.closed_by ?? null });
+    }
+    const inWindow = merged.filter((m) => Date.parse(m.at) < closes);
+
+    const changes: ChangeRecord[] = [];
+    const diagnostics: { label: string; value: number }[] = [];
+    const fullSha = new Map<string, string>();
+    let history: BbCommit[] = [];
+    const prCommits = new Map<number, BbCommit[]>();
+    if (req.kinds.includes("direct_push")) {
+      for (const m of merged) prCommits.set(m.pr.id, await this.paged<BbCommit>(`${base}/pullrequests/${m.pr.id}/commits?pagelen=100&fields=${COMMIT_FIELDS}`, req.signal));
+      history = await this.history(base, branch, opens, req.signal);
+    }
+    for (const c of [...history, ...[...prCommits.values()].flat()]) fullSha.set(c.hash.slice(0, 12), c.hash);
+
+    if (req.kinds.includes("pull_request")) {
+      diagnostics.push({ label: "PRs into other branches updated in window (excluded)", value: otherBase });
+      if (noMergeEvent) diagnostics.push({ label: "merged PRs with no MERGED activity (updated_on used as merge time)", value: noMergeEvent });
+      for (const m of inWindow) {
+        const short = m.pr.merge_commit?.hash;
+        if (!short) throw new Error(`bitbucket-cloud: merged PR #${m.pr.id} has no merge_commit`);
+        let sha = short.length >= 40 ? short : fullSha.get(short.slice(0, 12));
+        if (!sha) sha = (await this.http.get<{ hash: string }>(`${base}/commit/${short}?fields=hash`, req.signal)).data.hash;
+        const stats = await this.paged<{ lines_added: number; lines_removed: number }>(`${base}/pullrequests/${m.pr.id}/diffstat?pagelen=500&fields=next,values.lines_added,values.lines_removed`, req.signal);
+        const reviews = buildReviews({ author: m.pr.author, activity: m.activity, participants: m.pr.participants ?? [], mergedAt: m.at });
+        changes.push(normalizePullRequest(req.repo, m.pr, { mergeSha: sha, mergedAt: m.at, mergedBy: m.by ?? null, reviews, changedLines: stats.reduce((n, s) => n + (s.lines_added ?? 0) + (s.lines_removed ?? 0), 0), webBase: this.webBase }));
+      }
+    }
+
+    if (req.kinds.includes("direct_push")) {
+      const byFull = new Map<string, number>();
+      const byShort = new Map<string, number>();
+      const byKey = new Map<string, number>();
+      const claim = (map: Map<string, number>, k: string, id: number) => {
+        const prev = map.get(k);
+        if (prev === undefined || id < prev) map.set(k, id);
+      };
+      for (const m of merged) {
+        if (m.pr.merge_commit?.hash) claim(byShort, m.pr.merge_commit.hash.slice(0, 12), m.pr.id);
+        for (const c of prCommits.get(m.pr.id) ?? []) {
+          claim(byFull, c.hash, m.pr.id);
+          claim(byKey, rebaseKey(c), m.pr.id);
+        }
+      }
+      const seen = new Set<string>();
+      let inWin = 0;
+      let linked = 0;
+      let byRebase = 0;
+      const pushes: BbCommit[] = [];
+      for (const c of history) {
+        const t = Date.parse(c.date);
+        if (seen.has(c.hash) || t < opens || t >= closes) continue;
+        seen.add(c.hash);
+        inWin++;
+        if (byFull.has(c.hash) || byShort.has(c.hash.slice(0, 12))) linked++;
+        else if (byKey.has(rebaseKey(c))) {
+          linked++;
+          byRebase++;
+        } else pushes.push(c);
+      }
+      for (const c of pushes) {
+        const stats = await this.paged<{ lines_added: number; lines_removed: number }>(`${base}/diffstat/${c.hash}?pagelen=500&fields=next,values.lines_added,values.lines_removed`, req.signal);
+        changes.push(normalizeDirectPush(req.repo, c, stats.reduce((n, s) => n + (s.lines_added ?? 0) + (s.lines_removed ?? 0), 0), this.webBase));
+      }
+      diagnostics.push(
+        { label: "default-branch commits in window", value: inWin },
+        { label: "commits linked to a merged PR", value: linked },
+        { label: "rebased commits linked by author and message", value: byRebase },
+        { label: "direct pushes that are merge commits", value: pushes.filter((c) => c.parents.length > 1).length },
+      );
+    }
+    return { changes, defaultBranch: branch, limitations: BITBUCKET_CLOUD_LIMITATIONS, diagnostics };
+  }
+
+  /**
+   * Merged PRs updated since (window open - slack), newest update first, then the
+   * first page(s) again for PRs updated during the walk. `state` must sit inside
+   * `q`: Bitbucket ignores the `state` parameter when `q` is given.
+   */
+  async listMergedPrs(base: string, opens: number, signal?: AbortSignal): Promise<Map<number, BbPullRequest>> {
+    const now = this.ctx.now ?? Date.now;
+    const q = encodeURIComponent(`state="MERGED" AND updated_on >= ${isoUtcSeconds(opens - this.slackMs)}`);
+    const first = `${base}/pullrequests?pagelen=50&sort=-updated_on&q=${q}&fields=${PR_FIELDS}`;
+    const byId = new Map<number, BbPullRequest>();
+    const walkStart = now();
+    await this.paged<BbPullRequest>(first, signal, (page) => void page.forEach((p) => byId.set(p.id, p)));
+    await this.paged<BbPullRequest>(first, signal, (page) => {
+      page.forEach((p) => byId.set(p.id, p));
+      const last = page[page.length - 1];
+      return !!last && Date.parse(last.updated_on) >= walkStart - 60_000;
+    });
+    return byId;
+  }
+
+  /** Main-branch history from a pinned head, newest first (git's date order), until a whole page is older than the window. */
+  async history(base: string, branch: string, opens: number, signal?: AbortSignal): Promise<BbCommit[]> {
+    const { data: ref } = await this.http.get<{ target: { hash: string } }>(`${base}/refs/branches/${encodeURIComponent(branch)}?fields=target.hash`, signal);
+    return this.paged<BbCommit>(`${base}/commits/${ref.target.hash}?pagelen=100&fields=${COMMIT_FIELDS}`, signal, (page) => page.some((c) => Date.parse(c.date) >= opens));
+  }
+}
+
+export default defineProvider<BitbucketCloudOptions>({
+  providerApiVersion: PROVIDER_API_VERSION,
+  name: "bitbucket-cloud",
+  description: "Bitbucket Cloud: merged PRs, activity, participants and diffstat, plus main-branch history for direct pushes",
+  create: (options, ctx) => new BitbucketCloudProvider(options ?? {}, ctx),
+});

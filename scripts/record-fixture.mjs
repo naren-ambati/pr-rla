@@ -1,17 +1,25 @@
 // Records real, read-only SCM API responses for provider tests (GitLab, Bitbucket Cloud, Gitea/Forgejo).
 // Usage (after `npm run build`):
 //   node scripts/record-fixture.mjs <provider|./path.mjs> <repo> <first-day> <last-day> <out.json> ['{"base_url":"…"}']
+//   node scripts/record-fixture.mjs --cli <audit-dir> <out.json>
+// --cli runs the CLI program itself (`pr-rla -C <audit-dir> freeze --dry-run`, the same commander
+// program dist/cli.js runs) with a recording fetch, so one live dry run also produces the fixture.
 // Days are inclusive UTC days. Responses are trimmed to the fields pr-rla reads and scrubbed:
 // personal e-mail addresses become user-<hash>@example.invalid (bot addresses are kept, since bot
 // detection reads them), comment bodies become "(comment)", system-note bodies are cut to 120 chars.
 // Tokens are never recorded (only URLs and request-body hashes are).
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { buildProgram } from "../dist/cli.js";
+import { nodeContext } from "../dist/commands/context.js";
+import { loadConfig } from "../dist/config.js";
 import { loadProviderDefinition } from "../dist/registry.js";
 
-const [use, repo, first, last, out, optionsJson] = process.argv.slice(2);
-if (!use || !repo || !first || !last || !out) throw new Error("usage: record-fixture.mjs <provider> <repo> <first-day> <last-day> <out.json> [options-json]");
+const cliMode = process.argv[2] === "--cli";
+const [use, repo, first, last, out, optionsJson] = cliMode ? [] : process.argv.slice(2);
+if (!cliMode && (!use || !repo || !first || !last || !out)) throw new Error("usage: record-fixture.mjs <provider> <repo> <first-day> <last-day> <out.json> [options-json] | --cli <audit-dir> <out.json>");
 const options = optionsJson ? JSON.parse(optionsJson) : {};
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 const BOT_EMAIL = /^((project|group)_?\d+_bot|service_account_)|@bots\.bitbucket\.org$|noreply\.github\.com$/;
@@ -48,7 +56,18 @@ const bitbucket = (url, b) => {
   const p = new URL(url).pathname;
   const page = (vals) => ({ ...pick(b, ["next", "page", "pagelen"]), values: vals });
   if (/\/pullrequests$/.test(p))
-    return page(b.values.map((x) => ({ ...pick(x, ["id", "state", "updated_on", "created_on"]), destination: { branch: x.destination.branch, commit: pick(x.destination.commit, ["hash"]) }, source: { commit: pick(x.source?.commit, ["hash"]) }, merge_commit: pick(x.merge_commit, ["hash"]), author: bbUser(x.author), closed_by: bbUser(x.closed_by), links: { html: x.links?.html } })));
+    return page(
+      b.values.map((x) => ({
+        ...pick(x, ["id", "state", "updated_on", "created_on"]),
+        destination: { branch: x.destination.branch },
+        source: { commit: pick(x.source?.commit, ["hash"]) },
+        merge_commit: pick(x.merge_commit, ["hash"]),
+        author: bbUser(x.author),
+        closed_by: bbUser(x.closed_by),
+        links: { html: x.links?.html },
+        participants: (x.participants ?? []).map((q) => ({ ...pick(q, ["role", "approved", "state", "participated_on"]), user: bbUser(q.user) })),
+      })),
+    );
   if (/\/pullrequests\/\d+$/.test(p)) return { ...pick(b, ["id", "state", "updated_on"]), participants: b.participants.map((x) => ({ ...pick(x, ["role", "approved", "state", "participated_on"]), user: bbUser(x.user) })) };
   if (/\/activity$/.test(p))
     return page(
@@ -62,8 +81,8 @@ const bitbucket = (url, b) => {
     );
   if (/\/diffstat/.test(p)) return page(b.values.map((x) => pick(x, ["lines_added", "lines_removed", "status"])));
   if (/\/commits(\/[^/]+)?$/.test(p) || /\/pullrequests\/\d+\/commits$/.test(p))
-    return page(b.values.map((c) => ({ hash: c.hash, date: c.date, parents: c.parents.map((x) => ({ hash: x.hash })), author: { raw: raw(c.author?.raw), user: bbUser(c.author?.user) }, links: { html: c.links?.html } })));
-  if (/\/commit\/[^/]+$/.test(p)) return { hash: b.hash, date: b.date, parents: b.parents.map((x) => ({ hash: x.hash })), author: { raw: raw(b.author?.raw), user: bbUser(b.author?.user) }, links: { html: b.links?.html } };
+    return page(b.values.map((c) => ({ hash: c.hash, date: c.date, parents: c.parents.map((x) => ({ hash: x.hash })), message: (c.message ?? "").split("\n")[0], author: { raw: raw(c.author?.raw), user: bbUser(c.author?.user) }, links: { html: c.links?.html } })));
+  if (/\/commit\/[^/]+$/.test(p)) return pick(b, ["hash", "date"]);
   if (/\/diffstat\//.test(p)) return b;
   if (/^\/2\.0\/repositories\/[^/]+\/[^/]+$/.test(p)) return { full_name: b.full_name, mainbranch: b.mainbranch, links: { html: b.links?.html } };
   return b;
@@ -105,26 +124,45 @@ const recordingFetch = async (input, init) => {
 };
 
 const recordedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
-const def = await loadProviderDefinition(use, resolve("."));
-const provider = await def.create(options, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: recordingFetch, now: () => recordedAt.getTime() });
-const window = { opensAt: `${first}T00:00:00Z`, closesAt: new Date(Date.parse(`${last}T00:00:00Z`) + 86_400_000).toISOString().replace(".000Z", "Z") };
-const result = await provider.listChanges({ repo, window, kinds: ["pull_request", "direct_push"] });
 const tokenEnv = Object.keys(process.env).filter((k) => /TOKEN/.test(k) && /GITLAB|BITBUCKET|GITEA|FORGEJO|CODEBERG/.test(k));
+let fixture;
+if (cliMode) {
+  const [dir, cliOut] = process.argv.slice(3);
+  const cwd = resolve(dir);
+  const config = loadConfig(join(cwd, ".pr-rla.yml"));
+  const tmp = join(tmpdir(), `pr-rla-record-${process.pid}.json`);
+  let code = 0;
+  console.error(`$ pr-rla -C ${dir} freeze --dry-run   (recording)`);
+  await buildProgram(() => nodeContext({ cwd, fetch: recordingFetch }), (c) => (code = c)).parseAsync(["node", "pr-rla", "freeze", "--dry-run", "--out", tmp]);
+  if (code !== 0) throw new Error(`freeze --dry-run exited ${code}`);
+  const pop = JSON.parse(readFileSync(tmp, "utf8"));
+  rmSync(tmp);
+  const def = await loadProviderDefinition(config.provider.use, cwd);
+  fixture = { out: cliOut, def, options: config.provider.options, repo: config.repo, window: { opensAt: config.window.opensAt, closesAt: config.window.closesAt }, label: `${config.window.start}..${config.window.end}`, changes: pop.listed, diagnostics: pop.diagnostics, defaultBranch: null };
+} else {
+  const def = await loadProviderDefinition(use, resolve("."));
+  const provider = await def.create(options, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: recordingFetch, now: () => recordedAt.getTime() });
+  const window = { opensAt: `${first}T00:00:00Z`, closesAt: new Date(Date.parse(`${last}T00:00:00Z`) + 86_400_000).toISOString().replace(".000Z", "Z") };
+  const result = await provider.listChanges({ repo, window, kinds: ["pull_request", "direct_push"] });
+  fixture = { out, def, options, repo, window, label: `${first}..${last}`, changes: result.changes, diagnostics: result.diagnostics ?? [], defaultBranch: result.defaultBranch };
+}
+const { def, window } = fixture;
+const result = { changes: fixture.changes, diagnostics: fixture.diagnostics, defaultBranch: fixture.defaultBranch };
 writeFileSync(
-  out,
+  fixture.out,
   `${JSON.stringify(
     {
-      description: `Real ${def.name} API responses for ${repo}, window ${first}..${last} (UTC), recorded read-only${tokenEnv.length ? " with a token" : " without a token"}. Trimmed to the fields pr-rla reads; personal e-mail addresses and comment bodies scrubbed.`,
+      description: `Real ${def.name} API responses for ${fixture.repo}, window ${fixture.label} (UTC), recorded read-only${tokenEnv.length ? " with a token" : " without a token"}${cliMode ? " during a CLI freeze --dry-run" : ""}. Trimmed to the fields pr-rla reads; personal e-mail addresses and comment bodies scrubbed.`,
       provider: def.name,
       recordedAt: recordedAt.toISOString(),
-      options,
+      options: fixture.options,
       window,
-      repo,
+      repo: fixture.repo,
       expected: {
         ids: result.changes.map((c) => c.id).sort(),
         pullRequests: result.changes.filter((c) => c.kind === "pull_request").length,
         directPushes: result.changes.filter((c) => c.kind === "direct_push").map((c) => c.id).sort(),
-        defaultBranch: result.defaultBranch,
+        ...(result.defaultBranch ? { defaultBranch: result.defaultBranch } : {}),
         diagnostics: result.diagnostics ?? [],
       },
       exchanges,
@@ -133,4 +171,4 @@ writeFileSync(
     1,
   )}\n`,
 );
-console.error(`recorded ${exchanges.length} exchanges; ${result.changes.length} changes (${result.changes.filter((c) => c.kind === "direct_push").length} direct pushes) -> ${out}`);
+console.error(`recorded ${exchanges.length} exchanges; ${result.changes.length} changes (${result.changes.filter((c) => c.kind === "direct_push").length} direct pushes) -> ${fixture.out}`);

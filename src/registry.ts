@@ -19,6 +19,7 @@ import {
 } from "./sdk/provider.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
+import bitbucketCloud from "./providers/bitbucket-cloud/index.js";
 import jsonFile from "./providers/json-file.js";
 import gitFile from "./ledgers/git-file.js";
 
@@ -35,9 +36,10 @@ export interface PluginSpec {
 export const BUILTIN_PROVIDERS: Readonly<Record<string, ProviderDefinition<never>>> = {
   github: github as ProviderDefinition<never>,
   gitlab: gitlab as ProviderDefinition<never>,
+  "bitbucket-cloud": bitbucketCloud as ProviderDefinition<never>,
   "json-file": jsonFile as ProviderDefinition<never>,
 };
-const PROVIDER_ALIASES: Record<string, string> = { json: "json-file" };
+const PROVIDER_ALIASES: Record<string, string> = { json: "json-file", bitbucket: "bitbucket-cloud" };
 
 export const BUILTIN_LEDGERS: Readonly<Record<string, LedgerDefinition<never>>> = {
   "git-file": gitFile as LedgerDefinition<never>,
