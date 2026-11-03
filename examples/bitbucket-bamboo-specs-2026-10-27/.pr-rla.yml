@@ -1,13 +1,14 @@
-# A read-only Bitbucket Cloud population: atlassian/bamboo-specs, 2026-10-20..31, every change that
+# A read-only Bitbucket Cloud population: atlassian/bamboo-specs, 2026-10-27..31, every change that
 # landed on master (merged PRs and direct pushes). Works without a token, but unauthenticated
-# Bitbucket Cloud access allows only about 60 requests an hour; this window needs about 50.
+# Bitbucket Cloud access allows only about 50-60 requests an hour; this window needs about 27
+# (2026-10-20..31 needed about 52 and ran out on the last direct push).
 #   pr-rla -C examples/bitbucket-bamboo-specs-2026-10 freeze --dry-run
 provider: bitbucket-cloud
 repo: atlassian/bamboo-specs
 
 window:
-  name: 2026-10-late
-  start: 2026-10-20
+  name: 2026-10-27_31
+  start: 2026-10-27
   end: 2026-10-31
 
 selector:

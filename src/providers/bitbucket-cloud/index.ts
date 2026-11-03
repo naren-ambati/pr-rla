@@ -188,9 +188,9 @@ export class BitbucketCloudProvider implements ScmProvider {
   }
 
   /**
-   * Merged PRs updated since (window open - slack), newest update first, then the
-   * first page(s) again for PRs updated during the walk. `state` must sit inside
-   * `q`: Bitbucket ignores the `state` parameter when `q` is given.
+   * Merged PRs updated since (window open - slack), newest update first, then (after a
+   * multi-page walk) the first page(s) again for PRs updated during the walk. `state`
+   * must sit inside `q`: Bitbucket ignores the `state` parameter when `q` is given.
    */
   async listMergedPrs(base: string, opens: number, signal?: AbortSignal): Promise<Map<number, BbPullRequest>> {
     const now = this.ctx.now ?? Date.now;
@@ -198,7 +198,14 @@ export class BitbucketCloudProvider implements ScmProvider {
     const first = `${base}/pullrequests?pagelen=50&sort=-updated_on&q=${q}&fields=${PR_FIELDS}`;
     const byId = new Map<number, BbPullRequest>();
     const walkStart = now();
-    await this.paged<BbPullRequest>(first, signal, (page) => void page.forEach((p) => byId.set(p.id, p)));
+    let pages = 0;
+    await this.paged<BbPullRequest>(first, signal, (page) => {
+      pages++;
+      page.forEach((p) => byId.set(p.id, p));
+    });
+    // One page is one snapshot: nothing can have moved between pages, so the re-scan (a request out of
+    // an anonymous budget of about 60 an hour) is only needed after a multi-page walk.
+    if (pages <= 1) return byId;
     await this.paged<BbPullRequest>(first, signal, (page) => {
       page.forEach((p) => byId.set(p.id, p));
       const last = page[page.length - 1];
