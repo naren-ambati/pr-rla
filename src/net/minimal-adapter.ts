@@ -1,26 +1,16 @@
-import { BrokerRetriesExhausted, BrokerTimeout, DESTINATION_TIMEOUT_MS, TSA_RETRY_DEADLINE_MS, type BrokerFetch, type Destination } from "./contract.js";
+import { createBroker, type AttemptReport } from "./broker.js";
+import { DESTINATION_TIMEOUT_MS, type BrokerFetch, type Destination } from "./contract.js";
+import { HOST_SPACING_MS, defaultBudgets, spacingBudget } from "./rate-limits.js";
 
 /**
- * The minimal broker adapter U1 binds to until bolt 2 (contracts.md §2).
- *
- * - Every request gets its destination's timeout (TSA 15 s).
- * - `tsa` requests are retried on network errors, timeouts, 5xx and 429, with
- *   exponential backoff, until a 5-minute per-request deadline. No attempt
- *   starts after the deadline; the caller then drops that authority. This is
- *   the only retry loop for timestamp requests: the timestamp client does not loop.
- * - Hosts with a published request spacing are spaced (Sectigo >= 15 s, FreeTSA <= 1/s).
- * - Other destinations get one attempt with their timeout; their callers keep
- *   their phase-2 retries until bolt 2 moves them onto the broker.
- *
- * There is no host allowlist, read-only guard, credential swap or recorder here:
- * those are U2a's, and nothing in U1 needs them.
+ * Bolt 1's adapter interface, kept so its callers and tests run unchanged: it now
+ * builds the real broker (./broker.ts) in read-write mode with the default budgets,
+ * so the `tsa` policy it was written to (15 s per attempt, retries until a 5-minute
+ * deadline, Sectigo/FreeTSA spacing, Retry-After honoured, no retry on 4xx) is the
+ * broker's own. New code should use createBroker or the AuditContext (src/api/context.ts).
  */
 
-/** Minimum spacing between requests to one host, from the hosts' published guidance (nfr-design.md §3). */
-export const HOST_SPACING_MS: Readonly<Record<string, number>> = {
-  "timestamp.sectigo.com": 15_000,
-  "freetsa.org": 1_000,
-};
+export { HOST_SPACING_MS };
 
 export interface MinimalBrokerOptions {
   fetch?: typeof fetch;
@@ -31,77 +21,27 @@ export interface MinimalBrokerOptions {
   random?: () => number;
   timeouts?: Partial<Record<Destination, number>>;
   tsaDeadlineMs?: number;
+  /** Replaces the default spacing for timestamp authorities. */
   hostSpacingMs?: Readonly<Record<string, number>>;
-  /** Called once per attempt, for verbose output and tests. */
-  onAttempt?: (a: { host: string; destination: Destination; attempt: number; atMs: number; outcome: string }) => void;
-}
-
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-function retryAfterMs(res: Response): number | null {
-  const h = res.headers.get("retry-after");
-  if (!h) return null;
-  const s = Number(h);
-  if (Number.isFinite(s) && s >= 0) return s * 1000;
-  const t = Date.parse(h);
-  return Number.isNaN(t) ? null : Math.max(0, t - Date.now());
+  /** Called once per timestamp attempt, for verbose output and tests. */
+  onAttempt?: (a: AttemptReport) => void;
 }
 
 export function createMinimalBroker(o: MinimalBrokerOptions = {}): BrokerFetch {
-  const f = o.fetch ?? globalThis.fetch;
-  const now = o.now ?? Date.now;
-  const sleep = o.sleep ?? realSleep;
-  const random = o.random ?? Math.random;
-  const timeouts = { ...DESTINATION_TIMEOUT_MS, ...o.timeouts };
-  const deadline = o.tsaDeadlineMs ?? TSA_RETRY_DEADLINE_MS;
-  const spacing = o.hostSpacingMs ?? HOST_SPACING_MS;
-  const lastStart = new Map<string, number>();
-
-  async function once(url: URL, init: RequestInit, destination: Destination): Promise<Response> {
-    const gap = spacing[url.hostname];
-    if (gap) {
-      const prev = lastStart.get(url.hostname);
-      if (prev !== undefined && now() - prev < gap) await sleep(gap - (now() - prev));
-    }
-    lastStart.set(url.hostname, now());
-    const ms = timeouts[destination];
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ms);
-    try {
-      return await f(url, { ...init, signal: ctrl.signal });
-    } catch (e) {
-      if (ctrl.signal.aborted) throw new BrokerTimeout(url.host, destination, ms);
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
+  const budgets = defaultBudgets();
+  if (o.hostSpacingMs) {
+    for (const host of Object.keys(HOST_SPACING_MS)) budgets.delete(host);
+    for (const [host, ms] of Object.entries(o.hostSpacingMs)) budgets.set(host, spacingBudget(host, ms));
   }
-
-  return async (input, init) => {
-    const { pluginId: _pluginId, destination, idempotent: _idempotent, ...req } = init;
-    const url = new URL(String(input));
-    if (destination !== "tsa") return once(url, req, destination);
-    const start = now();
-    for (let attempt = 1; ; attempt++) {
-      const at = now();
-      let problem: string;
-      let wait: number | null = null;
-      try {
-        const res = await once(url, req, destination);
-        if (res.status < 500 && res.status !== 429) {
-          o.onAttempt?.({ host: url.host, destination, attempt, atMs: at - start, outcome: `HTTP ${res.status}` });
-          return res;
-        }
-        problem = `HTTP ${res.status}`;
-        wait = retryAfterMs(res);
-        await res.body?.cancel().catch(() => {});
-      } catch (e) {
-        problem = (e as Error).message;
-      }
-      o.onAttempt?.({ host: url.host, destination, attempt, atMs: at - start, outcome: problem });
-      const backoff = wait ?? Math.min(30_000, 1000 * 2 ** (attempt - 1)) * (0.5 + random() / 2);
-      if (now() + backoff - start > deadline) throw new BrokerRetriesExhausted(url.host, attempt, now() - start, problem);
-      await sleep(backoff);
-    }
-  };
+  return createBroker(
+    { timeouts: { ...DESTINATION_TIMEOUT_MS, ...o.timeouts }, budgets },
+    {
+      ...(o.fetch ? { fetch: o.fetch } : {}),
+      ...(o.now ? { now: o.now } : {}),
+      ...(o.sleep ? { sleep: o.sleep } : {}),
+      ...(o.random ? { random: o.random } : {}),
+      ...(o.tsaDeadlineMs !== undefined ? { tsaDeadlineMs: o.tsaDeadlineMs } : {}),
+      ...(o.onAttempt ? { onAttempt: o.onAttempt } : {}),
+    },
+  ).fetch;
 }

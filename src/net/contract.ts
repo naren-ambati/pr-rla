@@ -1,9 +1,10 @@
+import { RETRIES_EXHAUSTED, TIMED_OUT, type RetryHints } from "../sdk/http.js";
+
 /**
  * The fetch-broker contract (contracts.md §2). Every outbound HTTP request goes
- * through one function of this shape. Bolt 2 (U2a) builds the real broker; until
- * then the minimal adapter in ./minimal-adapter.ts implements the parts U1 needs
- * (per-destination timeouts and the timestamp-authority retry policy) with the
- * same signature, so callers do not change when the broker lands.
+ * through one function of this shape: the broker in ./broker.ts. (Bolt 1 bound
+ * to a minimal adapter with the same signature; ./minimal-adapter.ts is now a
+ * thin wrapper over the broker.)
  */
 
 export type Destination = "scm" | "tsa" | "beacon" | "rekor";
@@ -14,6 +15,12 @@ export interface BrokerInit extends RequestInit {
   destination: Destination;
   /** false for non-idempotent writes (ledger writes): retried only before send and on 429. Default true. */
   idempotent?: boolean;
+  /**
+   * The caller's retry rules (attempt limit, blind-429 limit, JSON acceptance), or `false`
+   * for one attempt whose response the caller handles itself. Ignored for `tsa`, which
+   * retries until its deadline. Absent: the destination's default policy.
+   */
+  retry?: RetryHints | false;
 }
 
 export type BrokerFetch = (input: string | URL, init: BrokerInit) => Promise<Response>;
@@ -42,14 +49,19 @@ export class BrokerError extends Error {
   }
 }
 
+/** A request got no response within its destination's timeout (NFR14). After retries, `attempts` says how many timed out. */
 export class BrokerTimeout extends BrokerError {
   constructor(
     host: string,
     readonly destination: Destination,
     readonly ms: number,
+    readonly attempts = 1,
   ) {
-    super(`${host}: no response within ${ms / 1000} s (${destination})`, "BROKER_TIMEOUT", host, "check the network or the service's status, then run the command again");
+    super(`${host}: no response within ${ms / 1000} s (${destination})${attempts > 1 ? `, ${attempts} attempts` : ""}`, TIMED_OUT, host, "check the network or the service's status, then run the command again");
     this.name = "BrokerTimeout";
+  }
+  get lastProblem(): string {
+    return `no response within ${this.ms / 1000} s`;
   }
 }
 
@@ -59,8 +71,63 @@ export class BrokerRetriesExhausted extends BrokerError {
     readonly attempts: number,
     readonly elapsedMs: number,
     readonly lastProblem: string,
+    /** The last response's status, when the last attempt got one. */
+    readonly status: number | null = null,
+    /** True when the service was rate limiting the requests. */
+    readonly rateLimited = false,
   ) {
-    super(`${host}: gave up after ${attempts} attempt(s) in ${Math.round(elapsedMs / 1000)} s (last: ${lastProblem})`, "BROKER_RETRIES_EXHAUSTED", host, "the service is unavailable; run the command again later");
+    super(`${host}: gave up after ${attempts} attempt(s) in ${Math.round(elapsedMs / 1000)} s (last: ${lastProblem})`, RETRIES_EXHAUSTED, host, rateLimited ? "the service is rate limiting this client; use a token, or run the command again later" : "the service is unavailable; run the command again later");
     this.name = "BrokerRetriesExhausted";
+  }
+}
+
+/** Step 1: the URL's host (or a redirect hop's) is not in the plugin's declared hosts. */
+export class HostNotAllowed extends BrokerError {
+  constructor(
+    host: string,
+    readonly pluginId: string,
+    readonly allowed: readonly string[],
+  ) {
+    super(`${pluginId} may not contact ${host} (declared hosts: ${allowed.join(", ") || "none"})`, "HOST_NOT_ALLOWED", host, "declare the host in the plugin's hosts(), or point it at a declared host");
+    this.name = "HostNotAllowed";
+  }
+}
+
+/** Step 2: a request that is not a read (GET, HEAD, a GraphQL query) under the read-only guard. */
+export class ReadOnlyViolation extends BrokerError {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    host: string,
+    why: string,
+  ) {
+    super(`read-only: ${method} ${host}${path} refused (${why})`, "READ_ONLY_VIOLATION", host, "this command or tool only reads; run the writing command yourself from the CLI");
+    this.name = "ReadOnlyViolation";
+  }
+}
+
+/** Step 2: a ledger's non-read request outside its declared writePaths. */
+export class WritePathNotAllowed extends BrokerError {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    host: string,
+    readonly pluginId: string,
+    readonly allowed: readonly string[],
+  ) {
+    super(`${pluginId} may not ${method} ${host}${path} (it may write only under: ${allowed.join(", ") || "nothing"})`, "WRITE_PATH_NOT_ALLOWED", host, "declare the path in the ledger's writePaths(), or write to the audit repo or project");
+    this.name = "WritePathNotAllowed";
+  }
+}
+
+/** Step 3: a credential placeholder addressed to a host outside that credential's hosts. Nothing was sent. */
+export class CredentialHostMismatch extends BrokerError {
+  constructor(
+    readonly env: string,
+    host: string,
+    readonly allowed: readonly string[],
+  ) {
+    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}, not ${host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
+    this.name = "CredentialHostMismatch";
   }
 }
