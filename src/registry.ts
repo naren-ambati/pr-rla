@@ -18,6 +18,7 @@ import {
   type ScmProvider,
 } from "./sdk/provider.js";
 import github from "./providers/github/index.js";
+import gitlab from "./providers/gitlab/index.js";
 import jsonFile from "./providers/json-file.js";
 import gitFile from "./ledgers/git-file.js";
 
@@ -33,6 +34,7 @@ export interface PluginSpec {
 
 export const BUILTIN_PROVIDERS: Readonly<Record<string, ProviderDefinition<never>>> = {
   github: github as ProviderDefinition<never>,
+  gitlab: gitlab as ProviderDefinition<never>,
   "json-file": jsonFile as ProviderDefinition<never>,
 };
 const PROVIDER_ALIASES: Record<string, string> = { json: "json-file" };

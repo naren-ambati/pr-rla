@@ -1,0 +1,29 @@
+# A read-only GitLab population: gitlab-org/cli on gitlab.com, October 2026, every change
+# that landed on main (merged MRs and direct pushes). No token needed for a public project:
+#   pr-rla -C examples/gitlab-cli-2026-10 freeze --dry-run
+provider: gitlab                # { use: gitlab, options: { base_url: https://gitlab.example.com } } for self-managed
+repo: gitlab-org/cli
+
+window:
+  name: 2026-10
+  start: 2026-10-01
+  end: 2026-10-31
+
+selector:
+  kinds: [pull_request, direct_push]
+  authors: any
+  labels: []
+  unreviewed: no-human-review
+  merged_by: any
+  max_changed_lines: 200
+  exclude_generated: true
+
+audit:
+  claim: D
+  p0: 0.10
+  p1: 0.02
+  alpha: 0.05
+  min_population: 150
+
+protocol: ../../docs/design/review-protocol.example.md
+ledger: git-file

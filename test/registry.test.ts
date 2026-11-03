@@ -47,7 +47,7 @@ describe("provider registry (bring-your-own providers)", () => {
     await expect(createProvider({ use: "./lies.mjs", options: {} }, pctx(dir))).rejects.toThrow(/providerApiVersion 3/);
     writeFileSync(join(dir, "none.mjs"), `export const nothing = 1;`);
     await expect(createProvider({ use: "./none.mjs", options: {} }, pctx(dir))).rejects.toThrow(/defineProvider/);
-    await expect(createProvider({ use: "no-such-provider-pkg", options: {} }, pctx(dir))).rejects.toThrow(/cannot load provider "no-such-provider-pkg".*Built-in providers: github, json-file/);
+    await expect(createProvider({ use: "no-such-provider-pkg", options: {} }, pctx(dir))).rejects.toThrow(/cannot load provider "no-such-provider-pkg".*Built-in providers: github, gitlab, json-file/);
   });
 
   it("ledgers plug in the same way", async () => {
