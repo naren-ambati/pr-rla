@@ -20,6 +20,7 @@ Working log for pr-rla v0.1: what is done, what is verified (with the command an
 | github-issues ledger, GitHub Action, `review-draw` skill + `draw-context` | not started (day-3 items) |
 | Claim T, fixed plans, multi-repo freeze | not started (v0.2) |
 | Phase 3, bolt 1 (U1): RFC 3161 trusted time, k-of-n by operator, record schema v2, Rekor v2 client (mock-tested only) | done in bolt 1 (below) |
+| Phase 3, bolt 2 (U2a): the fetch broker (every outbound request), published-limit rate defaults, the `src/api` foundation | done in bolt 2 (below) |
 
 ## Architecture
 
@@ -535,3 +536,168 @@ Check 2 fails there only because the demo audit has no manifest. Before the forg
 - `CommandContext` gained `sleep`, `nonceFor` (recorded-response replays), `tsaTrust` and `confirm`.
 - The network-deny harness allows loopback only; mock servers must listen on 127.0.0.1.
 - Exit code 5 and `src/io/atomic.ts` exist for every later unit; `writeJson` already writes atomically.
+
+## Bolt 2 (U2a): the fetch broker and the `src/api` foundation (2026-11-03)
+
+Goal (delivery-plan.md, bolt 2): one network path for every outbound HTTP request (host allowlist, read-only guard, credential swap, a per-host rate governor with published-limit defaults, per-destination timeouts, the single retrier, a recorder), the built-in providers behind it at `maxRetries: 0`, U1 rewired onto it, and `src/api/context.ts` with read-only and read-write modes.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR10.1 every built-in provider and ledger (and later the MCP server) calls through one broker; the phase-2 suite passes unchanged | met | the 259 earlier tests pass unchanged; `api-context.test.ts › every outbound request came through the broker` runs `register --submit` and `freeze --submit` against a GitLab instance, two authorities and a Rekor log (all mocks) and finds every request carrying `redirect: "manual"`, which only the broker sets; drand too (`› drand goes through the broker`) |
+| Built-ins at `maxRetries: 0` behind the broker; the conformance kit passes unchanged | met | `broker.test.ts › the built-in providers make one attempt per request` (each of the four: alone it gives up on the first 503; behind the broker it recovers; seven 502s give `gave up after 7 attempts`). Every built-in still passes `transient-faults`, now through the kit's broker-shaped harness, since the clients no longer retry |
+| U1 rewired onto the broker; `timestamp-client.test.ts` passes unchanged | met | `brokerFor(ctx)` returns the command's broker; `createMinimalBroker` is now a wrapper that builds the broker, so the file's 15 s, 5-minute-deadline, spacing, Retry-After and 4xx tests run against the broker's own `tsa` policy, unchanged |
+| FR10.2 retries with backoff and jitter on 429, 5xx, timeouts and truncated bodies, honouring `Retry-After` and reset headers | met | `broker.test.ts › FR10.2` (7 tests): 503, 429 + `Retry-After: 9` and a truncated body, then success, with waits `[750, 9000, 1500]`; gives up after 7 attempts naming the status; header waits are not attempts; blind-429 early stop; no retry on 4xx; non-idempotent rules |
+| FR10.3 a guarded `POST` mutation throws `ReadOnlyViolation` | met | `broker.test.ts › FR10.3` (5 tests): GET, HEAD and GraphQL queries pass (keywords inside strings and comments do not fool the tokenizer); mutations, subscriptions, REST POST/PUT/PATCH/DELETE/OPTIONS and unreadable GraphQL bodies are refused and nothing is sent; a cross-host redirect is refused for a plugin held to its hosts; every built-in GraphQL document is a query |
+| FR10.4 two parallel callers share one budget under a fake clock; a header lower than the default slows the pace | met | `broker.test.ts › FR10.4` (6 tests): shared starts `[0, 0, 500, …, 4000]` against 4 at once with a broker each; GitLab.com's anonymous default 500/min against a server saying 3 (the fourth request waits 61 s); headers above the default win too (the gh-aw case); GitHub's `search` budget does not pace `core`; `Retry-After` pauses the host for every caller; concurrency limit |
+| FR10.5 a request to an undeclared host has no `Authorization` header | met | `broker.test.ts › FR10.5` (5 tests): placeholder swapped for the declared host; refused unsent for any other (`CredentialHostMismatch`); `prrla-basic:` becomes Basic auth for declared hosts only; placeholders in URLs and bodies are never swapped; no credential follows a redirect to another origin |
+| NFR12 every default equals its table value; one raised through configuration is followed | met | `broker.test.ts › NFR12` (3 tests): the reviewed table row by row with its source URL; `rate_limits: { api.bitbucket.org: { anonymous: 600/h } }` from `.pr-rla.yml` lets the 61st anonymous request through at 0 s, where the default makes it wait 60 s; unknown rules and malformed rates are refused by name |
+| NFR14 hanging servers time out at 15 s (authority) and 30 s (SCM) | met | `broker.test.ts › NFR14` (4 tests, one per destination, against a server on 127.0.0.1 that never answers): the broker arms 30 000 ms (scm, rekor) and 15 000 ms (tsa, beacon) and turns the timer's firing into `BrokerTimeout`; the real-timer version is bolt 1's `an attempt is aborted at its destination timeout`, now against the broker |
+| No recorder in read-only mode; `writePaths` enforced for ledger writes | met | `broker.test.ts › step 7` (2), `› ledger writes only under declared writePaths` (2) |
+| `src/api/context.ts` exists with read-only and read-write modes | met | `api-context.test.ts › AuditContext modes` (4 tests) |
+| Demo: a guarded `POST` throws `ReadOnlyViolation`; two parallel callers share one budget | met | `node scripts/demo-broker.mjs`, below |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| The broker: the seven-step pipeline, `bind(pluginId)` for plugins and components, roles by id (`provider:<name>`, `ledger:<name>`, `pr-rla/<component>`) | `src/net/broker.ts` |
+| Rate governor: token buckets per host and auth state, server windows per reported resource, host pauses, concurrency slots | `src/net/governor.ts` |
+| Default budgets with sources; `rate_limits` parsing and overrides | `src/net/rate-limits.ts`, `src/config.ts` |
+| GraphQL operation tokenizer | `src/net/graphql.ts` |
+| Typed errors: `HostNotAllowed`, `ReadOnlyViolation`, `WritePathNotAllowed`, `CredentialHostMismatch`; `BrokerTimeout` and `BrokerRetriesExhausted` gain `attempts`, `status`, `rateLimited`; `BrokerInit.retry` | `src/net/contract.ts` |
+| The phase-2 retry policy in one pure module, shared by the broker, the clients and the kit | `src/sdk/http.ts` |
+| Built-in clients at `maxRetries: 0`, passing their rules in `retry`; `hosts()` on every built-in definition | `src/providers/http.ts`, `src/providers/github/http.ts`, `src/providers/*/index.ts` |
+| SDK definition fields `hosts`, `credentials` (providers and ledgers), `writePaths` (ledgers), validated at load | `src/sdk/provider.ts`, `src/sdk/ledger.ts` |
+| The kit's broker-shaped harness | `src/testing/conformance.ts` |
+| `AuditContext` (mode, clock, log, one broker), `openProvider`, `openLedger` (read-only view in read-only mode), `requireReadWrite`, `AuditApiError` | `src/api/context.ts` |
+| Every command on one broker per `CommandContext`; drand and Rekor v1 through it; broker errors print `next:` | `src/commands/context.ts`, `src/commands/translog.ts`, `src/translog/rekor.ts`, `src/cli.ts` |
+| Bolt 1's adapter as a wrapper over the broker | `src/net/minimal-adapter.ts` |
+| Fixture recorders through the broker; the demo | `scripts/record-fixture.mjs`, `scripts/record-github-fixture.mjs`, `scripts/demo-broker.mjs` |
+| Tests: 49 new | `test/broker.test.ts` 39, `test/api-context.test.ts` 8, `test/conformance-broker.test.ts` 2; `test/helpers/fake-clock.ts` |
+
+### Default rate limits (NFR12)
+
+Each is the smallest limit the service publishes for the request's auth state, read from the source page on 2026-11-03. A request with an `Authorization` or `Private-Token` header is authenticated. Every rule is a token bucket (`burst` at once, refilled at the rate). "Primary" rules are replaced by the server's own rate-limit headers once a response carries them; secondary ones always apply.
+
+| Service (hosts) | Rule (`rate_limits` key) | Default | Published limit | Source |
+|---|---|---|---|---|
+| GitHub (`api.github.com`; GHES hosts from `base_url`) | `rest` (authenticated, primary) | 1,000/h | `GITHUB_TOKEN`: 1,000 requests per hour per repository (personal tokens 5,000) | https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api |
+| | `rest_anonymous` (primary) | 60/h | unauthenticated: 60 requests per hour | same |
+| | `rest_points` | 900 points/min (reads 1, writes 5) | no more than 900 points per minute for REST endpoints | same |
+| | `graphql` (authenticated, primary) | **1,000 points/h** (1 per request until headers report cost) | `GITHUB_TOKEN`: 1,000 points per hour per repository (users 5,000) | https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api |
+| | `graphql_points` | 2,000 points/min (queries 1, mutations 5) | no more than 2,000 points per minute for the GraphQL endpoint | same |
+| | `writes_per_minute`, `writes_per_hour` | 80/min, 500/h | no more than 80 content-generating requests per minute and 500 per hour | REST page |
+| | `concurrency` | 100 in flight | no more than 100 concurrent requests | REST page |
+| GitLab.com (`gitlab.com`; self-managed hosts from `base_url`) | `api` (authenticated, primary) | 2,000/min | authenticated API traffic for a user: 2,000 requests each minute | https://docs.gitlab.com/user/gitlab_com/rate_limits/ |
+| | `api_anonymous` (primary) | **500/min** | unauthenticated traffic from an IP address: 500 requests each minute | same |
+| Bitbucket Cloud (`api.bitbucket.org`) | `repositories` (authenticated, `/2.0/repositories/*`, primary) | 1,000/h | 1,000 per hour (scaled to 10,000 only for large paid workspaces with access tokens) | https://support.atlassian.com/bitbucket-cloud/docs/api-request-limits/ |
+| | `anonymous` (primary) | 60/h | 60 requests per hour across all API resources | same |
+| Bitbucket Data Center (hosts from `base_url`) | `api` (authenticated) | burst 60, refill 5/s | default token bucket: size 60, refill 5 per second, per user | https://confluence.atlassian.com/bitbucketserver/improving-instance-stability-with-rate-limiting-976171954.html |
+| Jira Cloud (`*.atlassian.net`) | `issue_writes_2s`, `issue_writes_30s` (one bucket per issue) | 20 per 2 s, 100 per 30 s | per-issue write limits | https://developer.atlassian.com/cloud/jira/platform/rate-limiting/ |
+| Sectigo (`timestamp.sectigo.com`) | `spacing` | 1 per 15 s | "add a delay of 15 seconds or more between each one" | https://www.sectigo.com/resource-library/time-stamping-server |
+| FreeTSA (`freetsa.org`) | `spacing` | 1 per s | "a maximum of one timestamping request per second per IP address" | https://freetsa.org/freetsa.html |
+| Other authorities, drand | none | one request per record or round | none published | n/a |
+
+`.pr-rla.yml` changes any rule: `rate_limits: { api.github.com: { rest: 5000/h, concurrency: 50 }, bitbucket.example.com: { api: { rate: 10/s, burst: 120 } } }`.
+
+### Live checks (read-only, unauthenticated, 2026-11-03T23:04:14Z)
+
+Three requests, rate-limit headers only, no token:
+
+```
+$ curl -sD - -o /dev/null https://gitlab.com/api/v4/projects/gitlab-org%2Fcli
+HTTP/2 200 · ratelimit-limit: 500 · ratelimit-name: throttle_unauthenticated_api · ratelimit-observed: 1 · ratelimit-remaining: 499 · ratelimit-reset: 1793747100
+$ curl -sD - -o /dev/null https://api.github.com/repos/github/gh-aw
+HTTP/2 200 · x-ratelimit-limit: 60 · x-ratelimit-remaining: 59 · x-ratelimit-used: 1 · x-ratelimit-resource: core · x-ratelimit-reset: 1793750654
+$ curl -sD - -o /dev/null https://api.bitbucket.org/2.0/repositories/atlassian/bamboo-specs
+HTTP/2 200 · (no rate-limit header)
+```
+
+- **GitLab.com's unauthenticated limit is settled: 500 requests per minute.** The docs say so and the live header agrees (`throttle_unauthenticated_api`, a reset 46 s ahead, so per minute).
+- **`GITHUB_TOKEN`'s GraphQL budget is lower: 1,000 points per hour per repository**, by GitHub's GraphQL rate-limit page. It cannot be read with an unauthenticated call (only Actions issues that token), so it rests on the docs.
+- GitHub's anonymous REST limit (60, resource `core`) is confirmed. Bitbucket Cloud sends no rate-limit header on an anonymous 200, as phase 2 saw on its 429s, so its defaults bind for the whole run.
+- The other pages were read (WebFetch), not called.
+
+### Verified (command → output)
+
+From a fresh `git clone` of the repo at `be3ad2f`, 2026-11-03T23:33Z, Node 22.23.2:
+
+```
+npm ci                                     → added 60 packages … found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 27 passed (27) · Tests 308 passed (308)
+npm --prefix examples/providers/gitea ci   → added 1 package … found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+- 308 tests = the 259 of bolt 1, unchanged, plus 49 new (above). None skipped.
+- Each intermediate commit was checked in a scratch worktree: typecheck clean, and 259, 261 and 269 tests passing.
+- `npm test` makes no network call: the broker tests use fake transports and one hanging server on 127.0.0.1, under the network-deny harness.
+
+**The demo** (`node scripts/demo-broker.mjs`, offline, in the clean clone):
+
+```
+1. read-only guard (an AuditContext in read-only mode, as the MCP server will use)
+   GET  /repos/github/gh-aw: 200 (sent)
+   POST /graphql query: 200 (sent)
+   POST /graphql mutation: ReadOnlyViolation READ_ONLY_VIOLATION: read-only: POST api.github.com/graphql refused (a GraphQL mutation or subscription, or not a GraphQL query)
+   POST /repos/github/gh-aw/issues: ReadOnlyViolation READ_ONLY_VIOLATION: read-only: POST api.github.com/repos/github/gh-aw/issues refused (POST is not a read)
+
+2. two parallel callers, 40 anonymous GETs each to api.github.com (default budget: 60/h, burst 60)
+   one broker:  60 started at 0 s (a: 30, b: 30); the other 20 one a minute, at 60 s, 120 s, 180 s … 1200 s
+   a broker each (what sharing prevents): 80 started at 0 s, over the published limit
+```
+
+### Deviations from the design, and why
+
+1. **GitHub GraphQL defaults to 1,000 points per hour, not the table's 5,000.** The design marked this "to confirm: a lower `GITHUB_TOKEN` budget", and GitHub documents 1,000 for `GITHUB_TOKEN`. NFR12 takes the smallest published limit, as the REST row already does. With a personal token the first response reports 5,000 and replaces the default, so gh-aw is not slowed.
+2. **The broker retries only callers wired to it.** A request whose init passes the broker contract (`destination`) gets the full retry policy. A plugin calling `ctx.fetch(url, init)` as plain fetch gets every other step and one attempt, because phase-2 plugins bring their own retries. The kit's harness does the same: it retries wired requests ("broker-shaped by default"), and a plain-fetch provider is tested on its own retries. The design's harness would have rescued a provider with no retries at all; the unchanged kit test `transient-faults: a provider that does not retry fails` requires that such a provider still fails.
+3. **The shared retry policy lives in `src/sdk/http.ts`**, the file units-of-work gives to U3. The kit must stay self-contained (the `architecture boundaries` test), and the broker, the clients and the kit all need the policy. The `pr-rla/http` export and `createJsonClient` remain U3's.
+4. **Exhaustion throws.** After the last attempt the broker throws `BrokerRetriesExhausted` (with `attempts`, `status`, `rateLimited`); a request that timed out every time stays a `BrokerTimeout` with `attempts`. The clients reword it into their phase-2 message (`gitlab GET /x: gave up after 7 attempts (HTTP 502).`), so `GAVE_UP` handling such as GitHub's history halving is unchanged.
+5. **Waits imposed by rate-limit headers do not count as attempts, but they are bounded:** at most `maxRetries` (6) of them per request. Each one is capped at 15 minutes (the phase-2 cap), so a bogus header cannot stall a run. Waits the budget itself imposes are not capped, or a 60/h budget would not hold.
+6. **Budgets are token buckets.** "N per window" is burst N, refilled at N per window; Data Center is burst 60, refill 5/s; spacing is burst 1. A request reserves its slot when it asks, so parallel callers interleave and each wait is slept once.
+7. **Auth state comes from the request:** an `Authorization` or `Private-Token` header makes it authenticated. The design says "a token configured for the host"; a configured token is sent in one of those headers.
+8. **Self-hosted servers get their provider's family** for the hosts the built-in declares: GHES gets GitHub.com's rules and GitLab self-managed gets GitLab.com's. These are conservative, and headers win. Data Center's row only ever applies this way.
+9. **Header budgets are kept per reported resource.** GitHub reports `core`, `graphql` and `search` separately. They are learned per first path segment, so a `search` budget of 30/min never paces `core`.
+10. **drand stays one attempt per relay;** the relay list is its failover. Rekor v1 GETs are retried; its submit is not idempotent (`idempotent: false`), as for v2.
+11. **`hostsFor` is empty for every plugin in this bolt,** since built-ins and in-process plugins are trust `builtin` or `full`. `hosts()` is recorded for U2b's isolated host and used now for budget families. Credentials are swapped for any plugin that declares them and sends placeholders; the built-ins still read their tokens from the environment (as the draft said, the step is inert for them until U2b).
+12. **Caller roles come from the pluginId's namespace.** `provider:` and unknown ids are always read-only; `ledger:` writes only under `writePaths`; `pr-rla/` components (timestamp, Rekor) write only in read-write mode.
+13. **Every CLI command runs in read-write mode in this bolt.** The per-command split is U5's.
+14. **The broker reads every response body in full** before returning it. The timeout then covers the body, a truncated body can be retried, and the recorder sees it.
+15. **Redirects:** a raw `Authorization`, `Private-Token` or `Cookie` is dropped when a redirect leaves the origin, as fetch does. A placeholder credential is refused there.
+16. **The recorder scrubs every e-mail address,** as the contract says. The fixture scripts keep their own field-level trimming, which keeps bot addresses on purpose, and now run on top of the broker so the built-ins retry while recording.
+17. **`rate_limits` can lower a limit as well as raise it.** It is not in the `init` template yet (docs are U10's). An override for a host with no default budget is reported when the provider is opened.
+18. **The Jira Cloud row is implemented now** (per-issue buckets on `*.atlassian.net`), though the Jira example arrives in bolt 3, so the defaults test covers the whole table.
+19. **GitHub "content-generating" requests are counted as every write** (non-GET REST, GraphQL mutations), which is conservative.
+20. `src/net/minimal-adapter.ts` is kept as a thin wrapper, so bolt 1's callers and tests did not change.
+
+### Findings
+
+- **GitLab.com has published proposed per-plan limits** that are "not in effect yet": Free 5,000/h with a burst of 100/min, Premium 15,000/h, Ultimate 25,000/h, and unauthenticated traffic 60/h per IP. When GitLab enforces them, the authenticated default (2,000/min) and the anonymous one (500/min) must drop, and GitLab says it will announce dates in advance.
+- A 15-minute cap on every governor wait (the phase-2 cap) would have broken any budget slower than 4 per hour. The `headers replace the default` test caught it, and the cap now applies to header-imposed waits only.
+- On a clock that never moves, a host pause would be applied to every later request. Every test clock that sleeps must advance; the command contexts' clocks do.
+
+### Unverified
+
+- The `GITHUB_TOKEN` GraphQL budget against a real Actions token (docs only).
+- Bitbucket Cloud's headers on an authenticated or rate-limited request (phase 2 saw none on anonymous 429s).
+- The broker against real servers at all: no live freeze ran in this bolt. Its behaviour on GitHub's real secondary-limit 403s and on GitLab's `RateLimit-*` headers is tested on synthetic responses shaped like the documented ones.
+- Bitbucket Data Center's token bucket against a live server (it stays unverified, as in phase 2).
+- The hand-followed redirects against GitHub's renamed-repository 301s (none in the recorded fixtures).
+
+### What bolt 3 (U4, issue ledgers) needs to know
+
+- **Open ledgers through the broker:** `ledgerFor(ctx, config, paths)` (CLI) or `openLedger(actx, spec, cwd, windowDir)`. A ledger's requests carry `pluginId` `ledger:<definition name>`.
+- **Declare `writePaths(options)`** on `github-issues` and `gitlab-issues`, for example `api.github.com/repos/<owner>/<audit-repo>/` (the GHES host from `base_url`) and `gitlab.com/api/v4/projects/<id or encoded path>/`. Any other write is `WritePathNotAllowed`, and in read-only mode every write is `ReadOnlyViolation`. A GraphQL mutation cannot be path-scoped, so use REST for writes or declare the GraphQL path exactly.
+- **Mark writes `idempotent: false`** with `destination: "scm"` in the init. They are then retried only on 429 and on connection errors before send, never after a 5xx. `publishDraws` must therefore find an issue that may have been created before a lost response, by its body marker as designed.
+- **GitHub writes are paced automatically:** 80/min and 500/h (`writes_*`), plus 5 points each against 900/min. 144 issues take under a minute (80 at once, then one every 0.75 s).
+- **GitLab.com publishes issue creation at 200/min and note creation at 60/min.** They are not in the NFR12 table yet. Add them to the `gitlab` family, with rows in the defaults test, when `gitlab-issues` lands.
+- **Jira:** per-issue write buckets already exist for `*.atlassian.net`. The example should declare `hosts`, `writePaths` and `credentials` and authenticate with `prrla-basic:JIRA_EMAIL:JIRA_TOKEN`; swapping that placeholder is tested.
+- **Read-only mode:** `openLedger` returns a view with `readVerdicts`, `verifyIntegrity` and `readHistory` only. `requireReadWrite(actx, "checkpoint")` refuses before anything starts. The git transport is outside the broker, as designed.
+- **The kit's harness retries requests that pass `destination`.** A ledger kit built on the same harness gets this for free.
+- **Recording public issue timelines:** route the recording fetch through `createBroker({}, { fetch: recordingFetch }).bind("ledger:github-issues")`, as the provider recorders now do, or use the broker's scrubbing `recorder`.
+- `test/helpers/fake-clock.ts` drives parallel waits; a test clock must advance on `sleep`.
