@@ -14,6 +14,8 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
+    // Refuses every socket except loopback mocks, so the suite provably makes no network call.
+    setupFiles: ["test/setup/network-deny.ts"],
     testTimeout: 60_000,
   },
 });
