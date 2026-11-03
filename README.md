@@ -42,6 +42,8 @@ The real demo population is in [`examples/gh-aw-q3/.pr-rla.yml`](examples/gh-aw-
 GITHUB_TOKEN=$(gh auth token) pr-rla -C examples/gh-aw-q3 freeze --dry-run
 ```
 
+On 2026-11-03 it printed `2,947 landed · 2,717 no recorded human review (merged by: 2,717 human accounts, 0 bot) · 1,589 ≤ 200 changed lines`, next to GitHub search's `review:none` figure of 2,311. It also found 61 direct pushes to `main` in the window. [`BUILD-NOTES.md`](BUILD-NOTES.md) accounts for the two PRs that GitHub search counts and pr-rla does not: both were merged into other branches.
+
 ## How an audit stays honest
 
 | Step | What is fixed | How |
@@ -112,6 +114,7 @@ Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the
 - **Direct pushes on GitHub.**
   - The commit author is not the pusher, and GitHub's commit APIs do not expose the pusher. Every manifest records this.
   - The window applies to the commit date.
+  - GitHub reports the `Copilot` commit-author account as a `User`, so a commit it authors directly is classified `human`.
   - A direct-push merge commit (e.g. a `git pull` merge pushed to main) is its own change, and its size is GitHub's diff against its first parent.
 - **GitHub review states are read at freeze time.** Labels can change later, so a label-based stratum may not re-verify.
 - **One repo per audit.** There is no org-pooled freeze yet.
