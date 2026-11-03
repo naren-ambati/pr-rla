@@ -16,6 +16,23 @@ export { checkToken, assessTimestamps, timestampsLine, notTamperProof, type Toke
 export { requestTimestamps, buildTimeStampReq } from "./timestamp/client.js";
 export { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "./timestamp/bundle.js";
 export { EXIT } from "./cli/exit-codes.js";
+export { createBroker, roleOf, type Broker, type BrokerPolicy, type BrokerDeps, type RecordedExchange } from "./net/broker.js";
+export {
+  BrokerError,
+  BrokerTimeout,
+  BrokerRetriesExhausted,
+  HostNotAllowed,
+  ReadOnlyViolation,
+  WritePathNotAllowed,
+  CredentialHostMismatch,
+  DESTINATION_TIMEOUT_MS,
+  TSA_RETRY_DEADLINE_MS,
+  type BrokerFetch,
+  type BrokerInit,
+  type Destination,
+} from "./net/contract.js";
+export { BUDGET_FAMILIES, DEFAULT_HOSTS, defaultBudgets, parseRate, type HostBudgetDefault, type RateRule, type RateLimitOverrides } from "./net/rate-limits.js";
+export { createAuditContext, openProvider, openLedger, requireReadWrite, AuditApiError, type AuditContext, type AuditContextOptions, type AuditMode } from "./api/context.js";
 export { PR_RLA_VERSION } from "./version.js";
 export { createProvider, createLedger, loadProviderDefinition, loadLedgerDefinition, BUILTIN_PROVIDERS, BUILTIN_LEDGERS } from "./registry.js";
 export { loadConfig, parseConfig } from "./config.js";

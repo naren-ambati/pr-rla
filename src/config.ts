@@ -5,6 +5,7 @@ import type { AuditParameters } from "./core/records.js";
 import { normalizeSelector, type Selector } from "./core/selector.js";
 import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
+import { parseRate, type RateLimitOverrides } from "./net/rate-limits.js";
 import { normalizePluginSpec, type PluginSpec } from "./registry.js";
 import { DEFAULT_AUTHORITIES, DEFAULT_MIN_TOKENS } from "./timestamp/bundle.js";
 
@@ -27,6 +28,8 @@ export interface PrRlaConfig {
   transparencyLog: { url: string | null; publicKeyFile: string | null };
   /** RFC 3161 authorities (trust-bundle ids) and k. Absent in .pr-rla.yml means the four defaults with k = 2. */
   timestamping: { authorities: string[]; minTokens: number };
+  /** `rate_limits:` per host, replacing default budgets (NFR12): `{ "api.github.com": { rest: "5000/h", concurrency: 50 } }`. */
+  rateLimits: RateLimitOverrides;
 }
 
 export interface WindowPaths {
@@ -89,6 +92,7 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   const authorities = ts.authorities === undefined ? [...DEFAULT_AUTHORITIES] : ts.authorities;
   if (!Array.isArray(authorities) || authorities.some((a) => typeof a !== "string" || a.length === 0)) throw new Error(`${configPath}: timestamping.authorities must be a list of trust-bundle ids, or [] for none`);
   if (new Set(authorities).size !== authorities.length) throw new Error(`${configPath}: timestamping.authorities lists an authority twice`);
+  const rateLimits = parseRateLimits(raw.rate_limits, configPath);
   const minTokens = num(ts.min_tokens, "timestamping.min_tokens", DEFAULT_MIN_TOKENS);
   if (!Number.isInteger(minTokens) || minTokens < 1) throw new Error(`${configPath}: timestamping.min_tokens must be a whole number >= 1`);
   return {
@@ -108,7 +112,31 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
       publicKeyFile: typeof tl.public_key_file === "string" ? tl.public_key_file : null,
     },
     timestamping: { authorities: authorities as string[], minTokens },
+    rateLimits,
   };
+}
+
+/** `rate_limits:` checked for shape and rate syntax here; rule names are checked against the host's budget when it is used. */
+function parseRateLimits(raw: unknown, configPath: string): RateLimitOverrides {
+  if (raw === undefined || raw === null) return {};
+  const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  if (!isMap(raw)) throw new Error(`${configPath}: rate_limits must map hosts to rules, e.g. rate_limits: { api.github.com: { rest: 5000/h } }`);
+  const out: RateLimitOverrides = {};
+  for (const [host, rules] of Object.entries(raw)) {
+    if (!isMap(rules)) throw new Error(`${configPath}: rate_limits.${host} must map rule names to rates`);
+    for (const [id, v] of Object.entries(rules)) {
+      const rate = typeof v === "string" ? v : isMap(v) ? v.rate : undefined;
+      if (id === "concurrency") continue;
+      try {
+        if (typeof rate !== "string") throw new Error(`a rate like "5000/h", or { rate: "5/s", burst: 60 }`);
+        parseRate(rate);
+      } catch (e) {
+        throw new Error(`${configPath}: rate_limits.${host}.${id}: ${(e as Error).message}`);
+      }
+    }
+    out[host] = rules;
+  }
+  return out;
 }
 
 export function loadConfig(path: string, overrides: { fromFile?: string } = {}): PrRlaConfig {

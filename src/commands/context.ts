@@ -5,12 +5,11 @@ import { fetchQuicknetBeacon, verifyQuicknetBeacon, type Beacon } from "../beaco
 import { sha256Hex } from "../core/canonical.js";
 import type { AnyCommitment, AnyManifest, AnyRegistration, DrawsFile, SignedRecord } from "../core/records.js";
 import { writeFileAtomic } from "../io/atomic.js";
+import { createAuditContext, openLedger, openProvider, type AuditContext } from "../api/context.js";
 import type { BrokerFetch } from "../net/contract.js";
-import { createMinimalBroker } from "../net/minimal-adapter.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
 export type { DrawsFile } from "../core/records.js";
 import { CONFIG_FILE, loadConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
-import { createLedger, createProvider } from "../registry.js";
 import type { Ledger } from "../sdk/ledger.js";
 import type { ScmProvider } from "../sdk/provider.js";
 
@@ -69,9 +68,34 @@ export function nodeContext(overrides: Partial<CommandContext> = {}): CommandCon
   };
 }
 
-/** The fetch broker for this command (the minimal adapter until bolt 2), on the context's clock. */
+const auditContexts = new WeakMap<CommandContext, AuditContext>();
+const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * The command's AuditContext (src/api/context.ts), read-write, made once per CommandContext so
+ * every request of the command (providers, ledgers, timestamp authorities, drand, Rekor) goes
+ * through one broker and shares its per-host budgets. It reads the context's transport, clock
+ * and sleep when it uses them, on the command's clock.
+ */
+export function auditContextFor(ctx: CommandContext): AuditContext {
+  let a = auditContexts.get(ctx);
+  if (!a) {
+    a = createAuditContext({
+      mode: "read-write",
+      env: ctx.env,
+      nowMs: () => ctx.nowMs(),
+      sleep: (ms) => (ctx.sleep ?? realSleep)(ms),
+      log: (l) => ctx.err(l),
+      fetch: ((input, init) => ctx.fetch(input, init)) as typeof fetch,
+    });
+    auditContexts.set(ctx, a);
+  }
+  return a;
+}
+
+/** The fetch broker for this command: shared by every caller, on the context's clock. */
 export function brokerFor(ctx: CommandContext): BrokerFetch {
-  return createMinimalBroker({ fetch: ctx.fetch, now: ctx.nowMs, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
+  return auditContextFor(ctx).broker.fetch;
 }
 
 /** The shipped trust bundle plus anchors the caller trusts (ctx.tsaTrust, --tsa-trust files). Never the audit repo's own. */
@@ -82,15 +106,18 @@ export function trustFor(ctx: CommandContext, files: readonly string[] = []): Tr
 export function configFor(ctx: CommandContext): { config: PrRlaConfig; paths: WindowPaths } {
   const path = ctx.configPath ? resolve(ctx.cwd, ctx.configPath) : join(ctx.cwd, CONFIG_FILE);
   const config = loadConfig(path, ctx.fromFile ? { fromFile: resolve(ctx.cwd, ctx.fromFile) } : {});
+  auditContextFor(ctx).setRateLimits(config.rateLimits);
   return { config, paths: windowPaths(config) };
 }
 
+/** The configured provider, its requests through the command's broker. */
 export async function providerFor(ctx: CommandContext, config: PrRlaConfig): Promise<ScmProvider> {
-  return createProvider(config.provider, { cwd: config.dir, env: ctx.env, log: ctx.err, fetch: ctx.fetch });
+  return openProvider(auditContextFor(ctx), config.provider, config.dir);
 }
 
+/** The configured ledger, its requests through the command's broker. */
 export async function ledgerFor(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<Ledger> {
-  return createLedger(config.ledger, { cwd: config.dir, windowDir: paths.windowDir, env: ctx.env, log: ctx.err, fetch: ctx.fetch });
+  return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir);
 }
 
 export function readJson<T>(path: string, what: string): T {
@@ -126,7 +153,7 @@ export async function getBeacon(ctx: CommandContext, round: number, beaconFile?:
     return b;
   }
   if (ctx.beacon) return ctx.beacon(round);
-  return fetchQuicknetBeacon(round, { fetch: ctx.fetch, nowUnix: Math.floor(ctx.nowMs() / 1000) });
+  return fetchQuicknetBeacon(round, { fetch: auditContextFor(ctx).componentFetch("pr-rla/drand", "beacon"), nowUnix: Math.floor(ctx.nowMs() / 1000) });
 }
 
 export const fmt = (n: number) => n.toLocaleString("en-US");

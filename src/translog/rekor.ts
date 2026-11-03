@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from "node:crypto";
 import { canonicalJson } from "../core/canonical.js";
 import type { LoggedEntry, SignedRecord } from "../core/records.js";
+import type { BrokerInit } from "../net/contract.js";
 import { leafHash, verifyInclusion } from "./merkle.js";
 
 /**
@@ -52,6 +53,9 @@ function toLogged(logUrl: string, raw: Record<string, RawEntry>): LoggedEntry {
   return { logUrl, uuid, logIndex: e.logIndex, integratedTime: e.integratedTime, logID: e.logID, body: e.body, verification };
 }
 
+/** Broker fields on each request: ignored by a plain fetch; through the broker, GETs are retried and the submit is not idempotent. */
+type RekorInit = RequestInit & Pick<BrokerInit, "destination" | "idempotent">;
+
 export class RekorClient {
   private readonly base: string;
   constructor(baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {
@@ -59,23 +63,22 @@ export class RekorClient {
   }
 
   async submit(entry: HashedRekordEntry): Promise<LoggedEntry> {
-    const res = await this.fetchImpl(`${this.base}/api/v1/log/entries`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(entry),
-    });
+    const init: RekorInit = { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(entry), destination: "rekor", idempotent: false };
+    const res = await this.fetchImpl(`${this.base}/api/v1/log/entries`, init);
     if (res.status !== 201) throw new Error(`Rekor submit failed: HTTP ${res.status} ${await res.text()}`);
     return toLogged(this.base, (await res.json()) as Record<string, RawEntry>);
   }
 
   async getEntry(uuid: string): Promise<LoggedEntry> {
-    const res = await this.fetchImpl(`${this.base}/api/v1/log/entries/${uuid}`, { headers: { accept: "application/json" } });
+    const init: RekorInit = { headers: { accept: "application/json" }, destination: "rekor" };
+    const res = await this.fetchImpl(`${this.base}/api/v1/log/entries/${uuid}`, init);
     if (!res.ok) throw new Error(`Rekor get ${uuid.slice(0, 12)}… failed: HTTP ${res.status}`);
     return toLogged(this.base, (await res.json()) as Record<string, RawEntry>);
   }
 
   async publicKey(): Promise<string> {
-    const res = await this.fetchImpl(`${this.base}/api/v1/log/publicKey`, { headers: { accept: "application/x-pem-file" } });
+    const init: RekorInit = { headers: { accept: "application/x-pem-file" }, destination: "rekor" };
+    const res = await this.fetchImpl(`${this.base}/api/v1/log/publicKey`, init);
     if (!res.ok) throw new Error(`Rekor publicKey failed: HTTP ${res.status}`);
     return res.text();
   }

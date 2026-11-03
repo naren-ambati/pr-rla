@@ -33,6 +33,9 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
       setExit(await fn(ctx));
     } catch (e) {
       ctx.err(`pr-rla: ${(e as Error).message}`);
+      // Broker and API errors name the host and the next step (NFR17).
+      const next = (e as { next?: unknown }).next;
+      if (typeof next === "string" && next) ctx.err(`  next: ${next}`);
       setExit(e instanceof CommandError ? e.exitCode : 1);
     }
   };

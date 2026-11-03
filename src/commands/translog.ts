@@ -4,7 +4,7 @@ import type { SignedRecord } from "../core/records.js";
 import { RekorClient, buildHashedRekord, verifyLoggedEntry } from "../translog/rekor.js";
 import { REKOR_V2_WARNING, RekorV2Client, buildHashedRekordV002, verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import type { PrRlaConfig } from "../config.js";
-import { CommandError, brokerFor, type CommandContext } from "./context.js";
+import { CommandError, auditContextFor, brokerFor, type CommandContext } from "./context.js";
 
 export type RekorApi = "v1" | "v2";
 
@@ -43,7 +43,7 @@ export function submitUrl(config: PrRlaConfig, flag: string | undefined): string
 }
 
 export async function submitSigned<T>(ctx: CommandContext, signed: SignedRecord<T>, url: string): Promise<SignedRecord<T>> {
-  const client = new RekorClient(url, ctx.fetch);
+  const client = new RekorClient(url, auditContextFor(ctx).componentFetch("pr-rla/rekor", "rekor"));
   const entry = await client.submit(buildHashedRekord(signed));
   const check = verifyLoggedEntry(entry, signed, await client.publicKey());
   if (!check.ok) throw new CommandError(`log ${url} returned an entry that does not verify: ${check.problems.join("; ")}`);
@@ -55,5 +55,5 @@ export async function logPublicKey(ctx: CommandContext, config: PrRlaConfig, log
   const file = flag ? resolve(ctx.cwd, flag) : config.transparencyLog.publicKeyFile ? resolve(config.dir, config.transparencyLog.publicKeyFile) : null;
   if (file) return readFileSync(file, "utf8");
   if (offline) return null;
-  return new RekorClient(logUrl, ctx.fetch).publicKey();
+  return new RekorClient(logUrl, auditContextFor(ctx).componentFetch("pr-rla/rekor", "rekor")).publicKey();
 }
