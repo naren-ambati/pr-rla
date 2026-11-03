@@ -8,6 +8,7 @@ import {
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { attributeCommits } from "../attribution.js";
 import { HttpClient, HttpError, isoUtcSeconds, nextLink } from "../http.js";
 import {
   buildReviews,
@@ -204,21 +205,11 @@ export class GitLabProvider implements ScmProvider {
   }
 
   async directPushes(pid: number, req: ListChangesRequest, branch: string, intoDefault: readonly GlMergeRequest[]) {
-    const owner = new Map<string, number>();
-    const claim = (sha: string | null | undefined, iid: number) => {
-      if (!sha) return;
-      const k = sha.toLowerCase();
-      const prev = owner.get(k);
-      if (prev === undefined || iid < prev) owner.set(k, iid);
-    };
+    // Merge and squash commits are claimed from the listing; a commit list is read only for unsquashed MRs
+    // (merge commit, fast-forward, rebase: the MR's own commits land), and only while commits are unclaimed.
+    const known = new Map<string, number>();
     for (const mr of intoDefault) {
-      claim(mr.merge_commit_sha, mr.iid);
-      claim(mr.squash_commit_sha, mr.iid);
-      // Not squashed: the MR's own commits land (merge commit, fast-forward, rebase), so list them.
-      if (!mr.squash_commit_sha) {
-        claim(mr.sha, mr.iid);
-        for (const c of await this.paged<{ id: string }>(`/projects/${pid}/merge_requests/${mr.iid}/commits?per_page=${this.pageSize}`, req.signal)) claim(c.id, mr.iid);
-      }
+      for (const s of [mr.merge_commit_sha, mr.squash_commit_sha, mr.squash_commit_sha ? null : mr.sha]) if (s && !known.has(s.toLowerCase())) known.set(s.toLowerCase(), mr.iid);
     }
     // Pin the head so pushes during the walk cannot shift the pages.
     const { data: head } = await this.http.get<{ commit: { id: string } }>(`/projects/${pid}/repository/branches/${enc(branch)}`, req.signal);
@@ -229,27 +220,29 @@ export class GitLabProvider implements ScmProvider {
       req.signal,
     );
     const seen = new Set<string>();
-    const pushes: GlCommit[] = [];
-    let inWindow = 0;
-    let linked = 0;
-    let linkedByLookup = 0;
-    for (const c of history) {
-      const sha = c.id.toLowerCase();
+    const inWindow = history.filter((c) => {
       const t = Date.parse(c.committed_date);
-      if (seen.has(sha) || t < opens || t >= closes) continue;
-      seen.add(sha);
-      inWindow++;
-      if (owner.has(sha)) {
-        linked++;
-        continue;
-      }
-      const { data: mrs } = await this.http.get<{ iid: number; state: string; target_branch: string }[]>(`/projects/${pid}/repository/commits/${sha}/merge_requests`, req.signal);
-      if (mrs.some((m) => m.state === "merged" && m.target_branch === branch)) {
-        linked++;
-        linkedByLookup++;
-      } else pushes.push(c);
+      if (seen.has(c.id) || t < opens || t >= closes) return false;
+      seen.add(c.id);
+      return true;
+    });
+    const unsquashed = intoDefault.filter((m) => !m.squash_commit_sha).sort((a, b) => Date.parse(a.merged_at!) - Date.parse(b.merged_at!) || a.iid - b.iid);
+    const res = await attributeCommits({
+      commits: inWindow,
+      sha: (c) => c.id,
+      known,
+      prs: unsquashed.map((m) => m.iid),
+      readCommits: async (iid) => (await this.paged<{ id: string }>(`/projects/${pid}/merge_requests/${iid}/commits?per_page=${this.pageSize}`, req.signal)).map((c) => ({ sha: c.id })),
+    });
+    // Last resort: GitLab's own commit -> MR index.
+    const pushes: GlCommit[] = [];
+    let linkedByLookup = 0;
+    for (const c of res.pushes) {
+      const { data: mrs } = await this.http.get<{ iid: number; state: string; target_branch: string }[]>(`/projects/${pid}/repository/commits/${c.id}/merge_requests`, req.signal);
+      if (mrs.some((m) => m.state === "merged" && m.target_branch === branch)) linkedByLookup++;
+      else pushes.push(c);
     }
-    return { pushes, inWindow, linked, linkedByLookup };
+    return { pushes, inWindow: inWindow.length, linked: res.linked + linkedByLookup, linkedByLookup };
   }
 }
 

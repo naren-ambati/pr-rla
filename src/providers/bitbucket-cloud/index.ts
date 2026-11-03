@@ -7,6 +7,7 @@ import {
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { attributeCommits } from "../attribution.js";
 import { HttpClient, isoUtcSeconds } from "../http.js";
 import {
   buildReviews,
@@ -134,13 +135,8 @@ export class BitbucketCloudProvider implements ScmProvider {
     const changes: ChangeRecord[] = [];
     const diagnostics: { label: string; value: number }[] = [];
     const fullSha = new Map<string, string>();
-    let history: BbCommit[] = [];
-    const prCommits = new Map<number, BbCommit[]>();
-    if (req.kinds.includes("direct_push")) {
-      for (const m of merged) prCommits.set(m.pr.id, await this.paged<BbCommit>(`${base}/pullrequests/${m.pr.id}/commits?pagelen=100&fields=${COMMIT_FIELDS}`, req.signal));
-      history = await this.history(base, branch, opens, req.signal);
-    }
-    for (const c of [...history, ...[...prCommits.values()].flat()]) fullSha.set(c.hash.slice(0, 12), c.hash);
+    const history = req.kinds.includes("direct_push") ? await this.history(base, branch, opens, req.signal) : [];
+    for (const c of history) fullSha.set(c.hash.slice(0, 12), c.hash);
 
     if (req.kinds.includes("pull_request")) {
       diagnostics.push({ label: "PRs into other branches updated in window (excluded)", value: otherBase });
@@ -157,45 +153,35 @@ export class BitbucketCloudProvider implements ScmProvider {
     }
 
     if (req.kinds.includes("direct_push")) {
-      const byFull = new Map<string, number>();
-      const byShort = new Map<string, number>();
-      const byKey = new Map<string, number>();
-      const claim = (map: Map<string, number>, k: string, id: number) => {
-        const prev = map.get(k);
-        if (prev === undefined || id < prev) map.set(k, id);
-      };
-      for (const m of merged) {
-        if (m.pr.merge_commit?.hash) claim(byShort, m.pr.merge_commit.hash.slice(0, 12), m.pr.id);
-        for (const c of prCommits.get(m.pr.id) ?? []) {
-          claim(byFull, c.hash, m.pr.id);
-          claim(byKey, rebaseKey(c), m.pr.id);
-        }
-      }
+      // Merge commits (abbreviated to 12) are claimed from the listing; PR commit lists are read only while commits are unclaimed.
+      const known = new Map<string, number>();
+      for (const m of merged) if (m.pr.merge_commit?.hash && !known.has(m.pr.merge_commit.hash.slice(0, 12))) known.set(m.pr.merge_commit.hash.slice(0, 12), m.pr.id);
       const seen = new Set<string>();
-      let inWin = 0;
-      let linked = 0;
-      let byRebase = 0;
-      const pushes: BbCommit[] = [];
-      for (const c of history) {
+      const inWin = history.filter((c) => {
         const t = Date.parse(c.date);
-        if (seen.has(c.hash) || t < opens || t >= closes) continue;
+        if (seen.has(c.hash) || t < opens || t >= closes) return false;
         seen.add(c.hash);
-        inWin++;
-        if (byFull.has(c.hash) || byShort.has(c.hash.slice(0, 12))) linked++;
-        else if (byKey.has(rebaseKey(c))) {
-          linked++;
-          byRebase++;
-        } else pushes.push(c);
-      }
-      for (const c of pushes) {
+        return true;
+      });
+      const order = [...merged].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.pr.id - b.pr.id).map((m) => m.pr.id);
+      const res = await attributeCommits({
+        commits: inWin,
+        sha: (c) => c.hash,
+        known,
+        prefixLength: 12,
+        prs: order,
+        readCommits: async (id) => (await this.paged<BbCommit>(`${base}/pullrequests/${id}/commits?pagelen=100&fields=${COMMIT_FIELDS}`, req.signal)).map((c) => ({ sha: c.hash, key: rebaseKey(c) })),
+        rebaseKey,
+      });
+      for (const c of res.pushes) {
         const stats = await this.paged<{ lines_added: number; lines_removed: number }>(`${base}/diffstat/${c.hash}?pagelen=500&fields=next,values.lines_added,values.lines_removed`, req.signal);
         changes.push(normalizeDirectPush(req.repo, c, stats.reduce((n, s) => n + (s.lines_added ?? 0) + (s.lines_removed ?? 0), 0), this.webBase));
       }
       diagnostics.push(
-        { label: "default-branch commits in window", value: inWin },
-        { label: "commits linked to a merged PR", value: linked },
-        { label: "rebased commits linked by author and message", value: byRebase },
-        { label: "direct pushes that are merge commits", value: pushes.filter((c) => c.parents.length > 1).length },
+        { label: "default-branch commits in window", value: inWin.length },
+        { label: "commits linked to a merged PR", value: res.linked },
+        { label: "rebased commits linked by author and message", value: res.byRebase },
+        { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
     return { changes, defaultBranch: branch, limitations: BITBUCKET_CLOUD_LIMITATIONS, diagnostics };

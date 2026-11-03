@@ -7,6 +7,7 @@ import {
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { attributeCommits } from "../attribution.js";
 import { HttpClient, HttpError } from "../http.js";
 import {
   buildReviews,
@@ -136,47 +137,38 @@ export class BitbucketDataCenterProvider implements ScmProvider {
     }
 
     if (req.kinds.includes("direct_push")) {
-      const byFull = new Map<string, number>();
-      const byKey = new Map<string, number>();
-      const claim = (m: Map<string, number>, k: string, id: number) => {
-        const prev = m.get(k);
-        if (prev === undefined || id < prev) m.set(k, id);
-      };
+      // Merge commits are claimed from the listing (or the MERGED activity); PR commit lists are read only while commits are unclaimed.
+      const known = new Map<string, number>();
       for (const p of since) {
         const sha = await mergeShaOf(p);
-        if (sha) claim(byFull, sha.toLowerCase(), p.id);
-        for (const c of await this.paged<DcCommit>(`${path}/pull-requests/${p.id}/commits`, req.signal)) {
-          claim(byFull, c.id.toLowerCase(), p.id);
-          claim(byKey, rebaseKey(c), p.id);
-        }
+        if (sha && !known.has(sha.toLowerCase())) known.set(sha.toLowerCase(), p.id);
       }
       // Newest first in git's date order, from the pinned head, until a whole page is older than the window.
       const history = await this.paged<DcCommit>(`${path}/commits?until=${branch.latestCommit}`, req.signal, (page) => page.some((c) => c.committerTimestamp >= opens));
       const seen = new Set<string>();
-      let inWin = 0;
-      let linked = 0;
-      let byRebase = 0;
-      const pushes: DcCommit[] = [];
-      for (const c of history) {
-        const sha = c.id.toLowerCase();
-        if (seen.has(sha) || c.committerTimestamp < opens || c.committerTimestamp >= closes) continue;
-        seen.add(sha);
-        inWin++;
-        if (byFull.has(sha)) linked++;
-        else if (byKey.has(rebaseKey(c))) {
-          linked++;
-          byRebase++;
-        } else pushes.push(c);
-      }
-      for (const c of pushes) {
+      const inWin = history.filter((c) => {
+        if (seen.has(c.id) || c.committerTimestamp < opens || c.committerTimestamp >= closes) return false;
+        seen.add(c.id);
+        return true;
+      });
+      const order = [...since].sort((a, b) => (a.closedDate ?? a.updatedDate) - (b.closedDate ?? b.updatedDate) || a.id - b.id).map((p) => p.id);
+      const res = await attributeCommits({
+        commits: inWin,
+        sha: (c) => c.id,
+        known,
+        prs: order,
+        readCommits: async (id) => (await this.paged<DcCommit>(`${path}/pull-requests/${id}/commits`, req.signal)).map((c) => ({ sha: c.id, key: rebaseKey(c) })),
+        rebaseKey,
+      });
+      for (const c of res.pushes) {
         const { data: diff } = await this.http.get<DcDiff>(`${path}/commits/${c.id}/diff?contextLines=0`, req.signal);
         changes.push(normalizeDirectPush(req.repo, c, countDiff(diff).lines, web));
       }
       diagnostics.push(
-        { label: "default-branch commits in window", value: inWin },
-        { label: "commits linked to a merged PR", value: linked },
-        { label: "rebased commits linked by author, author time and message", value: byRebase },
-        { label: "direct pushes that are merge commits", value: pushes.filter((c) => c.parents.length > 1).length },
+        { label: "default-branch commits in window", value: inWin.length },
+        { label: "commits linked to a merged PR", value: res.linked },
+        { label: "rebased commits linked by author, author time and message", value: res.byRebase },
+        { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
     return { changes, defaultBranch: branch.displayId, limitations: BITBUCKET_DC_LIMITATIONS, diagnostics };
