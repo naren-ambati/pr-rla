@@ -1,0 +1,228 @@
+{
+ "schema": "pr-rla/tsa-trust-bundle/v1",
+ "version": "2026-11",
+ "defaults": {
+  "authorities": [
+   "sigstore",
+   "digicert",
+   "globalsign",
+   "microsoft"
+  ],
+  "minTokens": 2
+ },
+ "authorities": {
+  "sigstore": {
+   "operator": "Sigstore",
+   "url": "https://timestamp.sigstore.dev/api/v1/timestamp",
+   "defaultEnabled": true,
+   "notes": "ECDSA P-384 key, SHA-256 signatures. Tokens carry only the leaf; the chain is pinned from Sigstore's TUF trusted_root.json. No GA announcement, rate limit or terms found (unverified).",
+   "anchors": [
+    {
+     "subject": "O=sigstore.dev, CN=sigstore-tsa-selfsigned",
+     "sha256": "2aca8fea5d3ce48b01cc77076293c280e6c23ffe44034757ee7833ca9f45d633",
+     "notBefore": "2025-04-08T06:59:43Z",
+     "notAfter": "2035-04-06T06:59:43Z",
+     "independent": true,
+     "source": "TUF trusted_root.json: npm @sigstore/tuf 4.0.2 seeds.json (bundled in npm 11.19.1); TUF trusted_root.json: gh CLI TUF cache of tuf-repo-cdn.sigstore.dev, fetched 2026-10-20",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIB9zCCAXygAwIBAgIUV7f0GLDOoEzIh8LXSW80OJiUp14wCgYIKoZIzj0EAwMw\nOTEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MSAwHgYDVQQDExdzaWdzdG9yZS10c2Et\nc2VsZnNpZ25lZDAeFw0yNTA0MDgwNjU5NDNaFw0zNTA0MDYwNjU5NDNaMDkxFTAT\nBgNVBAoTDHNpZ3N0b3JlLmRldjEgMB4GA1UEAxMXc2lnc3RvcmUtdHNhLXNlbGZz\naWduZWQwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQUQNtfRT/ou3YATa6wB/kKTe70\ncfJwyRIBovMnt8RcJph/COE82uyS6FmppLLL1VBPGcPfpQPYJNXzWwi8icwhKQ6W\n/Qe2h3oebBb2FHpwNJDqo+TMaC/tdfkv/ElJB72jRTBDMA4GA1UdDwEB/wQEAwIB\nBjASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBSY7AHvf7tR/9SVHm+KiJhT\nB4nOvzAKBggqhkjOPQQDAwNpADBmAjEAwGEGrfGZR1cen1R8/DTVMI943LssZmJR\ntDp/i7SfGHmGRP6gRbuj9vOK3b67Z0QQAjEAuT2H673LQEaHTcyQSZrkp4mX7Wwk\nmF+sVbkYY5mXN+RMH13KUEHHOqASaemYWK/E\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": []
+  },
+  "digicert": {
+   "operator": "DigiCert",
+   "url": "http://timestamp.digicert.com",
+   "defaultEnabled": true,
+   "notes": "RSA-4096, SHA-256. HTTP is acceptable: only a hash is sent and the response is verified by signature. States no accuracy (60 s default). ESSCertID v1 and v2. Rotates signer certificates at least every 15 months; intermediates are kept as historical.",
+   "anchors": [
+    {
+     "subject": "C=US, O=DigiCert Inc, OU=www.digicert.com, CN=DigiCert Trusted Root G4",
+     "sha256": "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988",
+     "notBefore": "2013-08-01T12:00:00Z",
+     "notAfter": "2038-01-15T12:00:00Z",
+     "independent": true,
+     "source": "macOS SystemRootCertificates.keychain; Node v22.23.2 bundled Mozilla roots",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIFkDCCA3igAwIBAgIQBZsbV56OITLiOQe9p3d1XDANBgkqhkiG9w0BAQwFADBi\nMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\nd3cuZGlnaWNlcnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBUcnVzdGVkIFJvb3Qg\nRzQwHhcNMTMwODAxMTIwMDAwWhcNMzgwMTE1MTIwMDAwWjBiMQswCQYDVQQGEwJV\nUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQu\nY29tMSEwHwYDVQQDExhEaWdpQ2VydCBUcnVzdGVkIFJvb3QgRzQwggIiMA0GCSqG\nSIb3DQEBAQUAA4ICDwAwggIKAoICAQC/5pBzaN675F1KPDAiMGkz7MKnJS7JIT3y\nithZwuEppz1Yq3aaza57G4QNxDAf8xukOBbrVsaXbR2rsnnyyhHS5F/WBTxSD1If\nxp4VpX6+n6lXFllVcq9ok3DCsrp1mWpzMpTREEQQLt+C8weE5nQ7bXHiLQwb7iDV\nySAdYyktzuxeTsiT+CFhmzTrBcZe7FsavOvJz82sNEBfsXpm7nfISKhmV1efVFiO\nDCu3T6cw2Vbuyntd463JT17lNecxy9qTXtyOj4DatpGYQJB5w3jHtrHEtWoYOAMQ\njdjUN6QuBX2I9YI+EJFwq1WCQTLX2wRzKm6RAXwhTNS8rhsDdV14Ztk6MUSaM0C/\nCNdaSaTC5qmgZ92kJ7yhTzm1EVgX9yRcRo9k98FpiHaYdj1ZXUJ2h4mXaXpI8OCi\nEhtmmnTK3kse5w5jrubU75KSOp493ADkRSWJtppEGSt+wJS00mFt6zPZxd9LBADM\nfRyVw4/3IbKyEbe7f/LVjHAsQWCqsWMYRJUadmJ+9oCw++hkpjPRiQfhvbfmQ6QY\nuKZ3AeEPlAwhHbJUKSWJbOUOUlFHdL4mrLZBdd56rF+NP8m800ERElvlEFDrMcXK\nchYiCd98THU/Y+whX8QgUWtvsauGi0/C1kVfnSD8oR7FwI+isX4KJpn15GkvmB0t\n9dmpsh3lGwIDAQABo0IwQDAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIB\nhjAdBgNVHQ4EFgQU7NfjgtJxXWRM3y5nP+e6mK4cD08wDQYJKoZIhvcNAQEMBQAD\nggIBALth2X2pbL4XxJEbw6GiAI3jZGgPVs93rnD5/ZpKmbnJeFwMDF/k5hQpVgs2\nSV1EY+CtnJYYZhsjDT156W1r1lT40jzBQ0CuHVD1UvyQO7uYmWlrx8GnqGikJ9yd\n+SeuMIW59mdNOj6PWTkiU0TryF0Dyu1Qen1iIQqAyHNm0aAFYF/opbSnr6j3bTWc\nfFqK1qI4mfN4i/RN0iAL3gTujJtHgXINwBQy7zBZLq7gcfJW5GqXb5JQbZaNaHqa\nsjYUegbyJLkJEVDXCLG4iXqEI2FCKeWjzaIgQdfRnGTZ6iahixTXTBmyUEFxPT9N\ncCOGDErcgdLMMpSEDQgJlxxPwO5rIHQw0uA5NBCFIRUBCOhVMt5xSdkoF1BN5r5N\n0XWs0Mr7QbhDparTwwVETyw2m+L64kW4I1NsBm9nVX9GtUw/bihaeSbSpKhil9Ie\n4u1Ki7wb/UdKDd9nZn6yW0HQO+T0O/QEY+nvwlQAUaCKKsnOeMzV6ocEGLPOr0mI\nr/OSmbaz5mEP0oUA51Aa5BuVnRmhuZyxm7EAHu/QD09CbMkKvO5D+jpxpchNJqU1\n/YldvIViHTLSoCtU7ZpXwdv6EM8Zt4tKG48BtieVU+i2iW1bvGjUI+iLUaJW+fCm\ngKDWHrO8Dw9TdSmq6hN35N6MgSGtBxBHEa2HPQfRdbzP82Z+\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": [
+    {
+     "subject": "C=US, O=DigiCert\\, Inc., CN=DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1",
+     "sha256": "ca0b1554ecd901ea19dcad8749e9f2648c8d6dfcea1add9d2c2109415bb82ccd",
+     "notBefore": "2025-05-07T00:00:00Z",
+     "notAfter": "2038-01-14T23:59:59Z",
+     "source": "http://timestamp.digicert.com token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIGtDCCBJygAwIBAgIQDcesVwX/IZkuQEMiDDpJhjANBgkqhkiG9w0BAQsFADBi\nMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\nd3cuZGlnaWNlcnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBUcnVzdGVkIFJvb3Qg\nRzQwHhcNMjUwNTA3MDAwMDAwWhcNMzgwMTE0MjM1OTU5WjBpMQswCQYDVQQGEwJV\nUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRy\ndXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMIIC\nIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAtHgx0wqYQXK+PEbAHKx126NG\naHS0URedTa2NDZS1mZaDLFTtQ2oRjzUXMmxCqvkbsDpz4aH+qbxeLho8I6jY3xL1\nIusLopuW2qftJYJaDNs1+JH7Z+QdSKWM06qchUP+AbdJgMQB3h2DZ0Mal5kYp77j\nYMVQXSZH++0trj6Ao+xh/AS7sQRuQL37QXbDhAktVJMQbzIBHYJBYgzWIjk8eDrY\nhXDEpKk7RdoX0M980EpLtlrNyHw0Xm+nt5pnYJU3Gmq6bNMI1I7Gb5IBZK4ivbVC\niZv7PNBYqHEpNVWC2ZQ8BbfnFRQVESYOszFI2Wv82wnJRfN20VRS3hpLgIR4hjzL\n0hpoYGk81coWJ+KdPvMvaB0WkE/2qHxJ0ucS638ZxqU14lDnki7CcoKCz6eum5A1\n9WZQHkqUJfdkDjHkccpL6uoG8pbF0LJAQQZxst7VvwDDjAmSFTUms+wV/FbWBqi7\nfTJnjq3hj0XbQcd8hjj/q8d6ylgxCZSKi17yVp2NL+cnT6Toy+rN+nM8M7LnLqCr\nO2JP3oW//1sfuZDKiDEb1AQ8es9Xr/u6bDTnYCTKIsDq1BtmXUqEG1NqzJKS4kOm\nxkYp2WyODi7vQTCBZtVFJfVZ3j7OgWmnhFr4yUozZtqgPrHRVHhGNKlYzyjlroPx\nul+bgIspzOwbtmsgY1MCAwEAAaOCAV0wggFZMBIGA1UdEwEB/wQIMAYBAf8CAQAw\nHQYDVR0OBBYEFO9vU0rp5AZ8esrikFb2L9RJ7MtOMB8GA1UdIwQYMBaAFOzX44LS\ncV1kTN8uZz/nupiuHA9PMA4GA1UdDwEB/wQEAwIBhjATBgNVHSUEDDAKBggrBgEF\nBQcDCDB3BggrBgEFBQcBAQRrMGkwJAYIKwYBBQUHMAGGGGh0dHA6Ly9vY3NwLmRp\nZ2ljZXJ0LmNvbTBBBggrBgEFBQcwAoY1aHR0cDovL2NhY2VydHMuZGlnaWNlcnQu\nY29tL0RpZ2lDZXJ0VHJ1c3RlZFJvb3RHNC5jcnQwQwYDVR0fBDwwOjA4oDagNIYy\naHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZFJvb3RHNC5j\ncmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEB\nCwUAA4ICAQAXzvsWgBz+Bz0RdnEwvb4LyLU0pn/N0IfFiBowf0/Dm1wGc/Do7oVM\nY2mhXZXjDNJQa8j00DNqhCT3t+s8G0iP5kvN2n7Jd2E4/iEIUBO41P5F448rSYJ5\n9Ib61eoalhnd6ywFLerycvZTAz40y8S4F3/a+Z1jEMK/DMm/axFSgoR8n6c3nuZB\n9BfBwAQYK9FHaoq2e26MHvVY9gCDA/JYsq7pGdogP8HRtrYfctSLANEBfHU16r3J\n05qX3kId+ZOczgj5kjatVB+NdADVZKON/gnZruMvNYY2o1f4MXRJDMdTSlOLh0HC\nn2cQLwQCqjFbqrXuvTPSegOOzr4EWj7PtspIHBldNE2K9i697cvaiIo2p61Ed2p8\nxMJb82Yosn0z4y25xUbI7GIN/TpVfHIqQ6Ku/qjTY6hc3hsXMrS+U0yy+GWqAXam\n4ToWd2UQ1KYT70kZjE4YtL8Pbzg0c1ugMZyZZd/BdHLiRu7hAWE6bTEm4XYRkA6T\nl4KSFLFk43esaUeqGkH/wyW4N7OigizwJWeukcyIPbAvjSabnf7+Pu0VrFgoiovR\nDiyx3zEdmcif/sYQsfch28bZeUz2rtY/9TCA6TD8dC3JE3rYkrhLULy7Dc90G6e8\nBlqmyIjlgp2+VqsS9/wQD7yFylIz0scmbKvFoW2jNrbM1pD2T7m3XA==\n-----END CERTIFICATE-----\n"
+    },
+    {
+     "subject": "C=US, O=DigiCert Inc, OU=www.digicert.com, CN=DigiCert Trusted Root G4",
+     "sha256": "33846b545a49c9be4903c60e01713c1bd4e4ef31ea65cd95d69e62794f30b941",
+     "notBefore": "2022-08-01T00:00:00Z",
+     "notAfter": "2031-11-09T23:59:59Z",
+     "source": "http://timestamp.digicert.com token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0BAQwFADBl\nMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\nd3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVkIElEIFJv\nb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQswCQYDVQQG\nEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNl\ncnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBUcnVzdGVkIFJvb3QgRzQwggIiMA0G\nCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC/5pBzaN675F1KPDAiMGkz7MKnJS7J\nIT3yithZwuEppz1Yq3aaza57G4QNxDAf8xukOBbrVsaXbR2rsnnyyhHS5F/WBTxS\nD1Ifxp4VpX6+n6lXFllVcq9ok3DCsrp1mWpzMpTREEQQLt+C8weE5nQ7bXHiLQwb\n7iDVySAdYyktzuxeTsiT+CFhmzTrBcZe7FsavOvJz82sNEBfsXpm7nfISKhmV1ef\nVFiODCu3T6cw2Vbuyntd463JT17lNecxy9qTXtyOj4DatpGYQJB5w3jHtrHEtWoY\nOAMQjdjUN6QuBX2I9YI+EJFwq1WCQTLX2wRzKm6RAXwhTNS8rhsDdV14Ztk6MUSa\nM0C/CNdaSaTC5qmgZ92kJ7yhTzm1EVgX9yRcRo9k98FpiHaYdj1ZXUJ2h4mXaXpI\n8OCiEhtmmnTK3kse5w5jrubU75KSOp493ADkRSWJtppEGSt+wJS00mFt6zPZxd9L\nBADMfRyVw4/3IbKyEbe7f/LVjHAsQWCqsWMYRJUadmJ+9oCw++hkpjPRiQfhvbfm\nQ6QYuKZ3AeEPlAwhHbJUKSWJbOUOUlFHdL4mrLZBdd56rF+NP8m800ERElvlEFDr\nMcXKchYiCd98THU/Y+whX8QgUWtvsauGi0/C1kVfnSD8oR7FwI+isX4KJpn15Gkv\nmB0t9dmpsh3lGwIDAQABo4IBOjCCATYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E\nFgQU7NfjgtJxXWRM3y5nP+e6mK4cD08wHwYDVR0jBBgwFoAUReuir/SSy4IxLVGL\np6chnfNtyA8wDgYDVR0PAQH/BAQDAgGGMHkGCCsGAQUFBwEBBG0wazAkBggrBgEF\nBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEMGCCsGAQUFBzAChjdodHRw\nOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRBc3N1cmVkSURSb290Q0Eu\nY3J0MEUGA1UdHwQ+MDwwOqA4oDaGNGh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9E\naWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcmwwEQYDVR0gBAowCDAGBgRVHSAAMA0G\nCSqGSIb3DQEBDAUAA4IBAQBwoL9DXFXnOF+go3QbPbYW1/e/Vwe9mqyhhyzshV6p\nGrsi+IcaaVQi7aSId229GhT0E0p6Ly23OO/0/4C5+KH38nLeJLxSA8hO0Cre+i1W\nz/n096wwepqLsl7Uz9FDRJtDIeuWcqFItJnLnU+nBgMTdydE1Od/6Fmo8L8vC6bp\n8jQ87PcDx4eo0kxAGTVGamlUsLihVo7spNU96LHc/RzY9HdaXFSMb++hUD38dglo\nhJ9vytsgjTVgHAIDyyCwrFigDkBjxZgiwbJZ9VVrzyerbHbObyMt9H5xaiNrIv8S\nuFQtJ37YOtnwtoeW/VvRXKwYw02fc7cBqZ9Xql4o4rmU\n-----END CERTIFICATE-----\n"
+    }
+   ]
+  },
+  "globalsign": {
+   "operator": "GlobalSign",
+   "url": "http://timestamp.globalsign.com/tsa/r45standard",
+   "defaultEnabled": true,
+   "notes": "RSA-3072 key, SHA-384 signatures; accuracy 1 s. Chain: R45 timestamping CA, Timestamping Root R45 cross-signed by Root R6.",
+   "anchors": [
+    {
+     "subject": "OU=GlobalSign Root CA - R6, O=GlobalSign, CN=GlobalSign",
+     "sha256": "2cabeafe37d06ca22aba7391c0033d25982952c453647349763a3ab5ad6ccf69",
+     "notBefore": "2014-12-10T00:00:00Z",
+     "notAfter": "2034-12-10T00:00:00Z",
+     "independent": true,
+     "source": "macOS SystemRootCertificates.keychain; Node v22.23.2 bundled Mozilla roots",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIFgzCCA2ugAwIBAgIORea7A4Mzw4VlSOb/RVEwDQYJKoZIhvcNAQEMBQAwTDEg\nMB4GA1UECxMXR2xvYmFsU2lnbiBSb290IENBIC0gUjYxEzARBgNVBAoTCkdsb2Jh\nbFNpZ24xEzARBgNVBAMTCkdsb2JhbFNpZ24wHhcNMTQxMjEwMDAwMDAwWhcNMzQx\nMjEwMDAwMDAwWjBMMSAwHgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSNjET\nMBEGA1UEChMKR2xvYmFsU2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjCCAiIwDQYJ\nKoZIhvcNAQEBBQADggIPADCCAgoCggIBAJUH6HPKZvnsFMp7PPcNCPG0RQssgrRI\nxutbPK6DuEGSMxSkb3/pKszGsIhrxbaJ0cay/xTOURQh7ErdG1rG1ofuTToVBu1k\nZguSgMpE3nOUTvOniX9PeGMIyBJQbUJmL025eShNUhqKGoC3GYEOfsSKvGRMIRxD\naNc9PIrFsmbVkJq3MQbFvuJtMgamHvm566qjuL++gmNQ0PAYid/kD3n16qIfKtJw\nLnvnvJO7bVPiSHyMEAc4/2ayd2F+4OqMPKq0pPbzlUoSB239jLKJz9CgYXfIWHSw\n1CM69106yqLbnQneXUQtkPGBzVeS+n68UARjNN9rkxi+azayOeSsJDa38O+2HBNX\nk7besvjihbdzorg1qkXy4J02oW9UivFyVm4uiMVRQkQVlO6jxTiWm05OWgtH8wY2\nSXcwvHE35absIQh1/OZhFj931dmRl4QKbNQCTXTAFO39OfuD8l4UoQSwC+n+7o/h\nbguyCLNhZglqsQY6ZZZZwPA1/cnaKI0aEYdwgQqomnUdnjqGBQCe24DWJfncBZ4n\nWUx2OVvq+aWh2IMP0f/fMBH5hc8zSPXKbWQULHpYT9NLCEnFlWQaYw55PfWzjMpY\nrZxCRXluDocZXFSxZba/jJvcE+kNb7gu3GduyYsRtYQUigAZcIN5kZeR1Bonvzce\nMgfYFGM8KEyvAgMBAAGjYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTAD\nAQH/MB0GA1UdDgQWBBSubAWjkxPioufi1xzWx/B/yGdToDAfBgNVHSMEGDAWgBSu\nbAWjkxPioufi1xzWx/B/yGdToDANBgkqhkiG9w0BAQwFAAOCAgEAgyXt6NH9lVLN\nnsAEoJFp5lzQhN7craJP6Ed41mWYqVuoPId8AorRbrcWc+ZfwFSY1XS+wc3iEZGt\nIxg93eFyRJa0lV7Ae46ZeBZDE1ZXs6KzO7V33EByrKPrmzU+sQghoefEQzd5Mr61\n55wsTLxDKZmOMNOsIeDjHfrYBzN2VAAiKrlNIC5waNrlU/yDXNOd8v9EDERm8tLj\nvUYAGm0CuiVdjaExUd1URhxN25mW7xocBFymFe944Hn+Xds+qkxV/ZoVqW/hpvvf\ncDDpw+5CRu3CkwWJ+n1jez/QcYF8AOiYrg54NMMl+68KnyBr3TsTjxKM4kEaSHpz\noHdpx7Zcf4LIHv5YGygrqGytXm3ABdJ7t+uA/iU3/gKbaKxCXcPu9czc8FB10jZp\nnOZ7BN9uBmm23goJSFmH63sUYHpkqmlD75HHTOwY3WzvUy2MmeFe8nI+z1TIvWfs\npA9MRf/TuTAjB0yPEL+GltmZWrSZVxykzLsViVO6LAUP5MSeGbEYNNVMnbrt9x+v\nJJUEeKgDu+6B5dpffItKoZB0JaezPkvILFa9x8jvOOJckvB595yEunQtYQEgfn7R\n8k8HWV+LLUNS60YMlOH1Zkd5d9VUWx+tJDfLRVpOoERIyNiwmcUVhAn21klJwGW4\n5hpxbqCo8YLoRT5s1gLXCmeDBVrJpBA=\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": [
+    {
+     "subject": "C=BE, O=GlobalSign nv-sa, CN=GlobalSign Offline R45 Timestamping CA 2025",
+     "sha256": "52373a21b95b5e6de12a2bcf0ffb7d6a633b4caad725f64f6236fbe989dbc29e",
+     "notBefore": "2025-07-16T03:05:04Z",
+     "notAfter": "2041-07-16T00:00:00Z",
+     "source": "http://timestamp.globalsign.com/tsa/r45standard token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIGoDCCBIigAwIBAgIRAIPahje3nwyEDJR7hApSeB8wDQYJKoZIhvcNAQEMBQAw\nUzELMAkGA1UEBhMCQkUxGTAXBgNVBAoTEEdsb2JhbFNpZ24gbnYtc2ExKTAnBgNV\nBAMTIEdsb2JhbFNpZ24gVGltZXN0YW1waW5nIFJvb3QgUjQ1MB4XDTI1MDcxNjAz\nMDUwNFoXDTQxMDcxNjAwMDAwMFowXjELMAkGA1UEBhMCQkUxGTAXBgNVBAoTEEds\nb2JhbFNpZ24gbnYtc2ExNDAyBgNVBAMTK0dsb2JhbFNpZ24gT2ZmbGluZSBSNDUg\nVGltZXN0YW1waW5nIENBIDIwMjUwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK\nAoICAQCkdxb47X2L4t0ChkVjNL7lf5Zi+dagWpcB+KvWHKeFRN0fhFbUNv7I6atD\nbvmOWxDpvOhnec3QIydxlfgTRCGmnpC/Hbv5+Wl/N4xBpwPtVyJZSIXdMuK7vBPZ\nsEJIQ1SfeF8Ywbg8m9gW87mjgMDWI28eEbihLNy2h2gl9vhzwSNVqELD80uLMHet\nr41Z7aBkFJpkqtozEW3rvrKrHtFxCeNsXhHQ4sai+xm3be9Tr0DkF2g/F0D3O72s\nz6pMGw8NVQl7FjARVTQZjsEnmZRZaeLIA8dbRa/gDOTm3sjRdQiMDf7Y4aSvR1UF\ndUEPIR4YFWthcR2F9UvC6HocEYkV0isRjkqgaWmhP7gEFB7hcIfmy/XlSj4zvZUp\naM8DkTHed8UkLg/kVbVJHqiUJJoiu2dnNz7OCalLKIP4ZwTa51BFAdsOLvh6deBr\nOTT6S2kdnVnyhO9JpIhESi9dItsfcoLy4UiRe5yXtc8ftkYiuYX14XjO6ijkUhSe\ny9XrSQuoUPM+T5RsuaBkNQI+UUUEF6Fpo2+LETKbH043Ypd6/4x8ro5kKGoZus4L\nbC+8AUfIqVNltUd2o2K7S7lrZPUL11JNGfLX+HEvBzEv0FY/NAvCGyLJepTMzu4P\nSUP349gxrFRiChVLGpvjG88KJWos1psj5a2MTNh9DQ/7q0FMWwIDAQABo4IBYjCC\nAV4wDgYDVR0PAQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMBIGA1UdEwEB\n/wQIMAYBAf8CAQAwHQYDVR0OBBYEFHcCOwExDx50d8NIyMMHY1WIpTuiMB8GA1Ud\nIwQYMBaAFEayHHfhexXwpTmhcN7RxC7qbbLeMIGOBggrBgEFBQcBAQSBgTB/MDcG\nCCsGAQUFBzABhitodHRwOi8vb2NzcC5nbG9iYWxzaWduLmNvbS90aW1lc3RhbXBy\nb290cjQ1MEQGCCsGAQUFBzAChjhodHRwOi8vc2VjdXJlLmdsb2JhbHNpZ24uY29t\nL2NhY2VydC90aW1lc3RhbXByb290cjQ1LmNydDA/BgNVHR8EODA2MDSgMqAwhi5o\ndHRwOi8vY3JsLmdsb2JhbHNpZ24uY29tL3RpbWVzdGFtcHJvb3RyNDUuY3JsMBEG\nA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG9w0BAQwFAAOCAgEAMqPuftFu5GYxllhe\nqUw9EmhHpfWf/+q5cYtV86kWhH1hrTkv3jDTLAGN6XIYZ/6cAH4JkVDuBQ53ZrZu\nl+lbxfDkCsz5iM8R/wC0LgTpivXTlTVg2OVNIRGhYkpzWGRI3mbh2mxi14XKTMVB\nXBfnSFgoffJnpVy7odrQQDmh/MumLaMraNtEMJdsU0uLmY7XEpF0HYDMAXR/kLTR\nvgfd3mwI4HyeNO8DBpMwYQx5OQtYzhn1j7dQ606mjVC7FdsOldWQtetobbmIvVW2\n+PEQDLjnfidQg0H3CE5GJwklJMttrp84rZ//VAZYR17BYscDMT43mgfRCg1EAukn\nkmMh94ie876xB0GJ2c+4son3kdOPtfIy8mEVmO1sckaURbHhSApy40osMtdYAt/B\nAM3YN7LeRN93jLDidB2TU9y0ssrcXgvaecu/3gEySlj5F+Xneg4Q3jJO+3AJg/5U\nO5muS1zs1pyhNXFmcoaS/xrVqRyR07BBkL6LwDLVXLMwBf9Nvj6vdzrkHtykC2rc\n6hSKNdQmC9nFyLpNfvyyYvZNjLa1af7wbiSude/LYQtHZdicoQ5LgxWatIKyMzmf\nFKuCETXRUNdBsR9r3eWGKR8Wgi4g0rNYMuq+7xm5ybES5/GkeM2edFVdf9m/kpCr\nym78xCg7PoMLvifn47ltLC9PmyA=\n-----END CERTIFICATE-----\n"
+    },
+    {
+     "subject": "C=BE, O=GlobalSign nv-sa, CN=GlobalSign Timestamping Root R45",
+     "sha256": "6afbc07c724c6f75c7743392f32bf5780bd5dd39268544d4882e7aec1add0282",
+     "notBefore": "2020-12-09T00:00:00Z",
+     "notAfter": "2034-12-10T00:00:00Z",
+     "source": "http://timestamp.globalsign.com/tsa/r45standard token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIGozCCBIugAwIBAgIQeEqqgXNmnJAJVOQhyUfrwDANBgkqhkiG9w0BAQwFADBM\nMSAwHgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSNjETMBEGA1UEChMKR2xv\nYmFsU2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjAeFw0yMDEyMDkwMDAwMDBaFw0z\nNDEyMTAwMDAwMDBaMFMxCzAJBgNVBAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWdu\nIG52LXNhMSkwJwYDVQQDEyBHbG9iYWxTaWduIFRpbWVzdGFtcGluZyBSb290IFI0\nNTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALp0M+wn3BI4IRvF02Eo\n1lq8T9+LzJGEQyRXvGQhvDscHz1PjK0Ht/PF1wLpERSCmqq0lHI7cQ0a72hrhXmO\nr2bqWJgNusF8edL/zbNvMUXQBXQEAHJqJ364Nz86iO2Xg/WrNU0Pn1k79S/fWcV8\npTJ2YJbI7e74BH4ZUXKov0RBerx7HjsAm7y64Ja/kP6Nm8NyiwAS+CA6YDj3wcyF\nivuHeS6hKyDmy6CFkSO2xCgHVCje7BAxT4ryzRQfHt1VHOooMUz5IWqozfOWZ/oB\nQZvNDwtof7ve8UPqF+Ww3HAis2k2WXRrxuWJKnzlC4Fdqz+PuNF2cvN8oqnil0G/\nzIxF/mHJ9mwHCwAE6BUjT4IqLfbvw/oRNkih0f16OTo0XaMsDpt3UCA0QN2xAzGt\nX+lih3OWA2H3lLDZXGxP5xTF4fF7DSOczXCMHWreSi2LKrvbQhQFB6r7FNwx0/Yf\nbMu+aGZEcE1tF/lx6wVzjpGSdetoXB72RGEYKWLdF2aI7Ci6SW/bPnf+uTEfdRwY\noqZHvdjuSIU7/bPiDz8qmMaa+oJvsaWlhh1aOvqkbHQPd1Jhan+HKd45m4vus0Vg\nMCSXFRIqhTCTJqyWpi3ocG0LqTKtLJsoCnZC8lVhUZiU3u32xRdvPBUQsA6tsN7F\nFvRl0cwvWlYIz5nE8FWRwix5AgMBAAGjggF4MIIBdDAOBgNVHQ8BAf8EBAMCAYYw\nEwYDVR0lBAwwCgYIKwYBBQUHAwgwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQU\nRrIcd+F7FfClOaFw3tHELuptst4wHwYDVR0jBBgwFoAUrmwFo5MT4qLn4tcc1sfw\nf8hnU6AwewYIKwYBBQUHAQEEbzBtMC4GCCsGAQUFBzABhiJodHRwOi8vb2NzcDIu\nZ2xvYmFsc2lnbi5jb20vcm9vdHI2MDsGCCsGAQUFBzAChi9odHRwOi8vc2VjdXJl\nLmdsb2JhbHNpZ24uY29tL2NhY2VydC9yb290LXI2LmNydDA2BgNVHR8ELzAtMCug\nKaAnhiVodHRwOi8vY3JsLmdsb2JhbHNpZ24uY29tL3Jvb3QtcjYuY3JsMEcGA1Ud\nIARAMD4wPAYEVR0gADA0MDIGCCsGAQUFBwIBFiZodHRwczovL3d3dy5nbG9iYWxz\naWduLmNvbS9yZXBvc2l0b3J5LzANBgkqhkiG9w0BAQwFAAOCAgEAi0i6Nlc8csXa\ndfnvMvWGvdwSKOOILk82XyaZ7A8BIRCWkjjGcGtt867UDr0l74Z/4omNlaV+KUQD\nTaqYqPG33OopYyHc7c2ICssQaWF5KUIMI7zpxe9SHi8zN9VPZnpmqUdUM7HdFvLY\nZHGjMZTlb/ZNS+KEbNDJJWdPyEvQzksF1j37fUH6irHAIeB+CLDZZCv56vLHCvTP\nLgw0YO5su5LwP/F7UhJod1mB9RwupDqMOQMN7eXMr2ZIeWPVSbj/S9IlT0hOkzuT\nd7CaSGy2oB2zdJ5fvSIEO3w3DYW1w5q73ZxaA420DZ9MdjTVha1Fe7Wfuy6Ju6zI\nv5JjSMY/yheqDbwAEV+L6ONDhIpDNM39O8Cie9sfuGfIjBXeP6Z/xyjvoW9vskHP\nAiLrAfhLyNJ2byXfXtpoaD17RATCQW5JO6eYVgTt0SYrBJTb5O1mjj2AnaSkVXlQ\nXuP4Gh/AFm+QFTyKpkihDHu6KuCxqYcFRpvtJVU9N2mY7UaZmIVHCh5i2/2c5cFD\nQo69z2/2jJH9guSf7K3jlVUF80kvbTT3/2fumUC705qAQkDaI4lgH4NxkrXp5soK\n+d3HbLJYQZxmjZsqbx9vVwRDXINdO2mc3jn6hE0183sbbYvxbwPBKVLilL97VIvf\nQHoLcAJ3Py+IBwIAddKvxtYiMhmjO+g=\n-----END CERTIFICATE-----\n"
+    }
+   ]
+  },
+  "microsoft": {
+   "operator": "Microsoft",
+   "url": "https://timestamp.acs.microsoft.com",
+   "defaultEnabled": true,
+   "notes": "RSA-4096, SHA-256; accuracy 500 ms. The root (Microsoft Identity Verification Root Certificate Authority 2020) is not in the token or in a local root store; the anchor is the token's intermediate, pinned on first use (independent: false) until the root is confirmed.",
+   "anchors": [
+    {
+     "subject": "C=US, O=Microsoft Corporation, CN=Microsoft Public RSA Timestamping CA 2020",
+     "sha256": "36e731cfa9bfd69dafb643809f6dec500902f7197daeaad86ea0159a2268a2b8",
+     "notBefore": "2020-11-19T20:32:31Z",
+     "notAfter": "2035-11-19T20:42:31Z",
+     "independent": false,
+     "source": "https://timestamp.acs.microsoft.com token (recorded response of 2026-11-03): trust on first use, not confirmed by an independent source",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIHgjCCBWqgAwIBAgITMwAAAAXlzw//Zi7JhwAAAAAABTANBgkqhkiG9w0BAQwF\nADB3MQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9u\nMUgwRgYDVQQDEz9NaWNyb3NvZnQgSWRlbnRpdHkgVmVyaWZpY2F0aW9uIFJvb3Qg\nQ2VydGlmaWNhdGUgQXV0aG9yaXR5IDIwMjAwHhcNMjAxMTE5MjAzMjMxWhcNMzUx\nMTE5MjA0MjMxWjBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENv\ncnBvcmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3Rh\nbXBpbmcgQ0EgMjAyMDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAJ58\n51Jj/eDFnwV9Y7UGIqMcHtfnlzPREwW9ZUZHd5HBXXBvf7KrQ5cMSqFSHGqg2/qJ\nhYqOQxwuEQXG8kB41wsDJP5d0zmLYKAY8Zxv3lYkuLDsfMuIEqvGYOPURAH+Ybl4\nSJEESnt0MbPEoKdNihwM5xGv0rGofJ1qOYSTNcc55EbBT7uq3wx3mXhtVmtcCEr5\nZKTkKKE1CxZvNPWdGWJUPC6e4uRfWHIhZcgCsJ+sozf5EeH5KrlFnxpjKKTavwfF\nP6XaGZGWUG8TZaiTogRoAlqcevbiqioUz1Yt4FRK53P6ovnUfANjIgM9JDdJ4e0q\niDRm5sOTiEQtBLGd9Vhd1MadxoGcHrRCsS5rO9yhv2fjJHrmlQ0EIXmp4DhDBieK\nUGR+eZ4CNE3ctW4uvSDQVeSp9h1SaPV8UWEfyTxgGjOsRpeexIveR1MPTVf7gt8h\nY64XNPO6iyUGsEgt8c2PxF87E+CO7A28TpjNq5eLiiunhKbq0XbjkNoU5JhtYUrl\nmAbpxRjb9tSreDdtACpm3rkpxp7AQndnI0Shu/fk1/rE3oWsDqMX3jjv40e8KN5Y\nsJBnczyWB4JyeeFMW3JBfdeAKhzohFe8U5w9WuvcP1E8cIxLoKSDzCCBOu0hWdjz\nKNu8Y5SwB1lt5dQhABYyzR3dxEO/T1K/BVF3rV69AgMBAAGjggIbMIICFzAOBgNV\nHQ8BAf8EBAMCAYYwEAYJKwYBBAGCNxUBBAMCAQAwHQYDVR0OBBYEFGtpKDo1L0hj\nQM972K9J6T7ZPdshMFQGA1UdIARNMEswSQYEVR0gADBBMD8GCCsGAQUFBwIBFjNo\ndHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5o\ndG0wEwYDVR0lBAwwCgYIKwYBBQUHAwgwGQYJKwYBBAGCNxQCBAweCgBTAHUAYgBD\nAEEwDwYDVR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBTIftJqhSobyhmYBAcnz1AQ\nT2ioojCBhAYDVR0fBH0wezB5oHegdYZzaHR0cDovL3d3dy5taWNyb3NvZnQuY29t\nL3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSWRlbnRpdHklMjBWZXJpZmljYXRpb24l\nMjBSb290JTIwQ2VydGlmaWNhdGUlMjBBdXRob3JpdHklMjAyMDIwLmNybDCBlAYI\nKwYBBQUHAQEEgYcwgYQwgYEGCCsGAQUFBzAChnVodHRwOi8vd3d3Lm1pY3Jvc29m\ndC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElkZW50aXR5JTIwVmVyaWZp\nY2F0aW9uJTIwUm9vdCUyMENlcnRpZmljYXRlJTIwQXV0aG9yaXR5JTIwMjAyMC5j\ncnQwDQYJKoZIhvcNAQEMBQADggIBAF+Idsd+bbVaFXXnTHho+k7h2ESZJRWluLE0\nOa/pO+4ge/XEizXvhs0Y7+KVYyb4nHlugBesnFqBGEdC2IWmtKMyS1OWIviwpnK3\naL5JedwzbeBF7POyg6IGG/XhhJ3UqWeWTO+Czb1c2NP5zyEh89F72u9UIw+IfvM9\nlzDmc2O2END7MPnrcjWdQnrLn1Ntday7JSyrDvBdmgbNnCKNZPmhzoa8PccOiQlj\njTW6GePe5sGFuRHzdFt8y+bN2neF7Zu8hTO1I64XNGqst8S+w+RUdie8fXC1jKu3\nm9KGIqF4aldrYBamyh3g4nJPj/LR2CBaLyD+2BuGZCVmoNR/dSpRCxlot0i79dKO\nChmoONqbMI8m04uLaEHAv4qwKHQ1vBzbV/nG89LDKbRSSvijmwJwxRxLLpMQ/u4x\nXxFfR4f/gksSkbJp7oqLwliDm/h+w0aJ/U5ccnYhYb7vPKNMN+SZDWycU5ODIRfy\noGl59BsXR/HpRGtiJquOYGmvA/pk5vC1lcnbeMrcWD/26ozePQ/TWfNXKBOmkFpv\nPE8CH+EeGGWzqTCjdAsno2jzTeNSxlx3glDGJgcdz5D/AAxw9Sdgq/+rY7jjgs7X\n6fqPTXPmaCAJKVHAP19oEjJIBwD1LyHbaEgBxFCogYSOiUIr0Xqcr1nJfiWG2GwY\ne6ZoAF1b\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": []
+  },
+  "github": {
+   "operator": "GitHub",
+   "url": "https://timestamp.githubapp.com/api/v1/timestamp",
+   "defaultEnabled": false,
+   "notes": "ECDSA P-384, SHA-384; accuracy 1 s. Tokens carry only the leaf; the chain is pinned from GitHub's TUF trusted_root.json. Off by default.",
+   "anchors": [
+    {
+     "subject": "O=GitHub\\, Inc., CN=Internal Services Root",
+     "sha256": "dc64d3af9fd46dd840486935c903986d06edd35788769696d2f145d38b7f7887",
+     "notBefore": "2023-08-07T12:00:00Z",
+     "notAfter": "2033-08-04T12:00:00Z",
+     "independent": true,
+     "source": "TUF trusted_root.json: gh CLI TUF cache of tuf-repo.github.com, fetched 2026-10-20",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIB9TCCAXqgAwIBAgIUNFryA06EHDIcd5EIbe8swbl9OY4wCgYIKoZIzj0EAwMw\nODEVMBMGA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2\naWNlcyBSb290MB4XDTIzMDgwNzEyMDAwMFoXDTMzMDgwNDEyMDAwMFowODEVMBMG\nA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2aWNlcyBS\nb290MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEXYaXx4H0oNuVP/2cfydA3oaafvvk\nkkgb5hbL8/j/BO25S7uTmDOCA5e4QLLWCKFuc+xp2j14tCH4WmHzMUDvf2tXtInV\nliY5wZgQMM9L6klo/IwA9x4omdcjnT+kKJAjo0UwQzAOBgNVHQ8BAf8EBAMCAQYw\nEgYDVR0TAQH/BAgwBgEB/wIBAjAdBgNVHQ4EFgQUfFJ5/6rhfHEZPnXAhrQLhGkJ\nJMwwCgYIKoZIzj0EAwMDaQAwZgIxAPzXsV+eokrqOHSQZH/XhhHE1slOscKy3DQp\nYpYJ1AWmJ2lJu/XOmubBX5s7apllUwIxALw2Ts8CDACiK42UymC8fk6sbNfoXUAW\nqdyKTVt2Lst+wNdkRniGvx7jT65BKTkcsQ==\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": [
+    {
+     "subject": "O=GitHub\\, Inc., CN=TSA intermediate",
+     "sha256": "4e0f064a5faf69bf1e4672ce947bd425b5ac899985adb8013ea449814cc7cb02",
+     "notBefore": "2023-08-07T12:00:00Z",
+     "notAfter": "2028-08-05T12:00:00Z",
+     "source": "TUF trusted_root.json: gh CLI TUF cache of tuf-repo.github.com, fetched 2026-10-20",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIICJDCCAaqgAwIBAgIUckXVHpiw7iJY1V/jY8LYLj5TgqAwCgYIKoZIzj0EAwMw\nODEVMBMGA1UEChMMR2l0SHViLCBJbmMuMR8wHQYDVQQDExZJbnRlcm5hbCBTZXJ2\naWNlcyBSb290MB4XDTIzMDgwNzEyMDAwMFoXDTI4MDgwNTEyMDAwMFowMjEVMBMG\nA1UEChMMR2l0SHViLCBJbmMuMRkwFwYDVQQDExBUU0EgaW50ZXJtZWRpYXRlMHYw\nEAYHKoZIzj0CAQYFK4EEACIDYgAEISv96hTQ58QroEzzu4K+o9p8YkwDCBia2U7Y\n+VBNbOG/w1mLRibve9hSeUE1FSyLBMkiFSSm6MexcsbjyqOoNtRxuMinyYt6DSEo\nx+/It2s/bTPyNAN0QP0DCQQOpnTZo3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0l\nBAwwCgYIKwYBBQUHAwgwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQUdh+G\nTP65aetHLVLs9hdhGgDIKIwwHwYDVR0jBBgwFoAUfFJ5/6rhfHEZPnXAhrQLhGkJ\nJMwwCgYIKoZIzj0EAwMDaAAwZQIxAIhf+2E5W2yOb/fCDAjhL/G/jerf74M0tG/z\nyo32U2keawxkzZosDdwnPaHaGLynAQIwa8nr3en4fZz1AdOZm6nK5hr1qK2F94ni\nfgnAJ/WeT0fZnK/oHan0R28x363qYuYH\n-----END CERTIFICATE-----\n"
+    }
+   ]
+  },
+  "swisssign": {
+   "operator": "SwissSign",
+   "url": "https://tsa.swisssign.net",
+   "defaultEnabled": false,
+   "notes": "RSA-3072, SHA-256; accuracy 500 ms. Rejects SHA-384 requests (SHA-256 is used). Root not in a local store: pinned on first use. Off by default.",
+   "anchors": [
+    {
+     "subject": "C=CH, O=SwissSign AG, CN=SwissSign Signature Services Root 2020 - 2, organizationIdentifier=NTRCH-CHE-109.357.012",
+     "sha256": "b87f292a4d9feace2d669159eb26f56d85ec77c19e01098cd754e8abb310cde5",
+     "notBefore": "2020-10-07T10:19:32Z",
+     "notAfter": "2050-09-30T10:19:32Z",
+     "independent": false,
+     "source": "https://tsa.swisssign.net token (recorded response of 2026-11-03): trust on first use, not confirmed by an independent source",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIF4DCCA8igAwIBAgIPL9upuI0AHrznuZwtI+9KMA0GCSqGSIb3DQEBCwUAMHkx\nCzAJBgNVBAYTAkNIMRUwEwYDVQQKEwxTd2lzc1NpZ24gQUcxMzAxBgNVBAMTKlN3\naXNzU2lnbiBTaWduYXR1cmUgU2VydmljZXMgUm9vdCAyMDIwIC0gMjEeMBwGA1UE\nYRMVTlRSQ0gtQ0hFLTEwOS4zNTcuMDEyMCAXDTIwMTAwNzEwMTkzMloYDzIwNTAw\nOTMwMTAxOTMyWjB5MQswCQYDVQQGEwJDSDEVMBMGA1UEChMMU3dpc3NTaWduIEFH\nMTMwMQYDVQQDEypTd2lzc1NpZ24gU2lnbmF0dXJlIFNlcnZpY2VzIFJvb3QgMjAy\nMCAtIDIxHjAcBgNVBGETFU5UUkNILUNIRS0xMDkuMzU3LjAxMjCCAiIwDQYJKoZI\nhvcNAQEBBQADggIPADCCAgoCggIBANuQySrfgtsy1ZRN0Ttg35LSon4m+OwLN7X7\ndc7zUIjfHaqlTo6s1mTb0K6vcZ88TIjiLTmfuUQOUy8tQctEwGyMDG0rMwkaTGZO\nxWg9UIIWDmBd93ssWCUxvZtNLzsX2m2feUu0E4Es8o9BijpMonC3Y6Wx7qATwieQ\nIopBhFAXaL7xFnK5r0Nc53Ht38fmlWd8Nju7ovA6F/IsJp8zsE9HFQK4NYCQbD2v\nCwma11kVlFPMbhbqImfItBl8NzlqMugrdSE3CpcgmrSp7M05ogNY/SMMAMimFpws\nhou7atU4jxFDrVo9pdfRQ99iKcWNewHs+HlAR06xgcrTt5sOyb6pP1XOpGnvUbM7\nDiKjVek2q5V1D9Mg4y4/IqcupLAslYaX0ebrWCR3o3FTOO7SgJiwTvioNrLPrthk\nEeXs4fR++1mGt+pXmlcGBWktUcxxIHWlXL3EL79W+gmaitB5SVSTCjhszffcZf3Z\nLS2L2y5Fv5KWiK8LR65SouC7zOv2UM39QzjSjEz8bmxuNWdkxXhytqIVK5kfwRLM\nXpscgaFSA3+nncaoOERCA6QMXa/wBUtekdoP2qBRx7AyKNWNFmrpSHr+XxlOK3QU\nOSIPvghwgXm3jvA5r5m2nwd1FuxqRdSnp0bMcCuG98ZbExTEMAFT2sCxbsfV6NTL\nUeZvzv9bAgMBAAGjYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/\nMB0GA1UdDgQWBBTJm2F2N305d5b0oel7zesgcPLghDAfBgNVHSMEGDAWgBTJm2F2\nN305d5b0oel7zesgcPLghDANBgkqhkiG9w0BAQsFAAOCAgEArqMozRUHL5thl5qY\ndSp+PaJzqSEn5Oq+lgXCCdSUaq54nDFIOwjFkCXspO5GSiIHXgwe73iDt+DP1bRC\n+TG/SUzbRu9myBGHJwRpfscKp12S2Wzyd+0+iheB7ECgIEzoDmtiHnts4wPbaySP\nOF9ieeRY02Q1dR7zVOLL5UPS0/2J1fKZV+hUgP9oaoGNeWMHahCrCTdFTu5VB2fE\nAm2jyrEWRlAwG4KkXsOXgnuGX/LN7lbWA8Eg+8E7WA6TgPwi7w36yuDpU3CiOi2I\n7ace6JXZmdlZFMALi1joGKJ6Qm0YVQ2ZmGe2X7b32ubucc9/xR8iXh76Itxqhw3A\ncRw9lpQTWxAd539XLopbVuPzppU2PKHXOAhyujTjJKX64PTlvLVK9VC4f4PMXmun\nEfBzrvRS1tu47VDSJOu2jwxqWmGG3ySMsIFtSgiNDf37DV84IYhXRdqLEc6RmLPR\nVBD6kEr5RuBlErs+IZEzhpFs23D1/xRjaxMlo8DFrsNuJ6rjSutXiOcV9OyXfhwm\nJJHTFtKRV5HTaU+da+mh79uSiDZZi8ebNKJAEPOfp4YVixAo62iTjAdouLUD+H0W\nB9K5rLD5KDWJC67aVR56QHZqSLRnwQQQk/2+TrnPxQG+zgiwjL2k622mY40gYaX3\ntEyfc3cOjlUN0cOXh/w7eBzLtMA=\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": [
+    {
+     "subject": "C=CH, O=SwissSign AG, CN=SwissSign Qualified TSA ICA 2021 - 1, organizationIdentifier=NTRCH-CHE-109.357.012",
+     "sha256": "715dbaf62f04ea1ec8c04fb7cfdc3526b86daf8635eeff4376e49984c1971a7a",
+     "notBefore": "2021-09-27T14:25:51Z",
+     "notAfter": "2036-09-23T14:25:51Z",
+     "source": "https://tsa.swisssign.net token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIH3jCCBcagAwIBAgIPNfXUJ8ODMWzLVlurExApMA0GCSqGSIb3DQEBCwUAMHkx\nCzAJBgNVBAYTAkNIMRUwEwYDVQQKEwxTd2lzc1NpZ24gQUcxMzAxBgNVBAMTKlN3\naXNzU2lnbiBTaWduYXR1cmUgU2VydmljZXMgUm9vdCAyMDIwIC0gMjEeMBwGA1UE\nYRMVTlRSQ0gtQ0hFLTEwOS4zNTcuMDEyMB4XDTIxMDkyNzE0MjU1MVoXDTM2MDky\nMzE0MjU1MVowczELMAkGA1UEBhMCQ0gxFTATBgNVBAoTDFN3aXNzU2lnbiBBRzEt\nMCsGA1UEAxMkU3dpc3NTaWduIFF1YWxpZmllZCBUU0EgSUNBIDIwMjEgLSAxMR4w\nHAYDVQRhExVOVFJDSC1DSEUtMTA5LjM1Ny4wMTIwggIiMA0GCSqGSIb3DQEBAQUA\nA4ICDwAwggIKAoICAQCb+5GHSbooFZgJCCrmOFr7diip4R4VKdZMCJ+bSzv2y3tC\ngOdNzfgN25aCiKkOOCFeCHRQ8e2H4bSOuADnSNyRsGIpXTjRubjQvcSygpe8WeQS\n5FjtU3bvnu9mQOlqoI5IlYcBhh+YViWMAeKU7qau+d3q4rGQemEBhb3TNto+S/y3\nx2ng4sQaQ+xh6y7hwKka5ShSxHeZJgZJjmtVrDxNYDWXjc+QuAcPQedVazPPgc8A\nVCp0sBD6+zkX/k+T3vrj37bUlBOZTT8kszamgcNL4TPw8iq9LF/Am8xV37IW0HWl\n2pDStemxXhOVQaYhfBGEaVKBfX+MVH/TX3TzdpSm0fxD396HRJQTKnwszIwiyb4U\nm6B7rtesjzvGkCstRYL6oMU8/GNwgeKbBd5vvPIj/xFRjacKrHNdl5aLaXmOZDU4\n84x3jR7COYIENr5PDCzJQIZ1FQ23O0Y5XYIZVVZo8KSJIvc3pRT71mxR1NLR851u\nZw48WkbZmmcVNFEAcs3h66S3Gr5TGOSovfODYWriETUvNkIbBBvwNOR8EAxWbDdr\nMyiLeVprBQ29/mrbUEUocSmOKorDNzlrTAjhl3grZgLskqQbCEcj0arbv9jEnjoX\n+TstFe81EM7mcxNhU/uQTwD+A2ZQGaS6gB7k0isKxhdhX74leXQxFVAriBaYfQID\nAQABo4ICZzCCAmMwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQAw\nHQYDVR0OBBYEFDiZVzLu647P93UEFy7nKYciQyamMB8GA1UdIwQYMBaAFMmbYXY3\nfTl3lvSh6XvN6yBw8uCEMIH/BgNVHR8EgfcwgfQwR6BFoEOGQWh0dHA6Ly9jcmwu\nc3dpc3NzaWduLm5ldC9DOTlCNjE3NjM3N0QzOTc3OTZGNEExRTk3QkNERUIyMDcw\nRjJFMDg0MIGooIGloIGihoGfbGRhcDovL2RpcmVjdG9yeS5zd2lzc3NpZ24ubmV0\nL0NOPUM5OUI2MTc2Mzc3RDM5Nzc5NkY0QTFFOTdCQ0RFQjIwNzBGMkUwODQlMkNP\nPVN3aXNzU2lnbiUyQ0M9Q0g/Y2VydGlmaWNhdGVSZXZvY2F0aW9uTGlzdD9iYXNl\nP29iamVjdENsYXNzPWNSTERpc3RyaWJ1dGlvblBvaW50MIGEBgNVHSAEfTB7MHkG\nCGCFdAFZAgEYMG0wRgYIKwYBBQUHAgEWOmh0dHBzOi8vcmVwb3NpdG9yeS5zd2lz\nc3NpZ24uY29tL1N3aXNzU2lnbl9DUFNfU2lnbmluZy5wZGYwIwYIKwYBBQUHAgIw\nFxoVcmVndWxhdGVkIGNlcnRpZmljYXRlMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEF\nBQcwAoZYaHR0cDovL3N3aXNzc2lnbi5uZXQvY2dpLWJpbi9hdXRob3JpdHkvZG93\nbmxvYWQvQzk5QjYxNzYzNzdEMzk3Nzk2RjRBMUU5N0JDREVCMjA3MEYyRTA4NDAN\nBgkqhkiG9w0BAQsFAAOCAgEAWURG9+y1KC+ZLdKrcZT4DchvdyGTWq5bApYr8nwA\nJ1oqi2bDrjcIpNYcr3bfOsc54z6DU5G2w3C0tui0dqUekoPIB3PRyV6/2yDso6YI\n9Nai+5nO0/IetQL1T6MP7ULZw9TG66h1xrdhpFJ7V+X3bH58+jSnC+lwtj31eDq/\nLyM0T7+hjMYYze5Ya4yrztaPuQEn22OhyPPkZmx75cLQy9a6tM+NCQijEG0j8gwi\nIqwveuLGFpg4Ab7sgY8UpHXI1HBo+FP5ysOR7GCOsUumr8Cciq3bzgjvi4rSWKcZ\nJm+XyIuUHKxFAZoKswxIgL0F/u+/B0cn/xrru7Slv3N4LUDURPFOFm6V5J1grIob\n5tu2VfjIhSueico2HhCb8PT9XEhQkhiYeWeZQjiRl8EJkEWnKgL9gUliDNNfe6l1\nqU1wERqrX91IH9XHxwqDYi4RdMFnizlnY+lhUs7uaSKyijmvGY9pjo9YnQVlscHz\nxBSR0ge2LnV184Jj4ms8b6epDuCyeAGjfSZez6sSVzgHlzZjrGPH9iemtv+X4PbJ\nurABGk1YMWrUgZNbT5ftqbG+h5LvTBpCdE3RmEAECGsEZwJWzdflUjvkgXyJ55XR\nLZ68STsYq0R0pIvIkdnEv07WUd1GmY9uR81KSziiecEVkSRVLK4xJrS7qNNRpa+r\nVjU=\n-----END CERTIFICATE-----\n"
+    }
+   ]
+  },
+  "sectigo": {
+   "operator": "Sectigo",
+   "url": "https://timestamp.sectigo.com",
+   "defaultEnabled": false,
+   "notes": "RSA-4096, SHA-384. Asks for at least 15 s between scripted requests. ESSCertID v1 only; no accuracy stated. Entrust's TSA returns Sectigo-signed tokens: same operator. Off by default.",
+   "anchors": [
+    {
+     "subject": "C=GB, O=Sectigo Limited, CN=Sectigo Public Time Stamping Root R46",
+     "sha256": "4941b001b8a97e961b7817c9d9e960ec4b056bfc915a8c1aabf6ef6b3ac046a5",
+     "notBefore": "2021-03-22T00:00:00Z",
+     "notAfter": "2046-03-21T23:59:59Z",
+     "independent": true,
+     "source": "macOS SystemRootCertificates.keychain",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIFejCCA2KgAwIBAgIQeD0FbPqDLn5p+FYidp8CuTANBgkqhkiG9w0BAQwFADBX\nMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMS4wLAYDVQQD\nEyVTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFJvb3QgUjQ2MB4XDTIxMDMy\nMjAwMDAwMFoXDTQ2MDMyMTIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoT\nD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBT\ndGFtcGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIB\nAIid2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQ\nkiUvpVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx\n4IBrAou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4\nvvyVDQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6\nIuHJorEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid6\n1qmrlD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR\n3ZUwxDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM\n8/6NnWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7A\nLL8bAJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6\ntG9oj7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAH\nteORlsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjQjBAMB0GA1Ud\nDgQWBBT2d2rdP/0BE/8WoWyCAi/QCj0UJTAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0T\nAQH/BAUwAwEB/zANBgkqhkiG9w0BAQwFAAOCAgEACv68sZqZvmHk7JoU7AfTEZ7b\nX45u40OrLX/6vzHQAwDg1TB00bWbiwj+7+we60BP8AMsw1h5NCXWxeyvrEVC54Mi\nrwVrcF6SFGjRwRoelRuiaZ5FDO4oWhaePjZx3/jkQ7j653CA5WscYqlneLXBEZiY\no6rRNqnsZHZTQ606mlkNpsy3TFMADv5whZmilVEZ83OvydfH2DNL3FTkpZG7+lHS\n1DFHMSUB5UtSSeSRg2UWTXwU5oObGjFk/35fC/dlF+nJIXdqsw0TZSS86bi5GRCJ\nVjqjnkpZ0Jut7ucEv4PNOIU8ijkMRj17QPjHMtdy+WxBDDSdas/UFTVB/GF+Fofn\nOD3iZ4tXxFjPU3EWRcMWx8fcGyzlBfcjeoPNbNC7wfyV9Qkzfk2Bd48jGxG7OThY\nWolc56vmBHqDEfguDwYc9AeWirMVRDi+WYlsktzAEObiFoPqs+LWU5q7+Q1+nEcs\ntNuDIedeBRcHmtjL2hV3luuEWwDSnRhSjhPLPXzqpJ1rG3r4yqm1NjKg5A5QO9Az\nveHqRQldluTSKuu96oPEPusL2oF+4MxkJ+SQMGFWTw/PNCblUN8GXeL5+mR20diP\n5LiJMq8U3IpM/0Q7OFFQ+lXuYFIuDvUprWBPsp5La2WhL2+iLVVXItSl7up5yQqX\nXftzTXTX48FRiJ6PA9o=\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": [
+    {
+     "subject": "C=GB, O=Sectigo Limited, CN=Sectigo Public Time Stamping CA R41",
+     "sha256": "38b52fe70bdde4ecf34d77498d7cbfe48efd83294dca04de01868f7735d2db79",
+     "notBefore": "2026-03-25T00:00:00Z",
+     "notAfter": "2041-03-24T23:59:59Z",
+     "source": "https://timestamp.sectigo.com token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIGpzCCBI+gAwIBAgIRAJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAw\nVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UE\nAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAz\nMjUwMDAwMDBaFw00MTAzMjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQK\nEw9TZWN0aWdvIExpbWl0ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUg\nU3RhbXBpbmcgQ0EgUjQxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA\nruRKogGtghxi+WYtW5oDzPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILV\nRg//70pgNKq8xC3/WEQodjEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949yt\npWQDvCsYBbZccDmBAJC/ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz\n0MPtREdZYk4WhtM+hazqasMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqA\nY9P9RfixPPjUaJH6mnBSNBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhi\nLzCNjc6MUpcV5xalBvPOw/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIK\nv9ducE6VGfwIAtKYedG0bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psg\nm2vhQs3pHll9N00SHBdy2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyx\nx5kjDE5PVqp+x+HS4VAT+WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019f\nZFF2NR+TkSW0WcmQ3b5taGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzs\nS8XGoRCGBls6ruofeebSsHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8G\nA1UdIwQYMBaAFPZ3at0//QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZC\nUML9tfzHuyk0gvR6uTAOBgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIB\nADATBgNVHSUEDDAKBggrBgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwr\nBgEEAbIxAQIBAwgwTAYDVR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdv\nLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYB\nBQUHAQEEcDBuMEcGCCsGAQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1Nl\nY3RpZ29QdWJsaWNUaW1lU3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYX\naHR0cDovL29jc3Auc2VjdGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm\n8Z4DZvjfKHOhqu+hsdXNt+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWU\nspBkT4T2NXK49NvJAfCsztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9\nC3JmYdJCnnL0ga+pZ/Wo1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05\nV/SA9HC/ojj33W6GdwnpU/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQ\nJ8rll7OGLDbsXa2CLf0MRN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTM\ny2LgsPrqC2Z/6ZKb3fgrzU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR6\n5CbvM5MN/d/lahfXipU2NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0j\nq4JsfGMGDpIKx7FzkB8gaejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR\n9YlN3xruM/yZzhk+rAm9AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzf\nx7x8jh4ubTOMz954YIdqyeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAM\nmKJdyvTPqmOXs/LMnf+2Za0Z6FXsIB9z9aXL\n-----END CERTIFICATE-----\n"
+    },
+    {
+     "subject": "C=GB, O=Sectigo Limited, CN=Sectigo Public Time Stamping Root R46",
+     "sha256": "b53ac15cc1afb6e2ac06828f555bb3bf5bad8b2bac1733ce4cb7aafe729356de",
+     "notBefore": "2021-03-22T00:00:00Z",
+     "notAfter": "2038-01-18T23:59:59Z",
+     "source": "https://timestamp.sectigo.com token (recorded response of 2026-11-03)",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIGgjCCBGqgAwIBAgIQNsKwvXwbOuejs902y8l1aDANBgkqhkiG9w0BAQwFADCB\niDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0pl\ncnNleSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNV\nBAMTJVVTRVJUcnVzdCBSU0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMjEw\nMzIyMDAwMDAwWhcNMzgwMTE4MjM1OTU5WjBXMQswCQYDVQQGEwJHQjEYMBYGA1UE\nChMPU2VjdGlnbyBMaW1pdGVkMS4wLAYDVQQDEyVTZWN0aWdvIFB1YmxpYyBUaW1l\nIFN0YW1waW5nIFJvb3QgUjQ2MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC\nAgEAiJ3YuUVnnR3d6LkmgZpUVMB8SQWbzFoVD9mUEES0QUCBdxSZqdTkdizICFNe\nINCSJS+lV1ipnW5ihkQyC0cRLWXUJzodqpnMRs46npiJPHrfLBOifjfhpdXJ2aHH\nsPHggGsCi7uE0awqKggE/LkYw3sqaBia67h/3awoqNvGqiFRJ+OTWYmUCO2GAXse\nPHi+/JUNAax3kpqstbl3vcTdOGhtKShvZIvjwulRH87rbukNyHGWX5tNK/WABKf+\nGnoi4cmisS7oSimgHUI0Wn/4elNd40BFdSZ1EwpuddZ+Wr7+Dfo0lcHflm/FDDrO\nJ3rWqauUP8hsokDoI7D/yUVI9DAE/WK3Jl3C4LKwIpn1mNzMyptRwsXKrop06m7N\nUNHdlTDEMovXAIDGAvYynPt5lutv8lZeI5w3MOlCybAZDpK3Dy1MKo+6aEtE9vti\nTMzz/o2dYfdP0KWZwZIXbYsTIlg1YIetCpi5s14qiXOpRsKqFKqav9R1R5vj3Nge\nvsAsvxsAnI8Oa5s2oy25qhsoBIGo/zi6GpxFj+mOdh35Xn91y72J4RGOJEoqzEIb\nW3q0b2iPuWLA911cRxgY5SJYubvjay3nSMbBPPFsyl6mY4/WYucmyS9lo3l7jk27\nMAe145GWxK4O3m3gEFEIkv7kRmefDR7Oe2T1HxAnICQvr9sCAwEAAaOCARYwggES\nMB8GA1UdIwQYMBaAFFN5v1qqK0rPVIDh2JvAnfKyA2bLMB0GA1UdDgQWBBT2d2rd\nP/0BE/8WoWyCAi/QCj0UJTAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB\n/zATBgNVHSUEDDAKBggrBgEFBQcDCDARBgNVHSAECjAIMAYGBFUdIAAwUAYDVR0f\nBEkwRzBFoEOgQYY/aHR0cDovL2NybC51c2VydHJ1c3QuY29tL1VTRVJUcnVzdFJT\nQUNlcnRpZmljYXRpb25BdXRob3JpdHkuY3JsMDUGCCsGAQUFBwEBBCkwJzAlBggr\nBgEFBQcwAYYZaHR0cDovL29jc3AudXNlcnRydXN0LmNvbTANBgkqhkiG9w0BAQwF\nAAOCAgEADr5lQe1oRLjlocXUEYfktzsljOt+2sgXke3Y8UPEooU5y39rAARaAdAx\nUeiX1ktLJ3+lgxtoLQhn5cFb3GF2SSZRX8ptQ6IvuD3wz/LNHKpQ5nX8hjsDLRhs\nyeIiJsms9yAWnvdYOdEMq1W61KE9JlBkB20XBee6JaXx4UBErc+YuoSb1SxVf7nk\nNtUjPfcxuFtrQdRMRi/fInV/AobE8Gw/8yBMQKKaHt5eia8ybT8Y/Ffa6HAJyz9g\nvEOcF1VWXG8OMeM7Vy7Bs6mSIkYeYtddU1ux1dQLbEGur18ut97wgGwDiGinCwKP\nyFO7ApcmVJOtlw9FVJxw/mL1TbyBns4zOgkaXFnnfzg4qbSvnrwyj1NiurMp4pmA\nWjR+Pb/SIduPnmFzbSN/G8reZCL4fvGlvPFk4Uab/JVCSmj59+/mB2Gn6G/UYOy8\nk60mKcmaAZsEVkhOFuoj4we8CYyaR9vd9PGZKSinaZIkvVjbH/3nlLb0a7SBIkiR\nzfPfS9T+JesylbHa1LtRV9U/7m0q7Ma2CQ/t392ioOssXW7oKLdOmMBl14suVFBm\nbzrt5V5cQPnwtd3UOTpS9oCG+ZZheiIvPgkDmA8FzPsnfXW5qHELB43ET7HHFHeR\nPRYrMBKjkb8/IN7Po0d0hQoF4TeMM+zYAJzoKQnVKOLg8pZVPT8=\n-----END CERTIFICATE-----\n"
+    }
+   ]
+  },
+  "freetsa": {
+   "operator": "FreeTSA",
+   "url": "https://freetsa.org/tsr",
+   "defaultEnabled": false,
+   "notes": "ECDSA P-384, SHA-512; no accuracy stated. 1 request/s per IP, best effort. Root not in a local store: pinned on first use. Off by default.",
+   "anchors": [
+    {
+     "subject": "O=Free TSA, OU=Root CA, CN=www.freetsa.org, L=Wuerzburg, ST=Bayern, C=DE",
+     "sha256": "a6379e7cecc05faa3cbf076013d745e327bbbaa38c0b9af22469d4701d18aabc",
+     "notBefore": "2016-03-13T01:52:13Z",
+     "notAfter": "2041-03-07T01:52:13Z",
+     "independent": false,
+     "source": "https://freetsa.org/tsr token (recorded response of 2026-11-03): trust on first use, not confirmed by an independent source",
+     "pem": "-----BEGIN CERTIFICATE-----\nMIIH/zCCBeegAwIBAgIJAMHphhYNqOmAMA0GCSqGSIb3DQEBDQUAMIGVMREwDwYD\nVQQKEwhGcmVlIFRTQTEQMA4GA1UECxMHUm9vdCBDQTEYMBYGA1UEAxMPd3d3LmZy\nZWV0c2Eub3JnMSIwIAYJKoZIhvcNAQkBFhNidXNpbGV6YXNAZ21haWwuY29tMRIw\nEAYDVQQHEwlXdWVyemJ1cmcxDzANBgNVBAgTBkJheWVybjELMAkGA1UEBhMCREUw\nHhcNMTYwMzEzMDE1MjEzWhcNNDEwMzA3MDE1MjEzWjCBlTERMA8GA1UEChMIRnJl\nZSBUU0ExEDAOBgNVBAsTB1Jvb3QgQ0ExGDAWBgNVBAMTD3d3dy5mcmVldHNhLm9y\nZzEiMCAGCSqGSIb3DQEJARYTYnVzaWxlemFzQGdtYWlsLmNvbTESMBAGA1UEBxMJ\nV3VlcnpidXJnMQ8wDQYDVQQIEwZCYXllcm4xCzAJBgNVBAYTAkRFMIICIjANBgkq\nhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAtgKODjAy8REQ2WTNqUudAnjhlCrpE6ql\nmQfNppeTmVvZrH4zutn+NwTaHAGpjSGv4/WRpZ1wZ3BRZ5mPUBZyLgq0YrIfQ5Fx\n0s/MRZPzc1r3lKWrMR9sAQx4mN4z11xFEO529L0dFJjPF9MD8Gpd2feWzGyptlel\nb+PqT+++fOa2oY0+NaMM7l/xcNHPOaMz0/2olk0i22hbKeVhvokPCqhFhzsuhKsm\nq4Of/o+t6dI7sx5h0nPMm4gGSRhfq+z6BTRgCrqQG2FOLoVFgt6iIm/BnNffUr7V\nDYd3zZmIwFOj/H3DKHoGik/xK3E82YA2ZulVOFRW/zj4ApjPa5OFbpIkd0pmzxzd\nEcL479hSA9dFiyVmSxPtY5ze1P+BE9bMU1PScpRzw8MHFXxyKqW13Qv7LWw4sbk3\nSciB7GACbQiVGzgkvXG6y85HOuvWNvC5GLSiyP9GlPB0V68tbxz4JVTRdw/Xn/XT\nFNzRBM3cq8lBOAVt/PAX5+uFcv1S9wFE8YjaBfWCP1jdBil+c4e+0tdywT2oJmYB\nBF/kEt1wmGwMmHunNEuQNzh1FtJY54hbUfiWi38mASE7xMtMhfj/C4SvapiDN837\ngYaPfs8x3KZxbX7C3YAsFnJinlwAUss1fdKar8Q/YVs7H/nU4c4Ixxxz4f67fcVq\nM2ITKentbCMCAwEAAaOCAk4wggJKMAwGA1UdEwQFMAMBAf8wDgYDVR0PAQH/BAQD\nAgHGMB0GA1UdDgQWBBT6VQ2MNGZRQ0z357OnbJWveuaklzCBygYDVR0jBIHCMIG/\ngBT6VQ2MNGZRQ0z357OnbJWveuakl6GBm6SBmDCBlTERMA8GA1UEChMIRnJlZSBU\nU0ExEDAOBgNVBAsTB1Jvb3QgQ0ExGDAWBgNVBAMTD3d3dy5mcmVldHNhLm9yZzEi\nMCAGCSqGSIb3DQEJARYTYnVzaWxlemFzQGdtYWlsLmNvbTESMBAGA1UEBxMJV3Vl\ncnpidXJnMQ8wDQYDVQQIEwZCYXllcm4xCzAJBgNVBAYTAkRFggkAwemGFg2o6YAw\nMwYDVR0fBCwwKjAooCagJIYiaHR0cDovL3d3dy5mcmVldHNhLm9yZy9yb290X2Nh\nLmNybDCBzwYDVR0gBIHHMIHEMIHBBgorBgEEAYHyJAEBMIGyMDMGCCsGAQUFBwIB\nFidodHRwOi8vd3d3LmZyZWV0c2Eub3JnL2ZyZWV0c2FfY3BzLmh0bWwwMgYIKwYB\nBQUHAgEWJmh0dHA6Ly93d3cuZnJlZXRzYS5vcmcvZnJlZXRzYV9jcHMucGRmMEcG\nCCsGAQUFBwICMDsaOUZyZWVUU0EgdHJ1c3RlZCB0aW1lc3RhbXBpbmcgU29mdHdh\ncmUgYXMgYSBTZXJ2aWNlIChTYWFTKTA3BggrBgEFBQcBAQQrMCkwJwYIKwYBBQUH\nMAGGG2h0dHA6Ly93d3cuZnJlZXRzYS5vcmc6MjU2MDANBgkqhkiG9w0BAQ0FAAOC\nAgEAaK9+v5OFYu9M6ztYC+L69sw1omdyli89lZAfpWMMh9CRmJhM6KBqM/ipwoLt\nnxyxGsbCPhcQjuTvzm+ylN6VwTMmIlVyVSLKYZcdSjt/eCUN+41K7sD7GVmxZBAF\nILnBDmTGJmLkrU0KuuIpj8lI/E6Z6NnmuP2+RAQSHsfBQi6sssnXMo4HOW5gtPO7\ngDrUpVXID++1P4XndkoKn7Svw5n0zS9fv1hxBcYIHPPQUze2u30bAQt0n0iIyRLz\naWuhtpAtd7ffwEbASgzB7E+NGF4tpV37e8KiA2xiGSRqT5ndu28fgpOY87gD3ArZ\nDctZvvTCfHdAS5kEO3gnGGeZEVLDmfEsv8TGJa3AljVa5E40IQDsUXpQLi8G+UC4\n1DWZu8EVT4rnYaCw1VX7ShOR1PNCCvjb8S8tfdudd9zhU3gEB0rxdeTy1tVbNLXW\n99y90xcwr1ZIDUwM/xQ/noO8FRhm0LoPC73Ef+J4ZBdrvWwauF3zJe33d4ibxEcb\n8/pz5WzFkeixYM2nsHhqHsBKw7JPouKNXRnl5IAE1eFmqDyC7G/VT7OF669xM6hb\nUt5G21JE4cNK6NNucS+fzg1JPX0+3VhsYZjj7D5uljRvQXrJ8iHgr/M6j2oLHvTA\nI2MLdq2qjZFDOCXsxBxJpbmLGBx9ow6ZerlUxzws2AWv2pk=\n-----END CERTIFICATE-----\n"
+    }
+   ],
+   "intermediates": []
+  }
+ }
+}
