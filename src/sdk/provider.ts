@@ -22,11 +22,27 @@ export interface Actor {
   /** Provider login. Bot accounts carry a `[bot]` suffix, e.g. `copilot-swe-agent[bot]`. */
   login: string;
   kind: ActorKind;
+  /**
+   * Optional (U3, same API version): the SCM's stable account id, which survives a rename:
+   * GitHub `databaseId`, GitLab user id, Bitbucket Cloud account `uuid`, Data Center user id,
+   * Gitea user id. Selectors match it as `id:<value>`; logins stay the display value. Absent for
+   * a commit's git identity that the SCM links to no account (`git:<email>`) and for `ghost`.
+   */
+  id?: string;
 }
 
 export type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED";
 export const REVIEW_STATES: readonly ReviewState[] = ["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"];
 
+/**
+ * One review object (U3, FR7.4). On an SCM with review submissions, one object is one submitted
+ * review event: a GitHub or Gitea review, a GitLab approval or request-changes event. An SCM with no
+ * review objects for comments synthesises one `COMMENTED` per non-author user, at their first comment.
+ * A provider declares which it does with `ProviderDefinition.reviewGranularity`.
+ *
+ * `DISMISSED` is a decision that no longer stands: a dismissed review, a withdrawn approval, an
+ * approval reset by a push. A revoked approval never comes back as `APPROVED`.
+ */
 export interface Review {
   author: Actor;
   state: ReviewState;
@@ -67,7 +83,23 @@ export interface ChangeRecord {
   /** Raw additions + deletions as the SCM reports them (no generated-file exclusion). */
   changedLines: number;
   labels: string[];
+  /**
+   * Optional (U3, same API version), direct pushes only: the SHA of the direct-push merge commit,
+   * on the default branch's own history, whose non-first parent brought this commit in (for example
+   * a release branch merged by a push). The selector option `direct_push_via_merge: exclude` drops
+   * such records. Absent when the commit was pushed to the default branch itself.
+   */
+  landedVia?: string;
 }
+
+/**
+ * How a provider forms review objects (see `Review`): one per submitted review event, or one
+ * `COMMENTED` per non-author user at their first comment. Recorded in the manifest.
+ */
+export type ReviewGranularity = "submission" | "first-comment-per-user";
+export const REVIEW_GRANULARITIES: readonly ReviewGranularity[] = ["submission", "first-comment-per-user"];
+/** What a definition without `reviewGranularity` (written before the field existed) means. */
+export const DEFAULT_REVIEW_GRANULARITY: ReviewGranularity = "submission";
 
 export interface AuditWindow {
   /** Inclusive start, ISO-8601 UTC. */
@@ -83,6 +115,12 @@ export interface ListChangesRequest {
   /** The kinds the selector will keep. A provider MAY skip work for kinds not listed. */
   kinds: ChangeKind[];
   signal?: AbortSignal;
+  /**
+   * Optional (U3, same API version): walk default-branch history from this commit instead of the
+   * branch's current head. `freeze` leaves it unset and records the result's `headSha`; `verify`
+   * passes that SHA back, so a commit dated in the window but pushed after freeze is not reachable.
+   */
+  head?: string;
 }
 
 export interface ListChangesResult {
@@ -94,6 +132,11 @@ export interface ListChangesResult {
   limitations: string[];
   /** Optional counts that explain the population (e.g. PRs merged into other branches, excluded). Not used for selection. */
   diagnostics?: { label: string; value: number }[];
+  /**
+   * Optional (U3): the default-branch commit the provider actually walked history from: `request.head`
+   * when it honours one, else the head it resolved. Absent when the provider does not pin history.
+   */
+  headSha?: string;
 }
 
 export interface ProviderContext {
@@ -145,6 +188,21 @@ export interface ProviderDefinition<Options = Record<string, unknown>> {
    * in the value only for these hosts.
    */
   readonly credentials?: readonly PluginCredential[];
+  /**
+   * Optional (U3): how this provider forms review objects (see `Review`). Copied into the manifest.
+   * Absent means `"submission"`.
+   */
+  readonly reviewGranularity?: ReviewGranularity;
+  /**
+   * Optional (U3): the option keys that change the population (e.g. `base_url`, `bots`). The registration
+   * records a hash of exactly these (`populationOptionsSha256`); a verifier whose values differ FAILs check 5.
+   */
+  readonly populationOptions?: readonly string[];
+  /**
+   * Optional (U3): true when the provider sets `ChangeRecord.landedVia`. Without it, `register` warns that
+   * `direct_push_via_merge: exclude` has no effect.
+   */
+  readonly reportsLandedVia?: boolean;
   create(options: Options, context: ProviderContext): ScmProvider | Promise<ScmProvider>;
 }
 
@@ -181,8 +239,16 @@ export function assertProviderDefinition(value: unknown, source: string): assert
   if (typeof def.create !== "function") {
     throw new Error(`${source}: provider "${def.name}" has no create() function`);
   }
-  const problem = pluginGrantProblems(def);
+  const problem = pluginGrantProblems(def) ?? providerTraitProblems(def);
   if (problem) throw new Error(`${source}: provider "${def.name}" ${problem}`);
+}
+
+/** Checks the optional U3 definition fields `reviewGranularity`, `populationOptions` and `reportsLandedVia`. */
+export function providerTraitProblems(def: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown }): string | null {
+  if (def.reviewGranularity !== undefined && !REVIEW_GRANULARITIES.includes(def.reviewGranularity as ReviewGranularity)) return `reviewGranularity must be ${REVIEW_GRANULARITIES.map((g) => `"${g}"`).join(" or ")}`;
+  if (def.populationOptions !== undefined && (!Array.isArray(def.populationOptions) || def.populationOptions.some((k) => typeof k !== "string" || k.length === 0))) return "populationOptions must be a list of option names";
+  if (def.reportsLandedVia !== undefined && typeof def.reportsLandedVia !== "boolean") return "reportsLandedVia must be true or false";
+  return null;
 }
 
 /** Checks the optional `hosts`, `credentials` and `writePaths` fields of a plugin definition. */
@@ -214,6 +280,7 @@ function actorProblems(actor: unknown, path: string): string[] {
   const out: string[] = [];
   if (typeof a.login !== "string" || a.login.length === 0) out.push(`${path}.login must be a non-empty string`);
   if (a.kind !== "human" && a.kind !== "bot") out.push(`${path}.kind must be "human" or "bot"`);
+  if (a.id !== undefined && (typeof a.id !== "string" || a.id.length === 0)) out.push(`${path}.id must be a non-empty string when present`);
   return out;
 }
 
@@ -245,6 +312,11 @@ export function changeRecordProblems(value: unknown): string[] {
   if (r.kind === "direct_push") {
     if (Array.isArray(r.reviews) && r.reviews.length > 0) p.push("a direct_push has no reviews");
     if (r.mergedBy !== null) p.push("a direct_push has mergedBy: null (the pusher is not known)");
+  }
+  if (r.landedVia !== undefined) {
+    if (typeof r.landedVia !== "string" || !SHA.test(r.landedVia)) p.push("landedVia must be 40 or 64 lowercase hex characters when present");
+    else if (r.kind !== "direct_push") p.push("only a direct_push has landedVia");
+    else if (r.landedVia === r.mergeSha) p.push("landedVia names the merge that brought the commit in, not the commit itself");
   }
   return p;
 }

@@ -24,6 +24,10 @@
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./http": {
+      "types": "./dist/sdk/http.d.ts",
+      "default": "./dist/sdk/http.js"
     }
   },
   "files": [
