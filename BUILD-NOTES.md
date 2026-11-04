@@ -1343,3 +1343,104 @@ npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, d
 - **Still in process:** `scripts/record-fixture.mjs` and `examples/ledgers/jira/scripts/record.mjs` import the plugin they record, as before; they are developer tools, run on code you trust.
 - **`selector.bots` does not touch verdict eligibility.** A bot on a user account (U4 finding 3) is stopped only by `verdicts.reviewers`; with `Actor.id`, `id:<n>` entries are the robust form, since they survive a rename.
 - **IPC additions within `pr-rla/ipc/v1`** in this integration: `describe` returns `reviewGranularity`, `populationOptions`, `reportsLandedVia` and `provenance`; `create` passes a ledger's `reviewers`; `index` / `indexResult` carry `LedgerContext.index`.
+
+## Plugin and broker fix round (2026-11-04)
+
+Branch `fix/plugins-broker`, from master `4b72ecb`. It fixes findings 1, 3, 4, 5, 6 and 8 to 15 of the master review of the plugin system and fetch broker, closes the review's test gaps, and takes on two additions from the coordinator: finding 1 for the built-in providers and ledgers, and the two timing flakes. Findings 2 (registered plugin identity) and 7 (read-only contexts for verify and status) are left for the round after the other branches merge; freeze's and verify's identity comparison is unchanged.
+
+Every finding has a regression test that fails on `4b72ecb` and passes here. "Before" was run by copying the new tests into a clone of `4b72ecb`. The reproductions import only what existed there, so they fail on their assertions, not on imports.
+
+### Findings, commits and evidence
+
+| Finding | Commit | Tests | Before (on `4b72ecb`) → after |
+|---|---|---|---|
+| 1. The repo's lock granted credentials and `trust: full` on every machine | `d18ce8f` | `test/local-consent.test.ts` (11) | The verifier's `Bearer ghp_VERIFIER_SECRET` and `Bearer AWS_VERIFIER_SECRET` reached `telemetry.auditee.example`. A hard-coded placeholder was `sent 200`. `verify` loaded a `trust: full` plugin in process (the review's PWNED.txt). → Nothing is sent. The child's environment is `PR_RLA_HOST` alone, a hard-coded placeholder gets `CREDENTIAL_NOT_APPROVED`, one line names `pr-rla plugin approve <use>`, and `trust: full` exits 1 (`NOT_APPROVED`) before import |
+| 1, built-ins (the coordinator's addition) | `a528dbe`, `3ca3c66` | `test/builtin-consent.test.ts` (12) | `base_url: https://attacker.example` got `Bearer ghp_MINE`. `token_env: AWS_SECRET_ACCESS_KEY` sent `Bearer AWS_SECRET` to api.github.com. A self-managed GitLab got `Bearer glpat`. → All are anonymous, with one line each. The default github path keeps its token, and an approved GHES gets its token |
+| 3. Dependency names widened the read grant | `f7a6b1b` | `plugin-host.test.ts` › finding 3 (5) | `optionalDependencies: {"../../..": "*"}` granted the child `.env`, `.pr-rla/` and `package.json` of the audit repo. → `PLUGIN_INVALID` / `TREE_ESCAPE` before anything is hashed, granted or run, in `plugin check` too |
+| 4. Credentials bound to the hostname only | `e9281a9` | `broker.test.ts` › finding 4 (4), hostile `httpDowngrade`, `otherPort`, `redirectDowngrade` | `http://` got Basic auth, port 8443 got the token, and a 302 to http re-sent the Bearer. → `CREDENTIAL_HOST_MISMATCH`, nothing sent on the hop |
+| 5. Swapped into any header; recorder and scrubber missed echoes | `0d2012a`, `302aa47` | `broker.test.ts` › finding 5 (3) and recorder; hostile `otherHeader`, `echoForms` | `X-Echo` carried the secret. The recording kept `landing?t=SECRET%2BTOKEN%2F123%3D`, and the child saw encoded echoes. → `CREDENTIAL_HEADER_NOT_ALLOWED`. Every form becomes the placeholder in the body, headers, status text and redirect URL |
+| 6. GraphQL documents in the URL; method overrides | `dc35aaf` | `broker.test.ts` › finding 6 (4); hostile `graphqlPostUrl`, `graphqlGetMutation`, `methodOverride` | The requests were sent. → `READ_ONLY_VIOLATION` (or `WRITE_PATH_NOT_ALLOWED` for a ledger's override), unsent |
+| 8. Identities scrubbed out of data | `302aa47` | hostile `identityEcho`, `identityAsToken` | Logins came back as `prrla-cred:GITHUB_USER`, `prrla-cred:GITHUB_USERa` and `bprrla-cred:GITHUB_USER`. → `alice`, `alicea`, `balice`. An identity used as a token gets `CREDENTIAL_IDENTITY_ONLY` |
+| 9. Write paths were raw prefixes | `dc35aaf` | `broker.test.ts` › finding 9 | `/issueLink`, `/issuetype` and `/issue-archive` were written. → `WRITE_PATH_NOT_ALLOWED` |
+| 10. Isolated plugins lost `acceptJson` | `e28de24` | `plugin-host.test.ts` › finding 10; › finding 15 (pr-rla/http) | `{"errors":["busy 1"]}` came back accepted. → Retried twice, then `{"data":{"ok":true}}` |
+| 11. Oversize IPC refused only after full buffering | `e28de24` | › a message over the limit; › a frame header claiming 1 GiB | The 8 MiB result was refused only after parsing. A 1 GiB header hung until the test timed out (15 s). → Refused from the header at once, with under 64 KiB held |
+| 12. Signals and path probing undocumented | `a01d4fc` | measured, docs only | `process.kill(pid, "SIGUSR2")` was delivered to a same-user process, and `fs.realpathSync(outside)` succeeded, on 22.23.2, 24.20.0 and 26.8.2 (macOS, 2026-11-04). Now stated in docs/security-model.md |
+| 13. A plugin's sleep could keep pr-rla alive | `e28de24` | › finding 13 (3) | A 10 h sleep was served for `36000000` ms, a sleep after the call returned was served, and close() cancelled nothing. → Capped at 15 min, not served outside a call, aborted on close |
+| 14. Unlocked in-process loads | `1995202` | `registry.test.ts` › finding 14 (2), `plugin-lock.test.ts` › finding 14 | An external `createProvider` imported the module, `freeze --dry-run` ran an unhashed `node_modules/pr-rla` in process, and `record-fixture --cli` imported the plugin. → `NOT_LOCKED` (with `unsafe*` names for tests and authors), `TREE_ESCAPE` before import, and the name comes from the lock |
+| 15. pr-rla/http, `--plugins ""`, engines, plugin check | `970d7da`, `537c27c` | › finding 15 (pr-rla/http), `plugin-lock.test.ts` › typo, › finding 15 (2) | The child failed with `TypeScript parameter property is not supported in strip-only mode`, `tsc -p tsconfig.sdk.json` failed with 3 × TS1294, `--plugins ""` meant unset, and plugin check ran no kit for a ledger. → Passes on 22, 24 and 26, typecheck runs the SDK check, `--plugins ""` is refused, and the Jira example's recordings pass the ledger kit through the host |
+
+Test gaps (`e28de24`, `59b4d15`):
+- The UNVERIFIED test is now a skipped test with its reason in the title.
+- The heartbeat test counts heartbeats the parent received.
+- The size tests show the cap applies while reading.
+- The hostile fixture tries http, another port, a downgrading redirect, an `X-Echo` swap, GraphQL in the URL, a method override, echo forms, identities and dependency names, on this Node and with Node 26 as the child.
+- The plugin-lock test that pins finding 2 is unchanged and marked as the identity round's known gap.
+
+Flakes (`dda13e1`, the coordinator's addition):
+- The watchdog's heartbeat timeout now counts from `ready`. Start-up has its own `loadTimeoutMs`, 60 s by default, so the defaults are unchanged.
+- The heartbeat tests take their pace from the contract's ratio, timeout = 6 × interval: 250 ms and 1.5 s.
+- The Jira-through-the-host test starts fresh hosts ahead of need, at most three at once. Every kit instance still gets its own child, and the test went from 13–59 s to 6.9 s.
+- Proof: `test/plugin-host.test.ts` and `test/wave1-integration.test.ts` ran 20 times in a row in a clone of `dda13e1`. Load averages were 35 to 214 on 10 cores while a second clone ran full `npm test` 22 times: **20 of 20 passed** (54 tests each). In the load clone, 21 of 22 full runs passed. The one failure was `timestamps-e2e.test.ts › cloneScenario` (`ENOENT … .git/objects`), the copy-a-temp-git-repo race in bolt 1's helper. It is outside this round, and U5's branch turns off git's auto maintenance in test repos.
+
+### Decisions
+
+1. **What an approval covers.** An approval is keyed by the plugin's use, its `treeSha256`, its trust and its exact grants: each env var, its https origins, any declared `headers`, and `secret: false`. The brief named env vars and origins only. The other two are in the key because the lock is repo-controlled: an edited lock that marked a token `secret: false` would stop it being scrubbed. A load also refuses a definition that declares more headers, or an identity the lock lacks.
+2. **`plugin lock` records an approval, as `plugin add` does.** Re-locking after a review is the same consent.
+3. **Withheld means absent.** An unapproved credential gets no placeholder in the child, so a plugin runs exactly as if it were unset, anonymously. A placeholder written into the code gets `CREDENTIAL_NOT_APPROVED`. The broker never sees a value for it.
+4. **The built-ins' grant is (env var, origin), shared by every built-in.** The defaults are each service's own public API: GITHUB_TOKEN and GH_TOKEN to `https://api.github.com` (GH_TOKEN is the provider's documented fallback), GITLAB_TOKEN to `https://gitlab.com`, and BITBUCKET_TOKEN and BITBUCKET_USERNAME to `https://api.bitbucket.org`.
+   - A built-in's environment loses each set variable that is not approved for every origin it would go to. If `token_env` is withheld, GitHub falls back to GITHUB_TOKEN for api.github.com, which is a default.
+   - `src/plugins/builtin-credentials.ts` mirrors each built-in's reads. A test runs every built-in on an environment that records each variable read, so the table cannot drift.
+   - An `http:` origin is never approvable, not even with `--accept-lock-grants`.
+5. **`plugin approve` has two shapes.** `plugin approve <use>` covers an external plugin, as its lock pins it, or a built-in, as the config's options make it send. `plugin approve --env <ENV> --origin <https-url>` covers one built-in grant without an audit repo. Without a terminal, both need `--yes`.
+6. **The approvals file is located per key.** Each key is read from the context's env first, then from this process's environment. A test's env object therefore never reaches the real home: the test setup gives each test file its own `PR_RLA_APPROVALS_FILE`, and it fails if the real file's mtime changes. `~/.config/pr-rla` did not exist before this round and does not exist after it.
+7. **Identities must be declared (finding 8).** The brief: "a Basic username is not secret unless the plugin marks it so." Inferring a username from its place in `prrla-basic:USER:TOKEN` would let a hostile plugin swap the two and read the password back unscrubbed. So `secret: false` is declared, shown at approval, and an identity may be only the user part. An undeclared credential is a secret. The Jira example marks JIRA_EMAIL and the hostile fixture marks GITHUB_USER. The built-in Bitbucket username is an identity, though that only matters to the recorder.
+8. **A placeholder in an undeclared header is refused, not stripped (finding 5).** Refusal is visible to the plugin author. Fragments of a secret, and secrets the server hashes or transforms, are not scrubbed; this is documented.
+9. **A method override must be allowed as both methods (finding 6).** A server may honour either. `_method` in the URL counts too. A GraphQL GET with a query document stays a read.
+10. **IPC: bumped to `pr-rla/ipc/v2`, not kept additive (finding 11).** Node's channel cannot be capped while reading, so the framing changed: 4-byte length-prefixed JSON on fd 3, a plain pipe. Under `--permission`, `new net.Socket({ fd: 3 })` and `fs.writeSync(3)` work on 22, 24 and 26. The messages are v1's plus `accept` / `acceptResult`. The child flushes its load-failure frame before it exits.
+11. **acceptJson is asked over IPC (finding 10).** `RetryHints.acceptJson` may now return a promise (additive within `HTTP_HELPER_VERSION` 1). Retry semantics and the 7-attempt cap stay the broker's.
+12. **Sleeps (finding 13).** The cap is the SDK's own MAX_WAIT_MS of 15 min. A wait is cancelled when the calls end or the host closes. `AuditContext.sleep` and `CommandContext.sleep` take an optional AbortSignal, so the CLI's real timer is cleared too.
+13. **Unlocked loads (finding 14).** The existing public names now load built-ins only, and the old behaviour moved to `unsafe*` names. `pr-rla` must resolve to the running pr-rla, or not at all, from a `trust: full` plugin's directory and every dependency's; I chose this over hashing a second copy.
+14. **Finding 15.**
+    - `tsconfig.sdk.json` also covers `src/plugins/child.ts` and `protocol.ts`, which also run type-stripped. U8's round may add the same file; merge by union.
+    - `plugin check` for a ledger runs the kit on recorded ledger fixtures, which are data. Cases that need a tracker to change between reads (erasure, publish) stay in the ledger's own test. An unconfigured ledger is asked with its first fixture's options.
+    - The Jira recordings gained `expected` blocks, appended so the recorded bytes are untouched, and its package.json lists them.
+
+### Verification
+
+Filled in below from fresh clones.
+
+### Unverified
+
+- Linux and Windows (the permission-model and pipe behaviour were measured on macOS only); Node 25.x itself (26.8.2 stands in, as in bolt 4).
+- Node 22.15–22.17 running from source (type stripping is unflagged only from 22.18); the package runs from `dist/`, which 22.15.0 ran.
+- A real GHES, GitLab self-managed or Bitbucket Data Center with an approved token: fakes only, no live call was made in this round.
+- `npm audit signatures` in `plugin check` (always `--offline` here).
+
+### Files touched (for the merge)
+
+- New: `src/plugins/approvals.ts`, `src/plugins/approve.ts`, `src/plugins/builtin-credentials.ts`, `src/net/scrub.ts`, `tsconfig.sdk.json`, `test/local-consent.test.ts`, `test/builtin-consent.test.ts`, `test/setup/approvals.ts`.
+- Plugin system: `src/plugins/{host,child,protocol,open,lock,identity,check,errors}.ts`.
+  - **U5** added `withPluginHostScope` / `livePluginHosts` to `host.ts`. They are independent of this round's changes but in the same file.
+  - **U8** added `estimateRequests` to `child.ts`, `protocol.ts` and `host.ts`. Its method-list lines are near but not in this round's hunks; the frame codec is new code.
+- Broker: `src/net/broker.ts` and `src/net/contract.ts`. **U8** adds `stats` in `attempt()` around `send()`; this round changed the same function's guard, swap and redirect lines, so expect a small manual merge there.
+- SDK: `src/sdk/http.ts` (`HttpError`, the `HttpClient` constructor, `RetryHints.acceptJson`, `checkJsonBody`). **U5** changed `RequestOptions`, `request()` and `getText` next to the constructor. `src/sdk/provider.ts` and `src/sdk/ledger.ts` gained the credential `headers` and `secret` fields (U5, U8, U9 and fix/ledgers-selector also touch these files).
+- API and CLI:
+  - `src/api/context.ts`: `consent`, `builtinEnvironment`, the abortable sleep, grant host normalisation.
+  - `src/registry.ts`: the `unsafe*` loaders, `providerNameOf`.
+  - `src/index.ts`: two export lines (U8 adds lines nearby).
+  - `src/provider-traits.ts` and `src/ledger-traits.ts`: parameter types.
+  - `src/cli.ts`: `--accept-lock-grants` and `plugin approve`.
+  - `src/commands/context.ts` (`acceptLockGrants`, the abortable sleep) and `src/commands/plugin.ts` (approvals in add and lock, approve, the ledger kit in check). **U5** moved both into `src/api/session.ts` and `src/api/write/plugin.ts` / `src/api/plugin-check.ts`, so port these hunks there.
+  - `src/commands/{verify,record,freeze,checkpoint,register}.ts`: `auditContextFor(ctx).plugins` → `auditContextFor(ctx)` in ten calls, so a `trust: full` identity read carries consent. U5 moved those calls into `src/api/write/*` and `src/api/read/*`, so port them there. A missed one fails closed: a `trust: full` plugin refused.
+- Tests: `test/{plugin-host,plugin-lock,broker,registry,wave1-integration,e2e-u3,jira-example,gitea-example,github-issues-ledger,gitlab-issues-ledger}.test.ts`, `test/helpers/plugin-lock.ts` (`approve` option), `test/fixtures/plugins/hostile/index.mjs`, `vitest.config.ts` (one setup file).
+- Examples: `examples/ledgers/jira/index.mjs` (`secret: false` on JIRA_EMAIL, in the definition's credentials, below fix/ledgers-selector's hunks), `examples/ledgers/jira/package.json`, and both Jira recordings (an appended `expected` block; fix/ledgers-selector edits their `options` and `index` near the top).
+- Scripts: `scripts/record-fixture.mjs`, `scripts/demo-plugin-host.mjs`.
+- `package.json` (`typecheck`, `engines >=22.15`), `package-lock.json` (engines only).
+- Docs: `docs/security-model.md` (inside the plugin section, above the last lines U5 and U9 append after), `docs/design/phase-3-4/contracts.md` §§1, 2, 3, 5, `docs/writing-a-provider.md`, `README.md` (two lines).
+
+### For the identity round and the integration
+
+- Finding 2's test in `plugin-lock.test.ts` is marked. Finding 7 still holds after this round, as noted at the end of this list.
+- Approvals are keyed by `treeSha256`, so the identity round's "freeze refuses a swapped provider" composes with them. A swapped plugin is a new tree, and it is unapproved on every machine but the one that locked it.
+- Every commands-layer call that reads a `trust: full` plugin's identity must pass the AuditContext, not `.plugins`.
+- Finding 7: a verify still opens a read-write broker. With this round, a verifier's credentials are withheld unless approved, but an approved ledger can still write under its writePaths during verify.
