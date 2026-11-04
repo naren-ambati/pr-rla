@@ -7,7 +7,9 @@ import { stoppingTable, effectiveCap } from "../core/sprt.js";
 import { providerTraits } from "../provider-traits.js";
 import { preflightExternalLedger } from "../plugins/open.js";
 import { builtinLedgerName, loadLedgerDefinition, pluginIdentity } from "../registry.js";
-import { provenanceRank, type ProvenanceLevel } from "../sdk/ledger.js";
+import type { ProvenanceLevel } from "../sdk/ledger.js";
+import { maxProvenanceOf, SIGNATURE_LEDGERS } from "../ledger-traits.js";
+import { PRESENCE_LIMIT, presenceReachable, registeredVerdicts, verdictRuleWarnings, verdictsSummary, type RegisteredVerdicts } from "../core/presence/index.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
@@ -36,7 +38,7 @@ export const REREGISTER_COMMAND = "pr-rla register --force";
  * the registration fixes (FR3.8): `min_provenance` from .pr-rla.yml, else the ledger's own level.
  * An external ledger must be locked, and an isolated one does all of this in its plugin host.
  */
-export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<{ minProvenance: ProvenanceLevel; reviewers: string[] | null }> {
+export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<RegisteredVerdicts> {
   const offline = (async () => {
     throw new CommandError("register's preflight contacts no tracker");
   }) as unknown as typeof fetch;
@@ -56,11 +58,25 @@ export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, 
     if (x.problem) throw new CommandError(`ledger ${config.ledger.use}: ${x.problem}`);
     def = x;
   }
-  const level = def.provenance ?? "self-asserted";
-  const minProvenance = config.verdicts.minProvenance ?? level;
-  if (provenanceRank(minProvenance) > provenanceRank(level))
-    throw new CommandError(`verdicts.min_provenance is ${minProvenance}, but ledger ${def.name} records ${level} verdicts, so no verdict could count; use an issue ledger (github-issues, gitlab-issues) for account provenance`);
-  return { minProvenance, reviewers: config.verdicts.reviewers };
+  // U9: git-file reaches account and presence through per-verdict signatures; SSH keys count only there.
+  const builtin = !!builtinLedgerName(config.ledger.use);
+  const input = {
+    ledger: def.name,
+    verifiesSignatures: builtin && SIGNATURE_LEDGERS.has(def.name),
+    ledgerLevel: def.provenance ?? "self-asserted",
+    ledgerCeiling: maxProvenanceOf(builtin, def.name, def.provenance ?? "self-asserted"),
+    minProvenance: config.verdicts.minProvenance,
+    reviewers: config.verdicts.reviewers,
+    allowedSigners: config.verdicts.allowedSigners,
+    requireSigned: config.ledger.options.require_signed === true,
+  };
+  try {
+    const verdicts = registeredVerdicts(input);
+    for (const w of verdictRuleWarnings(input, verdicts)) ctx.out(`  warning: ${w}`);
+    return verdicts;
+  } catch (e) {
+    throw new CommandError((e as Error).message);
+  }
 }
 
 export async function registerCommand(ctx: CommandContext, opts: RegisterOptions): Promise<number> {
@@ -101,7 +117,8 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     if (!traits.reportsLandedVia) ctx.out(`  warning: provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`);
   }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
-  ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}${record.verdicts.reviewers ? ` · reviewers ${record.verdicts.reviewers.join(", ")}` : ""}`);
+  ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · ${verdictsSummary(record.verdicts)}`);
+  if (presenceReachable(record.verdicts.allowed_signers)) ctx.out(`  ${PRESENCE_LIMIT}`);
   for (const id of [record.plugins.provider, record.plugins.ledger]) {
     if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);
     if (id.trust === "full") ctx.out(`  PLUGIN TRUST: full (${id.name}@${id.version ?? "unversioned"} runs with your environment and files)`);

@@ -62,10 +62,11 @@ describe("provider registry (bring-your-own providers)", () => {
 });
 
 describe("architecture boundaries", () => {
+  // Every .ts file under src/<dir>, subdirectories included (src/core/presence is part of the core).
+  const filesOf = (dir: string): string[] =>
+    (readdirSync(join(ROOT, "src", dir), { recursive: true }) as string[]).filter((f) => f.endsWith(".ts")).map((f) => `${dir}/${f.split("\\").join("/")}`);
   const importsOf = (dir: string) =>
-    readdirSync(join(ROOT, "src", dir))
-      .filter((f) => f.endsWith(".ts"))
-      .flatMap((f) => [...readFileSync(join(ROOT, "src", dir, f), "utf8").matchAll(/from\s+"([^"]+)"/g)].map((m) => ({ file: `${dir}/${f}`, spec: m[1]! })));
+    filesOf(dir).flatMap((file) => [...readFileSync(join(ROOT, "src", file), "utf8").matchAll(/from\s+"([^"]+)"/g)].map((m) => ({ file, spec: m[1]! })));
 
   it("the core imports no provider, ledger, registry or command module", () => {
     const bad = importsOf("core").filter((i) => /providers\/|ledgers\/|registry|commands\/|octokit/.test(i.spec));
@@ -73,8 +74,27 @@ describe("architecture boundaries", () => {
   });
 
   it("the core never mentions a concrete SCM's API", () => {
-    const hits = readdirSync(join(ROOT, "src", "core")).filter((f) => /graphql|api\.github\.com|pullRequest\(/i.test(readFileSync(join(ROOT, "src", "core", f), "utf8")));
+    const hits = filesOf("core").filter((f) => /graphql|api\.github\.com|pullRequest\(/i.test(readFileSync(join(ROOT, "src", f), "utf8")));
     expect(hits).toEqual([]);
+  });
+
+  it("PresenceVerifier (src/core/presence) is pure: node:crypto, the core and the SDK only (functional-design.md §U9)", () => {
+    const presence = importsOf("core/presence");
+    expect(presence.map((i) => i.file)).toContain("core/presence/sshsig.ts");
+    // Allowed: node:crypto, its own modules, other core modules (../x.js) and the SDK (../../sdk/x.js); nothing else.
+    const bad = presence.filter((i) => !(i.spec === "node:crypto" || /^\.\/[a-z-]+\.js$/.test(i.spec) || /^\.\.\/(\.\.\/sdk\/)?[a-z-]+\.js$/.test(i.spec)));
+    expect(bad).toEqual([]);
+    // Nothing it reaches, transitively, spawns a process, opens a file or a socket, or calls fetch.
+    const reach = (file: string, seen = new Set<string>()): Set<string> => {
+      if (seen.has(file)) return seen;
+      seen.add(file);
+      for (const m of readFileSync(join(ROOT, "src", file), "utf8").matchAll(/^(?:import|export) (?!type )[^;]*?from\s+"(\.[^"]+)"/gm)) reach(join(file, "..", m[1]!).replace(/\.js$/, ".ts"), seen);
+      return seen;
+    };
+    const closure = [...reach("core/presence/index.ts")];
+    expect(closure).toContain("sdk/ledger.ts");
+    const io = closure.filter((f) => /child_process|node:fs|node:net|node:http|node:dns|\bfetch\(|execFile|spawn\(/.test(readFileSync(join(ROOT, "src", f), "utf8")));
+    expect(io).toEqual([]);
   });
 
   it("the core imports no timestamp client, network module, API or plugin host (test-design.md §5)", () => {

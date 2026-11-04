@@ -1,4 +1,4 @@
-import { provenanceRank, recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
+import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import type { ScmProvider } from "../sdk/provider.js";
@@ -34,7 +34,8 @@ import {
 import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
-import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "./status.js";
+import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
+import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL" | "SKIP";
 
@@ -70,6 +71,14 @@ export interface VerifyDeps {
   ledger: Ledger | null;
   /** Why the ledger was not read (an offline verify of a ledger that lives in a tracker); check 7 then SKIPs saying so. */
   ledgerSkipped?: string;
+  /**
+   * The most the registered ledger's verdicts can count as (U9: `presence` only for git-file, whose
+   * verdict signatures pr-rla checks; `account` for the issue ledgers). A verdict claiming more is
+   * counted at this level and check 7 WARNs. Absent: no cap.
+   */
+  provenanceCeiling?: ProvenanceLevel;
+  /** The identity of the ledger verify loaded (U9, after review): check 7 FAILs when it is not the registered one. */
+  ledgerIdentity?: PluginIdentity;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL: the verifier's --log-key or a key pinned in the package, never the audit repo's; null if none. */
@@ -204,7 +213,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     regTs = await checkTimestamps(reg, reg.record.registeredAt, reg.record.timestamping, regLog, "registration", deps, c1);
     if (!regTs.proven) tamperProof = false;
     else mode = regTs.ukMs! < Date.parse(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
-    c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${reg.record.verdicts.minProvenance}`);
+    c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${provenanceLabel(reg.record.verdicts.minProvenance)}${reg.record.verdicts.require_signed ? " · signed verdicts required" : ""}`);
   } else if (!regLog.verified) tamperProof = false;
   if (a.currentProtocolSha256 === null) {
     c1.details.push("review protocol file not found: cannot confirm it is the registered one");
@@ -402,9 +411,30 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       }
     };
     let lastCountedAt: string | null = null;
-    const verdicts = await attempt("readVerdicts", () => ledger.readVerdicts());
+    const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
-    const minProvenance: ProvenanceLevel = regVerdicts?.minProvenance ?? "self-asserted";
+    const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
+    // U9: the ledger read must be the registered one (name, source, files, options), or nothing it says counts as registered.
+    const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
+    const loadedId = deps.ledgerIdentity;
+    const idDiffs = registeredLedger && loadedId ? (["name", "source", "integrity", "optionsSha256"] as const).filter((k) => registeredLedger[k] !== loadedId[k]) : [];
+    if (idDiffs.length) {
+      const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
+      c7.status = "FAIL";
+      c7.details.push(`FAIL the ledger verify loaded is not the registered one (${idDiffs.map((k) => `${k} ${show(registeredLedger![k])} → ${show(loadedId![k])}`).join("; ")}): verify with the registered ledger and options`);
+    }
+    if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
+      c7.status = "FAIL";
+      c7.details.push(`FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})`);
+    }
+    // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
+    const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
+    const counted = read ? countedVerdicts(read, { registration: reg, verifiesSignatures, ...(deps.provenanceCeiling ? { ceiling: deps.provenanceCeiling } : {}), ledger: ledger.name }) : null;
+    const verdicts = counted?.verdicts ?? null;
+    if (counted) {
+      c7.details.push(...counted.notes, ...counted.findings, ...counted.warnings);
+      if ((counted.notes.length || counted.warnings.length) && c7.status === "PASS") c7.status = "WARN";
+    }
     if (verdicts) {
       status = computeStatus({
         N: m.N,
@@ -425,13 +455,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           c7.status = "FAIL";
           c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
         }
-        // FR3.8: a counted verdict below the registered minimum provenance FAILs.
-        if (v && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance)) {
+        // FR3.8, FR9.4: a counted verdict below the registered minimum provenance FAILs; FR9.1: so does one
+        // its registered reviewer did not sign, under require_signed.
+        for (const failure of v ? verdictRuleFailures(v, rules) : []) {
           c7.status = "FAIL";
-          c7.details.push(`verdict on draw #${v.draw} (${id}) is ${provenanceOf(v)}; the registration requires ${minProvenance}`);
+          c7.details.push(failure);
         }
       }
-      c7.details.push(`${provenanceLine(status.provenance)} (registered minimum: ${minProvenance})`);
+      c7.details.push(`${provenanceLine(status.provenance)} (${rulesLine(rules)})`);
+      if (rules.minProvenance === "presence" || status.provenance.some((p) => p.level === "presence")) c7.details.push(PRESENCE_LIMIT);
       for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
       for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
       if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";

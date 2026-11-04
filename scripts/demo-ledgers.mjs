@@ -47,41 +47,51 @@ for (const [f, title] of [
   console.log();
 }
 
-console.log("Part 2: pr-rla verify, with an audit's ledger pointed at the recorded tracker (check 7)\n");
-const dir = mkdtempSync(join(tmpdir(), "prrla-demo-audit-"));
+console.log("Part 2: pr-rla verify, with an audit registered on the recorded tracker (check 7)\n");
 const changes = Array.from({ length: 200 }, (_, i) => {
   const sha = (BigInt(i + 1) * 0x9e3779b97f4a7c15n).toString(16).padStart(40, "0").slice(-40);
   const mergedAt = new Date(Date.parse("2026-07-01T00:00:00Z") + i * 39_000_000).toISOString().replace(".000Z", "Z");
   return { id: `json:acme/widgets#${1000 + i}`, kind: "pull_request", repo: "acme/widgets", url: `https://git.example.com/acme/widgets/pulls/${1000 + i}`, mergeSha: sha, mergedAt, author: { login: "copilot-swe-agent[bot]", kind: "bot" }, mergedBy: { login: "maint", kind: "human" }, reviews: [], changedLines: 10 + i, labels: [] };
 });
-writeFileSync(join(dir, "changes.json"), JSON.stringify({ schema: "pr-rla/changes/v1", repo: "acme/widgets", defaultBranch: "main", changes }));
-writeFileSync(join(dir, "review-protocol.md"), "# Protocol\nA change fails if it introduces a user-visible bug or a security weakness.\n");
 const yml = (ledger) => `provider: { use: json-file, options: { path: changes.json } }\nrepo: acme/widgets\nwindow: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }\nselector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }\ntimestamping: { authorities: [] }\nledger: ${ledger}\n`;
-writeFileSync(join(dir, ".pr-rla.yml"), yml("git-file"));
 const beacon = JSON.parse(readFileSync(new URL("../test/fixtures/drand/quicknet-33245812.json", import.meta.url), "utf8"));
-let clock = Date.parse("2026-10-20T00:00:00Z");
-const run = async (args, fetch) => {
-  const out = [];
-  let code = 0;
-  const ctx = () => nodeContext({ cwd: dir, env: {}, nowMs: () => clock, fetch, out: (l) => out.push(l), err: (l) => out.push(l), beacon: async (r) => (r === beacon.round && (await verifyQuicknetBeacon(beacon, r)) ? beacon : Promise.reject(new Error("no recorded beacon"))) });
-  await buildProgram(ctx, (c) => (code = c)).parseAsync(["node", "pr-rla", ...args]);
-  return { code, out };
-};
 const offline = async (u) => {
   throw new Error(`demo: no network (${u})`);
 };
-await run(["register"], offline);
-clock = Date.parse("2026-10-20T12:00:00Z");
-await run(["freeze"], offline);
-clock = Date.parse("2026-10-21T01:00:00Z");
-await run(["sample", "--through", "1"], offline); // one draw: the recorded tracker holds one issue
-console.log("  (a json-file audit of 200 changes, registered, frozen and sampled offline; its ledger is now github-issues over a recorded tracker)\n");
+/**
+ * A 200-change json-file audit registered with `ledger` (verify FAILs check 7 on any other: U9), then
+ * frozen and sampled offline. Sampling runs with git-file so no draw is published to a tracker: the
+ * recorded issue stands for draw #1.
+ */
+async function auditOn(ledger) {
+  const dir = mkdtempSync(join(tmpdir(), "prrla-demo-audit-"));
+  writeFileSync(join(dir, "changes.json"), JSON.stringify({ schema: "pr-rla/changes/v1", repo: "acme/widgets", defaultBranch: "main", changes }));
+  writeFileSync(join(dir, "review-protocol.md"), "# Protocol\nA change fails if it introduces a user-visible bug or a security weakness.\n");
+  let clock = Date.parse("2026-10-20T00:00:00Z");
+  const run = async (args, fetch) => {
+    const out = [];
+    let code = 0;
+    const ctx = () => nodeContext({ cwd: dir, env: {}, nowMs: () => clock, fetch, out: (l) => out.push(l), err: (l) => out.push(l), beacon: async (r) => (r === beacon.round && (await verifyQuicknetBeacon(beacon, r)) ? beacon : Promise.reject(new Error("no recorded beacon"))) });
+    await buildProgram(ctx, (c) => (code = c)).parseAsync(["node", "pr-rla", ...args]);
+    return { code, out };
+  };
+  writeFileSync(join(dir, ".pr-rla.yml"), yml(ledger));
+  await run(["register"], offline);
+  clock = Date.parse("2026-10-20T12:00:00Z");
+  await run(["freeze"], offline);
+  clock = Date.parse("2026-10-21T01:00:00Z");
+  writeFileSync(join(dir, ".pr-rla.yml"), yml("git-file"));
+  await run(["sample", "--through", "1"], offline); // one draw: the recorded tracker holds one issue
+  writeFileSync(join(dir, ".pr-rla.yml"), yml(ledger));
+  return { dir, run };
+}
+console.log("  (a json-file audit of 200 changes per fixture, registered on github-issues, frozen and sampled offline)\n");
 for (const [f, ledger] of [
   ["relabel-same-nodejs-node-67038.json", "{ use: github-issues, options: { repo: nodejs/node, labels: { pass: commit-queue-squash, fail: commit-queue-rebase } } }"],
   ["deleted-microsoft-vscode-345635.json", "{ use: github-issues, options: { repo: microsoft/vscode, labels: { pass: bug, fail: feature-request } } }"],
 ]) {
   const rec = fixture(f);
-  writeFileSync(join(dir, ".pr-rla.yml"), yml(ledger));
+  const { dir, run } = await auditOn(ledger);
   mkdirSync(join(dir, "audit/2026-q3"), { recursive: true });
   // The recorded issue stands for the audit's draw #1, under the audit's registered protocol.
   const draws = JSON.parse(readFileSync(join(dir, "audit/2026-q3/draws.json"), "utf8"));

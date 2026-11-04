@@ -3,14 +3,17 @@ import { buildPopulation } from "../core/population.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
+import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
+import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
+import { builtinLedgerName } from "../registry.js";
 import { provenanceRank } from "../sdk/ledger.js";
 import { checkpointCommand } from "./checkpoint.js";
 import { windowDays } from "../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import type { Selector } from "../core/selector.js";
 import { anchorLines, notTamperProof } from "../timestamp/verify.js";
-import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
+import { auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
 import { assessRecord, logBound } from "./timestamps.js";
 
 /**
@@ -111,17 +114,23 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   }
   const draws = readDraws(paths);
   const ledger = await ledgerFor(ctx, config, paths);
+  // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the registered ledger's ceiling.
+  const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
+  const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins));
+  const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
+  const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
     draws: draws.draws,
     drawsIssued: draws.issued,
-    verdicts: await ledger.readVerdicts(),
+    verdicts: capped.verdicts,
     protocolSha256: reg.record.protocolSha256,
     params: reg.record.parameters,
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
   });
   const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
+  const requireSigned = isRegistrationV2(reg) && reg.record.verdicts.require_signed === true;
   if (opts.json) {
     ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report }, null, 2));
   } else if (report.refusal) {
@@ -134,10 +143,14 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
     for (const r of report.relabels) ctx.out(`  relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
-    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${minProvenance}`);
+    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${provenanceLabel(minProvenance)}${requireSigned ? " · signed verdicts required (require_signed)" : ""}`);
+    if (minProvenance === "presence" || report.provenance.some((p) => p.level === "presence")) ctx.out(`  ${PRESENCE_LIMIT}`);
+    for (const note of [...capped.notes, ...capped.warnings]) ctx.out(`  ${note}`);
     const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
     const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
-    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${minProvenance} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
+    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${provenanceLabel(minProvenance)} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
+    const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length) : [];
+    if (unsigned.length) ctx.out(`  ${unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${unsigned.map((v) => `#${v.draw}`).join(", ")})`);
     if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
       const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
       const cp = latestCheckpointAt(paths.windowDir);

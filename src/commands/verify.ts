@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../beacon/drand.js";
 import { isRegistrationV2, type PluginIdentity } from "../core/records.js";
 import { verifyAudit, type VerifyReport } from "../core/verify.js";
-import { ledgerTraits } from "../ledger-traits.js";
+import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
 import { pluginIdentity } from "../registry.js";
 import { statusLine } from "./status.js";
 import {
@@ -55,12 +55,16 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
+  // U9: the ledger's, compared in check 7; its ceiling is the registered ledger's.
+  const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins) : null;
   const report = await verifyAudit(
     { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
     {
       provider,
       ledger,
       ...(skipLedger ? { ledgerSkipped: `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; run verify without --offline to check the verdicts` } : {}),
+      provenanceCeiling: registeredCeiling(isRegistrationV2(registration) ? registration.record.plugins.ledger : null, lt),
+      ...(ledgerIdentity ? { ledgerIdentity } : {}),
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {

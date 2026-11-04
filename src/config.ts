@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import type { AuditParameters } from "./core/records.js";
 import { normalizeSelector, type Selector } from "./core/selector.js";
+import { parseAllowedSigners } from "./core/presence/allowed-signers.js";
 import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
 import { parseRate, type RateLimitOverrides } from "./net/rate-limits.js";
@@ -34,8 +35,10 @@ export interface PrRlaConfig {
   /**
    * `verdicts:` (FR3.8): the minimum provenance a counted verdict needs (null: the ledger's own level,
    * `account` for issue ledgers, else `self-asserted`) and the reviewers whose verdicts count (null: any non-bot account).
+   * `allowed_signers` (git-file, U9): the reviewers' SSH keys as allowed-signers lines, given inline
+   * or as a file next to the configuration; null when none are registered.
    */
-  verdicts: { minProvenance: ProvenanceLevel | null; reviewers: string[] | null };
+  verdicts: { minProvenance: ProvenanceLevel | null; reviewers: string[] | null; allowedSigners: string[] | null };
 }
 
 /** Issue ledgers that take their provider's self-hosted base_url when they set none (FR4.8). */
@@ -129,12 +132,17 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   };
 }
 
-/** `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>"] }`. */
+/**
+ * `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>"], allowed_signers: [...] | <file> }`.
+ * `allowed_signers` (U9) is a list of OpenSSH allowed-signers lines, or the path (relative to the
+ * configuration) of an allowed_signers file; blank lines and `#` comments in the file are skipped.
+ */
 function parseVerdicts(raw: unknown, configPath: string): PrRlaConfig["verdicts"] {
-  if (raw === undefined || raw === null) return { minProvenance: null, reviewers: null };
+  if (raw === undefined || raw === null) return { minProvenance: null, reviewers: null, allowedSigners: null };
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${configPath}: verdicts must be a mapping, e.g. verdicts: { min_provenance: account, reviewers: [alice] }`);
   const v = raw as Record<string, unknown>;
-  for (const k of Object.keys(v)) if (k !== "min_provenance" && k !== "reviewers") throw new Error(`${configPath}: verdicts.${k} is not a setting (verdicts takes min_provenance and reviewers)`);
+  for (const k of Object.keys(v))
+    if (k !== "min_provenance" && k !== "reviewers" && k !== "allowed_signers") throw new Error(`${configPath}: verdicts.${k} is not a setting (verdicts takes min_provenance, reviewers and allowed_signers)`);
   const min = v.min_provenance;
   if (min !== undefined && min !== null && !PROVENANCE_LEVELS.includes(min as ProvenanceLevel)) throw new Error(`${configPath}: verdicts.min_provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
   let reviewers: string[] | null = null;
@@ -145,7 +153,29 @@ function parseVerdicts(raw: unknown, configPath: string): PrRlaConfig["verdicts"
     if (v.reviewers.length === 0) throw new Error(`${configPath}: verdicts.reviewers is empty, so no verdict could count; list the reviewers, or leave it out to accept any account that is not a bot`);
     reviewers = [...new Set((v.reviewers as string[]).map((r) => r.trim()))].sort();
   }
-  return { minProvenance: (min ?? null) as ProvenanceLevel | null, reviewers };
+  return { minProvenance: (min ?? null) as ProvenanceLevel | null, reviewers, allowedSigners: parseAllowedSignersSetting(v.allowed_signers, configPath) };
+}
+
+/** `verdicts.allowed_signers`: inline lines, or an allowed_signers file next to the configuration. Each line is checked here. */
+function parseAllowedSignersSetting(raw: unknown, configPath: string): string[] | null {
+  if (raw === undefined || raw === null) return null;
+  let lines: string[];
+  if (typeof raw === "string") {
+    const file = resolve(dirname(configPath), raw);
+    if (!existsSync(file)) throw new Error(`${configPath}: verdicts.allowed_signers names ${raw}, which does not exist (give the file's path relative to the configuration, or list the lines)`);
+    lines = readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.startsWith("#"));
+  } else if (Array.isArray(raw) && raw.every((r) => typeof r === "string" && r.trim() !== "")) lines = (raw as string[]).map((r) => r.trim());
+  else throw new Error(`${configPath}: verdicts.allowed_signers must be a list of allowed-signers lines ("<principal> <keytype> <base64 key>") or the path of an allowed_signers file`);
+  if (lines.length === 0) throw new Error(`${configPath}: verdicts.allowed_signers lists no key; leave it out to register none`);
+  if (lines.some((l) => /[<>]/.test(l))) throw new Error(`${configPath}: verdicts.allowed_signers: replace the placeholder with the reviewer's principal and public key`);
+  try {
+    return parseAllowedSigners(lines).map((s) => s.line).sort();
+  } catch (e) {
+    throw new Error(`${configPath}: verdicts.allowed_signers: ${(e as Error).message}`);
+  }
 }
 
 /** `rate_limits:` checked for shape and rate syntax here; rule names are checked against the host's budget when it is used. */

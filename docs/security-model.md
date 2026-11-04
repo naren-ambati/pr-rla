@@ -73,3 +73,59 @@ Every intermediate must be a CA allowed to issue certificates (critical `cA`, `k
 - **A pinned issuing CA must be updated when an operator rotates it.** A token signed under a new issuing CA fails until the bundle carries it (NFR21's release diff). Old tokens keep verifying, because issuing CAs are only added.
 - **A v1 audit logged to a log whose key is not pinned** verifies at most as `time unproven` unless the verifier passes that log's key with `--log-key`.
 - **The parsing library still verifies the signature** (pkijs); pr-rla checks that it did so under the signer certificate's key, byte for byte.
+
+## Verdict provenance and presence (T7, T16)
+
+A verdict is only as good as the evidence of who recorded it. pr-rla gives every counted verdict a provenance level, prints it on every certificate, and lets a registration require a minimum (FR3.8, FR9).
+
+| Level | What it means | Produced by |
+|---|---|---|
+| `self-asserted` | `reviewer` and `recordedAt` are whatever the writer typed | the `git-file` ledger: a line with no signature, or one whose signature does not count (another key, another reviewer, another registration, a broken signature) |
+| `account` | an SCM account (server-assigned time) or the reviewer's registered signing key did it | the issue ledgers (the label event's actor and `created_at`); a `git-file` line signed by the registered software SSH key of the reviewer it names, or by their registered security key with the user-presence flag clear |
+| `presence` | as `account`, and the signature carries the FIDO user-presence (UP) flag from the reviewer's registered security key | a `git-file` line signed by the registered `sk-ssh-ed25519@openssh.com` or `sk-ecdsa-sha2-nistp256@openssh.com` key of the reviewer it names, UP set |
+
+Every certificate prints the level, and prints `presence` as `presence (user-presence flag verified; key hardware not attested)`: `VERDICT PROVENANCE: account (12) · presence (user-presence flag verified; key hardware not attested) (24)`.
+
+### One signature per verdict
+
+A verdict's provenance comes only from its own signature. Each `git-file` line carries `sshsig`: an SSHSIG (OpenSSH `PROTOCOL.sshsig`) in namespace `pr-rla-verdict@v1`, made by `ssh-keygen -Y sign`, over a versioned text that names the registration's digest, the protocol, the draw, the change, the verdict, the reviewer and the time (contracts.md §1, "Per-verdict signatures"). `pr-rla record --sign <key>` makes it; a reviewer who does not want to run pr-rla's process can write the bytes with printf and sign them with ssh-keygen themselves (README, "Signed verdicts").
+
+So one signature is one verdict, on one draw, of one registration. With a security key, one touch signs exactly one verdict: an assistant that appends lines in the reviewer's shell cannot have them all vouched for by the next touch, a line cannot move to another draw or another audit, and rebasing, cherry-picking or amending other people's commits signs nothing that counts. Commit signatures give no provenance at all, and no line is credited to the commit that added it.
+
+### What the registration fixes
+
+- `verdicts.min_provenance`: the level below which a counted verdict FAILs check 7. The default is `account` with an issue ledger and `self-asserted` with `git-file`.
+- `verdicts.allowed_signers`: the reviewers' keys, as lines of OpenSSH's allowed-signers format (`<principal> [namespaces="pr-rla-verdict@v1"] <keytype> <base64 key>`), inline or from an `allowed_signers` file next to the configuration. They are hashed into the signed registration, so rotating a key needs a new registration, which is the point. pr-rla reads a narrower form than `ssh-keygen`: one principal per line, an exact name; no two principals equal ignoring case; no key under two principals; the only option is `namespaces`, which must admit `pr-rla-verdict@v1`.
+- `verdicts.reviewers`: whose verdicts count at all (logins and `id:<account id>`), as before; it is no longer where keys go.
+- `verdicts.require_signed`, from the `git-file` option `require_signed: true`: every counted verdict must carry a valid signature by the registered key of the reviewer it names. Only the built-in `git-file` ledger can be registered with it.
+
+`register` refuses rules no verdict could meet (`account` with `git-file` and no keys, `presence` with no registered security key, `require_signed` with no keys or another ledger, keys with any ledger but `git-file`), and warns when keys are registered but neither `require_signed` nor a minimum above `self-asserted` is set, since unsigned verdicts would then still count.
+
+### How pr-rla checks a signed verdict
+
+For each line, the core's PresenceVerifier (`src/core/presence/`, pure: node:crypto only, no file, process or network access):
+1. rebuilds the signed bytes from the line's fields and **this** registration's digest (a line naming another registration is refused);
+2. parses the SSHSIG and checks the `SSHSIG` preamble, version 1, an empty reserved field, namespace `pr-rla-verdict@v1` and a `sha256` or `sha512` message hash;
+3. requires the signing key to be a registered key, byte for byte, admitting the namespace, and the line's `reviewer` to be that key's principal, exactly (as `ssh-keygen -Y verify -I` matches);
+4. verifies the signature in TypeScript: Ed25519, ECDSA P-256, P-384 and P-521, RSA (rsa-sha2-256 or rsa-sha2-512, 2048 bits or more, an odd exponent above 1; SHA-1 `ssh-rsa` is refused), and for the FIDO types the authenticator's signed data, `SHA256(application) ‖ flags ‖ counter ‖ SHA256(signed data)` (OpenSSH `PROTOCOL.u2f`), with an application that starts with `ssh:`; small-order Ed25519 keys and WebAuthn signatures are refused;
+5. for a security key, reads the UP flag (bit `0x01`) itself.
+
+A level a line writes about itself never counts. A ledger cannot raise a verdict above what it can attest: `presence` comes only from this check of a `git-file` line, the issue ledgers top out at `account` (a label event carries no presence evidence), and an external ledger is never counted above `account`. Signatures count only when the ledger `verify` loaded is the registered one: check 7 FAILs when its name, source, files (`integrity`) or options differ from the registration's `plugins.ledger`, and takes the ceiling from the registered identity. Check 7 WARNs on an unreadable, invalid or foreign signature, an unlisted key, a signer who is not the reviewer the line names, and a security key whose signature counter goes down.
+
+### The ledger's history
+
+Signed lines can still be deleted, so `verify` walks the history of `verdicts.jsonl` itself: every commit reachable from HEAD through the parents its raw commit object names (no `git log` history simplification, no rename following), each object read with `git cat-file --batch` and checked to hash to its name. Every version of the file must extend the version in each of its parents, so a removal, a relabel or a rewrite anywhere, on any merged branch, FAILs. git runs through one guard (`src/io/git-safe.ts`): every inherited `GIT_*` variable dropped, no lazy fetch, no optional locks, no automatic gc or maintenance, no climbing above the repository, no replace refs, no commit-graph, no fsmonitor, and no textconv (the walk reads blobs, never diffs).
+
+A shallow clone, a repository with a grafts file or a hand-written `shallow` file, and a partial clone are refused before anything is read: check 7 FAILs and says to verify in a full clone. In a shallow clone the history before the cut is not there, so a verdict removed before it could not be seen; earlier versions of this page said such lines "lose their level", which was wrong (they took the boundary commit's level). A missing object is reported as missing, never as a deletion, and is never fetched.
+
+### The limits, stated plainly
+
+- **`presence` does not prove a person touched hardware (T16).** A software-emulated authenticator sets the user-presence flag as easily as a hardware key does. So `presence` relies on each reviewer having registered a hardware-backed security key; pr-rla does not check that a registered key is hardware-backed (key hardware not attested). Closing this would need FIDO attestation at registration (`ssh-keygen -O write-attestation`, verified against the authenticator vendors' roots); it is not built.
+- **Tested with software keys only (D7).** The `-sk` signatures in the test suite come from OpenSSH's own sk-dummy test middleware and from a software-emulated authenticator in the tests; no hardware key has been used, and no doc or certificate claims hardware-verified presence.
+- **Don't register your everyday signing key.** Register a key you keep for verdicts, with `namespaces="pr-rla-verdict@v1"`. A touch request from a key that only signs verdicts is unambiguous; one from the key that also signs your commits and SSH logins is easy to grant without looking. And anyone who can use a registered software key (an assistant in your shell, a process reading your key file) can sign verdicts as you at `account`.
+- **A touch is presence for one signature, not a review.** The authenticator does not show what it signs, so a reviewer could be talked into touching for a verdict they did not make. `presence` rules out "no human at all" for that one verdict, not "no review".
+- **`ssh-keygen -Y verify` and `git verify-commit` do not enforce the presence flag.** OpenSSH 10.3p1 accepts a security-key signature whose UP flag is clear, and neither `-Y verify` nor the allowed-signers format has an option that requires it (checked 2026-11-04; `test/presence-oracle.test.ts`). pr-rla checks the flag itself; verifying with ssh-keygen alone would accept a touch-less signature. ssh-keygen also accepts things pr-rla refuses on purpose: a small-order Ed25519 key whose one "signature" verifies every message, RSA keys of 1024 to 2047 bits, a non-empty reserved field, and WebAuthn signatures.
+- **The counter is a WARN, never a FAIL.** Authenticators differ: some report 0, OpenSSH's test middleware a constant. A counter that goes down for one key can mean a cloned key, so it is reported.
+- **A signature binds the verdict to the reviewer's key, not to a time.** `recordedAt` is signed, but it is still the signer's own clock.
+- **The walk sees the history it is given.** It catches a removal or rewrite anywhere in the history reachable from HEAD. A history rewritten wholesale (a new root, force-pushed, with the signed lines copied over without the ones the rewriter dislikes) is not visible from the repository alone: protect the default branch and keep the audit repository where force-pushes are refused, and compare with a clone taken earlier.
+- **SHA-1 repositories hash-check objects without collision detection.** pr-rla recomputes each object's SHA-1 itself; it does not run git's collision detection over it, so a repository whose objects were built with a SHA-1 collision (chosen-prefix collisions are practical) could pass the check with two contents under one name. A SHA-256 repository (`git init --object-format=sha256`) does not have this exposure; the per-verdict signatures (SHA-256 or SHA-512 message hashes) do not depend on git's hash either way.

@@ -93,12 +93,16 @@ interface VerdictEvent {
   /* phase-1 fields unchanged */
   provenance?: {
     level: ProvenanceLevel;
-    source: "git-commit" | "git-signed-commit" | "scm-label-event" | "jira-field-change" | string;
+    source: "verdict-signature" | "scm-label-event" | "jira-field-change" | string;  // "git-commit", "git-signed-commit": reserved, no longer produced (U9 fix round)
     actorId?: string;
     viaApp?: string | null;     // GitHub performed_via_github_app; non-null is ineligible by default
     eventId?: string;
-    signer?: string;            // allowed-signers principal, for git-signed-commit
+    signer?: string;            // allowed-signers principal, for verdict-signature
+    keyFingerprint?: string;    // verdict-signature: SHA256:… of the signing key
+    counter?: number;           // verdict-signature with a FIDO key: the authenticator's counter
   };
+  registrationSha256?: string;  // git-file line: the registration a signed verdict names
+  sshsig?: string;              // git-file line: the per-verdict SSHSIG, base64 without armor (below)
 }
 interface LedgerHistoryEvent {
   id: string;                   // the tracker's event id
@@ -124,6 +128,39 @@ interface LedgerDefinition {
 **Event order (added in the ledger/selector fix round).** `readVerdicts` returns verdicts in recorded order: by the tracker's time, then by event id. Ids compare part by part (split on `:`), each part as an integer when it is all digits (BigInt, so ids past 2^53 stay exact), a number before anything else, and anything else by UTF-16 code unit; equal numbers written differently fall back to code units. The order is total. `compareEventIds` and `compareByTimeThenId` in `pr-rla/ledger` are the reference; a lexical order would put id "100" before "99" and count the wrong one of two same-second verdicts. The checkpoint's canonical event list (`eventsSha256`) is sorted the same way.
 
 **The ledger index.** An issue-tracker ledger keeps `audit/<window>/ledger-index.json` (draw → issue; for an external ledger, through `LedgerContext.index`). It is a hint, not a witness: on read the issue the tracker returns must be the one the index names (GitHub node id or GitLab id, and number), its body must carry the draw's marker for the same window, draw and change, and no two draws may share an issue number or id. `sample` binds the file to the draws (§5); `verify` compares.
+
+#### Per-verdict signatures (`pr-rla-verdict@v1`, U9)
+
+Added in the U9 fix round (2026-11-04). A git-file verdict's provenance comes only from its own signature; no line is credited to a git commit.
+
+**The signed bytes** are UTF-8 text, eight lines in this order, each ending in LF (0x0A), the last included, with one space between a name and its value:
+
+```
+pr-rla-verdict/v1
+registrationSha256 <64 lowercase hex: the registration's sha256, as in registration.json>
+protocolSha256 <64 lowercase hex>
+draw <decimal, 1 or more, no leading zero>
+changeId <text>
+verdict <pass | fail>
+reviewer <text: the allowed-signers principal>
+recordedAt <YYYY-MM-DDTHH:MM:SS[.1-9 digits]Z>
+```
+
+`<text>` is non-empty, well-formed UTF-8 with no control character (U+0000–U+001F, U+007F), so no value can carry a line break and the form is unambiguous. Nothing is escaped, quoted or normalised; the bytes are the values as the line holds them. A verdict whose fields do not fit cannot be signed (`record --sign` refuses it) and its signature cannot count. `note` is not signed and never counts.
+
+**The signature** is an SSHSIG (OpenSSH `PROTOCOL.sshsig`) over those bytes in namespace `pr-rla-verdict@v1`, as `ssh-keygen -Y sign -n pr-rla-verdict@v1 -f <key> <file>` makes it: version 1, an empty reserved field, hash `sha512` (ssh-keygen's default) or `sha256`.
+
+**The line** carries it in two fields beside the verdict's own:
+- `registrationSha256`: the registration the signature names (a line naming another one is refused before its signature is checked);
+- `sshsig`: the SSHSIG blob in base64, without the armor lines (`sed '1d;$d' file.sig | tr -d '\n'`).
+
+```json
+{"changeId":"github:acme/widgets#104","draw":7,"protocolSha256":"…","recordedAt":"2026-10-21T03:00:00Z","registrationSha256":"…","reviewer":"alice","schema":"pr-rla/verdict/v1","sshsig":"U1NIU0lH…","verdict":"pass"}
+```
+
+**Verification** (src/core/presence, pure) rebuilds the bytes from the line's fields and the registration being verified, and counts the signature only when its key is one of the registration's `verdicts.allowed_signers` (exactly, with a `namespaces=` option that admits `pr-rla-verdict@v1`) and the line's `reviewer` is that key's principal, exactly. Level: `presence` for a FIDO security key with the user-presence flag set, else `account`; any other line `self-asserted`. Signatures count only with the registered built-in `git-file` ledger, and only when the ledger verify loaded is the registered one (check 7 compares `name`, `source`, `integrity` and `optionsSha256`).
+
+**The git-file history** check walks every commit reachable from HEAD through the parents in its raw object, reading objects with `git cat-file --batch` and checking each hashes to its name; every version of the file must extend each parent's version. A shallow, grafted or partial repository is refused. git runs through `src/io/git-safe.ts` only.
 
 **Failure behaviour:**
 - `readVerdicts` or `readHistory` throwing makes check 7 FAIL with the error. It never passes silently.
@@ -258,7 +295,7 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 | `registeredAt` | time | signed; the seed input |
 | `timestamping` | `{ authorities: string[], minTokens: number, toleranceSeconds: 600, defaultAccuracySeconds: 60, bundle: string }` | `minTokens` defaults to 2 |
 | `plugins` | `{ provider: PluginIdentity, ledger: PluginIdentity }` | |
-| `verdicts` | `{ minProvenance: ProvenanceLevel, reviewers: string[] \| null, require_signed?: boolean }` | `reviewers` is an OpenSSH allowed-signers list or account ids |
+| `verdicts` | `{ minProvenance: ProvenanceLevel, reviewers: string[] \| null, require_signed?: boolean, allowed_signers?: string[] }` | `reviewers` are logins or account ids (who may count); `allowed_signers` (U9 fix round) are OpenSSH allowed-signers lines, sorted, present only when keys are registered; `require_signed` only when true, and only with the built-in git-file ledger |
 
 ### `PluginIdentity`
 

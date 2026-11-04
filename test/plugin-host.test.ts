@@ -264,9 +264,10 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
   });
 
   it("a slow call that keeps sending heartbeats is not stopped", async () => {
-    const host = await hostileHost({ heartbeatTimeoutMs: 500, heartbeatIntervalMs: 100 });
+    // The watchdog also covers the child's start, which takes longer than 500 ms under a loaded parallel run: 2 s, and a call twice as long.
+    const host = await hostileHost({ heartbeatTimeoutMs: 2_000, heartbeatIntervalMs: 100 });
     try {
-      const p = await hostedProvider(host, { slowMs: 1_500, bigResultBytes: 10 }, ctx);
+      const p = await hostedProvider(host, { slowMs: 4_000, bigResultBytes: 10 }, ctx);
       expect((await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).defaultBranch).toBe("main");
     } finally {
       host.close();

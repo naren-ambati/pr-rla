@@ -15,9 +15,11 @@ export type Verdict = "pass" | "fail";
 
 /**
  * How much a verdict's `reviewer` and `recordedAt` can be trusted (contracts.md §1):
- * `self-asserted` (whatever the writer typed: git-file), `account` (an SCM or tracker account
- * did it, at a server-assigned time: issue ledgers), `presence` (U9: a signature with the
- * user-presence flag). Added in phase 3 within API version 1.
+ * `self-asserted` (whatever the writer typed: an unsigned git-file line), `account` (an SCM or
+ * tracker account did it, at a server-assigned time: issue ledgers; or a git-file verdict signed
+ * by the reviewer's registered SSH key), `presence` (U9: a git-file verdict signed by the
+ * reviewer's registered FIDO security key, with the user-presence flag set; pr-rla does not check
+ * that the key is hardware-backed). Added in phase 3 within API version 1.
  */
 export type ProvenanceLevel = "self-asserted" | "account" | "presence";
 export const PROVENANCE_LEVELS: readonly ProvenanceLevel[] = ["self-asserted", "account", "presence"];
@@ -30,15 +32,19 @@ export function provenanceRank(level: ProvenanceLevel | undefined): number {
 /** Where a verdict came from (optional, phase 3). Absent means `self-asserted`. */
 export interface VerdictProvenance {
   level: ProvenanceLevel;
-  source: "git-commit" | "git-signed-commit" | "scm-label-event" | "jira-field-change" | (string & {});
+  source: "git-commit" | "git-signed-commit" | "verdict-signature" | "scm-label-event" | "jira-field-change" | (string & {});
   /** The tracker's stable account id of the actor, when it has one. */
   actorId?: string;
   /** GitHub's `performed_via_github_app` slug; non-null makes the verdict ineligible. */
   viaApp?: string | null;
   /** The tracker's id of the event the verdict was read from. */
   eventId?: string;
-  /** Allowed-signers principal, for git-signed-commit (U9). */
+  /** verdict-signature (U9): the allowed-signers principal whose key signed the verdict. */
   signer?: string;
+  /** verdict-signature (U9): the signing key's `SHA256:` fingerprint, as `ssh-keygen -l` prints it. */
+  keyFingerprint?: string;
+  /** verdict-signature with a FIDO security key (U9): the authenticator's signature counter. */
+  counter?: number;
 }
 
 export interface VerdictEvent {
@@ -54,6 +60,14 @@ export interface VerdictEvent {
   note?: string;
   /** Optional (phase 3): where the verdict came from. Issue ledgers set `account` with the label event. */
   provenance?: VerdictProvenance;
+  /**
+   * Optional (U9, git-file lines): the registration a signed verdict names, and its SSHSIG in
+   * namespace `pr-rla-verdict@v1` over the verdict's bytes, base64 without the armor (contracts.md
+   * §1, "Per-verdict signatures"). pr-rla checks it against the registration's allowed signers; a
+   * ledger never sets provenance from it.
+   */
+  registrationSha256?: string;
+  sshsig?: string;
 }
 
 /** An account in a ledger's history. `id` is the tracker's stable account id, when it has one. */
