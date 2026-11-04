@@ -135,7 +135,12 @@ export function backoffMs(attempt: number, random: number, capMs = MAX_BACKOFF_M
  * Checks a 2xx JSON body against the caller's rule. Returns a fresh Response with the
  * same body (the original is consumed) and the reason to retry, or null.
  */
+/** Statuses whose response has no body by definition; `new Response()` refuses one for them. */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304]);
+
 export async function checkJsonBody(res: Response, accept: (body: unknown) => string | null): Promise<{ response: Response; problem: string | null }> {
+  // A 204 (Jira answers a PUT with one), 205 or 304 has no body to check: pass it on as it is.
+  if (NULL_BODY_STATUSES.has(res.status)) return { response: new Response(null, { status: res.status, statusText: res.statusText, headers: res.headers }), problem: null };
   const text = await res.text();
   const response = new Response(text, { status: res.status, statusText: res.statusText, headers: res.headers });
   let body: unknown;

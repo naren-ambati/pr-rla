@@ -189,6 +189,17 @@ describe("FR10.2: the broker retries, with backoff and jitter, honouring rate-li
     expect(waits).toEqual([750, 9000, 1500]);
   });
 
+  it("a 204, 205 or 304 to a request with a JSON check passes through, with no body to check (it used to throw)", async () => {
+    for (const status of [204, 205, 304]) {
+      const t = transport(() => new Response(null, { status, headers: { "x-n": String(status) } }));
+      const res = await createBroker({}, { fetch: t.f, ...noSleep }).fetch("https://scm.example/x", scm({ retry: { acceptJson: () => "never asked" } }));
+      expect(res.status).toBe(status);
+      expect(res.headers.get("x-n")).toBe(String(status));
+      expect(await res.text()).toBe("");
+      expect(t.seen).toHaveLength(1);
+    }
+  });
+
   it("gives up after 7 attempts (phase-2 maxRetries 6), naming the last status", async () => {
     const t = transport(() => raw("down", 503));
     const e = await createBroker({}, { fetch: t.f, ...noSleep }).fetch("https://scm.example/x", scm()).catch((x: unknown) => x);
