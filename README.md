@@ -119,10 +119,24 @@ External: [`examples/providers/gitea`](examples/providers/gitea) (`pr-rla-provid
 
 Built-in ledgers:
 
-- `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended). Verdict provenance: `self-asserted`.
+- `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended). Verdict provenance: `self-asserted`; with the reviewers' SSH keys registered and each verdict commit signed (`git commit -S`, SSH format), `account`, or `presence` with a FIDO security key and the user-presence flag set ([signed verdicts](#signed-verdicts-git-file), below).
 - `github-issues` and `gitlab-issues`: one issue per drawn change in an audit repo or project (GitHub Enterprise Server and GitLab self-managed through `base_url`); a reviewer applies `pr-rla:pass` / `pr-rla:fail` (`pr-rla-pass` / `pr-rla-fail` on GitLab), and the verdict is read from the label-event history, never from current labels. Verdict provenance: `account`, the default `verdicts.min_provenance` with an issue ledger. `pr-rla checkpoint [--push]` time-stamps a hash of that history into the audit repo, so an admin deleting issues shows up in `verify`.
 
 External: [`examples/ledgers/jira`](examples/ledgers/jira) (`pr-rla-ledger-jira`) for Jira Cloud, with the verdict in a single-select custom field read from the changelog. Like any external plugin it loads only once locked (`pr-rla plugin add`), and runs in the plugin host: `JIRA_EMAIL` and `JIRA_TOKEN` reach it as placeholders, the broker builds Basic auth for the `base_url` site only, and pr-rla writes its `ledger-index.json` for it.
+
+### Signed verdicts (git-file)
+
+A registration can make `git-file` verdicts attributable: list each reviewer's SSH public key as an allowed-signers line, require signed verdict commits, and set the minimum provenance.
+
+```yaml
+ledger: { use: git-file, options: { require_signed: true } }
+verdicts:
+  min_provenance: presence        # or account; the git-file default is self-asserted
+  reviewers:                      # "<principal> <keytype> <base64 key>", as in an allowed_signers file
+    - "alice sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29t…"
+```
+
+The reviewer records as usual and commits each verdict signed: `pr-rla record 7 pass --reviewer alice`, then `git commit -S` with `gpg.format=ssh` and `user.signingkey` set. `verify` finds the commit that added each line (`git blame`) and checks its SSHSIG in TypeScript, without ssh-keygen: the key must be registered, the line's `reviewer` must be that key's principal, and for a security key (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`) the user-presence flag must be set for `presence`. Ed25519, ECDSA and RSA software keys give `account`. Check 7 FAILs a counted verdict below the registered minimum and, with `require_signed`, one that its registered reviewer did not sign. Certificates print the level as `presence (user-presence flag verified; key hardware not attested)`: a software-emulated authenticator can set that flag too, and pr-rla does not check that a registered key is hardware-backed ([`docs/security-model.md`](docs/security-model.md), T16). Issue ledgers top out at `account`.
 
 ### Adding a provider (Gerrit, Azure Repos, …)
 
@@ -151,4 +165,5 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 - **One repo per audit.** There is no org-pooled freeze yet.
 - **Timestamps** are tamper-evident only when k = 2 timestamp-authority operators agree; with fewer (or none configured) they are the signer's clock, and every output says so. Three of the eight bundled anchors (Microsoft's, pinned at its intermediate, SwissSign's and FreeTSA's) were taken from the authorities' own responses (trust on first use): see BUILD-NOTES, bolt 1.
 - **One registration per audit is a procedural control.** `verify` cannot prove that no other registration exists: hand your auditor the registration before the window opens.
+- **`presence` is not hardware-attested.** It means the signature's user-presence flag was set by a registered security key. A software-emulated authenticator sets the same flag, pr-rla does not check that a key is hardware-backed, and the presence path has been tested with software keys only.
 - **External plugins run isolated, not sandboxed.** On Node 22 and 24 an isolated plugin cannot read your tokens or files but can still open network connections and send out what it reads; Node 25 or later blocks that. The Node permission model is a seatbelt ([`docs/security-model.md`](docs/security-model.md)).
