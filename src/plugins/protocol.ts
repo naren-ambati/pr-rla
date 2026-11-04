@@ -21,7 +21,7 @@ export type PluginKind = "provider" | "ledger";
  * `writePaths(options)` without creating an instance; `create` makes the instance; the rest
  * are the SDK's instance methods.
  */
-export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange"] as const;
+export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests"] as const;
 export const LEDGER_METHODS = ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const;
 export type PluginMethod = "describe" | "create" | (typeof PROVIDER_METHODS)[number] | (typeof LEDGER_METHODS)[number];
 

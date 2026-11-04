@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { buildPopulation } from "../core/population.js";
-import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
+import { buildSetPopulation } from "../core/population.js";
+import { perRepoLines, perRepoRows } from "../core/pooled-report.js";
+import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
@@ -89,7 +90,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     let soFar = "";
     if (!opts.offline && now >= opens) {
       const provider = await providerFor(ctx, config);
-      const pop = await buildPopulation(provider, { repo: registrationRepo(reg), window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
+      const pop = await buildSetPopulation(provider, registrationRepoSet(reg), { window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
       soFar = ` · N so far ${fmt(pop.entries.length)}`;
     }
     ctx.out(`${mode} · ${phase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${tsNote}`);
@@ -113,8 +114,9 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
   });
   const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
+  const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
   if (opts.json) {
-    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report }, null, 2));
+    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report, ...(perRepo ? { perRepo } : {}) }, null, 2));
   } else if (report.refusal) {
     ctx.out(report.refusal);
     return 3;
@@ -133,6 +135,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
       const cp = latestCheckpointAt(paths.windowDir);
       if (cp === null || Date.parse(cp) < Date.parse(lastVerdict)) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
     }
+    if (perRepo) for (const l of perRepoLines(perRepo)) ctx.out(l);
     ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
   }
   return report.sequence.state === "ESCALATE" ? 2 : 0;

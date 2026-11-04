@@ -5,6 +5,10 @@ import {
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
+  type RepoVisibility,
+  type RequestEstimate,
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
@@ -86,7 +90,8 @@ export class GitHubProvider implements ScmProvider {
     const { owner, name } = this.split(req.repo);
     const head = await this.http.graphql<{ repository: { defaultBranchRef: { name: string; target: { oid: string } } | null } }>(HEAD_QUERY, { owner, name });
     const ref = head.repository.defaultBranchRef;
-    if (!ref) throw new Error(`${req.repo} has no default branch`);
+    // An empty repository (no commits) has no default branch ref and nothing landed in any window: an org-wide pool must not fail on one.
+    if (!ref) return { changes: [], defaultBranch: "", limitations: GITHUB_LIMITATIONS, diagnostics: [] };
     // The pinned head (U3): verify walks the history freeze walked, from the manifest's headSha.
     const headSha = (req.head ?? ref.target.oid).toLowerCase();
     const changes: ChangeRecord[] = [];
@@ -213,6 +218,119 @@ export class GitHubProvider implements ScmProvider {
       inWindow: result.inWindow,
       merges: result.directPushMerges.length,
     };
+  }
+
+  /**
+   * The repositories under an org (or, when it is a user account, that user), with the stable id, default branch,
+   * archived and fork flags and visibility the core filters on (U8). `GET /orgs/{owner}/repos?type=all` sees every
+   * repository the token can; a user account answers 404 there, so the user's own repositories are read instead.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    interface RestRepo {
+      full_name: string;
+      id: number;
+      default_branch?: string | null;
+      archived?: boolean;
+      fork?: boolean;
+      private?: boolean;
+      visibility?: string;
+    }
+    const owner = encodeURIComponent(set.owner);
+    const path = (kind: "orgs" | "users") => `/${kind}/${owner}/repos?${kind === "orgs" ? "type=all" : "type=owner"}&per_page=${this.pageSize}`;
+    let url: string | null = path("orgs");
+    const out: RepoRef[] = [];
+    let pages = 0;
+    while (url) {
+      let page: { data: RestRepo[]; next: string | null };
+      try {
+        page = await this.http.rest<RestRepo[]>(url);
+      } catch (e) {
+        if (pages === 0 && url === path("orgs") && e instanceof GitHubHttpError && e.status === 404) {
+          url = path("users");
+          continue;
+        }
+        throw e;
+      }
+      pages++;
+      if (pages % 20 === 0) this.ctx.log(`github: listed ${pages} pages of ${set.owner} repositories`);
+      for (const r of page.data) {
+        const visibility: RepoVisibility = r.visibility === "public" || r.visibility === "private" || r.visibility === "internal" ? r.visibility : r.private ? "private" : "public";
+        out.push({ repo: r.full_name, id: String(r.id), defaultBranch: r.default_branch ?? "", archived: r.archived === true, fork: r.fork === true, visibility });
+      }
+      url = page.next;
+    }
+    return out;
+  }
+
+  /**
+   * What `listChanges` would ask for, from a probe (U8, `freeze --dry-run --estimate`): the default-branch head, the
+   * newest page of closed PRs (and, when the list is longer, a page from its middle for the density and the share merged
+   * in the window), and one page of history. Everything else is arithmetic on those pages.
+   */
+  async estimateRequests(req: ListChangesRequest): Promise<RequestEstimate> {
+    const { owner, name } = this.split(req.repo);
+    const opens = Date.parse(req.window.opensAt);
+    const closes = Date.parse(req.window.closesAt);
+    const wantPrs = req.kinds.includes("pull_request");
+    const wantPushes = req.kinds.includes("direct_push");
+    let probed = 1;
+    const head = await this.http.graphql<{ repository: { defaultBranchRef: { name: string; target: { oid: string } } | null } }>(HEAD_QUERY, { owner, name });
+    const ref = head.repository.defaultBranchRef;
+    if (!ref) return { requests: 1, graphql: 1, probed };
+    const headOid = (req.head ?? ref.target.oid).toLowerCase();
+
+    // Closed PRs, newest update first: pages until one ends before the window opened (listMergedPullNumbers), and the shares in the window.
+    const url = (page: number) => `/repos/${req.repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${this.pageSize}${page > 1 ? `&page=${page}` : ""}`;
+    const a = await this.http.rest<RestPull[]>(url(1));
+    probed++;
+    const span = (p: RestPull[]) => Math.max(1, Date.parse(p[0]!.updated_at) - Date.parse(p.at(-1)!.updated_at));
+    const intoWindow = (p: readonly RestPull[]) => p.filter((x) => x.merged_at && x.base.ref === ref.name && Date.parse(x.merged_at) >= opens && Date.parse(x.merged_at) < closes).length;
+    let updatedSinceOpens: number;
+    let merged: number;
+    let pullPages: number | null = null;
+    if (a.data.length === 0 || !a.next || Date.parse(a.data.at(-1)!.updated_at) < opens) {
+      // The whole list since the window opened is on this page: exact.
+      updatedSinceOpens = a.data.filter((x) => Date.parse(x.updated_at) >= opens).length;
+      merged = intoWindow(a.data);
+      pullPages = 1;
+    } else {
+      // Density from the newest page projects the length; a page from the middle gives the density there and what share merged in the window.
+      const dA = a.data.length / span(a.data);
+      const firstProjection = a.data.length + dA * (Date.parse(a.data.at(-1)!.updated_at) - opens);
+      const middle = Math.floor(firstProjection / this.pageSize / 2) + 1;
+      let b: RestPull[] | null = null;
+      if (middle > 1) {
+        b = (await this.http.rest<RestPull[]>(url(middle))).data;
+        probed++;
+      }
+      if (b && b.length > 0) {
+        const dB = b.length / span(b);
+        updatedSinceOpens = a.data.length + dB * Math.max(0, Date.parse(a.data.at(-1)!.updated_at) - opens);
+        merged = updatedSinceOpens * (intoWindow(b) / b.length);
+      } else {
+        updatedSinceOpens = firstProjection;
+        merged = updatedSinceOpens * (intoWindow(a.data) / a.data.length);
+      }
+    }
+    // The newest page is read once more (the re-scan for PRs updated during the walk).
+    const restPages = (pullPages ?? Math.max(2, Math.ceil(updatedSinceOpens / this.pageSize))) + 1;
+    let graphql = 1;
+    graphql += wantPrs ? Math.ceil(merged / this.batchSize) : 0;
+
+    if (wantPushes) {
+      type Page = { repository: { object: { history: { pageInfo: { hasNextPage: boolean }; nodes: { committedDate: string }[] } } | null } };
+      const h = await this.http.graphql<Page>(historyQuery(this.historyPageSize), { owner, name, head: headOid, since: req.window.opensAt, after: null });
+      probed++;
+      const nodes = h.repository.object?.history.nodes ?? [];
+      let commits = nodes.length;
+      if (h.repository.object?.history.pageInfo.hasNextPage && nodes.length > 1) {
+        const dates = nodes.map((n) => Date.parse(n.committedDate)).sort((x, y) => y - x);
+        const density = nodes.length / Math.max(1, dates[0]! - dates.at(-1)!);
+        commits = nodes.length + density * Math.max(0, dates.at(-1)! - opens);
+      }
+      graphql += Math.max(1, Math.ceil(commits / this.historyPageSize));
+    }
+    return { requests: Math.round(restPages + graphql), graphql: Math.round(graphql), probed };
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */

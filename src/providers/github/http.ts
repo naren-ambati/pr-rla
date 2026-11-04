@@ -113,7 +113,9 @@ export class GitHubHttp {
       if (errs.length && errs.every((e) => TRANSIENT_GRAPHQL.test(e.message) || e.type === "RATE_LIMITED")) return `GraphQL: ${errs[0]!.message}`;
       return null;
     }, opts.maxRetries);
-    if (body.errors?.length) throw new GitHubHttpError(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`, 200);
+    // A repository that is gone, or that the token cannot see, is a 404 or 403 to the caller (U8: verify reports it as unverifiable, not as a failure).
+    const only = (type: string) => body.errors!.every((e) => e.type === type);
+    if (body.errors?.length) throw new GitHubHttpError(`GitHub GraphQL: ${body.errors.map((e) => e.message).join("; ")}`, only("NOT_FOUND") ? 404 : only("FORBIDDEN") ? 403 : 200);
     if (!body.data) throw new GitHubHttpError("GitHub GraphQL: empty response", 200);
     return body.data;
   }

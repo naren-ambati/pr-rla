@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { describeRepoSet, RepoSetError, resolveRepoSet } from "../core/repo-set.js";
 import { beaconParams, derivedRoundFor, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
@@ -11,7 +12,7 @@ import { provenanceRank, type ProvenanceLevel } from "../sdk/ledger.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
-import { auditContextFor, CommandError, configFor, isoNow, pct, protocolSha256, trustFor, writeJson, type CommandContext } from "./context.js";
+import { auditContextFor, CommandError, configFor, isoNow, pct, protocolSha256, providerFor, trustFor, writeJson, type CommandContext } from "./context.js";
 import { assessRecord, obtainTimestamps, reportTimestamps, timestampingFor } from "./timestamps.js";
 import { confirmRekorV2, rekorApi, submitSigned, submitSignedV2, submitUrl } from "./translog.js";
 
@@ -63,15 +64,33 @@ export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, 
   return { minProvenance, reviewers: config.verdicts.reviewers };
 }
 
+/**
+ * A pooled registration (a repo list or a rule) is checked before it is signed (FR5.1, FR5.6): one provider per
+ * pool, a provider that can list repos for a rule, and a rule that matches something now (a dry resolve, reads
+ * only). Returns the number of repos it resolves to, or null for a single repo.
+ */
+async function preflightRepoSet(ctx: CommandContext, config: PrRlaConfig): Promise<number | null> {
+  if (config.repoSet.kind === "repo") return null;
+  try {
+    const resolved = await resolveRepoSet(await providerFor(ctx, config), config.repoSet);
+    if (resolved.length === 0) throw new CommandError(`${describeRepoSet(config.repoSet)} matches no repository the token can see; widen the rule, or check the token's access`);
+    return resolved.length;
+  } catch (e) {
+    if (e instanceof RepoSetError) throw new CommandError(e.message);
+    throw e;
+  }
+}
+
 export async function registerCommand(ctx: CommandContext, opts: RegisterOptions): Promise<number> {
   const { config, paths } = configFor(ctx);
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = timestampingFor(config, bundle);
   const api = rekorApi(opts.rekorApi);
   const verdicts = await preflightLedger(ctx, config, paths);
+  const repoCount = await preflightRepoSet(ctx, config);
   const record: RegistrationRecordV2 = {
     schema: "pr-rla/registration/v2",
-    repos: { kind: "repo", repo: config.repo },
+    repos: config.repoSet,
     window: config.window,
     selector: config.selector,
     protocolSha256: protocolSha256(config),
@@ -94,6 +113,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   const r = derivedRoundFor(signed);
   const table = stoppingTable(config.parameters).map((x) => x.draws).join(" / ");
   ctx.out(`${opts.dryRun ? "[dry run] " : ""}registration ${signed.sha256.slice(0, 12)}… · ${config.repo} · window ${config.window.name} (${config.window.start}..${config.window.end})`);
+  if (repoCount !== null) ctx.out(`  repos: ${describeRepoSet(config.repoSet)} · resolves to ${repoCount} now; resolved again at freeze, one certificate for the pool`);
   ctx.out(`  claim D: detected-defect rate <= ${pct(config.parameters.p0)} (p1 ${pct(config.parameters.p1)}, risk ${pct(config.parameters.alpha)}) · certify after ${table} draws with 0/1/2 fails · cap ${effectiveCap(config.parameters)}`);
   ctx.out(`  selector ${JSON.stringify(config.selector)}`);
   if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {

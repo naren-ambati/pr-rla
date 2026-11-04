@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
-import type { AuditParameters } from "./core/records.js";
+import type { AuditParameters, RepoSet } from "./core/records.js";
+import { normalizeRepoSet, repoSetLabel } from "./core/repo-set.js";
 import { normalizeSelector, type Selector } from "./core/selector.js";
 import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
@@ -17,6 +18,9 @@ export interface PrRlaConfig {
   /** The audit repo: directory holding .pr-rla.yml. */
   dir: string;
   provider: PluginSpec;
+  /** What the audit covers (U8): one repo (`repo:`), a list or a rule (`repos:`). A single repo is a pool of one. */
+  repoSet: RepoSet;
+  /** Display name of `repoSet`: the repo itself, or `owner/*` for a rule, `n repos` for a list. */
   repo: string;
   window: ResolvedWindow;
   selector: Selector;
@@ -36,7 +40,12 @@ export interface PrRlaConfig {
    * `account` for issue ledgers, else `self-asserted`) and the reviewers whose verdicts count (null: any non-bot account).
    */
   verdicts: { minProvenance: ProvenanceLevel | null; reviewers: string[] | null };
+  /** `freeze:` (U8): operational settings of a pooled freeze. They are not registered: they change how fast it runs, never what it finds. */
+  freeze: { concurrency: number };
 }
+
+/** Repos frozen at once in a pooled freeze (FR5.7). The fetch broker's per-host budget, not this, limits the request rate. */
+export const DEFAULT_FREEZE_CONCURRENCY = 4;
 
 /** Issue ledgers that take their provider's self-hosted base_url when they set none (FR4.8). */
 const LEDGER_BASE_URL_FROM: Readonly<Record<string, string>> = { "github-issues": "github", "gitlab-issues": "gitlab" };
@@ -78,7 +87,12 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   const dir = dirname(resolve(configPath));
   let provider = normalizePluginSpec(raw.provider, "provider", "github");
   if (overrides.fromFile) provider = { use: "json-file", options: { path: resolve(process.cwd(), overrides.fromFile) } };
-  if (typeof raw.repo !== "string" || raw.repo.length === 0) throw new Error(`${configPath}: "repo" is required (e.g. github/gh-aw)`);
+  let repoSet: RepoSet;
+  try {
+    repoSet = normalizeRepoSet(raw);
+  } catch (e) {
+    throw new Error(`${configPath}: ${(e as Error).message}`);
+  }
   const w = (raw.window ?? {}) as Record<string, unknown>;
   const start = String(w.start ?? "");
   const end = String(w.end ?? "");
@@ -111,7 +125,8 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
     configPath: resolve(configPath),
     dir,
     provider,
-    repo: raw.repo,
+    repoSet,
+    repo: repoSetLabel(repoSet),
     window,
     selector: normalizeSelector(raw.selector as Record<string, unknown> | undefined),
     parameters,
@@ -126,7 +141,19 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
     timestamping: { authorities: authorities as string[], minTokens },
     rateLimits,
     verdicts: parseVerdicts(raw.verdicts, configPath),
+    freeze: parseFreeze(raw.freeze, configPath),
   };
+}
+
+/** `freeze: { concurrency: 4 }`. */
+function parseFreeze(raw: unknown, configPath: string): PrRlaConfig["freeze"] {
+  if (raw === undefined || raw === null) return { concurrency: DEFAULT_FREEZE_CONCURRENCY };
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${configPath}: freeze must be a mapping, e.g. freeze: { concurrency: 4 }`);
+  const f = raw as Record<string, unknown>;
+  for (const k of Object.keys(f)) if (k !== "concurrency") throw new Error(`${configPath}: freeze.${k} is not a setting (freeze takes concurrency)`);
+  const c = f.concurrency === undefined || f.concurrency === null ? DEFAULT_FREEZE_CONCURRENCY : f.concurrency;
+  if (typeof c !== "number" || !Number.isInteger(c) || c < 1 || c > 32) throw new Error(`${configPath}: freeze.concurrency must be a whole number from 1 to 32`);
+  return { concurrency: c };
 }
 
 /** `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>"] }`. */

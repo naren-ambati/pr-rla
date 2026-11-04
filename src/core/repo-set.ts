@@ -88,7 +88,7 @@ const sortedUnique = (xs: readonly string[]) => [...new Set(xs)].sort(cmp);
  */
 export function normalizeRepoSet(raw: { repo?: unknown; repos?: unknown }): RepoSet {
   if (raw.repos === undefined || raw.repos === null) {
-    if (typeof raw.repo !== "string" || raw.repo.length === 0) throw new RepoSetError('"repo" is required (e.g. github/gh-aw), or "repos" for several repositories');
+    if (typeof raw.repo !== "string" || raw.repo.length === 0) throw new RepoSetError('"repo" is required (e.g. github/gh-aw)');
     return { kind: "repo", repo: raw.repo };
   }
   if (raw.repo !== undefined && raw.repo !== null) throw new RepoSetError('set either "repo" (one repository) or "repos" (a list or a rule), not both');
@@ -147,10 +147,8 @@ export function splitScheme(entry: string): { scheme: string | null; path: strin
 export function repoSetProblems(set: RepoSet, provider: Pick<ScmProvider, "name" | "listRepos">): string[] {
   const p: string[] = [];
   switch (set.kind) {
-    case "repo": {
-      if (!REPO_PATH.test(splitScheme(set.repo).path)) p.push(`repo "${set.repo}" must look like owner/name`);
-      break;
-    }
+    case "repo":
+      break; // the provider reports a malformed repo itself, as it always has
     case "list": {
       if (set.repos.length === 0) p.push("the repo list is empty");
       const schemes = new Set<string>();
@@ -181,6 +179,11 @@ export function repoSetProblems(set: RepoSet, provider: Pick<ScmProvider, "name"
 export function validateRepoSet(set: RepoSet, provider: Pick<ScmProvider, "name" | "listRepos">): void {
   const problems = repoSetProblems(set, provider);
   if (problems.length) throw new RepoSetError(problems.join("; "));
+}
+
+/** The short name outputs and the config's `repo` field use for a set: the repo, `owner/*` for a rule, `n repos` for a list. */
+export function repoSetLabel(set: RepoSet): string {
+  return set.kind === "repo" ? set.repo : set.kind === "rule" ? `${set.owner}/*` : `${set.repos.length} repos`;
 }
 
 /** A one-line description for register and freeze output. */
@@ -215,7 +218,7 @@ function refProblems(ref: unknown, owner: string): string | null {
  */
 export async function resolveRepoSet(provider: Pick<ScmProvider, "name" | "listRepos">, set: RepoSet): Promise<ResolvedRepo[]> {
   validateRepoSet(set, provider);
-  if (set.kind === "repo") return [{ repo: splitScheme(set.repo).path, repoId: null }];
+  if (set.kind === "repo") return [{ repo: set.repo, repoId: null }];
   if (set.kind === "list") return sortedUnique(set.repos.map((e) => splitScheme(e).path)).map((repo) => ({ repo, repoId: null }));
   const refs = await provider.listRepos!(set);
   if (!Array.isArray(refs)) throw new RepoSetError(`provider ${provider.name}: listRepos returned ${typeof refs}, not a list`);

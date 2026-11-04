@@ -1,5 +1,6 @@
 import { assertChangeRecord, isRepoUnavailable, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
-import { sortChanges, type ManifestEntry } from "./records.js";
+import { sortChanges, type ManifestEntry, type RepoSet } from "./records.js";
+import { resolveRepoSet } from "./repo-set.js";
 import { applySelector, reviewsAsOf, type ActorAliases, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
@@ -206,4 +207,14 @@ export function manifestAliases(changes: readonly ChangeRecord[]): Map<string, s
   const out = new Map<string, string>();
   for (const c of changes) for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) if (a.id !== undefined && !out.has(a.id)) out.set(a.id, a.login);
   return out;
+}
+
+/**
+ * The population of a registered repo set as it stands now (status, "N so far"): the set resolved through the
+ * provider and built like a freeze would, but straight from the provider, with no checkpoints.
+ */
+export async function buildSetPopulation(provider: ScmProvider, set: RepoSet, args: PoolArgs & { concurrency?: number }): Promise<Population> {
+  if (set.kind === "repo") return buildPopulation(provider, { repo: set.repo, ...args });
+  const resolved = await resolveRepoSet(provider, set);
+  return buildPooledPopulation(provider, { repos: resolved, ...args });
 }

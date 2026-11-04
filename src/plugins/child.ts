@@ -31,7 +31,7 @@ interface Definition {
 }
 
 const METHODS: Record<ChildBoot["kind"], readonly string[]> = {
-  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange"],
+  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests"],
   ledger: ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"],
 };
 
@@ -203,7 +203,7 @@ async function run(m: CallMessage): Promise<void> {
       if (!METHODS[boot.kind].includes(m.method) || typeof fn !== "function") throw new Error(`the plugin has no ${m.method}()`);
       const args = [...m.args];
       // A request object carries the call's abort signal (the parent's `cancel`).
-      if ((m.method === "listChanges" || m.method === "nativeCounts") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
+      if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
       value = await (fn as Fn).apply(instance, args);
     }
     send({ type: "result", id: m.id, value: value === undefined ? null : value });

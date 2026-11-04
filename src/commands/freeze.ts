@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
-import { buildPopulation, type Population } from "../core/population.js";
+import type { Population } from "../core/population.js";
 import {
   derivedRoundFor,
   isRegistrationV2,
   manifestSha256,
-  registrationRepo,
+  registrationRepoSet,
   type CommitmentRecordV2,
   type Manifest,
   type ManifestCommitmentRecord,
@@ -15,6 +15,7 @@ import {
   type SignedRecord,
 } from "../core/records.js";
 import type { Selector } from "../core/selector.js";
+import { repoSetLabel } from "../core/repo-set.js";
 import { isoToUnix, unixToIso } from "../core/seed.js";
 import { loadOrCreateKey, signRecord } from "../core/signing.js";
 import { providerTraits } from "../provider-traits.js";
@@ -23,6 +24,7 @@ import { PROVIDER_API_VERSION } from "../sdk/provider.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
 import { auditContextFor, CommandError, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, trustFor, writeJson, type CommandContext } from "./context.js";
+import { estimateCommand, runFreezeRepos } from "./freeze-pool.js";
 import { assessRecord, obtainTimestamps, reportTimestamps } from "./timestamps.js";
 import { confirmRekorV2, rekorApi, submitSigned, submitSignedV2, submitUrl } from "./translog.js";
 
@@ -41,6 +43,10 @@ export interface FreezeOptions {
   rekorApi?: string;
   yes?: boolean;
   tsaTrust?: string[];
+  /** With --dry-run: predict the requests and wall time of a pooled freeze (probes the first page of each repo; writes nothing). Implies --dry-run. */
+  estimate?: boolean;
+  /** Continue the run with this id (printed when a pooled freeze stops); refused if its inputs differ. */
+  resume?: string;
 }
 
 export function summarizePopulation(pop: Population, sel: Selector, defaultBranch: string): { lines: string[]; summary: string } {
@@ -63,6 +69,7 @@ export function summarizePopulation(pop: Population, sel: Selector, defaultBranc
 }
 
 export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): Promise<number> {
+  if (opts.estimate && !opts.dryRun) opts = { ...opts, dryRun: true };
   const { config, paths } = configFor(ctx);
   const frozenAt = isoNow(ctx);
   const now = isoToUnix(frozenAt);
@@ -92,7 +99,9 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const api = rekorApi(opts.rekorApi);
   const url = opts.submit && !opts.dryRun ? submitUrl(config, opts.rekorUrl) : null;
   if (url && api === "v2") await confirmRekorV2(ctx, opts.yes);
-  const repo = reg ? registrationRepo(reg) : config.repo;
+  const repoSet = reg ? registrationRepoSet(reg) : config.repoSet;
+  const pooled = repoSet.kind !== "repo";
+  const repo = repoSet.kind === "repo" ? repoSet.repo : repoSetLabel(repoSet);
   if (reg && isRegistrationV2(reg)) {
     // Options that change the population are part of the stratum (populationOptions, check 5).
     const now = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
@@ -105,11 +114,15 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   }
 
   const provider = await providerFor(ctx, config);
-  const pop = await buildPopulation(provider, { repo, window, selector, cutoffIso: frozenAt });
+  if (opts.estimate) return estimateCommand(ctx, { provider, repoSet, window, selector, concurrency: config.freeze.concurrency, publishesAt: round?.publishesAt ?? null, json: opts.json });
+  const run = await runFreezeRepos(ctx, config, { provider, repoSet, window, selector, startedAt: frozenAt, reg, dryRun: !!opts.dryRun, force: !!opts.force, resume: opts.resume });
+  const pop = run.population;
+  // The as-of time of the reviews and of the manifest: the command's start, or (a resumed pooled run) the run's own.
+  const asOf = run.startedAt;
   const N = pop.entries.length;
-  const { lines, summary } = summarizePopulation(pop, selector, pop.listed.defaultBranch);
+  const { lines, summary } = summarizePopulation(pop, selector, pooled ? "each repo's default branch" : pop.listed.defaultBranch);
   let native: { label: string; value: number }[] = [];
-  if (provider.nativeCounts) {
+  if (provider.nativeCounts && !pooled) {
     try {
       native = await provider.nativeCounts({ repo, window, kinds: selector.kinds }, selector as unknown as Record<string, unknown>);
     } catch (e) {
@@ -117,28 +130,34 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     }
   }
   if (opts.json) {
-    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo, window, frozenAt, N, headSha: pop.headSha, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], viaMerge: pop.viaMerge, limitations: pop.limitations, summary }, null, 2));
+    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo, window, frozenAt: asOf, N, headSha: pop.headSha, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], viaMerge: pop.viaMerge, limitations: pop.limitations, summary, ...(pooled ? { repos: run.repos } : {}) }, null, 2));
   } else {
-    ctx.out(`${opts.dryRun ? "[dry run] " : ""}${repo} · window ${window.name} (${window.start}..${window.end} UTC) · provider ${provider.name} · reviews as of ${frozenAt}`);
+    ctx.out(`${opts.dryRun ? "[dry run] " : ""}${repo} · window ${window.name} (${window.start}..${window.end} UTC) · provider ${provider.name} · reviews as of ${asOf}`);
     lines.forEach((l) => ctx.out(l));
     ctx.out(`N = ${fmt(N)}`);
     ctx.out(summary);
     if (native.length) ctx.out(`provider-native, for comparison only (not used): ${native.map((n) => `${n.label} ${fmt(n.value)}`).join(" · ")}`);
     for (const d of pop.listed.diagnostics ?? []) ctx.out(`  diagnostic: ${d.label}: ${fmt(d.value)}`);
     for (const v of pop.viaMerge) ctx.out(`  diagnostic: direct pushes that arrived through merge ${v.merge.slice(0, 12)}… (a non-first parent): ${fmt(v.count)}`);
+    if (pooled) ctx.out(`  ${fmt(run.repos.length)} repos (${fmt(run.repos.filter((r) => r.headSha).length)} with a pinned head, recorded in the manifest) · ${fmt(pop.repos.filter((r) => r.listed > 0).length)} with changes in the window`);
     if (pop.headSha) ctx.out(`  history walked from ${pop.listed.defaultBranch} head ${pop.headSha} (recorded in the manifest; verify walks the same history)`);
     for (const l of pop.limitations) ctx.out(`  limitation: ${l}`);
     if (N < parameters.minPopulation) ctx.out(`population ${fmt(N)} < ${parameters.minPopulation}: review all ${fmt(N)} instead`);
   }
   if (opts.dryRun) {
     if (opts.out) {
-      writeJson(resolve(ctx.cwd, opts.out), { repo, window, frozenAt, selector, headSha: pop.headSha, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
+      writeJson(resolve(ctx.cwd, opts.out), { repo, window, frozenAt: asOf, selector, headSha: pop.headSha, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
       ctx.out(`wrote the dry-run population to ${opts.out}`);
     }
     return 0;
   }
 
   const key = loadOrCreateKey(resolve(config.dir, opts.key ?? config.signingKey));
+  // A pooled freeze can run for hours: its commitment is signed when it finishes (its tokens then agree with its signed
+  // time), while the manifest keeps the run's start as its as-of time. A single repo signs both at the command's start.
+  const committedAt = pooled ? isoNow(ctx) : frozenAt;
+  if (pooled && isoToUnix(committedAt) >= round!.publishesAt)
+    throw new CommandError(`the freeze finished ${committedAt}, after seed round ${round!.round} published (${unixToIso(round!.publishesAt)}): a manifest written now would be written after the seed was public (verify check 2 fails). Its checkpoints are kept; register a new audit`);
   if (!isRegistrationV2(reg!)) {
     // A v1 registration (made before bolt 1) is frozen as v1, so the audit stays one schema end to end.
     const body: Omit<Manifest, "sha256"> = {
@@ -189,10 +208,10 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const body: Omit<ManifestV2, "sha256"> = {
     schema: "pr-rla/manifest/v2",
     registrationSha256: v2reg.sha256,
-    repos: [{ repo, repoId: null, defaultBranch: pop.listed.defaultBranch, headSha: pop.headSha }],
+    repos: run.repos,
     provider: { ...providerId, apiVersion: PROVIDER_API_VERSION, reviewGranularity: traits.reviewGranularity },
     window,
-    frozenAt,
+    frozenAt: asOf,
     selector,
     parameters,
     protocolSha256: protocol,
@@ -209,7 +228,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     manifestSha256: manifest.sha256,
     N,
     registrationSha256: v2reg.sha256,
-    frozenAt,
+    frozenAt: committedAt,
     seedRound: round!.round,
     seedRoundPublishesAt: unixToIso(round!.publishesAt),
     prRlaVersion: PR_RLA_VERSION,
@@ -217,11 +236,12 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const ts = v2reg.record.timestamping;
   const bundle = trustFor(ctx, opts.tsaTrust);
   let signed: SignedRecord<CommitmentRecordV2> = signRecord(commitment, key);
-  const got = await obtainTimestamps(ctx, signed, frozenAt, ts, bundle);
+  const got = await obtainTimestamps(ctx, signed, committedAt, ts, bundle);
   signed = { ...signed, timestamps: got.timestamps };
   writeJson(paths.manifest, manifest);
   writeJson(paths.commitment, signed);
-  ctx.out(`manifest ${manifest.sha256} · N ${fmt(N)} → ${paths.manifest}`);
+  run.finish();
+  ctx.out(`manifest ${manifest.sha256} · N ${fmt(N)}${pooled ? ` · ${fmt(run.repos.length)} repos` : ""} → ${paths.manifest}`);
   if (url) {
     try {
       signed = api === "v2" ? await submitSignedV2(ctx, config, signed, url) : await submitSigned(ctx, signed, url);
@@ -231,7 +251,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
       return 1;
     }
   }
-  const evidence = await assessRecord(ctx, config, signed, frozenAt, ts, bundle);
+  const evidence = await assessRecord(ctx, config, signed, committedAt, ts, bundle);
   if (evidence.ukMs !== null && evidence.ukMs >= round!.publishesAt * 1000) ctx.out("FAIL manifest logged after the seed was public");
   else if (evidence.ukMs !== null) ctx.out(`  manifest commitment existed by ${isoMs(evidence.ukMs)} (U_k), before R`);
   const code = reportTimestamps(ctx, evidence, got.outcomes, REFREEZE_COMMAND);
