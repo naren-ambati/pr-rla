@@ -1477,7 +1477,7 @@ The ecdsa-sk pair (draws #3 and #5) gives the same two results; the ECDSA P-256/
 
 ### Findings
 
-1. **`ssh-keygen -Y verify` does not enforce the presence flag (settles the design's open item).** OpenSSH_10.3p1 (macOS, LibreSSL 3.3.6), 2026-11-04: a `sk-ssh-ed25519` signature with flags `0x00` verifies (`Good "git" signature for bob with ED25519-SK key SHA256:…`, exit 0); `-vv` logs `signature details: counter = 43, flags = 0x00`. No option requires the flag: `-Y verify` takes `-O hashalg`, `print-pubkey` and `verify-time` only, and the allowed-signers options are `cert-authority`, `namespaces`, `valid-after` and `valid-before`; in the source, `sig_verify` only logs the flags at debug2. `no-touch-required` and `verify-required` exist only as certificate and key-generation options in ssh-keygen, and as `authorized_keys` options for sshd. `git verify-commit` inherits this: the fixture's UP-clear commits (draws #4 and #5) verify with exit 0. So a team verifying with git or ssh-keygen alone would accept a touch-less signature; pr-rla checks the flag itself. Every other outcome agrees with ssh-keygen, including its refusal reasons (`unsupported RSA signature algorithm ssh-rsa`, `Signature version 2 is larger than supported version 1`, `namespace does not match`, `incorrect signature`).
+1. **`ssh-keygen -Y verify` does not enforce the presence flag (settles the design's open item).** OpenSSH_10.3p1 (macOS, LibreSSL 3.3.6), 2026-11-04: a `sk-ssh-ed25519` signature with flags `0x00` verifies (`Good "git" signature for bob with ED25519-SK key SHA256:…`, exit 0); `-vv` logs `signature details: counter = 43, flags = 0x00`. No option requires the flag: `-Y verify` takes `-O hashalg`, `print-pubkey` and `verify-time` only, and the allowed-signers options are `cert-authority`, `namespaces`, `valid-after` and `valid-before`; in the source, `sig_verify` only logs the flags at debug2. `no-touch-required` and `verify-required` exist only as certificate and key-generation options in ssh-keygen, and as `authorized_keys` options for sshd. `git verify-commit` inherits this: the fixture's UP-clear commits (draws #4 and #5) verify with exit 0. So a team verifying with git or ssh-keygen alone would accept a touch-less signature; pr-rla checks the flag itself. Every other outcome agrees with ssh-keygen, including its refusal reasons (`unsupported RSA signature algorithm ssh-rsa`, `Signature version 2 is larger than supported version 1`, `namespace does not match`, `incorrect signature`). *(Corrected in the U9 fix round, below: not every outcome agreed. A non-empty SSHSIG reserved field was signed over by pr-rla and ignored by ssh-keygen (review finding 6); pr-rla now refuses it, and the oracle lists each case where pr-rla is deliberately stricter.)*
 2. **An empty `blame.ignoreRevsFile` does not clear a configured ignore list.** git inserts the configured files into a sorted list, so `""` sorts first and clears nothing; a verifier whose git configuration names an ignore-revs file would have had lines moved to other commits. `--no-ignore-revs-file` clears it, and the ledger passes it (`git-file-presence.test.ts › an ignore-revs list…`).
 3. **Replace refs.** With a `refs/replace` entry, plain `git cat-file commit <unsigned>` shows a genuinely signed object under the unsigned commit's name. The ledger runs git with `--no-replace-objects` and checks that each commit object hashes to its name (`› a replace ref cannot swap…`).
 4. **sk-dummy's counter is a constant** (305419896) and it echoes the flags ssh-keygen asks for, so a decreasing counter cannot be made with it.
@@ -1491,7 +1491,7 @@ The ecdsa-sk pair (draws #3 and #5) gives the same two results; the ECDSA P-256/
 - Git versions other than 2.55.0 (the ledger needs `blame --no-ignore-revs-file`, git 2.23 or later).
 - Real authenticators' counter behaviour; the decreasing-counter case is synthetic.
 - OpenPGP- and X.509-signed verdict commits: reported as unsupported and counted `self-asserted`, never verified.
-- Shallow clones: lines before the boundary lose their level (stated in the security model, not tested).
+- Shallow clones: lines before the boundary lose their level (stated in the security model, not tested). *(Wrong, corrected in the U9 fix round, below: in a shallow clone, blame attributed every line before the boundary to the boundary commit, which then gave them all its signer's level (review finding 1, reproduced end to end). A shallow, grafted or partial clone is now refused.)*
 - The logic through U5's API layer, which does not exist on this branch.
 
 ### Shared files touched (for the integration with U5 and U8)
@@ -1510,3 +1510,120 @@ The ecdsa-sk pair (draws #3 and #5) gives the same two results; the ECDSA P-256/
 - **U5:** status and verify results should carry each verdict's `provenance` (with `signer`, `keyFingerprint`, `counter`) and print levels through `provenanceLabel`; the MCP tools must not print `presence` without it. A read-only context reads signed git-file verdicts the same way (blame and cat-file only read). `verify --offline` checks signatures, since git-file is local.
 - **U10:** the "write a ledger" guide should say that a ledger cannot raise a verdict above `account` (only git-file's own signature check gives `presence`), and list the new optional `VerdictProvenance` fields. The release checklist could add a run of `presence-oracle.test.ts` on Linux.
 - **The founder:** registering reviewers' security keys gives `presence` only as far as T16 allows; until key attestation exists, the security model asks each reviewer to register a hardware-backed key.
+
+## U9 fix round (2026-11-04)
+
+An independent review of bolt 10 at `0cf8af1` (verdict: FIX FIRST) found a critical forgery path and a design flaw, with two end-to-end reproductions in which `verify` passed 7/7 and `status` said CERTIFIED at `presence` on forged or tampered verdicts. This round fixes every finding on the same branch, `bolt/u9-presence-verdicts`, in the same worktree, and replaces the verdict mechanism on the coordinator's decision.
+
+### The mechanism change: a deviation from the approved design
+
+**What the approved design said.** The refined design's §U9 kept the draft's mechanism (`05` §U9): the registration lists allowed signers, the reviewer commits each verdict with `git commit -S`, and each verdict line takes the level of the signed commit that added it, with SSHSIG verified in TypeScript.
+
+**Why it was changed (the review's reasoning).** That mechanism defeats U9's own goal, which is to let a registration demand evidence that a person was present for each verdict, against an assistant holding the reviewer's shell:
+- A line's provenance was its commit's signature, so one signing touch covered every line in the commit: an assistant appends 35 verdicts naming the reviewer, the reviewer's next `git commit -S -a` makes all 35 `presence` (finding 4). With `commit.gpgsign=true`, rebase, cherry-pick, amend and `merge --squash` re-sign other people's lines with the registered key.
+- Finding a line's commit needs `git blame`, which a verifier's checkout can steer: in a `--depth 1` clone (a CI checkout's default) every line is attributed to the boundary commit and takes its signer's level (finding 1, reproduced: 7/7 PASS, CERTIFIED, `presence (35)`); grafts, a hand-written `.git/shallow`, a rename hidden behind a merge (finding 2, reproduced on a full clone), textconv and commit-graph files steer it too (finding 5).
+- The namespace `git` cannot tell a verdict from any other commit the reviewer signs, and a signed line was bound to no audit (finding 8).
+
+**What replaces it.** One signature per verdict:
+- Each git-file line carries `sshsig`, an SSHSIG in its own namespace `pr-rla-verdict@v1`, made by OpenSSH's `ssh-keygen -Y sign`, over a canonical, versioned text naming `registrationSha256`, `protocolSha256`, `draw`, `changeId`, `verdict`, `reviewer` (the principal) and `recordedAt`, and `registrationSha256` beside it (contracts.md §1, "Per-verdict signatures"). A `-sk` key with UP set gives `presence (user-presence flag verified; key hardware not attested)`; any other valid registered key gives `account`; anything else `self-asserted`.
+- So one touch signs exactly one verdict, for one draw of one registration (findings 4 and 8 closed by construction). Commit signatures give no provenance; no line is credited to any commit; blame is gone.
+- `pr-rla record <draw> pass|fail --sign <key>` writes the bytes to a temporary file, runs `ssh-keygen -Y sign -n pr-rla-verdict@v1 -f <key> <file>` (a security key asks for its touch), checks the signature as verify will, and appends the line. The README gives the manual alternative: the bytes with `printf`, the ssh-keygen command, the line with `printf`, and the `-Y verify` check. The sk-dummy fixture is made with exactly that recipe.
+- `verdicts.allowed_signers` holds the keys (lines, or the path of an `allowed_signers` file). `require_signed` means every counted verdict carries a valid per-verdict signature by the registered key of the reviewer it names, and needs the built-in git-file ledger.
+- Signed lines can still be deleted, so the git-file history walk was rebuilt over hash-checked raw objects (findings 1, 2, 5), and check 7 now compares the loaded ledger with the registered one (finding 3).
+
+**What it means for FR9.** FR9.1 ("`require_signed` makes every verdict commit carry an SSH signature") is met as "every counted verdict carries its own SSHSIG"; FR9.2 ("verifies SSHSIG commit signatures") as "verifies each verdict's SSHSIG". The requirements table (`stages/requirements.md`) is not edited; this section and the refined §U9's dated note record the change. FR9.3–FR9.6, NFR4, NFR23, T16 and the levels are unchanged.
+
+**What it costs.** A reviewer signs each verdict (one touch each with a security key) instead of each commit; `git commit -S` is no longer needed. Keys move from `verdicts.reviewers` to `verdicts.allowed_signers`, so a registration made on this branch before the round must be remade (none was released). A key's principal is matched exactly.
+
+### Each finding, its commit and its test
+
+| # | Finding (severity) | Outcome | Commit | Tests |
+|---|---|---|---|---|
+| 1 | Shallow clone credits every line to the boundary commit (CRITICAL) | fixed: no line is credited to a commit; a shallow clone, a grafts file and a hand-written `.git/shallow` are refused before anything is read, saying to verify in a full clone | `4fef1aa`, `9ba0e90` | `u9-review-regressions.test.ts › attack A`, `› exp1`, `› exp7`; `git-file-history.test.ts › finding 1: a cut history is refused` |
+| 2 | Rename hidden behind a merge drops a signed FAIL (HIGH) | fixed: the walk takes parents from raw commit objects, with full history and no rename following; every version must extend every parent's | `9ba0e90` | `› attack B`; `git-file-history.test.ts › finding 2: a removal on a branch merged in FAILs` |
+| 3 | Verify never compares the loaded ledger with the registered one (HIGH) | fixed for every ledger: check 7 FAILs when name, source, integrity or optionsSha256 differ; the ceiling comes from the registered identity; `require_signed` needs the built-in git-file | `47b8e6f` | `› exp2(b): a renamed copy … through a changed file option`; `› a locally locked external ledger, swapped in at verify` |
+| 4 | A verdict signature is just a commit signature (MEDIUM) | fixed by construction: one signature per verdict; security model: don't register your everyday signing key | `4fef1aa` | `› finding 4: … one touch signs the commit; none of its lines counts`; fixture draw #14 (bob's touch as a commit signature) |
+| 5 | Trusts the verifier's git config and environment (LOW-MEDIUM) | fixed: blobs read raw (no blame, diff or textconv), no commit-graph, no replace refs, inherited `GIT_*` dropped, all through `src/io/git-safe.ts` | `9ba0e90` | `› exp4: textconv …`, `› a lying commit-graph …`, `› an inherited GIT_DIR …`; `git-file-history.test.ts › finding 5` (also replace ref, a corrupt object) |
+| 6 | SSHSIG reserved field differs from OpenSSH (LOW) | fixed: a non-empty reserved field is refused; oracle cases | `356adf2` | `presence-verifier.test.ts › finding 6`; `presence-oracle.test.ts › finding 6: …` (both variants); `› exp5` |
+| 7 | Principal matching case-insensitive and not unique (LOW) | fixed: principals equal ignoring case and one key under two principals are refused; one principal per entry; matching exact | `4fef1aa` | `presence-verifier.test.ts › finding 7`; `› exp6 and finding 7`; `e2e-presence.test.ts › malformed keys, principals equal ignoring case, and one key twice` |
+| 8 | Verdict not bound to its audit (LOW) | fixed by construction: the signed bytes name `registrationSha256` | `4fef1aa` | `› finding 8`; `presence-verifier.test.ts › finding 8`; fixture draw #13 |
+| 9 | Wording test weak; bare `presence` printed (LOW) | fixed: negation scoped to the claim, new claim patterns, `scripts/` scanned, every printed level labelled in text and `--json`; the draft's forgery sentence gains a "Superseded" note | `4fef1aa` (labels), `bfae3e6` | `presence-wording.test.ts`; `e2e-presence.test.ts › finding 9: every printed level is labelled …` |
+| 10 | Oracle gaps (LOW) | fixed: principal matching as production, reserved, curve/algorithm, RSA 1024, webauthn, small-order Ed25519, real `ssh-keygen -Y sign` (software ed25519), the recorded sk-dummy `-sk` signatures (UP set and clear); a missing ssh-keygen FAILs unless `PR_RLA_SKIP_ORACLE=1` | `4fef1aa` | `presence-oracle.test.ts` (33) |
+| 11 | Existing audits verify differently (LOW) | (a) keyless git-file audits verify as before; the lines' own `provenance` stays discarded (release note); (b) fixed: reviewers with spaces load as plain names; (c) kept, release-noted | `4fef1aa`, `4638e99` | `git-file-unchanged.test.ts` (passes on `a360348`, before U9, and now); `› finding 11(b)` |
+| 12 | Hardening (INFO) | fixed: RSA e = 1 or even, small-order Ed25519, a non-`ssh:` application refused; `register` warns when keys enforce nothing; SHA-1 collision exposure documented | `356adf2`, `4fef1aa`, `06fee84` | `presence-verifier.test.ts › finding 12` (3); `› exp6 (finding 12)`, `› finding 12: …` (2) |
+| — | Partial clone fetches lazily (from the U5 review, via the coordinator) | fixed: refused (promisor remote or packs, `extensions.partialClone`); `GIT_NO_LAZY_FETCH=1`; a missing object is "missing", never "deleted" | `9ba0e90` | `git-file-history.test.ts › a partial clone is refused, and nothing is fetched` (2); `› a partial clone (--filter=blob:none) …` |
+
+Other commits: `8c1166f` (a plugin-host test's timing, below), `06fee84` (docs), and this section.
+
+### Before and after
+
+The reviewer's own reproductions, re-run against `0cf8af1` at the start of the round (2026-11-04T03:27Z):
+- `attack.test.ts`, attack A: full clone `7:FAIL` (`self-asserted (30) · presence (1)`); the depth-1 clone `1:PASS … 7:PASS`, `VERDICT PROVENANCE: presence (user-presence flag verified; key hardware not attested) (31)`, status `CERTIFIED (risk 5%)`.
+- attack B: before the attack `7:WARN`, `NOT CERTIFIED · 20 more passing draws needed`; after it, `log -- rel` shows one commit, `7:PASS`, `CERTIFIED (risk 5%)` at presence (31).
+- `exp1`: the shallow, grafted and hand-shallow clones credit the attacker's unsigned line `account` with integrity clean; `exp2(b)`/`exp3`: the rename keeps every line at `account`, integrity clean; `exp4`: with textconv, the flipped line is `account`; `exp5`: reserved `X` signed over `X` is `ok=true` in pr-rla, refused by ssh-keygen; `exp6`: RSA e = 1 and 2 accepted, `alice,ALICE` accepted; `exp7`: the shallow clone with a signed README tip credits three forged lines `account`.
+
+`test/u9-review-regressions.test.ts` turns each into a test. Run against `0cf8af1` at 2026-11-04T04:22Z (the same file; only `test/helpers/u9-config.ts` swapped for that branch's key setting, keys in `verdicts.reviewers`; the newer test signer and line helper copied in): **18 failed, 2 passed** ("held before"), each failing on the attack's own outcome: `expected 'PASS' to be 'FAIL'` for attacks A and B, exp1, exp7, exp2(b), the external ledger, findings 4 and 8; `expected 'account' to be 'self-asserted'` (exp4); the lying commit-graph and `GIT_DIR` tests found nothing; the partial clone's pack count went from 2 to 4 (a lazy fetch); exp5, exp6 and finding 12's keys accepted; register accepted `Alice` and `alice`; the config refused `"Alice Smith"`; no register warning. After the round: **20 passed**.
+
+### Release notes (behaviour that changes for existing audits)
+
+1. **A git-file line's own `provenance` never counts**, keys or not: its `level`, and also `actorId` and `viaApp`. A hand-written line with `provenance.actorId` no longer matches an `id:<N>` reviewer (a phase-1/2 audit relying on that loses those verdicts); a hand-written `viaApp` line is no longer ignored. `pr-rla record` never wrote `provenance`, so only hand-written lines are affected. Restoring `actorId`/`viaApp` was declined: in git-file they are as self-asserted as the line, and honouring a line's claim about itself is what U9 removes.
+2. **A shallow, grafted or partial clone FAILs check 7** for every git-file audit (before: a silently weaker check). Verify in a full clone: `git fetch --unshallow`, or `git clone` without `--depth` or `--filter`.
+3. **A merge where both sides appended different verdicts FAILs** the append-only check: no version of the merge extends both parents. Record verdicts on one branch.
+4. **Check 7 FAILs when the ledger verify loads is not the registered one** (name, source, files, options), for every ledger, including a changed git-file `file` option.
+5. **`verdicts.reviewers` takes names again** (logins, `id:<N>`); SSH keys go in `verdicts.allowed_signers`. A key line left in `reviewers` is read as a name, and `register` warns.
+6. **`require_signed` with any ledger but the built-in git-file is refused** at register (before: silently ignored), and FAILs check 7.
+7. **An external ledger reporting a level above the one it declares** is counted at its declared level and check 7 WARNs (finding 11(c), kept: trusting a ledger beyond its declaration is what the ceiling prevents).
+8. **A missing object is reported as missing**, never as a deletion, and git never fetches it.
+9. git-file no longer looks for a repository from the process's cwd when the window directory does not exist; it starts from the nearest existing parent.
+
+### Deviations, and what was declined
+
+1. **The mechanism** (above).
+2. **Signatures are checked in the core, not in the ledger.** git-file returns each line with its `sshsig` and `registrationSha256`; `countedVerdicts` (src/core/presence/provenance.ts) attests them against the registration's digest and allowed signers, for check 7 and status. The ledger can only supply lines, never a level, and `LedgerContext` is unchanged.
+3. **One principal per allowed-signers entry**, stricter than "refuse one key under several principals": an entry `bob,robert <key>` is refused too.
+4. **Exact principal matching.** Production now matches as `ssh-keygen -Y verify -I` does, so the oracle and production agree (finding 10); principals equal ignoring case are refused, so the exact match is never ambiguous.
+5. **The canonical form is text, not JSON**: eight `name value` lines, values without control characters, `recordedAt` in strict ISO-8601 UTC, so a reviewer can type it with printf. `note` is not signed and never counts. The line carries the SSHSIG blob in base64 without the armor.
+6. **`--no-textconv`** is not a global git option and `cat-file --batch` has none; textconv applies only to diff, log, show, blame and grep, and to `cat-file --textconv`. `git-safe.ts` adds `--no-textconv` to those commands; the walk runs none of them (only `rev-parse`, `rev-list` as a hint, `config` and `cat-file --batch`), and a test shows a configured textconv changes nothing.
+7. **`GIT_CEILING_DIRECTORIES`** is the audit root's parent: git stops before climbing *into* a ceiling, so this keeps git at or below the root. Discovery (`rev-parse --show-toplevel` from the window directory) runs with no effective ceiling, so an audit whose `.pr-rla.yml` sits in a subdirectory of its repository keeps working; every later call runs at the toplevel with the ceiling there.
+8. **Commit signatures are not reported, even informationally** (the brief allowed it): the commit-signature code is removed, so nothing can be mistaken for provenance.
+9. **`CommandContext.signVerdict`**, an optional hook like `ctx.beacon`, lets the end-to-end tests sign through the software-emulated authenticator; the default is ssh-keygen.
+10. **`rev-list` is used as a hint only.** The walk reads what it names, then follows raw parent links from HEAD and reads whatever the hint missed; a commit the hint names but HEAD does not reach is ignored.
+11. **`test/plugin-host.test.ts`** (U2b's): "a slow call that keeps sending heartbeats is not stopped" failed in 2 of 4 full runs under the parallel load on this machine (load average near 48, other agents' suites running) and in 0 of 5 alone: its 500 ms watchdog window also covers the child's start. Widened to 2 s with a 4 s call (`8c1166f`); the property tested is unchanged.
+12. **Declined:** FIDO attestation (T16; unchanged, not built); detecting a history rewritten wholesale (a limit: nothing in one clone can show it; stated in the security model); SHA-1 collision detection (a limit, stated).
+
+### Live and local work (dated)
+
+- 2026-11-04T03:47:22Z: the fixture remade with the round-1 sk-dummy build (`scratchpad/u9/openssh-10.3p1/regress/misc/sk-dummy/sk-dummy.so`, as recorded above) and macOS's `ssh-keygen` (OpenSSH_10.3p1, LibreSSL 3.3.6): 14 verdicts, one `-Y sign` each, ten keys in a temporary directory deleted afterwards. ssh-keygen's own `-Y verify` and `-vv -Y check-novalidate` outcomes are recorded per verdict (UP `0x01` for bob and carol, `0x00` for dave and erin, counter 305419896).
+- 2026-11-04T04:24Z: `record --sign` run live through real `ssh-keygen -Y sign` with sk-dummy (a scratch test, not committed, as sk-dummy is not in the repository): ssh-keygen printed `Confirm user presence for key ED25519-SK SHA256:…` for each of bob's verdicts; verify gave `VERDICT PROVENANCE: account (1) · presence (user-presence flag verified; key hardware not attested) (32)` and FAILed check 7 on dave's no-touch `ecdsa-sk` verdict (`is account; the registration requires presence (…)`).
+- Found while running the suite, 2026-11-04T04:10Z: a symlink `node_modules/node_modules → …/u8-org-pooled-freeze/node_modules` had appeared inside this worktree's `node_modules` (not made by this round). Node then resolved `pkijs`'s `asn1js` from U8's tree, two copies of `asn1js` disagreed on `instanceof`, and every timestamp test failed with `rule 4: signer certificate not found among the token's certificates`, at `0cf8af1` too. The link (only the link) was removed; U8's tree was not touched.
+- ssh-keygen findings, 2026-11-04 (`presence-oracle.test.ts`): it still does not enforce the UP flag; it accepts a non-empty reserved field signed over an empty one, RSA keys of 1024 bits, and WebAuthn signatures; and it accepts a small-order Ed25519 key (the identity point) whose one "signature" (R = identity, S = 0) verifies any message. pr-rla refuses all of these.
+- Nothing left the machine: no network call, no key in `~/.ssh`, no hardware key, nothing pushed.
+
+### Tests
+
+- Before the round (`0cf8af1`): 577 passed, 2 skipped (579).
+- After: 630 passed, 1 skipped (631); the remaining skip is the pre-existing one (the oracle's `UNVERIFIED` placeholder is gone). U9's files: `presence-verifier` 41, `presence-oracle` 33, `presence-fixtures` 13, `e2e-presence` 23, `git-file-history` 22 (replaces `git-file-presence`, 11), `presence-wording` 7, `u9-review-regressions` 20, `git-file-unchanged` 3.
+
+### Verified (command → output)
+
+Recorded below in the next commit, from fresh clones of the branch.
+
+### Unverified
+
+- Any hardware FIDO key (D7); T16 is not mitigated.
+- The oracle and sk-dummy on Linux, Windows and other OpenSSH versions; only macOS's OpenSSH_10.3p1 (LibreSSL 3.3.6) ran.
+- git other than 2.55.0. `GIT_NO_LAZY_FETCH` needs git 2.44 or later; an older git still refuses a partial clone through the promisor check, which runs before any object is read.
+- The walk's cost on a very large history: it reads every reachable commit and its root tree once (measured only on test repositories).
+- `record --sign` with a passphrase-protected key or a key held by ssh-agent (`--sign key.pub`).
+- A history rewritten wholesale, and SHA-1 collisions (limits, stated in the security model).
+- The logic through U5's API layer, which is not on this branch.
+
+### Shared files touched (for the integration with U5 and U8)
+
+- **Command files:** `src/commands/context.ts` (`CommandContext.signVerdict`), `record.ts` (`--sign`, through `verdictSigner` in `src/io/ssh-sign.ts`), `register.ts` (`allowedSigners` input, `verdictRuleWarnings`, the T16 line from `allowed_signers`), `status.ts` (`countedVerdicts`, `registeredCeiling`, labelled lines), `verify.ts` (`ledgerIdentity`, `registeredCeiling`); `src/cli.ts` (one option).
+- **`src/core/verify.ts`:** `VerifyDeps.ledgerIdentity`, next to `provenanceCeiling`; check 7's verdict block (identity, `require_signed` ledger, `countedVerdicts`); check 1's `signed verdicts required` wording. Nothing in checks 2 and 5.
+- **New shared git helper: `src/io/git-safe.ts`** (`gitSafe`, `gitSafeText`, `gitSafeSpawn`, `gitSafeEnv`, `gitSafeArgs`, `historyRefusal`, `FULL_CLONE`). U5's equivalent guard should merge into it; every read-path git call should go through it.
+- **New:** `src/core/presence/verdict-payload.ts`, `src/io/ssh-sign.ts`, `src/ledgers/git-history.ts`; `src/core/presence/commit.ts` removed; `src/core/presence/verifier.ts` rewritten.
+- `src/sdk/ledger.ts` (`VerdictEvent.registrationSha256`, `.sshsig`; source `verdict-signature`; `verdictIneligibility` back to master's), `src/config.ts` (`verdicts.allowed_signers`), `src/core/records.ts`, `src/ledger-traits.ts` (`registeredCeiling`), `src/index.ts`.
+- Tests: `test/plugin-host.test.ts` (one test's timing).
+- **U5 must:** have its status and verify APIs call `countedVerdicts(read, { registration, verifiesSignatures, ceiling, ledger })` with `registeredCeiling`, and pass `ledgerIdentity` to `verifyAudit`; carry `record --sign`; strip `sshsig` and `registrationSha256` before showing a verdict (`withoutSignatureFields`); run any git through `git-safe.ts`.
