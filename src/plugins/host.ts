@@ -236,13 +236,21 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   const setRef = (on: boolean) => handles.forEach((h) => (on ? h?.ref?.() : h?.unref?.()));
 
   let disarm: (() => void) | null = null;
+  let armed = 0;
   const arm = () => {
     disarm?.();
     disarm = null;
     if (dead || closed || (!loading && pending.size === 0)) return;
+    const mine = ++armed;
     disarm = setTimer(() => {
-      die(new PluginError(withTail(`plugin ${o.label} sent no heartbeat for ${Math.round(timeoutMs / 1000)} s and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
-      child.kill("SIGKILL");
+      // When this process was not running for a while (a busy machine), the timer and the child's
+      // heartbeat are both ready: timers run before I/O is read, so decide only after the poll phase
+      // has read what arrived (setImmediate runs after it). A message re-arms, and this one stands down.
+      setImmediate(() => {
+        if (mine !== armed || dead || closed) return;
+        die(new PluginError(withTail(`plugin ${o.label} sent no heartbeat for ${Math.round(timeoutMs / 1000)} s and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
+        child.kill("SIGKILL");
+      });
     }, timeoutMs);
   };
   const busy = () => {
