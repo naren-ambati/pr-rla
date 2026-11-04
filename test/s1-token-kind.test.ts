@@ -38,14 +38,13 @@ const c5 = (r: { checks: { n: number; status: string; details: unknown[] }[]; un
 const visibility = (c: Check5) => c.details.filter((d) => /repositor(y|ies) under acme-org/.test(d) && /private|internal/.test(d));
 
 /** Check 5 of the CLI's verify and of read.verify (read-only mode) on the same audit, with `token` as GITHUB_TOKEN. */
-async function both(s: PoolScenario, org: FakeOrg, token: string): Promise<{ cli: Check5; ro: Check5; verdicts: [string, string] }> {
+async function both(s: PoolScenario, org: FakeOrg, token: string): Promise<{ cli: Check5; ro: Check5; verdicts: [string, string]; fenced: () => void }> {
   const env = { GITHUB_TOKEN: token };
   const cli = await s.clock.run(runVerify({ ...s.ctx, env }, { offline: false }));
   const ro = await s.clock.run(read.verify({ dir: s.dir, offline: false }, { nowMs: () => s.clock.now(), sleep: (ms) => s.clock.sleep(ms), fetch: org.fetch, env }));
-  // Read-only says pr-rla's words: the reason itself is only in untrusted.errors.
+  // Read-only says pr-rla's words: the reason itself is only in untrusted.errors (item 2, checked after each test's verdicts).
   const raw = ro.checks.find((x) => x.n === 5)!.details.filter((d) => /under acme-org/.test(d) && /private|internal/.test(d));
-  for (const l of raw) expect(l).not.toMatch(/OAuth App|X-OAuth-Scopes|classic token|auditor/);
-  return { cli: c5(cli), ro: c5(ro), verdicts: [cli.verdict, ro.verdict] };
+  return { cli: c5(cli), ro: c5(ro), verdicts: [cli.verdict, ro.verdict], fenced: () => raw.forEach((l) => expect(l).not.toMatch(/OAuth App|X-OAuth-Scopes|classic token|auditor/)) };
 }
 
 describe("item 1: the GitHub token kind is derived from the real value in read-only mode too", () => {
@@ -65,6 +64,8 @@ describe("item 1: the GitHub token kind is derived from the real value in read-o
     const counted = await both(s, org, "gho_synthetic000000000000000000000000000");
     expect([counted.cli.status, counted.ro.status]).toEqual(["PASS", "PASS"]);
     for (const c of [counted.cli, counted.ro]) for (const l of visibility(c)) expect(l).toMatch(/with a OAuth App token holding the repo scope: GitHub shows org owners every repository of the org, and the listing is held to the org's total_private_repos/);
+    r.fenced();
+    counted.fenced();
   }, 240_000);
 
   it("a classic token (ghp_): complete in both, and both name it a classic token", async () => {
@@ -77,6 +78,7 @@ describe("item 1: the GitHub token kind is derived from the real value in read-o
       for (const l of visibility(c)) expect(l).toMatch(/^(private|internal) repositories under acme-org: listed completely \(auditor is an owner \(admin\) of acme-org, with a classic token holding the repo scope/);
     }
     expect(visibility(r.ro)).toEqual(visibility(r.cli));
+    r.fenced();
   }, 240_000);
 
   it("a fine-grained token (github_pat_, no X-OAuth-Scopes): INCOMPLETE in both, on the same reason", async () => {
@@ -87,6 +89,7 @@ describe("item 1: the GitHub token kind is derived from the real value in read-o
     expect([r.cli.status, r.ro.status]).toEqual(["INCOMPLETE", "INCOMPLETE"]);
     for (const c of [r.cli, r.ro]) for (const l of visibility(c)) expect(l).toMatch(/the token sends no X-OAuth-Scopes header, so it is a fine-grained personal access token or a GitHub App token/);
     expect(visibility(r.ro)).toEqual(visibility(r.cli));
+    r.fenced();
   }, 240_000);
 
   it("the credential layer passes the kind beside the placeholder, never the value; a placeholder without a kind proves nothing", async () => {
