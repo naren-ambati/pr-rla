@@ -24,7 +24,7 @@ import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { describeGitHubChange } from "./describe.js";
 import { classifyHistory, type HistoryNode } from "./history.js";
-import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
+import { GAVE_UP, GitHubHttp, GitHubHttpError, asGitHubTokenKind } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
 import { COMMIT_PARENTS_QUERY, COMMIT_PRS_QUERY, HEAD_QUERY, MORE_LABELS_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
 
@@ -119,9 +119,13 @@ export class GitHubProvider implements ScmProvider {
 
   constructor(opts: GitHubProviderOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
     const urls = githubEndpoints(opts);
-    const token = (opts.token_env ? ctx.env[opts.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN ?? (urls.enterprise ? ctx.env.GH_ENTERPRISE_TOKEN : undefined);
+    const names = [...(opts.token_env ? [opts.token_env] : []), "GITHUB_TOKEN", "GH_TOKEN", ...(urls.enterprise ? ["GH_ENTERPRISE_TOKEN"] : [])];
+    const from = names.find((n) => ctx.env[n] !== undefined);
+    const token = from === undefined ? undefined : ctx.env[from];
+    // In read-only mode the token is a placeholder: its kind is what pr-rla derived from the real value (S1).
+    const tokenKind = from === undefined ? undefined : asGitHubTokenKind(ctx.credentialKinds?.[from]);
     // maxRetries 0: ctx.fetch is the fetch broker, the only retrier (contracts.md §2).
-    this.http = new GitHubHttp({ token, apiUrl: urls.apiUrl, graphqlUrl: urls.graphqlUrl, fetch: ctx.fetch, log: ctx.log, maxRetries: 0, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
+    this.http = new GitHubHttp({ token, ...(tokenKind ? { tokenKind } : {}), apiUrl: urls.apiUrl, graphqlUrl: urls.graphqlUrl, fetch: ctx.fetch, log: ctx.log, maxRetries: 0, ...(ctx.sleep ? { sleep: ctx.sleep } : {}) });
     this.pageSize = Math.min(100, opts.page_size ?? 100);
     this.batchSize = opts.batch_size ?? 40;
     this.historyPageSize = opts.history_page_size ?? 50;
@@ -417,6 +421,7 @@ export class GitHubProvider implements ScmProvider {
     const publicProof = { complete: true, reason: "GitHub lists every public repository to anyone" };
     const none = (reason: string): ListingVisibility => ({ identity, visibilities: { public: publicProof, private: { complete: false, reason }, internal: { complete: false, reason } } });
     if (!this.http.authenticated) return none("no token: GitHub shows only public repositories");
+    if (this.http.tokenKind === "unknown") return none("pr-rla holds only a placeholder for the token and was not told its kind (classic, OAuth App, fine-grained), which decides what its listing can prove");
     let user: { data: { login: string }; headers: Headers };
     try {
       user = await this.http.rest<{ login: string }>("/user");

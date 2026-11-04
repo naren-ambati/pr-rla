@@ -137,7 +137,9 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
     expect(hostsOf(gh)).toEqual({ GITHUB_TOKEN: ["api.github.com"], GH_TOKEN: ["api.github.com"] });
     expect(builtinEnv(ctx, "provider", "gitlab", "gitlab", {}).env).toEqual({ GITLAB_TOKEN: "prrla-cred:GITLAB_TOKEN" });
     expect(hostsOf(builtinEnv(ctx, "provider", "bitbucket-cloud", "bitbucket-cloud", {}))).toEqual({ BITBUCKET_TOKEN: ["api.bitbucket.org"], BITBUCKET_USERNAME: ["api.bitbucket.org"] });
-    expect(builtinEnv(ctx, "provider", "json-file", "json-file", { path: "x.json" })).toEqual({ env: {}, credentials: [] });
+    expect(builtinEnv(ctx, "provider", "json-file", "json-file", { path: "x.json" })).toEqual({ env: {}, credentials: [], kinds: {} });
+    // S1: what GitHub decides by its token's kind is derived from the real value, beside the placeholder.
+    expect(gh.kinds).toEqual({ GITHUB_TOKEN: "classic", GH_TOKEN: "classic" });
     // read-write (the CLI) gets the approved values themselves, from the same decision
     const rw = createAuditContext({ mode: "read-write", env, fetch: (async () => new Response("{}")) as typeof fetch });
     expect(builtinEnv(rw, "provider", "github", "github", {}).env).toEqual({ GITHUB_TOKEN: "ghp_default", GH_TOKEN: "ghp_gh" });

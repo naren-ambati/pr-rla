@@ -167,6 +167,13 @@ export interface ProviderContext {
    * instead of sleeping. When absent, use a real timer.
    */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Optional (S1): what pr-rla derived from a credential's real value, by variable name, for a built-in that holds
+   * only the variable's placeholder (read-only mode, src/api/context.ts): GitHub's token kind (`classic`,
+   * `oauth-app`, `fine-grained`, …), which decides what its listing can prove. pr-rla sets it for its built-ins
+   * only; an external plugin never gets it.
+   */
+  credentialKinds?: Readonly<Record<string, string>>;
 }
 
 export type RepoVisibility = "public" | "private" | "internal";

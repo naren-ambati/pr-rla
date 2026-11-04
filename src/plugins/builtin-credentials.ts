@@ -1,4 +1,5 @@
 import { githubEndpoints } from "../providers/github/index.js";
+import { githubTokenKind } from "../providers/github/http.js";
 import { PluginError } from "./errors.js";
 
 /**
@@ -98,4 +99,14 @@ export function builtinCredentialUses(kind: "provider" | "ledger", name: string,
   const f = (kind === "provider" ? PROVIDERS : LEDGERS)[name];
   if (!f) throw new Error(`no credential table for built-in ${kind} ${name}`);
   return f(options && typeof options === "object" ? (options as Record<string, unknown>) : {});
+}
+
+/**
+ * What a built-in's decisions need from a credential's value, derived here from the real value (S1): in read-only
+ * mode the built-in holds only a placeholder, so it cannot read the value's documented format itself, and reading the
+ * placeholder's would decide for a token that is not the one sent. GitHub's token kind (classic, OAuth App,
+ * fine-grained, installation) decides what its listing can prove. Nothing of the value but its kind leaves here.
+ */
+export function builtinCredentialKind(kind: "provider" | "ledger", name: string, value: string): string | null {
+  return name === "github" && kind === "provider" ? githubTokenKind(value) : null;
 }
