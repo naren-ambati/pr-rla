@@ -86,7 +86,9 @@ pr-rla freeze --dry-run --estimate    # predicts the requests and wall time from
 pr-rla freeze                         # 4 repos at a time, all-or-nothing; if it stops (exit 4) it prints `pr-rla freeze --resume <runId>`
 ```
 
-A killed or rate-limited freeze resumes to a byte-identical manifest. There is no `--skip-repo`: a repo the token cannot read is excluded in the registered rule, before the seed. `verify` fails a repo that matches the rule but is missing from the manifest, and warns, with a count, for a repo that is gone. One provider per pool. Details, the output of a read-only run on the public `navikt` org (2026-11-04) and the limits: [`docs/org-pooled-audits.md`](docs/org-pooled-audits.md).
+A killed or rate-limited freeze resumes to a byte-identical manifest. There is no `--skip-repo`: a repo the token cannot read is excluded in the registered rule, before the seed. `register` signs the repos the rule matches, by id, so archiving, renaming or hiding one later cannot take it out of the pool. `verify` fails a repo that matches the rule (or was registered) but is missing from the manifest, and a frozen head that hides window landings; it is **INCOMPLETE** (exit 6) for a repo that is gone or unreadable, and when it cannot establish that its token sees every private or internal repo. One provider per pool. Details, the output of a read-only run on the public `navikt` org (2026-11-04) and the limits, including what a retrospective pooled audit cannot detect: [`docs/org-pooled-audits.md`](docs/org-pooled-audits.md).
+
+`verify` exits 0 when VERIFIED, 1 when a check FAILed, and 6 when INCOMPLETE: nothing failed, but part of the population could not be rebuilt or its completeness established, so it is not a verification (`--json` has `verdict`; `ok` is true only for VERIFIED). The other exit codes are in [`contracts.md` §7](docs/design/phase-3-4/contracts.md).
 
 ## Architecture: bring-your-own providers and ledgers
 
