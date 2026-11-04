@@ -36,7 +36,7 @@ Signed into `audits/gh-aw-prospective/audit/gh-aw-prospective/registration.json`
 ## Before registering
 
 1. **Use a build that includes bolt 3**, so the `github-issues` ledger exists. (The bolt-1 build refused this configuration with `cannot load ledger "github-issues"`.)
-2. **Finalize `audits/gh-aw-prospective/review-protocol.md`.** Its hash is registered; changing it later fails check 1. It is a copy of `docs/design/review-protocol.example.md`, with the recording section rewritten for labels.
+2. **Finalize `audits/gh-aw-prospective/review-protocol.md`.** Its hash is registered; changing it later fails check 1. It is drafted for gh-aw (2026-11-03): five failure codes with gh-aw examples, the generated-file exception, an unresolved specific concern counted as FAIL, and label rules that match the ledger's (the first label counts; never remove one). Edit it until it says what you mean; nothing hashes it before `register`.
 3. **Create the audit repo** on GitHub (public, so auditors can read it), with issues enabled. `sample` opens the draw issues there and creates the labels `pr-rla:pass`, `pr-rla:fail` and `pr-rla:draw`; nothing is written before `sample`.
 4. **Fill in the four placeholders (marked `EDIT`) in `audits/gh-aw-prospective/.pr-rla.yml`.** Until each is replaced, `register` refuses and names it.
    - `window.start`: the UTC day after the day you register; `window.end`: start + 41 days (42 inclusive days).
