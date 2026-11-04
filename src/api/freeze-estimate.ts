@@ -23,6 +23,34 @@ import type { AuditContext } from "./context.js";
 
 export const MAX_PROBED_REPOS = 200;
 
+/**
+ * The replay reserves the predicted requests in at most this many batches (S1), so its cost does not grow with the
+ * count a provider names: before, 4 million requests were replayed one at a time, in one synchronous stretch of
+ * 2.9 s. A batch's share of the wait is the most the batching can move the result, 1/REPLAY_STEPS of it: 0.1%, well
+ * inside the prediction's own error (the pooled-freeze tests hold it to half the measured run).
+ */
+export const REPLAY_STEPS = 1000;
+
+/**
+ * Why a provider's estimate for one repo is not usable, or null (S1): every figure a whole number of requests, from 0
+ * to `cap`; `graphql` and `probed` part of `requests`. `cap` is the most per repo that keeps the scaled total, over
+ * every repo of the set, an exact integer. The value itself is not quoted: it is the provider's.
+ */
+export function estimateProblem(e: unknown, cap: number): string | null {
+  if (!e || typeof e !== "object") return "is not an object with a request count";
+  const x = e as Record<string, unknown>;
+  const whole = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= cap;
+  const what = (v: unknown) => (typeof v === "number" ? "a number that is not a whole count of requests" : typeof v === "string" ? "text" : v === null || typeof v === "object" ? "an object" : typeof v === "undefined" ? "nothing" : `a ${typeof v}`);
+  const range = `not a whole number from 0 to ${cap.toLocaleString("en-US")}`;
+  if (!whole(x.requests)) return `gives requests as ${what(x.requests)}, ${range}`;
+  for (const k of ["graphql", "probed"] as const) {
+    if (x[k] === undefined) continue;
+    if (!whole(x[k])) return `gives ${k} as ${what(x[k])}, ${range}`;
+    if ((x[k] as number) > (x.requests as number)) return `gives more ${k} requests than requests in all`;
+  }
+  return null;
+}
+
 export interface FreezeEstimate {
   /** False when the provider cannot estimate: `reason` says so and no figures are given. */
   supported: boolean;
@@ -92,6 +120,12 @@ export async function estimateFreeze(a: EstimateArgs): Promise<FreezeEstimate> {
   const parts: RequestEstimate[] = await mapPool(sample, Math.max(1, a.concurrency), (r) =>
     estimate({ repo: r.repo, window: a.window, kinds: a.selector.kinds, ...(a.signal ? { signal: a.signal } : {}) }),
   );
+  // The provider's figures are checked before any arithmetic on them (S1): an isolated plugin's come over IPC as any JSON.
+  const cap = Math.floor(Number.MAX_SAFE_INTEGER / Math.max(1, n));
+  for (const [k, e] of parts.entries()) {
+    const why = estimateProblem(e, cap);
+    if (why) return empty(`provider ${a.provider.name}'s estimate for ${sample[k]!.repo} ${why}, so no figures are printed: ${n} repos need at least ${n} requests`);
+  }
   const scale = n / sample.length;
   const sum = (f: (e: RequestEstimate) => number) => parts.reduce((t, e) => t + f(e), 0);
   // P3: freeze reads each repo's push log once its listing is done: one REST page per repo, more only for a branch
@@ -115,7 +149,7 @@ export async function estimateFreeze(a: EstimateArgs): Promise<FreezeEstimate> {
   if (main && main.requests > 0) {
     host = main.host;
     const authenticated = main.authenticated * 2 >= main.requests;
-    budgetMs = replay(a.ctx, host, authenticated, a.listingRequests + rest, graphql, budgetLines);
+    budgetMs = replay(a.ctx, host, authenticated, a.listingRequests + rest, graphql, budgetLines, a.signal);
   }
   const work = (total * latencyMs) / Math.max(1, Math.min(a.concurrency, n));
   return {
@@ -135,8 +169,10 @@ export async function estimateFreeze(a: EstimateArgs): Promise<FreezeEstimate> {
  * Replays `rest` REST reads and `graphql` GraphQL queries (evenly interleaved, the order does not change the
  * total) through a fresh governor with the broker's budgets, and returns how long it waits. Limits a server reported
  * while probing are fed in through synthetic headers, so a 5,000/hour token is paced as the real run will pace it.
+ * The requests are reserved in at most REPLAY_STEPS batches (S1), so the replay's cost is bounded whatever the count,
+ * and the call's signal is honoured between batches.
  */
-function replay(ctx: AuditContext, host: string, authenticated: boolean, rest: number, graphql: number, lines: string[]): number {
+function replay(ctx: AuditContext, host: string, authenticated: boolean, rest: number, graphql: number, lines: string[], signal?: AbortSignal): number {
   const clock = { t: ctx.nowMs() };
   const start = clock.t;
   const budgets = ctx.broker.policy.budgets;
@@ -155,12 +191,18 @@ function replay(ctx: AuditContext, host: string, authenticated: boolean, rest: n
   const b = budgetFor(budgets, host);
   if (b) for (const r of b.rules) if (r.scope !== "writes" && (r.auth === "any" || r.auth === (authenticated ? "authenticated" : "anonymous")) && !(r.primary && reported.has(r.scope))) lines.push(`${host}: ${r.id}${r.primary ? "" : " (secondary)"}: ${r.published}`);
   const total = rest + graphql;
+  const steps = Math.min(total, REPLAY_STEPS);
+  let doneRest = 0;
   let doneGraphql = 0;
-  for (let i = 0; i < total; i++) {
-    // Bresenham: GraphQL requests are spread evenly through the run.
-    const wantGraphql = Math.floor(((i + 1) * graphql) / Math.max(1, total)) > doneGraphql;
-    if (wantGraphql) doneGraphql++;
-    clock.t += fresh.reserve(req(wantGraphql));
+  for (let i = 1; i <= steps; i++) {
+    signal?.throwIfAborted();
+    // Each step takes its share of both kinds, so GraphQL requests are spread evenly through the run.
+    const r = Math.round((i * rest) / steps) - doneRest;
+    const g = Math.round((i * graphql) / steps) - doneGraphql;
+    if (r > 0) clock.t += fresh.reserve(req(false), r);
+    if (g > 0) clock.t += fresh.reserve(req(true), g);
+    doneRest += r;
+    doneGraphql += g;
   }
   return clock.t - start;
 }

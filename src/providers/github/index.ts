@@ -573,36 +573,43 @@ export class GitHubProvider implements ScmProvider {
     const headOid = (req.head ?? ref.target.oid).toLowerCase();
 
     // Closed PRs, newest update first: pages until one ends before the window opened (listMergedPullNumbers), and the shares in the window.
+    // The pages are a server's answer (with base_url, any server's), so every figure taken from them is bounded (S1):
+    // an entry whose time does not parse is not used, and a page's density is at most one page per second, since
+    // GitHub's times count to the second (a page whose times spanned 0 ms was projected at 100 per millisecond across
+    // the whole window); a figure that is still not finite is not used.
     const url = (page: number) => `/repos/${req.repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${this.pageSize}${page > 1 ? `&page=${page}` : ""}`;
+    const pulls = (data: unknown): RestPull[] => (Array.isArray(data) ? data.filter((x): x is RestPull => !!x && typeof x === "object" && Number.isFinite(Date.parse((x as RestPull).updated_at))) : []);
     const a = await this.http.rest<RestPull[]>(url(1));
+    const first = pulls(a.data);
     probed++;
-    const span = (p: RestPull[]) => Math.max(1, Date.parse(p[0]!.updated_at) - Date.parse(p.at(-1)!.updated_at));
-    const intoWindow = (p: readonly RestPull[]) => p.filter((x) => x.merged_at && x.base.ref === ref.name && Date.parse(x.merged_at) >= opens && Date.parse(x.merged_at) < closes).length;
+    const span = (p: RestPull[]) => Math.max(1000, Date.parse(p[0]!.updated_at) - Date.parse(p.at(-1)!.updated_at));
+    const intoWindow = (p: readonly RestPull[]) => p.filter((x) => x.merged_at && x.base?.ref === ref.name && Date.parse(x.merged_at) >= opens && Date.parse(x.merged_at) < closes).length;
+    const atMost = (v: number) => (Number.isFinite(v) ? Math.max(0, v) : first.length);
     let updatedSinceOpens: number;
     let merged: number;
     let pullPages: number | null = null;
-    if (a.data.length === 0 || !a.next || Date.parse(a.data.at(-1)!.updated_at) < opens) {
+    if (first.length === 0 || !a.next || Date.parse(first.at(-1)!.updated_at) < opens) {
       // The whole list since the window opened is on this page: exact.
-      updatedSinceOpens = a.data.filter((x) => Date.parse(x.updated_at) >= opens).length;
-      merged = intoWindow(a.data);
+      updatedSinceOpens = first.filter((x) => Date.parse(x.updated_at) >= opens).length;
+      merged = intoWindow(first);
       pullPages = 1;
     } else {
       // Density from the newest page projects the length; a page from the middle gives the density there and what share merged in the window.
-      const dA = a.data.length / span(a.data);
-      const firstProjection = a.data.length + dA * (Date.parse(a.data.at(-1)!.updated_at) - opens);
+      const dA = first.length / span(first);
+      const firstProjection = atMost(first.length + dA * (Date.parse(first.at(-1)!.updated_at) - opens));
       const middle = Math.floor(firstProjection / this.pageSize / 2) + 1;
       let b: RestPull[] | null = null;
       if (middle > 1) {
-        b = (await this.http.rest<RestPull[]>(url(middle))).data;
+        b = pulls((await this.http.rest<RestPull[]>(url(middle))).data);
         probed++;
       }
       if (b && b.length > 0) {
         const dB = b.length / span(b);
-        updatedSinceOpens = a.data.length + dB * Math.max(0, Date.parse(a.data.at(-1)!.updated_at) - opens);
+        updatedSinceOpens = atMost(first.length + dB * Math.max(0, Date.parse(first.at(-1)!.updated_at) - opens));
         merged = updatedSinceOpens * (intoWindow(b) / b.length);
       } else {
         updatedSinceOpens = firstProjection;
-        merged = updatedSinceOpens * (intoWindow(a.data) / a.data.length);
+        merged = updatedSinceOpens * (intoWindow(first) / first.length);
       }
     }
     // The newest page is read once more (the re-scan for PRs updated during the walk).
@@ -614,11 +621,13 @@ export class GitHubProvider implements ScmProvider {
       type Page = { repository: { object: { history: { pageInfo: { hasNextPage: boolean }; nodes: { committedDate: string }[] } } | null } };
       const h = await this.http.graphql<Page>(historyQuery(this.historyPageSize), { owner, name, head: headOid, since: req.window.opensAt, after: null });
       probed++;
-      const nodes = h.repository.object?.history.nodes ?? [];
+      const nodes = Array.isArray(h.repository?.object?.history?.nodes) ? h.repository.object!.history.nodes : [];
       let commits = nodes.length;
-      if (h.repository.object?.history.pageInfo.hasNextPage && nodes.length > 1) {
-        const dates = nodes.map((n) => Date.parse(n.committedDate)).sort((x, y) => y - x);
-        const density = nodes.length / Math.max(1, dates[0]! - dates.at(-1)!);
+      // Commit times count to the second (GitHub's committedDate has no fractions): a page's density is at most one
+      // page per second, whatever times a server sends.
+      const dates = nodes.map((x) => Date.parse(x?.committedDate)).filter((t) => Number.isFinite(t)).sort((x, y) => y - x);
+      if (h.repository?.object?.history?.pageInfo?.hasNextPage && dates.length > 1) {
+        const density = dates.length / Math.max(1000, dates[0]! - dates.at(-1)!);
         commits = nodes.length + density * Math.max(0, dates.at(-1)! - opens);
       }
       graphql += Math.max(1, Math.ceil(commits / this.historyPageSize));
