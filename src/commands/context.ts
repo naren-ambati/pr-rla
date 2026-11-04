@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fetchQuicknetBeacon, verifyQuicknetBeacon, type Beacon } from "../beacon/drand.js";
 import { sha256Hex } from "../core/canonical.js";
-import { isRegistrationV2, type AnyCommitment, type AnyManifest, type AnyRegistration, type DrawsFile, type SignedRecord } from "../core/records.js";
+import { isManifestV2, isRegistrationV2, type AnyCommitment, type AnyManifest, type AnyRegistration, type DrawsFile, type SignedRecord } from "../core/records.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../api/context.js";
 import type { BrokerFetch } from "../net/contract.js";
@@ -12,7 +12,7 @@ import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, typ
 export type { DrawsFile } from "../core/records.js";
 import { CONFIG_FILE, loadConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
 import type { Ledger } from "../sdk/ledger.js";
-import type { ScmProvider } from "../sdk/provider.js";
+import { isCommitId, type ScmProvider } from "../sdk/provider.js";
 
 export interface CommandContext {
   /** Directory holding .pr-rla.yml (the audit repo). */
@@ -147,7 +147,14 @@ export function protocolSha256(config: PrRlaConfig): string {
 }
 
 export const readRegistration = (paths: WindowPaths) => readJson<SignedRecord<AnyRegistration>>(paths.registration, "registration");
-export const readManifest = (paths: WindowPaths) => readJson<AnyManifest>(paths.manifest, "manifest");
+export function readManifest(paths: WindowPaths): AnyManifest {
+  const m = readJson<AnyManifest>(paths.manifest, "manifest");
+  // The pinned head goes into provider URLs and queries: only a commit id is accepted (schema pr-rla/manifest/v2).
+  if (isManifestV2(m))
+    for (const r of m.repos ?? [])
+      if (r.headSha !== null && r.headSha !== undefined && !isCommitId(r.headSha)) throw new CommandError(`manifest at ${paths.manifest}: repos[].headSha ${JSON.stringify(r.headSha)} must be null or 40 to 64 lowercase hex characters`);
+  return m;
+}
 export const readCommitment = (paths: WindowPaths) => readJson<SignedRecord<AnyCommitment>>(paths.commitment, "manifest commitment");
 
 export const readDraws = (paths: WindowPaths) => readJson<DrawsFile>(paths.draws, "draws");

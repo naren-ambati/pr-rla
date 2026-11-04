@@ -116,6 +116,8 @@ export function applyBotList(changes: readonly ChangeRecord[], bots: readonly st
 /** Funnel step names the selector adds for U3 options (none of them mention reviews). */
 export const BOT_LIST_STEP = "actors re-labelled as bot by selector";
 export const VIA_MERGE_STEP = "excluding pushes via a pushed merge";
+/** Added after the size step when some kept changes have a diff the SCM truncated (`changedLinesUnknown`): kept, because their size cannot be shown to exceed the limit. */
+export const UNKNOWN_SIZE_STEP = "of which size unknown (kept in the stratum)";
 
 /** Reviews visible as of `cutoffIso` (inclusive). Later reviews are not part of the frozen record. */
 export function reviewsAsOf(change: ChangeRecord, cutoffIso: string): Review[] {
@@ -213,8 +215,12 @@ export function applySelector(changes: readonly ChangeRecord[], sel: Selector, c
   }
   if (sel.max_changed_lines !== null) {
     const max = sel.max_changed_lines;
-    cur = cur.filter((c) => c.changedLines <= max);
+    // A change whose diff the SCM truncated has no known size: it stays in the stratum (it must not slip
+    // out, or in, on an undercount) and the funnel says how many there are.
+    cur = cur.filter((c) => c.changedLinesUnknown === true || c.changedLines <= max);
     funnel.push({ step: `<= ${max} changed lines`, count: cur.length });
+    const unknown = cur.filter((c) => c.changedLinesUnknown === true).length;
+    if (unknown > 0) funnel.push({ step: UNKNOWN_SIZE_STEP, count: unknown });
   }
   return { selected: cur, funnel, mergedByBreakdown };
 }

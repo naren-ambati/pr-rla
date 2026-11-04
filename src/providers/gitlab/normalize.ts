@@ -43,6 +43,12 @@ export interface GlNote {
   body: string;
   createdAt: string;
   author: GlUser | null;
+  /**
+   * GitLab's own tag for a system note (GraphQL `systemNoteMetadata.action`): `approved`, `unapproved`,
+   * `requested_changes`, `reviewed`, `approvals_reset`, … It does not depend on the instance's language;
+   * the English body is read only when it is absent (an older instance).
+   */
+  systemNoteMetadata?: { action: string | null } | null;
 }
 
 export interface GlCommit {
@@ -96,13 +102,17 @@ const APPROVED = /^approved this merge request\s*$/i;
 const UNAPPROVED = /^unapproved this merge request\s*$/i;
 const REQUESTED_CHANGES = /^requested changes\s*$/i;
 const RESET = /^reset approvals from (.+?) by pushing to the branch/i;
+// (RESET, APPROVED, UNAPPROVED and REQUESTED_CHANGES are the English texts, the fallback for a note GitLab did not tag.)
 
 /**
- * Builds the review list of one MR, as events in time order:
- * - system note "approved this merge request" -> APPROVED;
- * - "requested changes" -> CHANGES_REQUESTED (GitLab 17+ reviewer states);
- * - "unapproved this merge request", or "reset approvals from @a … by pushing to
- *   the branch" -> that user's last approval becomes DISMISSED (it no longer stood);
+ * Builds the review list of one MR, as events in time order. System notes are read by GitLab's own
+ * tag (`systemNoteMetadata.action`), which does not change with the instance's language, and by
+ * their English text only when a note has no tag:
+ * - `approved` ("approved this merge request") -> APPROVED;
+ * - `requested_changes` ("requested changes") -> CHANGES_REQUESTED (GitLab 17+ reviewer states);
+ * - `unapproved` ("unapproved this merge request"), or `approvals_reset` ("reset approvals from
+ *   @a … by pushing to the branch"; the tag says it is a reset, the @references say whose) ->
+ *   that user's last approval becomes DISMISSED (it no longer stood);
  * - a user's non-system note on someone else's MR -> one COMMENTED at their first note.
  * Then reconciled with the REST approvals (`approved_by`, with `approved_at`) and
  * reviewer states, for approvals or states the notes do not show. A reviewer
@@ -115,6 +125,8 @@ export function buildReviews(args: {
   reviewers: readonly GlReviewer[];
   mergedAt: string;
   actor: (u: GlUser | null) => Actor;
+  /** Called for an approval-reset note whose approvers it could not read from the body (the reset is then not applied). */
+  onUnreadableReset?: (note: GlNote) => void;
 }): Review[] {
   const out: (Review & { key: string })[] = [];
   const standing = new Map<string, number>();
@@ -134,12 +146,18 @@ export function buildReviews(args: {
     const u = n.author.username;
     const body = n.body.trim();
     if (n.system) {
-      if (APPROVED.test(body)) standing.set(u, add(n.author, "APPROVED", n.createdAt));
-      else if (UNAPPROVED.test(body)) dismiss(u);
-      else if (REQUESTED_CHANGES.test(body)) add(n.author, "CHANGES_REQUESTED", n.createdAt);
-      else {
-        const m = RESET.exec(body);
-        if (m) for (const who of m[1]!.matchAll(/@([\w.-]+)/g)) dismiss(who[1]!);
+      // GitLab tags its system notes (systemNoteMetadata.action); the tag is the same in every language.
+      // A note with no tag (an older instance) is read by its English text, as before.
+      const action = n.systemNoteMetadata?.action ?? null;
+      const tagged = n.systemNoteMetadata !== undefined && n.systemNoteMetadata !== null;
+      if (action === "approved" || (!tagged && APPROVED.test(body))) standing.set(u, add(n.author, "APPROVED", n.createdAt));
+      else if (action === "unapproved" || (!tagged && UNAPPROVED.test(body))) dismiss(u);
+      else if (action === "requested_changes" || (!tagged && REQUESTED_CHANGES.test(body))) add(n.author, "CHANGES_REQUESTED", n.createdAt);
+      else if (action === "approvals_reset" || (!tagged && RESET.test(body))) {
+        // Who was reset is named in the note as @references (`reset approvals from @a and @b by pushing …`).
+        const who = [...body.matchAll(/@([\w.-]+)/g)].map((m) => m[1]!);
+        if (who.length === 0) args.onUnreadableReset?.(n);
+        for (const w of who) dismiss(w);
       }
     } else if (u !== args.mrAuthor && !commented.has(u)) {
       commented.add(u);

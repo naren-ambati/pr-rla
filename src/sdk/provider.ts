@@ -82,6 +82,13 @@ export interface ChangeRecord {
   reviews: Review[];
   /** Raw additions + deletions as the SCM reports them (no generated-file exclusion). */
   changedLines: number;
+  /**
+   * Optional (same API version): true when the SCM truncated the diff (GitLab `too_large`, Bitbucket
+   * Data Center's `truncated`) and offered no stat field to count instead, so `changedLines` is a lower
+   * bound, not the size. A provider must set it rather than report an undercount. The selector keeps
+   * such a change in a `max_changed_lines` stratum and the funnel reports how many there were.
+   */
+  changedLinesUnknown?: true;
   labels: string[];
   /**
    * Optional (U3, same API version), direct pushes only: the SHA of the direct-push merge commit,
@@ -279,6 +286,13 @@ const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const ID = /^[a-z0-9][a-z0-9-]*:[^\s#@]+(?:#[1-9][0-9]*|@(?:[0-9a-f]{40}|[0-9a-f]{64}))$/;
 
+/** A git commit id as the manifest records and providers send it: 40 (SHA-1) to 64 (SHA-256) lowercase hex characters. */
+export const COMMIT_ID = /^[0-9a-f]{40,64}$/;
+
+export function isCommitId(value: unknown): value is string {
+  return typeof value === "string" && COMMIT_ID.test(value);
+}
+
 export function isIsoUtc(value: unknown): value is string {
   return typeof value === "string" && ISO_UTC.test(value) && !Number.isNaN(Date.parse(value));
 }
@@ -317,6 +331,7 @@ export function changeRecordProblems(value: unknown): string[] {
       if (!isIsoUtc(rev.submittedAt)) p.push(`reviews[${i}].submittedAt must be ISO-8601 UTC`);
     });
   if (typeof r.changedLines !== "number" || !Number.isInteger(r.changedLines) || r.changedLines < 0) p.push("changedLines must be a non-negative integer");
+  if (r.changedLinesUnknown !== undefined && r.changedLinesUnknown !== true) p.push("changedLinesUnknown must be true when present");
   if (!Array.isArray(r.labels) || r.labels.some((l) => typeof l !== "string")) p.push("labels must be an array of strings");
   if (r.kind === "direct_push") {
     if (Array.isArray(r.reviews) && r.reviews.length > 0) p.push("a direct_push has no reviews");

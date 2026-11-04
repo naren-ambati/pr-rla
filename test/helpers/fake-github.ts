@@ -45,9 +45,10 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
     committedDate: c.date,
     additions: c.lines ?? 10,
     deletions: 0,
-    parents: { nodes: c.parents.map((oid) => ({ oid })) },
+    // The history query reads 2 parents and 5 PRs per commit and says how many there are (finding 10).
+    parents: { totalCount: c.parents.length, nodes: c.parents.slice(0, 2).map((oid) => ({ oid })) },
     author: c.author ? { name: c.author.name, email: c.author.email, user: c.author.login ? withId({ login: c.author.login }) : null } : { name: "Dev", email: "dev@example.com", user: withId({ login: "dev" }) },
-    associatedPullRequests: { nodes: c.prs ?? [] },
+    associatedPullRequests: { totalCount: (c.prs ?? []).length, pageInfo: { hasNextPage: (c.prs ?? []).length > 5, endCursor: (c.prs ?? []).length > 5 ? "5" : null }, nodes: (c.prs ?? []).slice(0, 5) },
   });
   // git log order from a commit: reverse chronological over all reachable commits.
   const reachableFrom = (from: string) => {
@@ -74,7 +75,7 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
     author: withId(p.author),
     mergedBy: withId(p.mergedBy),
     mergeCommit: p.mergeCommit ? { oid: p.mergeCommit } : null,
-    labels: { nodes: (p.labels ?? []).map((name) => ({ name })) },
+    labels: { totalCount: (p.labels ?? []).length, pageInfo: { hasNextPage: (p.labels ?? []).length > 50, endCursor: (p.labels ?? []).length > 50 ? "50" : null }, nodes: (p.labels ?? []).slice(0, 50).map((name) => ({ name })) },
     reviews: { totalCount: p.reviews.length, pageInfo: { hasNextPage: p.reviews.length > first, endCursor: p.reviews.length > first ? String(first) : null }, nodes: p.reviews.slice(0, first).map((r) => ({ ...r, author: withId(r.author) })) },
   });
   const pageSize = opts.pageSize ?? 2;
@@ -102,6 +103,22 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
         const start = variables.after ? Number(variables.after) : 0;
         const nodes = all.slice(start, start + size).map(commitNode);
         return json({ data: { repository: { object: { history: { pageInfo: { hasNextPage: start + size < all.length, endCursor: String(start + size) }, nodes } } } } });
+      }
+      if (query.includes("labels(first: 100, after: $after)")) {
+        const p = prs.find((x) => x.number === variables.number)!;
+        const start = Number(variables.after);
+        const all = p.labels ?? [];
+        return json({ data: { repository: { pullRequest: { labels: { pageInfo: { hasNextPage: start + 100 < all.length, endCursor: String(start + 100) }, nodes: all.slice(start, start + 100).map((name) => ({ name })) } } } } });
+      }
+      if (query.includes("parents(first: 100)")) {
+        const c = byOid.get(String(variables.oid));
+        return json({ data: { repository: { object: c ? { parents: { totalCount: c.parents.length, nodes: c.parents.slice(0, 100).map((oid) => ({ oid })) } } : null } } });
+      }
+      if (query.includes("associatedPullRequests(first: 100, after: $after)")) {
+        const c = byOid.get(String(variables.oid));
+        const all = c?.prs ?? [];
+        const start = Number(variables.after);
+        return json({ data: { repository: { object: c ? { associatedPullRequests: { pageInfo: { hasNextPage: start + 100 < all.length, endCursor: String(start + 100) }, nodes: all.slice(start, start + 100) } } : null } } });
       }
       if (query.includes("object(oid: $oid)")) {
         const c = byOid.get(String(variables.oid));

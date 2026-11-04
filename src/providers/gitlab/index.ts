@@ -25,7 +25,7 @@ import {
   type GlReviewer,
   type GlUser,
 } from "./normalize.js";
-import { MORE_NOTES_QUERY, MR_BATCH_QUERY, type GqlMergeRequest, type GqlNotesPage } from "./queries.js";
+import { MORE_APPROVERS_QUERY, MORE_NOTES_QUERY, MORE_REVIEWERS_QUERY, MR_BATCH_QUERY, type GqlMergeRequest, type GqlNotesPage, type GqlUsersPage } from "./queries.js";
 
 export interface GitLabProviderOptions {
   /** Instance root for self-managed GitLab, e.g. `https://gitlab.example.com` (default `https://gitlab.com`). */
@@ -48,7 +48,7 @@ export const GITLAB_LIMITATIONS = [
   "direct_push: the window is applied to the commit's committed_date, not the push time.",
   "direct_push: every commit reachable from the default branch (all parents), dated in the window, that no merged MR into that branch brought in (its merge or squash commit, its listed commits, or GitLab's commit->MR link). A direct-push merge commit's changedLines are GitLab's stats against its first parent.",
   "pull_request: only MRs merged into the default branch count; changedLines are GitLab's MR diff stats (additions + deletions), not changes_count (which counts files).",
-  "pull_request: review events come from approval and review system notes; a reviewer state with no note (older instances) is dated at the review request.",
+  "pull_request: review events come from approval and review system notes, read by GitLab's own note tag (systemNoteMetadata.action) and only for an untagged note by its English text; an approval reset still learns WHOSE approvals it reset from the @references in the note body; a reviewer state with no note (older instances) is dated at the review request.",
   "bots: GitLab's bot flag and access-token/service-account usernames; a bot that runs as a regular user account (bot: false) is counted as human.",
 ];
 
@@ -63,6 +63,9 @@ export class GitLabProvider implements ScmProvider {
   private readonly pageSize: number;
   private readonly batchSize: number;
   private readonly slackMs: number;
+  /** MRs whose size GitLab would not give (diff excluded), and approval-reset notes that named nobody: reported as diagnostics. */
+  private unknownSize = 0;
+  private unreadableResets = 0;
 
   constructor(opts: GitLabProviderOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
     const base = (opts.base_url ?? "https://gitlab.com").replace(/\/+$/, "").replace(/\/api\/v4$/, "");
@@ -127,9 +130,13 @@ export class GitLabProvider implements ScmProvider {
 
     const changes: ChangeRecord[] = [];
     const diagnostics: { label: string; value: number }[] = [];
+    this.unknownSize = 0;
+    this.unreadableResets = 0;
     if (req.kinds.includes("pull_request")) {
       diagnostics.push({ label: "MRs merged into other branches in window (excluded)", value: otherBase });
       changes.push(...(await this.mergeRequestRecords(pid, req.repo, inWindow, req.signal)));
+      if (this.unknownSize) diagnostics.push({ label: "MRs whose diff GitLab excluded (changedLinesUnknown: size unknown)", value: this.unknownSize });
+      if (this.unreadableResets) diagnostics.push({ label: "approval-reset notes that name no approver (approvals may be over-counted)", value: this.unreadableResets });
     }
     let headSha = req.head?.toLowerCase();
     let viaMerge = false;
@@ -184,6 +191,16 @@ export class GitLabProvider implements ScmProvider {
           n.notes.nodes.push(...more.project.mergeRequest.notes.nodes);
           page = more.project.mergeRequest.notes.pageInfo;
         }
+        // approvedBy and reviewers are read 100 at a time: page the rest, so no approver or reviewer is missing its bot flag.
+        for (const [field, query] of [["approvedBy", MORE_APPROVERS_QUERY], ["reviewers", MORE_REVIEWERS_QUERY]] as const) {
+          let up = n[field].pageInfo;
+          while (up?.hasNextPage) {
+            const more = await this.graphql<{ project: { mergeRequest: Record<string, GqlUsersPage> } }>(query, { path: repo, iid: n.iid, after: up.endCursor }, signal);
+            const next = more.project.mergeRequest[field]!;
+            n[field].nodes.push(...next.nodes);
+            up = next.pageInfo;
+          }
+        }
         details.set(n.iid, n);
       }
       if ((i / this.batchSize) % 10 === 9) this.ctx.log(`gitlab: read ${Math.min(i + this.batchSize, mrs.length)}/${mrs.length} MRs`);
@@ -204,17 +221,23 @@ export class GitLabProvider implements ScmProvider {
         if (u && id !== undefined && !ids.has(u.username)) ids.set(u.username, id);
       }
       const actor = (u: GlUser | null): Actor => normalizeUser(u, bots, ids);
-      const reviews = buildReviews({ mrAuthor: mr.author?.username ?? null, notes: d.notes.nodes as GlNote[], approvals, reviewers, mergedAt: mr.merged_at!, actor });
-      const lines = d.diffStatsSummary ? d.diffStatsSummary.additions + d.diffStatsSummary.deletions : await this.diffLines(pid, mr.iid, signal);
-      out.push(normalizeMergeRequest(repo, mr, reviews, lines, actor));
+      const reviews = buildReviews({ mrAuthor: mr.author?.username ?? null, notes: d.notes.nodes as GlNote[], approvals, reviewers, mergedAt: mr.merged_at!, actor, onUnreadableReset: () => this.unreadableResets++ });
+      // GitLab's own diff stats first; the REST diffs only when GraphQL has none, and a diff GitLab excluded is a size we do not know.
+      const size = d.diffStatsSummary ? { lines: d.diffStatsSummary.additions + d.diffStatsSummary.deletions, unknown: false } : await this.diffLines(pid, mr.iid, signal);
+      if (size.unknown) this.unknownSize++;
+      out.push({ ...normalizeMergeRequest(repo, mr, reviews, size.lines, actor), ...(size.unknown ? { changedLinesUnknown: true as const } : {}) });
     }
     return out;
   }
 
-  /** Fallback when GraphQL has no diff stats: count +/- lines of the MR's diffs. */
-  private async diffLines(pid: number, iid: number, signal?: AbortSignal): Promise<number> {
-    const diffs = await this.paged<{ diff: string }>(`/projects/${pid}/merge_requests/${iid}/diffs?per_page=${this.pageSize}`, signal);
-    return diffs.reduce((n, d) => n + countDiffLines(d.diff), 0);
+  /**
+   * Fallback when GraphQL has no diff stats: count +/- lines of the MR's diffs. A file diff GitLab
+   * excluded (`too_large`: cannot be retrieved; `collapsed`: left out unless asked for) has no lines to
+   * count, so the MR's size is unknown, not the sum of the others (finding 10 of the master review).
+   */
+  private async diffLines(pid: number, iid: number, signal?: AbortSignal): Promise<{ lines: number; unknown: boolean }> {
+    const diffs = await this.paged<{ diff: string; too_large?: boolean; collapsed?: boolean }>(`/projects/${pid}/merge_requests/${iid}/diffs?per_page=${this.pageSize}`, signal);
+    return { lines: diffs.reduce((n, d) => n + countDiffLines(d.diff), 0), unknown: diffs.some((d) => d.too_large === true || d.collapsed === true) };
   }
 
   async directPushes(pid: number, req: ListChangesRequest, branch: string, intoDefault: readonly GlMergeRequest[]) {
@@ -229,7 +252,7 @@ export class GitLabProvider implements ScmProvider {
     const opens = Date.parse(req.window.opensAt);
     const closes = Date.parse(req.window.closesAt);
     const history = await this.paged<GlCommit>(
-      `/projects/${pid}/repository/commits?ref_name=${headSha}&since=${enc(req.window.opensAt)}&until=${enc(req.window.closesAt)}&with_stats=true&per_page=${this.pageSize}`,
+      `/projects/${pid}/repository/commits?ref_name=${enc(headSha)}&since=${enc(req.window.opensAt)}&until=${enc(req.window.closesAt)}&with_stats=true&per_page=${this.pageSize}`,
       req.signal,
     );
     const seen = new Set<string>();
