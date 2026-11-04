@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, type Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PRESENCE_LABEL, PRESENCE_LIMIT, provenanceLabel, rulesLine, verdictsSummary } from "../src/core/presence/index.js";
@@ -17,8 +17,14 @@ import { provenanceLine } from "../src/core/status.js";
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-function files(dir: string, ext: RegExp): string[] {
-  return (readdirSync(join(ROOT, dir), { recursive: true }) as string[]).filter((f) => ext.test(f) && !/(^|[\\/])node_modules[\\/]/.test(f)).map((f) => join(dir, f));
+/** Files under `dir` matching `ext`; `deep: false` reads one level. Never enters node_modules, .git or a symlink (the examples link back to the repo). */
+function files(dir: string, ext: RegExp, deep = true): string[] {
+  const entries: Dirent[] = readdirSync(join(ROOT, dir), { withFileTypes: true });
+  return entries.flatMap((e) => {
+    const path = join(dir, e.name);
+    if (e.isDirectory()) return deep && e.name !== "node_modules" && e.name !== ".git" ? files(path, ext) : [];
+    return e.isFile() && ext.test(e.name) ? [path] : [];
+  });
 }
 
 /** Claims of hardware-verified presence, or of a human proven present. */
@@ -41,7 +47,7 @@ function claimsIn(text: string): string[] {
 }
 
 describe("FR9.6 / NFR23: no claim of hardware-verified presence", () => {
-  const docs = [...files(".", /^[^/\\]+\.md$/), ...files("docs", /\.md$/), ...files("examples", /\.md$/), ...files("audits", /\.md$/)];
+  const docs = [...files(".", /\.md$/, false), ...files("docs", /\.md$/), ...files("examples", /\.md$/), ...files("audits", /\.md$/)];
   const sources = files("src", /\.ts$/);
 
   it("the check sees the docs, the design record and the sources, and catches a claim", () => {
