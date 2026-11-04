@@ -466,13 +466,15 @@ export async function describePlugin(host: PluginHost, options: unknown): Promis
  * `hostFromOption` goes to the host of that option's URL when the options set it, and only to an
  * `https:` URL's host (any other value grants it no host, so a token is never sent in clear text);
  * without the option it keeps its declared `hosts`. pr-rla computes this from the audit's own
- * options, not from the plugin's code, and the lock records the result.
+ * options, not from the plugin's code, and the lock records the result, with any extra header
+ * names the definition declares for it (lowercase).
  */
 export function credentialGrants(declared: readonly PluginCredential[], options: unknown): LockedCredential[] {
   const o = options && typeof options === "object" ? (options as Record<string, unknown>) : {};
   return declared.map((c) => {
     const key = c.hostFromOption;
-    if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort() };
+    const headers = c.headers?.length ? { headers: [...new Set(c.headers.map((h) => h.toLowerCase()))].sort() } : {};
+    if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort(), ...headers };
     let host: string | null = null;
     try {
       const u = typeof o[key] === "string" ? new URL(o[key] as string) : null;
@@ -480,7 +482,7 @@ export function credentialGrants(declared: readonly PluginCredential[], options:
     } catch {
       host = null;
     }
-    return { env: c.env, hosts: host ? [host] : [], hostFromOption: key };
+    return { env: c.env, hosts: host ? [host] : [], hostFromOption: key, ...headers };
   });
 }
 

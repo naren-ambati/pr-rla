@@ -175,7 +175,8 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
         const value = env[c.env];
         // As the broker compares them: URL hosts of https origins (lowercase, the default port left out).
         const hosts = new Set(c.hosts.flatMap((h) => (httpsOrigin(h) ? [new URL(httpsOrigin(h)!).host] : [])));
-        if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts, withheld: c.withheld } : { value, hosts });
+        const headers = c.headers?.length ? { headers: new Set(c.headers.map((h) => h.toLowerCase())) } : {};
+        if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts, ...headers, withheld: c.withheld } : { value, hosts, ...headers });
       }
       grants.set(pluginId, { trust: g.trust, hosts: new Set(g.hosts ?? []), writePaths: new Set(g.writePaths ?? []), credentials });
       if (g.budgetFamily) {

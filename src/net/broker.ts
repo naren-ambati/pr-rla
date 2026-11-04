@@ -4,6 +4,7 @@ import {
   BrokerError,
   BrokerRetriesExhausted,
   BrokerTimeout,
+  CredentialHeaderNotAllowed,
   CredentialHostMismatch,
   CredentialNotApproved,
   DESTINATION_TIMEOUT_MS,
@@ -27,7 +28,8 @@ import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
  * 2. read-only guard (GET, HEAD, a GraphQL query; provider requests always; ledger
  *    writes only under their declared writePaths);
  * 3. credential swap (`prrla-cred:<ENV>`, `prrla-basic:<USER_ENV>:<TOKEN_ENV>`) for the
- *    granted https origins only (host and port exact), never after a redirect from https to http;
+ *    granted https origins only (host and port exact), never after a redirect from https to http,
+ *    and only in `authorization` or a header the plugin declares for that credential;
  * 4. rate governor: one budget per host, shared by every caller (./governor.ts);
  * 5. timeout by destination (SCM 30 s, authority 15 s, drand 15 s, Rekor 30 s);
  * 6. retry: the only retrier for callers wired to it (the phase-2 policy, src/sdk/http.ts);
@@ -57,6 +59,8 @@ export interface Credential {
    * scheme is always https, and the port must match exactly (finding 4).
    */
   hosts: Set<string>;
+  /** Header names (lowercase), besides `authorization`, where its placeholder may be swapped (finding 5). */
+  headers?: Set<string>;
   /**
    * Locked but not approved by the person running the command (src/plugins/approvals.ts): never
    * swapped; a placeholder for it is refused with CREDENTIAL_NOT_APPROVED, naming `approve`.
@@ -224,9 +228,10 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   // Step 3. `downgraded`: an earlier hop of this request redirected from https to http.
   function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean, downgraded: boolean): Headers {
     const creds = p.credentialsFor(call.pluginId);
-    const secret = (env: string): string => {
+    const secret = (env: string, header: string): string => {
       const c = creds.get(env);
       if (c?.withheld) throw new CredentialNotApproved(env, url.host, call.pluginId, c.withheld.approve);
+      if (header !== "authorization" && !c?.headers?.has(header)) throw new CredentialHeaderNotAllowed(env, header, url.host);
       const allowed = c ? [...c.hosts] : [];
       if (url.protocol !== "https:") throw new CredentialHostMismatch(env, url.host, allowed, { name: url.origin, overHttps: true });
       if (downgraded) throw new CredentialHostMismatch(env, url.host, allowed, { name: `${url.origin} after a redirect from https to http`, overHttps: true });
@@ -236,8 +241,8 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const out = new Headers();
     for (const [name, value] of original) {
       const basic = name === "authorization" ? BASIC.exec(value) : null;
-      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!)}:${secret(basic[2]!)}`).toString("base64")}`);
-      else if (PLACEHOLDER.test(value)) out.set(name, value.replace(PLACEHOLDERS, (_m, env: string) => secret(env)));
+      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!, name)}:${secret(basic[2]!, name)}`).toString("base64")}`);
+      else if (PLACEHOLDER.test(value)) out.set(name, value.replace(PLACEHOLDERS, (_m, env: string) => secret(env, name)));
       else if (crossOrigin && SECRET_HEADERS.has(name)) continue; // a raw secret never follows a redirect to another origin
       else out.append(name, value);
     }

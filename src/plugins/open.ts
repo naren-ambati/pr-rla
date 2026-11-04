@@ -68,7 +68,7 @@ async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", s
       ...within(asked.writePaths, entry.writePaths).map((w) => `write path ${w}`),
       ...declaredCredentials(host, spec.options).flatMap((c) => {
         const locked = entry.credentials.find((l) => l.env === c.env);
-        return locked ? within(c.hosts, locked.hosts).map((h) => `credential ${c.env} for ${h}`) : [`credential ${c.env}`];
+        return locked ? [...within(c.hosts, locked.hosts).map((h) => `credential ${c.env} for ${h}`), ...within(c.headers ?? [], locked.headers ?? []).map((h) => `credential ${c.env} in header ${h}`)] : [`credential ${c.env}`];
       }),
     ];
     if (extra.length) throw new PluginError(`plugin ${spec.use} asks for ${extra.join(", ")}, which its lock entry does not grant (did its options change?)`, "LOCK_MISMATCH", lockAgain);

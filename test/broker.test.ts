@@ -232,6 +232,41 @@ describe("finding 4: a credential goes only to its exact https origin, never in 
   });
 });
 
+describe("finding 5: a placeholder is swapped only in authorization and the headers its plugin declares", () => {
+  const creds = new Map([
+    ["JIRA_TOKEN", { value: "SECRET-TOKEN-123", hosts: new Set(["corp.atlassian.net"]) }],
+    ["GITLAB_TOKEN", { value: "glpat-456", hosts: new Set(["gitlab.example.com"]), headers: new Set(["private-token"]) }],
+  ]);
+
+  it("refuses a placeholder in any other header, unsent (it used to be swapped into X-Echo and recorded)", async () => {
+    const t = transport();
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    const e = await b.bind("ledger:jira")("https://corp.atlassian.net/x", { headers: { "x-echo": "prrla-cred:JIRA_TOKEN" } }).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: "CREDENTIAL_HEADER_NOT_ALLOWED", message: "credential JIRA_TOKEN may be sent only in authorization or a header its plugin declares for it, not in x-echo; nothing was sent" });
+    await expect(b.bind("ledger:jira")("https://corp.atlassian.net/x", { headers: { cookie: "s=prrla-cred:JIRA_TOKEN" } })).rejects.toMatchObject({ code: "CREDENTIAL_HEADER_NOT_ALLOWED" });
+    expect(t.seen).toEqual([]);
+  });
+
+  it("swaps it in a header the credential declares, and still in authorization", async () => {
+    const t = transport();
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    await b.bind("provider:gitlab-plugin")("https://gitlab.example.com/api/v4/user", { headers: { "private-token": "prrla-cred:GITLAB_TOKEN" } });
+    await b.bind("provider:gitlab-plugin")("https://gitlab.example.com/api/v4/user", { headers: { authorization: "Bearer prrla-cred:GITLAB_TOKEN" } });
+    expect(t.seen.map((x) => [x.headers.get("private-token"), x.headers.get("authorization")])).toEqual([["glpat-456", null], [null, "Bearer glpat-456"]]);
+  });
+
+  it("the declaration is optional, validated, recorded lowercase in the grant, and shown to the approver", async () => {
+    const { assertProviderDefinition } = await import("../src/sdk/provider.js");
+    const { credentialGrants } = await import("../src/plugins/host.js");
+    const def = { providerApiVersion: 1, name: "x", create: () => ({}) };
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], headers: ["Private-Token"] }] }, "x")).not.toThrow();
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], headers: ["bad header"] }] }, "x")).toThrow(/headers must be a list of header names/);
+    expect(credentialGrants([{ env: "T", hosts: ["a.example"], headers: ["Private-Token", "private-token"] }], {})).toEqual([{ env: "T", hosts: ["a.example"], headers: ["private-token"] }]);
+    const { grantText, grantsOf } = await import("../src/plugins/approvals.js");
+    expect(grantsOf([{ env: "T", hosts: ["a.example"], headers: ["private-token"] }]).map(grantText)).toEqual(["T -> https://a.example (also in header private-token)"]);
+  });
+});
+
 describe("FR10.2: the broker retries, with backoff and jitter, honouring rate-limit headers", () => {
   it("retries 503, 429 (Retry-After) and a truncated JSON body, then succeeds", async () => {
     const t = sequence(() => raw("unavailable", 503), () => raw("slow down", 429, { "retry-after": "9" }), () => raw('{"a":', 200), () => ok({ ok: true }));

@@ -152,3 +152,18 @@ export class CredentialNotApproved extends BrokerError {
     this.name = "CredentialNotApproved";
   }
 }
+
+/**
+ * Step 3: a credential placeholder in a header other than `authorization` and the header names the
+ * plugin declares for that credential (finding 5). Nothing was sent.
+ */
+export class CredentialHeaderNotAllowed extends BrokerError {
+  constructor(
+    readonly env: string,
+    readonly header: string,
+    host: string,
+  ) {
+    super(`credential ${env} may be sent only in authorization${header === "authorization" ? "" : ` or a header its plugin declares for it, not in ${header}`}; nothing was sent`, "CREDENTIAL_HEADER_NOT_ALLOWED", host, `send it in authorization, or declare ${header} in the credential's headers`);
+    this.name = "CredentialHeaderNotAllowed";
+  }
+}
