@@ -2274,6 +2274,25 @@ How: one `git cat-file --batch` per pass fed straight from `git rev-list` (a hin
 - Before (`66e3f54`): 985 passed, 1 skipped (986).
 - After: 1016 passed, 1 skipped (1017): `p4-review-regressions` 10 (new), `git-file-history` 32 (was 22), `presence-wording` 12 (7), `presence-verifier` 43 (41), `presence-oracle` 36 (33), `presence-fixtures` 14 (13); `e2e-presence`, `u9-review-regressions`, `git-file-unchanged` and `single-repo-anchor` keep their counts, with assertions changed as above.
 
+### Verified (command → output)
+
+Three runs in a row, each a fresh `git clone` of the branch at `532e2bc` (the last commit before this one, which changes only this section) into the scratch directory, Node 22.23.2, other agents' suites running beside them:
+
+```
+run 1 (2026-11-04T07:41Z, load 71)  run 2 (07:44Z, load 16)  run 3 (07:47Z, load 22)
+npm ci              → exit 0, found 0 vulnerabilities, all three
+npm run build       → exit 0, all three
+npm run typecheck   → exit 0 (both tsconfigs), all three
+npm test            → Tests 1016 passed | 1 skipped (1017), all three
+gitea ci, test      → found 0 vulnerabilities · # pass 1 · # fail 0, all three
+jira ci, test       → found 0 vulnerabilities · # pass 1 · # fail 0, all three
+npm test (again)    → Tests 1016 passed | 1 skipped (1017), all three
+node scripts/demo-{presence,broker,ledgers,plugin-host,sdk-carry-overs}.mjs → exit 0, all three
+npm ls --prod --depth=0 → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+No LICENSE file; `"private": true, "license": "UNLICENSED"`; no dependency added.
+
 ### Unverified
 
 - Windows, entirely: the absolute-path resolution (`.exe`, `.com`), the cwd lookup it closes, and the CRLF checkout above.
