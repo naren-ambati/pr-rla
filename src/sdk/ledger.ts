@@ -123,6 +123,19 @@ export interface LedgerContext {
    * analysis. null or absent: any account that is not a bot or an app.
    */
   reviewers?: readonly string[] | null;
+  /**
+   * Optional (phase 3): the ledger's local index, one JSON document pr-rla keeps for it at
+   * `<windowDir>/ledger-index.json` (committed with draws.json), written atomically. A ledger in
+   * the plugin host cannot write files, so it keeps its state here; `read()` gives null before the
+   * first `write()`. pr-rla gives it to external ledgers.
+   */
+  index?: LedgerIndexStore;
+}
+
+/** A ledger's local index document (LedgerContext.index). */
+export interface LedgerIndexStore {
+  read(): Promise<unknown>;
+  write(value: unknown): Promise<void>;
 }
 
 export interface Ledger {
@@ -140,13 +153,15 @@ export interface Ledger {
 }
 
 /**
- * An environment variable a plugin may receive, and the hosts its value may be sent to. An empty
- * `hosts` (phase 3) means the hosts the ledger's `hosts(options)` declares, for trackers whose host
- * is the user's own (a Jira site, a self-hosted server).
+ * An environment variable a plugin may receive, and the hosts its value may be sent to. For a
+ * tracker whose host is the user's own (a Jira site, a self-hosted server), name the option that
+ * holds its URL in `hostFromOption` (phase 3): pr-rla then sends the value to that URL's host (an
+ * `https:` URL only) instead of `hosts`, as for providers (`PluginCredential`).
  */
 export interface LedgerCredential {
   env: string;
   hosts: string[];
+  hostFromOption?: string;
 }
 
 export interface LedgerDefinition<Options = Record<string, unknown>> {
@@ -200,6 +215,8 @@ export function assertLedgerDefinition(value: unknown, source: string): asserts 
   if (def.writePaths !== undefined && typeof def.writePaths !== "function") throw new Error(`${source}: ledger "${def.name}" writePaths must be a function of the options`);
   if (def.credentials !== undefined && !(Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c.env === "string" && Array.isArray(c.hosts))))
     throw new Error(`${source}: ledger "${def.name}" credentials must be a list of { env, hosts }`);
+  if (def.credentials?.some((c) => c.hostFromOption !== undefined && (typeof c.hostFromOption !== "string" || c.hostFromOption.length === 0)))
+    throw new Error(`${source}: ledger "${def.name}" a credential's hostFromOption must name an option (a string)`);
   if (def.provenance !== undefined && !PROVENANCE_LEVELS.includes(def.provenance)) throw new Error(`${source}: ledger "${def.name}" provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
 }
 

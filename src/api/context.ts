@@ -1,6 +1,7 @@
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
+import { credentialGrants } from "../plugins/host.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
@@ -223,13 +224,12 @@ async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   const def = await loadLedgerDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
   const id = `ledger:${def.name}`;
-  const hosts = def.hosts?.(spec.options as never) ?? [];
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
-    hosts,
+    hosts: def.hosts?.(spec.options as never) ?? [],
     writePaths: def.writePaths?.(spec.options as never) ?? [],
-    // A credential declared with no hosts goes only to the hosts the ledger declares for these options.
-    credentials: (def.credentials ?? []).map((c) => (c.hosts.length ? c : { ...c, hosts: [...hosts] })),
+    // A credential's hosts for these options: its declared hosts, or the https host of the URL option it names (hostFromOption).
+    credentials: credentialGrants(def.credentials ?? [], spec.options),
     ...(builtin && LEDGER_BUDGET_FAMILY[def.name] ? { budgetFamily: LEDGER_BUDGET_FAMILY[def.name] } : {}),
   });
   return createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });

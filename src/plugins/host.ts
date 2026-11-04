@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEFAULT_MAX_RETRIES } from "../sdk/http.js";
-import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger } from "../sdk/ledger.js";
+import { assertLedgerDefinition, LedgerApiVersionError, PROVENANCE_LEVELS, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerIndexStore, type ProvenanceLevel } from "../sdk/ledger.js";
 import {
   assertProviderDefinition,
   DEFAULT_REVIEW_GRANULARITY,
@@ -104,6 +104,8 @@ export interface HostIo {
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
   log: (line: string) => void;
+  /** A ledger's local index (LedgerContext.index), kept by the parent. */
+  index?: LedgerIndexStore;
 }
 
 export interface PluginHost {
@@ -335,6 +337,15 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
       case "log":
         io?.log(String(m.line));
         return;
+      case "index": {
+        const store = io?.index;
+        const op = !store ? Promise.reject(new Error("this plugin has no local index (LedgerContext.index is for ledgers)")) : m.op === "write" ? store.write(m.value).then(() => null) : store.read();
+        void op.then(
+          (value) => post({ type: "indexResult", xid: m.xid, value: value ?? null }),
+          (e: { name?: unknown; code?: unknown; message?: unknown }) => post({ type: "indexResult", xid: m.xid, error: { name: typeof e?.name === "string" ? e.name : "Error", message: typeof e?.message === "string" ? e.message : String(e), ...(typeof e?.code === "string" ? { code: e.code } : {}) } }),
+        );
+        return;
+      }
       case "heartbeat":
         return;
       default:
@@ -439,14 +450,15 @@ export function definitionTraits(raw: { reviewGranularity?: unknown; populationO
   };
 }
 
-/** The definition's request for these options and its U3 traits, evaluated in the child. */
-export async function describePlugin(host: PluginHost, options: unknown): Promise<{ hosts: string[]; writePaths: string[]; traits: DefinitionTraits }> {
+/** The definition's request for these options, its U3 traits and a ledger's provenance (U4), evaluated in the child. */
+export async function describePlugin(host: PluginHost, options: unknown): Promise<{ hosts: string[]; writePaths: string[]; traits: DefinitionTraits; provenance: ProvenanceLevel | null }> {
   const d = (await host.call("describe", [options])) as DescribeResult;
   const list = (v: unknown, what: string): string[] => {
     if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.length > 0)) throw new PluginError(`plugin ${host.label}: ${what}(options) must return a list of host names`, "PLUGIN_INVALID");
     return [...new Set(v as string[])].sort();
   };
-  return { hosts: list(d.hosts, "hosts"), writePaths: list(d.writePaths, "writePaths"), traits: definitionTraits(d, host.label) };
+  if (d.provenance !== undefined && !PROVENANCE_LEVELS.includes(d.provenance as ProvenanceLevel)) throw new PluginError(`plugin ${host.label}: provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`, "PLUGIN_INVALID");
+  return { hosts: list(d.hosts, "hosts"), writePaths: list(d.writePaths, "writePaths"), traits: definitionTraits(d, host.label), provenance: (d.provenance as ProvenanceLevel | undefined) ?? null };
 }
 
 /**
@@ -507,8 +519,8 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
 }
 
 /** A Ledger whose methods run in the host. */
-export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null }): Promise<Ledger> {
-  host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log });
+export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore }): Promise<Ledger> {
+  host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log, ...(ctx.index ? { index: ctx.index } : {}) });
   const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}) });
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(c.apiVersion as number)) throw new LedgerApiVersionError(String(host.ready.name), c.apiVersion);
   const has = new Set(c.methods);

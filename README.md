@@ -122,7 +122,7 @@ Built-in ledgers:
 - `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended). Verdict provenance: `self-asserted`.
 - `github-issues` and `gitlab-issues`: one issue per drawn change in an audit repo or project (GitHub Enterprise Server and GitLab self-managed through `base_url`); a reviewer applies `pr-rla:pass` / `pr-rla:fail` (`pr-rla-pass` / `pr-rla-fail` on GitLab), and the verdict is read from the label-event history, never from current labels. Verdict provenance: `account`, the default `verdicts.min_provenance` with an issue ledger. `pr-rla checkpoint [--push]` time-stamps a hash of that history into the audit repo, so an admin deleting issues shows up in `verify`.
 
-External: [`examples/ledgers/jira`](examples/ledgers/jira) (`pr-rla-ledger-jira`) for Jira Cloud, with the verdict in a single-select custom field read from the changelog.
+External: [`examples/ledgers/jira`](examples/ledgers/jira) (`pr-rla-ledger-jira`) for Jira Cloud, with the verdict in a single-select custom field read from the changelog. Like any external plugin it loads only once locked (`pr-rla plugin add`), and runs in the plugin host: `JIRA_EMAIL` and `JIRA_TOKEN` reach it as placeholders, the broker builds Basic auth for the `base_url` site only, and pr-rla writes its `ledger-index.json` for it.
 
 ### Adding a provider (Gerrit, Azure Repos, …)
 

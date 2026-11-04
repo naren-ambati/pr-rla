@@ -65,6 +65,8 @@ export interface DescribeResult {
   reviewGranularity?: unknown;
   populationOptions?: unknown;
   reportsLandedVia?: unknown;
+  /** A ledger definition's `provenance` (U4), when it declares one. */
+  provenance?: unknown;
 }
 
 /** What `create` returns: the instance's identity and which of its kind's methods it has. */
@@ -140,6 +142,22 @@ export interface LogMessage {
 export interface HeartbeatMessage {
   type: "heartbeat";
 }
+/**
+ * child -> parent (added within v1 for U4): a ledger read or wrote its local index
+ * (LedgerContext.index). The parent keeps the file; the child has no fs-write.
+ */
+export interface IndexMessage {
+  type: "index";
+  xid: number;
+  op: "read" | "write";
+  value?: unknown;
+}
+export interface IndexResultMessage {
+  type: "indexResult";
+  xid: number;
+  value?: unknown;
+  error?: { name: string; code?: string; message: string };
+}
 
-export type ChildMessage = ReadyMessage | ResultMessage | ErrorMessage | FetchMessage | SleepMessage | LogMessage | HeartbeatMessage;
-export type ParentMessage = CallMessage | CancelMessage | FetchResultMessage | SleptMessage;
+export type ChildMessage = ReadyMessage | ResultMessage | ErrorMessage | FetchMessage | SleepMessage | LogMessage | HeartbeatMessage | IndexMessage;
+export type ParentMessage = CallMessage | CancelMessage | FetchResultMessage | SleptMessage | IndexResultMessage;

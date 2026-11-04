@@ -1,7 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AuditContext } from "../api/context.js";
+import { writeFileAtomic } from "../io/atomic.js";
+import { INDEX_FILE } from "../ledgers/issue-index.js";
 import type { PluginSpec } from "../registry.js";
-import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerDefinition } from "../sdk/ledger.js";
+import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerDefinition, type LedgerIndexStore, type ProvenanceLevel } from "../sdk/ledger.js";
 import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
 import { PluginError } from "./errors.js";
 import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
@@ -85,8 +89,26 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   }
 }
 
+/**
+ * LedgerContext.index for an external ledger: `<windowDir>/ledger-index.json`, read and written by
+ * pr-rla (atomically) so that a ledger in the plugin host, which cannot write files, keeps its
+ * state. In a read-only context the ledger's writes are refused before they reach it, and so is this.
+ */
+export function ledgerIndexStore(ctx: Pick<AuditContext, "mode">, windowDir: string): LedgerIndexStore {
+  const path = join(windowDir, INDEX_FILE);
+  return {
+    read: async () => (existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as unknown) : null),
+    write: async (value) => {
+      if (ctx.mode === "read-only") throw Object.assign(new Error(`${path}: this audit context is read-only`), { code: "READ_ONLY_VIOLATION" });
+      if (!value || typeof value !== "object") throw new PluginError(`${path}: a ledger index must be a JSON object`, "PLUGIN_INVALID");
+      writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+    },
+  };
+}
+
 export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } = {}): Promise<Ledger> {
   const reviewers = opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {};
+  const index = ledgerIndexStore(ctx, windowDir);
   refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
   const id = `ledger:${entry.name}`;
@@ -94,7 +116,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
     ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], writePaths: def.writePaths?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
-    const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...reviewers });
+    const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, index, ...reviewers });
     if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");
     return l;
@@ -102,11 +124,55 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: entry.credentials });
   const host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
   try {
-    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log, ...reviewers });
+    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log, index, ...reviewers });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return l;
   } catch (e) {
     host.close();
     throw e;
+  }
+}
+
+/**
+ * register's preflight for an external ledger (U4): the lock entry and files check out, its options
+ * are accepted (`hosts`, `writePaths` and `create()` all see them), and nothing is contacted:
+ * `create()` gets `refuse` as its fetch. An isolated ledger does all of this in its host, which is
+ * stopped straight away; its provenance comes from `describe`. A plugin refusal (not locked,
+ * changed, builtin-only) is thrown as it is; anything the ledger throws is returned as `problem`.
+ */
+export async function preflightExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, refuse: typeof fetch): Promise<{ name: string; provenance: ProvenanceLevel; problem: string | null }> {
+  refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
+  const { entry, plugin } = verifyLocked(spec.use, cwd);
+  const base = { cwd, windowDir, log: () => {}, fetch: refuse, index: ledgerIndexStore({ mode: "read-only" }, windowDir) };
+  if (entry.trust === "full") {
+    const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
+    const provenance = def.provenance ?? "self-asserted";
+    try {
+      def.hosts?.(spec.options);
+      def.writePaths?.(spec.options);
+      await def.create(spec.options, { ...base, env: ctx.env });
+      return { name: def.name, provenance, problem: null };
+    } catch (e) {
+      return { name: def.name, provenance, problem: (e as Error).message };
+    }
+  }
+  let host: PluginHost;
+  try {
+    host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
+  } catch (e) {
+    // pr-rla's refusals (the lock, the definition) stay what they are; what hosts() or writePaths() threw is the ledger's.
+    if (e instanceof PluginError) throw e;
+    return { name: entry.name, provenance: "self-asserted", problem: (e as Error).message };
+  }
+  try {
+    const { provenance } = await describePlugin(host, spec.options);
+    try {
+      await hostedLedger(host, spec.options, base);
+      return { name: entry.name, provenance: provenance ?? "self-asserted", problem: null };
+    } catch (e) {
+      return { name: entry.name, provenance: provenance ?? "self-asserted", problem: (e as Error).message };
+    }
+  } finally {
+    host.close();
   }
 }

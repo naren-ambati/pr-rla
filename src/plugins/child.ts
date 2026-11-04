@@ -24,6 +24,7 @@ interface Definition {
   credentials?: unknown;
   populationOptions?: unknown;
   reportsLandedVia?: unknown;
+  provenance?: unknown;
   hosts?: unknown;
   writePaths?: unknown;
   create?: unknown;
@@ -126,6 +127,18 @@ function settleFetch(m: FetchResultMessage): void {
   f.resolve(Object.defineProperty(res, "url", { value: m.url ?? "", enumerable: true }));
 }
 
+let nextXid = 1;
+const indexOps = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
+
+/** LedgerContext.index inside the child: the parent reads and writes the file. */
+function hostIndex(op: "read" | "write", value?: unknown): Promise<unknown> {
+  const xid = nextXid++;
+  return new Promise((resolve, reject) => {
+    indexOps.set(xid, { resolve, reject });
+    send({ type: "index", xid, op, ...(op === "write" ? { value } : {}) });
+  });
+}
+
 function hostSleep(ms: number): Promise<void> {
   const sid = nextSid++;
   return new Promise<void>((resolve) => {
@@ -157,7 +170,7 @@ async function describe(options: unknown): Promise<DescribeResult> {
     hosts: typeof def.hosts === "function" ? await (def.hosts as Fn)(options) : [],
     writePaths: typeof def.writePaths === "function" ? await (def.writePaths as Fn)(options) : [],
   };
-  for (const k of ["reviewGranularity", "populationOptions", "reportsLandedVia"] as const) if (def[k] !== undefined) out[k] = def[k];
+  for (const k of ["reviewGranularity", "populationOptions", "reportsLandedVia", "provenance"] as const) if (def[k] !== undefined) out[k] = def[k];
   return out;
 }
 
@@ -170,6 +183,7 @@ async function create(options: unknown, base: { cwd?: unknown; windowDir?: unkno
     log: (line: unknown) => send({ type: "log", line: String(line) }),
     fetch: hostFetch,
     sleep: hostSleep,
+    ...(boot.kind === "ledger" ? { index: { read: () => hostIndex("read"), write: async (v: unknown) => void (await hostIndex("write", v)) } } : {}),
   };
   instance = (await (def.create as Fn)(options, context)) as Record<string, unknown>;
   if (!instance || typeof instance !== "object") throw new Error("create() returned no object");
@@ -210,6 +224,11 @@ process.on("message", (raw: unknown) => {
   else if (m.type === "slept") {
     sleeps.get(m.sid)?.();
     sleeps.delete(m.sid);
+  } else if (m.type === "indexResult") {
+    const op = indexOps.get(m.xid);
+    indexOps.delete(m.xid);
+    if (m.error) op?.reject(Object.assign(new Error(m.error.message), m.error));
+    else op?.resolve(m.value ?? null);
   }
 });
 

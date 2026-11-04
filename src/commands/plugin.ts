@@ -188,7 +188,8 @@ export async function pluginCheckCommand(ctx: CommandContext, use: string, opts:
   ctx.out(`  credentials     ${x.credentials.length ? x.credentials.map(credentialText).join("; ") : "none"}`);
   warnInstallScripts(ctx, plugin);
   let ok = false;
-  if (kind === "ledger") ctx.out("  conformance     not run: this build has no ledger conformance kit");
+  // The ledger kit's fixtures are built by code (fake trackers, published issues), not recorded data a check can replay.
+  if (kind === "ledger") ctx.out("  conformance     not run: plugin check replays recorded provider fixtures only; run your ledger's own runLedgerConformance test");
   else {
     const declared = plugin.pkg?.["pr-rla"] && typeof plugin.pkg["pr-rla"] === "object" ? (plugin.pkg["pr-rla"] as { conformance?: unknown }).conformance : undefined;
     const files = [...(Array.isArray(declared) ? declared.filter((f): f is string => typeof f === "string").map((f) => resolve(plugin.rootIsFile ? dirname(plugin.root) : plugin.root, f)) : []), ...(opts.fixture ?? []).map((f) => resolve(ctx.cwd, f))];

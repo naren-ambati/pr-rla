@@ -1,7 +1,7 @@
 import { isRegistrationV2 } from "../core/records.js";
-import { loadLedgerDefinition } from "../registry.js";
+import { ledgerTraits } from "../ledger-traits.js";
 import { verdictIneligibility } from "../sdk/ledger.js";
-import { configFor, CommandError, isoNow, ledgerFor, readDraws, readRegistration, type CommandContext } from "./context.js";
+import { auditContextFor, configFor, CommandError, isoNow, ledgerFor, readDraws, readRegistration, type CommandContext } from "./context.js";
 
 export async function recordCommand(ctx: CommandContext, drawArg: string, verdictArg: string, opts: { reviewer?: string; note?: string; force?: boolean }): Promise<number> {
   const { config, paths } = configFor(ctx);
@@ -9,7 +9,7 @@ export async function recordCommand(ctx: CommandContext, drawArg: string, verdic
   if (!Number.isInteger(draw) || draw < 1) throw new CommandError(`draw must be a positive integer (got ${drawArg})`);
   if (verdictArg !== "pass" && verdictArg !== "fail") throw new CommandError('verdict must be "pass" or "fail"');
   // A ledger whose tracker records the acting account (issue ledgers) needs no --reviewer: the label event names who applied it.
-  const recordsActor = (await loadLedgerDefinition(config.ledger.use, config.dir)).provenance === "account";
+  const recordsActor = (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins)).provenance === "account";
   if (!opts.reviewer && !recordsActor) throw new CommandError("--reviewer <id> is required");
   const reg = readRegistration(paths);
   const draws = readDraws(paths);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,12 +11,15 @@ import { loadLedgerDefinition } from "../src/registry.js";
 import type { DrawForLedger, LedgerDefinition, PublishContext } from "../src/sdk/ledger.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerUnderTest } from "../src/testing/index.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
+import { auditDirWith, lockPlugin } from "./helpers/plugin-lock.js";
 
 /**
  * The Jira example (examples/ledgers/jira, its own package, importing only pr-rla/ledger) is an
- * EXTERNAL ledger: loaded here from .pr-rla.yml through the registry, in-process (trust: full),
- * since the isolated plugin host is bolt 4's. Its fixtures: two recorded public changelogs
- * (hibernate.atlassian.net, Jira Cloud, read-only) and a synthetic Jira.
+ * EXTERNAL ledger: loaded here from .pr-rla.yml through the registry, in-process (trust: full).
+ * An external plugin loads only when locked (bolt 4), so the last two tests lock a copy of it in a
+ * temp audit directory with trust: full; test/wave1-integration.test.ts runs it isolated, in the
+ * plugin host. Its fixtures: two recorded public changelogs (hibernate.atlassian.net, Jira Cloud,
+ * read-only) and a synthetic Jira.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const EX = join(ROOT, "examples/ledgers/jira");
@@ -24,6 +27,9 @@ type FakeJira = { fetch: typeof fetch; requests: { method: string; url: string; 
 const fakeJira = async (): Promise<FakeJira> => new ((await import(pathToFileURL(join(EX, "test/fake-jira.mjs")).href)) as { FakeJira: new () => FakeJira }).FakeJira();
 const cases = async () => ((await import(pathToFileURL(join(EX, "test/cases.mjs")).href)) as { jiraCases: (j: LedgerDefinition) => Promise<{ fixtures: LedgerFixture[]; factory: LedgerUnderTest }>; draw: (d: number, n: number) => DrawForLedger; PUB: PublishContext });
 const CONFIG = "ledger:\n  use: ./examples/ledgers/jira/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\n";
+const OPTIONS = { base_url: "https://acme.atlassian.net", project: "AUD", field: "customfield_10050" };
+/** The example's module and package.json, copied to `<dir>/jira/`. */
+const JIRA_FILES = { "jira/index.mjs": join(EX, "index.mjs"), "jira/package.json": join(EX, "package.json") };
 
 describe("external Jira example ledger, loaded from .pr-rla.yml through the registry", () => {
   it("passes the ledger kit (recorded Jira Cloud changelogs and a synthetic Jira)", async () => {
@@ -37,11 +43,12 @@ describe("external Jira example ledger, loaded from .pr-rla.yml through the regi
   });
 
   it("authenticates with prrla-basic: the broker builds Basic auth for the site only, and the ledger writes only under /rest/api/3/issue", async () => {
-    const config = parseConfig(`repo: acme/widgets\nwindow: { name: w, start: 2026-07-01, end: 2026-09-30 }\n${CONFIG}`, join(ROOT, ".pr-rla.yml"));
+    const audit = auditDirWith(JIRA_FILES);
+    await lockPlugin(audit, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full" });
     const fake = await fakeJira();
     const dir = mkdtempSync(join(tmpdir(), "prrla-jira-"));
     const actx = createAuditContext({ mode: "read-write", fetch: fake.fetch, env: { JIRA_EMAIL: "me@acme.example", JIRA_TOKEN: "tok-123" } });
-    const l = await openLedger(actx, config.ledger, config.dir, dir);
+    const l = await openLedger(actx, { use: "./jira/index.mjs", options: OPTIONS }, audit, dir);
     const { draw, PUB } = await cases();
     await l.publishDraws!([draw(1, 101), draw(2, 102)], PUB);
     await l.appendVerdict({ draw: 2, changeId: draw(2, 102).changeId, verdict: "fail", protocolSha256: PUB.protocolSha256, reviewer: "x", recordedAt: "2026-10-21T03:00:00Z" });
@@ -57,7 +64,9 @@ describe("external Jira example ledger, loaded from .pr-rla.yml through the regi
 
   it("register takes account provenance from the ledger, and records it as an external path plugin at trust full (in-process until bolt 4)", async () => {
     const s = setupAuditRepo({ changes: makeChanges(160) });
-    appendFileSync(join(s.dir, ".pr-rla.yml"), `ledger:\n  use: ${pathToFileURL(join(EX, "index.mjs")).href}\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\nverdicts: { reviewers: ["557058:alice"] }\n`);
+    for (const [to, from] of Object.entries(JIRA_FILES)) cpSync(from, join(s.dir, to), { recursive: true });
+    appendFileSync(join(s.dir, ".pr-rla.yml"), `ledger:\n  use: ./jira/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\nverdicts: { reviewers: ["557058:alice"] }\n`);
+    await lockPlugin(s.dir, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full" });
     s.clock.now = T("2026-06-20T00:00:00Z");
     expect(await registerCommand(s.ctx, { dryRun: true })).toBe(0);
     expect(s.out.join("\n")).toMatch(/ledger jira · verdict provenance account · reviewers 557058:alice/);

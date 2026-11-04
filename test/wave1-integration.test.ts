@@ -1,25 +1,35 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAuditContext, openProvider } from "../src/api/context.js";
+import { pathToFileURL } from "node:url";
+import { createAuditContext, openLedger, openProvider } from "../src/api/context.js";
 import { freezeCommand } from "../src/commands/freeze.js";
+import { recordCommand } from "../src/commands/record.js";
 import { registerCommand } from "../src/commands/register.js";
 import { runVerify } from "../src/commands/verify.js";
 import type { ManifestV2 } from "../src/core/records.js";
-import { closeAllPluginHosts, credentialGrants } from "../src/plugins/host.js";
-import { readLock } from "../src/plugins/lock.js";
+import { ledgerTraits } from "../src/ledger-traits.js";
+import { HostNotAllowed } from "../src/net/contract.js";
+import { closeAllPluginHosts, credentialGrants, hostedLedger, startPluginHost, type PluginHost } from "../src/plugins/host.js";
+import { readGrants, readLock, resolvePlugin } from "../src/plugins/lock.js";
+import { ledgerIndexStore } from "../src/plugins/open.js";
 import { providerTraits } from "../src/provider-traits.js";
 import { optionsDigest, pluginIdentity } from "../src/registry.js";
+import type { DrawForLedger, LedgerContext, LedgerDefinition, PublishContext } from "../src/sdk/ledger.js";
 import { assertProviderDefinition } from "../src/sdk/provider.js";
+import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerUnderTest } from "../src/testing/index.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
 import { fakeGitea } from "./helpers/fake-gitea.js";
 import { auditDirWith, lockPlugin } from "./helpers/plugin-lock.js";
 import { scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
 
 /**
- * Integration of U2b (the isolated plugin host) and U3 (the SDK carry-overs): the definition's U3
- * traits cross the host in `describe` (pr-rla/ipc/v1), and a self-hosted isolated plugin's credential
- * follows its validated URL option (`hostFromOption`), recorded in pr-rla.lock.json.
+ * Integration of wave 1: U2b (the isolated plugin host), U3 (the SDK carry-overs) and U4 (issue
+ * ledgers). The definition's U3 traits and a ledger's provenance cross the host in `describe`
+ * (pr-rla/ipc/v1); a self-hosted isolated plugin's credential follows its validated URL option
+ * (`hostFromOption`), recorded in pr-rla.lock.json; and the Jira example ledger runs in the host,
+ * its index kept by the parent.
  */
 
 const ROOT = join(import.meta.dirname, "..");
@@ -171,5 +181,127 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
     expect(credentialGrants(c, { base_url: "git.example.com" })).toEqual([{ env: "T", hosts: [], hostFromOption: "base_url" }]);
     expect(credentialGrants(c, { base_url: null })).toEqual([{ env: "T", hosts: ["a.example"] }]);
     expect(credentialGrants([{ env: "T", hosts: ["b.example", "a.example"] }], { base_url: "https://elsewhere.example" })).toEqual([{ env: "T", hosts: ["a.example", "b.example"] }]);
+  });
+});
+
+describe("external ledgers through the plugin host (U4 with U2b)", () => {
+  const EX = join(ROOT, "examples", "ledgers", "jira");
+  const JIRA_USE = "./jira/index.mjs";
+  const JIRA_OPTIONS = { base_url: "https://acme.atlassian.net", project: "AUD", field: "customfield_10050" };
+  const jiraAudit = () => auditDirWith({ "jira/index.mjs": join(EX, "index.mjs"), "jira/package.json": join(EX, "package.json") });
+  type FakeJira = { fetch: typeof fetch; requests: { method: string; url: string; authorization: string | null }[]; writes(): { method: string; url: string }[] };
+  const fakeJira = async (): Promise<FakeJira> => new ((await import(pathToFileURL(join(EX, "test/fake-jira.mjs")).href)) as { FakeJira: new () => FakeJira }).FakeJira();
+  const cases = async () => (await import(pathToFileURL(join(EX, "test/cases.mjs")).href)) as { jiraCases: (j: Pick<LedgerDefinition, "create">) => Promise<{ fixtures: LedgerFixture[]; factory: LedgerUnderTest }>; draw: (d: number, n: number) => DrawForLedger; PUB: PublishContext };
+
+  it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", async () => {
+    const plugin = resolvePlugin("./examples/ledgers/jira/index.mjs", ROOT);
+    const hosts: PluginHost[] = [];
+    // A definition whose create() starts the ledger in a host child: the kit's fake Jira and its
+    // faults stay in this process, and the ledger's index is kept here (LedgerContext.index).
+    const isolated: Pick<LedgerDefinition, "create"> = {
+      async create(options: unknown, ctx: LedgerContext) {
+        const host = await startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "jira" });
+        hosts.push(host);
+        return hostedLedger(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}), index: ledgerIndexStore({ mode: "read-write" }, ctx.windowDir) });
+      },
+    };
+    try {
+      const { fixtures, factory } = await (await cases()).jiraCases(isolated);
+      const report = await runLedgerConformance(factory, fixtures);
+      expect(report.ok, formatLedgerConformanceReport(report)).toBe(true);
+      expect(fixtures.filter((f) => f.source === "recorded")).toHaveLength(2);
+      const ran = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
+      for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults"]) expect(ran.has(c), c).toBe(true);
+      expect(hosts.length).toBeGreaterThan(fixtures.length);
+    } finally {
+      hosts.forEach((h) => h.close());
+    }
+  });
+
+  it("isolated, the Jira ledger gets placeholders, the broker builds Basic auth for the base_url host only, and pr-rla writes its index", async () => {
+    const audit = jiraAudit();
+    await lockPlugin(audit, JIRA_USE, { kind: "ledger", options: JIRA_OPTIONS });
+    expect(readLock(audit).plugins[JIRA_USE]).toMatchObject({
+      trust: "isolated",
+      hosts: ["acme.atlassian.net"],
+      writePaths: ["acme.atlassian.net/rest/api/3/issue"],
+      credentials: [
+        { env: "JIRA_EMAIL", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
+        { env: "JIRA_TOKEN", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
+      ],
+    });
+    const fake = await fakeJira();
+    const windowDir = mkdtempSync(join(tmpdir(), "prrla-jira-w-"));
+    const actx = createAuditContext({ mode: "read-write", fetch: fake.fetch, env: { JIRA_EMAIL: "me@acme.example", JIRA_TOKEN: "tok-123" } });
+    const l = await openLedger(actx, { use: JIRA_USE, options: JIRA_OPTIONS }, audit, windowDir);
+    const { draw, PUB } = await cases();
+    await l.publishDraws!([draw(1, 101), draw(2, 102)], PUB);
+    await l.appendVerdict({ draw: 2, changeId: draw(2, 102).changeId, verdict: "fail", protocolSha256: PUB.protocolSha256, reviewer: "x", recordedAt: "2026-10-21T03:00:00Z" });
+    expect(fake.writes().map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual(["POST /rest/api/3/issue", "POST /rest/api/3/issue", "PUT /rest/api/3/issue/AUD-2"]);
+    expect((await l.readVerdicts()).map((v) => [v.draw, v.verdict, v.reviewer, v.provenance?.source])).toEqual([[2, "fail", "557058:writer", "jira-field-change"]]);
+    const basic = `Basic ${Buffer.from("me@acme.example:tok-123").toString("base64")}`;
+    expect(fake.requests.length).toBeGreaterThan(6);
+    expect(fake.requests.every((r) => r.authorization === basic)).toBe(true);
+    // The child cannot write files: the index on disk was written by pr-rla for it, through ctx.index.
+    const index = JSON.parse(readFileSync(join(windowDir, "ledger-index.json"), "utf8")) as { issues: { draw: number; key: string }[] };
+    expect(index.issues.map((i) => [i.draw, i.key])).toEqual([[1, "AUD-1"], [2, "AUD-2"]]);
+    // Isolated, the ledger may contact only its locked hosts: elsewhere is refused before the credential step.
+    await expect(actx.broker.bind("ledger:jira")("https://evil.example/rest/api/3/myself", { headers: { authorization: "prrla-basic:JIRA_EMAIL:JIRA_TOKEN" } })).rejects.toBeInstanceOf(HostNotAllowed);
+  });
+
+  // A ledger that refuses to run in pr-rla's own process: register, record and verify must read its
+  // provenance and hosts without importing it.
+  const TRACKER = `import { defineLedger } from "pr-rla/ledger";
+if (process.env.PR_RLA_HOST !== "1") throw new Error("tracker ledger: imported outside the plugin host");
+const site = (o) => {
+  if (!o || typeof o.base_url !== "string") throw new Error("tracker: options.base_url is required");
+  return new URL(o.base_url).host;
+};
+export default defineLedger({
+  ledgerApiVersion: 1,
+  name: "tracker",
+  provenance: "account",
+  hosts: (o) => [site(o)],
+  create(o) {
+    site(o);
+    return { apiVersion: 1, name: "tracker", readVerdicts: async () => [], appendVerdict: async () => {} };
+  },
+});
+`;
+  const TRACKER_USE = "./plugins/tracker/index.mjs";
+  const withTracker = () => {
+    const s = setupAuditRepo({ changes: makeChanges(160) });
+    mkdirSync(join(s.dir, "plugins", "tracker"), { recursive: true });
+    writeFileSync(join(s.dir, "plugins", "tracker", "package.json"), JSON.stringify({ name: "tracker-ledger", version: "0.0.1", type: "module" }));
+    writeFileSync(join(s.dir, "plugins", "tracker", "index.mjs"), TRACKER);
+    const cfg = join(s.dir, ".pr-rla.yml");
+    const setLedger = (options: string) => writeFileSync(cfg, `${readFileSync(cfg, "utf8").replace(/^ledger:\n(?:  .*\n)*/m, "")}ledger:\n  use: ${TRACKER_USE}\n  options: ${options}\n`);
+    setLedger("{ base_url: https://tracker.example }");
+    return { s, setLedger };
+  };
+
+  it("register's preflight, record and verify --offline read an isolated ledger through its host, never by importing it", async () => {
+    const { s, setLedger } = withTracker();
+    await lockPlugin(s.dir, TRACKER_USE, { kind: "ledger", options: { base_url: "https://tracker.example" } });
+    expect(await ledgerTraits({ use: TRACKER_USE, options: { base_url: "https://tracker.example" } }, s.dir)).toEqual({ name: "tracker", provenance: "account", hosts: ["tracker.example"] });
+    s.clock.now = T("2026-06-20T00:00:00Z");
+    // The preflight runs hosts(), writePaths() and create() in the child; the provenance it reports is the default minimum.
+    expect(await registerCommand(s.ctx, { dryRun: true })).toBe(0);
+    expect(s.out.join("\n")).toMatch(/ledger tracker · verdict provenance account/);
+    expect(await registerCommand(s.ctx, {})).toBe(0);
+    // An account-provenance ledger needs no --reviewer: record gets past that check (and stops at the missing draws).
+    await expect(recordCommand(s.ctx, "1", "pass", {})).rejects.toThrow(/draws/);
+    const c7 = (await runVerify(s.ctx, { offline: true })).checks.find((c) => c.n === 7)!;
+    expect(c7).toMatchObject({ status: "SKIP", summary: "offline: ledger tracker lives in tracker.example; run verify without --offline to check the verdicts" });
+    // Options the ledger refuses fail the preflight with its own message, from the child.
+    setLedger("{ base_url: 7 }");
+    await expect(registerCommand(s.ctx, { dryRun: true })).rejects.toThrow(/ledger \.\/plugins\/tracker\/index\.mjs: .*tracker: options\.base_url is required/);
+  });
+
+  it("an unlocked external ledger is refused by register's preflight, naming plugin add", async () => {
+    const { s } = withTracker();
+    s.clock.now = T("2026-06-20T00:00:00Z");
+    await expect(registerCommand(s.ctx, { dryRun: true })).rejects.toMatchObject({ code: "NOT_LOCKED", message: expect.stringMatching(/plugin \.\/plugins\/tracker\/index\.mjs is not locked; review it and run "pr-rla plugin add/) });
+    expect(existsSync(join(s.dir, "pr-rla.lock.json"))).toBe(false);
   });
 });

@@ -5,7 +5,8 @@ import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
 import { stoppingTable, effectiveCap } from "../core/sprt.js";
 import { providerTraits } from "../provider-traits.js";
-import { loadLedgerDefinition, pluginIdentity } from "../registry.js";
+import { preflightExternalLedger } from "../plugins/open.js";
+import { builtinLedgerName, loadLedgerDefinition, pluginIdentity } from "../registry.js";
 import { provenanceRank, type ProvenanceLevel } from "../sdk/ledger.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
@@ -33,18 +34,27 @@ export const REREGISTER_COMMAND = "pr-rla register --force";
  * The ledger part of register's preflight: the ledger loads, its options are valid (hosts,
  * writePaths and create() all check them), and nothing is contacted. Returns the verdict rules
  * the registration fixes (FR3.8): `min_provenance` from .pr-rla.yml, else the ledger's own level.
+ * An external ledger must be locked, and an isolated one does all of this in its plugin host.
  */
 export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<{ minProvenance: ProvenanceLevel; reviewers: string[] | null }> {
-  const def = await loadLedgerDefinition(config.ledger.use, config.dir);
   const offline = (async () => {
     throw new CommandError("register's preflight contacts no tracker");
   }) as unknown as typeof fetch;
-  try {
-    def.hosts?.(config.ledger.options);
-    def.writePaths?.(config.ledger.options);
-    await def.create(config.ledger.options, { cwd: config.dir, windowDir: paths.windowDir, env: ctx.env, log: () => {}, fetch: offline });
-  } catch (e) {
-    throw new CommandError(`ledger ${config.ledger.use}: ${(e as Error).message}`);
+  let def: { name: string; provenance?: ProvenanceLevel };
+  if (builtinLedgerName(config.ledger.use)) {
+    const builtin = await loadLedgerDefinition(config.ledger.use, config.dir);
+    def = builtin;
+    try {
+      builtin.hosts?.(config.ledger.options);
+      builtin.writePaths?.(config.ledger.options);
+      await builtin.create(config.ledger.options, { cwd: config.dir, windowDir: paths.windowDir, env: ctx.env, log: () => {}, fetch: offline });
+    } catch (e) {
+      throw new CommandError(`ledger ${config.ledger.use}: ${(e as Error).message}`);
+    }
+  } else {
+    const x = await preflightExternalLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, offline);
+    if (x.problem) throw new CommandError(`ledger ${config.ledger.use}: ${x.problem}`);
+    def = x;
   }
   const level = def.provenance ?? "self-asserted";
   const minProvenance = config.verdicts.minProvenance ?? level;

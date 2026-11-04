@@ -6,8 +6,9 @@
 // and new sets, which would have to be diffed.
 //
 // It imports only the public SDK (pr-rla/ledger) and speaks the fetch-broker contract (destination,
-// idempotent), so the broker retries its reads and never retries its writes after a 5xx. It runs
-// in-process (trust: full) until pr-rla's isolated plugin host exists (bolt 4).
+// idempotent), so the broker retries its reads and never retries its writes after a 5xx. Lock it with
+// `pr-rla plugin add`; it then runs in pr-rla's plugin host (isolated: no file writes, so it keeps its
+// index through ctx.index, which pr-rla writes to ledger-index.json for it).
 //
 //   ledger:
 //     use: pr-rla-ledger-jira                     # or ./examples/ledgers/jira/index.mjs
@@ -15,7 +16,8 @@
 //
 // Credentials: JIRA_EMAIL and JIRA_TOKEN (an Atlassian API token), sent as
 // `Authorization: prrla-basic:JIRA_EMAIL:JIRA_TOKEN`: the broker builds the Basic header for the
-// site's host only. Without them the ledger reads anonymously (public projects).
+// host of options.base_url only (an https site; hostFromOption below). Without them the ledger reads
+// anonymously (public projects).
 //
 // Jira deletes an issue's changelog with the issue, and admins can delete issues: run
 // `pr-rla checkpoint` after verdicts; checkpoints are not optional with Jira.
@@ -98,15 +100,21 @@ class JiraLedger {
   }
 
   // --- the index ---------------------------------------------------------------
-  readIndex() {
+  // pr-rla keeps it (ctx.index, the same ledger-index.json) when it offers to: always in its plugin
+  // host, where this ledger cannot write files. Without ctx.index (an older pr-rla, or a test calling
+  // create() directly) the ledger reads and writes the file itself.
+  async readIndex() {
+    if (this.ctx.index) return (await this.ctx.index.read()) ?? null;
     const p = join(this.ctx.windowDir, INDEX);
     return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
   }
-  writeIndex(index) {
+  async writeIndex(index) {
+    const sorted = { ...index, issues: [...index.issues].sort((a, b) => a.draw - b.draw) };
+    if (this.ctx.index) return this.ctx.index.write(sorted);
     mkdirSync(this.ctx.windowDir, { recursive: true });
     const p = join(this.ctx.windowDir, INDEX);
     const tmp = `${p}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ ...index, issues: [...index.issues].sort((a, b) => a.draw - b.draw) }, null, 2)}\n`);
+    writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`);
     renameSync(tmp, p);
   }
 
@@ -121,7 +129,7 @@ class JiraLedger {
 
   async read() {
     const s = { verdicts: [], history: [], failures: [], warnings: [], notes: [] };
-    const index = this.readIndex();
+    const index = await this.readIndex();
     if (!index) return s;
     const fields = (await this.request("GET", "/rest/api/3/field")).data;
     if (!fields.some((f) => f.id === this.s.field)) s.failures.push(`verdict field ${this.s.field} no longer exists on ${this.s.host}: the verdicts recorded in it cannot be checked`);
@@ -193,7 +201,7 @@ class JiraLedger {
   async publishDraws(draws, context) {
     if (!context?.protocolSha256) throw new Error("jira: publishDraws needs the registration's protocol hash");
     const window = context.window || basename(this.ctx.windowDir);
-    const index = this.readIndex() ?? { schema: "pr-rla-ledger-jira/index/v1", ledger: NAME, tracker: `${this.s.base}/projects/${this.s.project}`, window, protocolSha256: context.protocolSha256, field: this.s.field, issues: [], repeats: [] };
+    const index = (await this.readIndex()) ?? { schema: "pr-rla-ledger-jira/index/v1", ledger: NAME, tracker: `${this.s.base}/projects/${this.s.project}`, window, protocolSha256: context.protocolSha256, field: this.s.field, issues: [], repeats: [] };
     if (index.protocolSha256 !== context.protocolSha256 || index.window !== window) throw new Error(`jira: ${INDEX} belongs to another window or protocol`);
     this.snapshot = null;
     const firstByChange = new Map(index.issues.map((i) => [i.changeId, i.draw]));
@@ -223,13 +231,13 @@ class JiraLedger {
         }
       }
       index.issues.push({ draw: d.draw, changeId: d.changeId, key: made.key, id: made.id, url: `${this.s.base}/browse/${made.key}`, createdAt: made.createdAt });
-      this.writeIndex(index);
+      await this.writeIndex(index);
     }
-    this.writeIndex(index);
+    await this.writeIndex(index);
   }
 
   async appendVerdict(event) {
-    const index = this.readIndex();
+    const index = await this.readIndex();
     const draw = index?.repeats.find((r) => r.draw === event.draw)?.sameAs ?? event.draw;
     const issue = index?.issues.find((i) => i.draw === draw);
     if (!issue) throw new Error(`jira: draw #${event.draw} has no issue; run "pr-rla sample" first`);
@@ -246,10 +254,10 @@ export default defineLedger({
   provenance: "account",
   hosts: (options) => [settings(options).host],
   writePaths: (options) => [`${settings(options).host}/rest/api/3/issue`],
-  // No hosts listed: the broker sends these only to the site the options name (hosts(options)).
+  // No fixed host: pr-rla sends these only to the host of options.base_url, and only when it is https.
   credentials: [
-    { env: "JIRA_EMAIL", hosts: [] },
-    { env: "JIRA_TOKEN", hosts: [] },
+    { env: "JIRA_EMAIL", hosts: [], hostFromOption: "base_url" },
+    { env: "JIRA_TOKEN", hosts: [], hostFromOption: "base_url" },
   ],
   create: (options, ctx) => new JiraLedger(options, ctx),
 });
