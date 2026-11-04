@@ -86,6 +86,8 @@ describe("P5 finding 5: a rule pool's visibility (or name) exclusion is not N's 
     const c5 = results["B (out)"]!.checks[4]!;
     expect(c5.status).toBe("INCOMPLETE");
     expect(c5.details.some((d) => d.startsWith(`INCOMPLETE repo ${victim} matches the registered rule now but is not in the pool, and was not registered; the freeze's listing excluded it (visibility private), an attribute its owners can change, which nothing can check now, and `))).toBe(true);
+    // Check 5's INCOMPLETE alone stops it: every other check is what A's was, and nothing FAILs.
+    expect(results["B (out)"]!.checks.map((c) => `${c.n}:${c.status}`).filter((c) => c !== "7:WARN")).toEqual(["1:PASS", "2:PASS", "3:PASS", "4:PASS", "5:INCOMPLETE", "6:PASS"]);
     expect(results["B (out)"]!.verdict).toBe("INCOMPLETE");
     expect(results["B (out)"]!.ok).toBe(false);
   }, 300_000);

@@ -3,7 +3,7 @@ import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.j
 import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
 import { auditVerdict, certificateFor, isCertified, verdictExitCode, verdictWithholdings, type Withholding } from "../../core/verdict.js";
 import { accessShortfall } from "../access.js";
-import { verifyAudit, type VerifyReport } from "../../core/verify.js";
+import { localFails, verifyAudit, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
 import { pluginIdentity } from "../../registry.js";
@@ -16,6 +16,7 @@ import { readError } from "./errors.js";
 import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { verifierLogKeys } from "../translog.js";
 import { statusLine } from "./status.js";
+import { registrationPin } from "./offline-core.js";
 
 export interface VerifyOptions {
   /** Another window than the configured one. */
@@ -29,6 +30,11 @@ export interface VerifyOptions {
   beaconFile?: string;
   /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
   tsaTrust?: string[];
+  /**
+   * P5 (T14): the registration's SHA-256 the verifier was handed before R published (prospective: before the window
+   * opened), 64 lowercase hex characters (`--registration`): check 1 FAILs any other. Malformed: a usage error.
+   */
+  registration?: string;
 }
 
 /** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. The one map, src/core/verdict.ts. */
@@ -60,6 +66,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   const { config, paths } = configFor(ctx, opts.window);
   // The verifier's own log keys, read and checked before anything else (a malformed --log-key is a usage error).
   const logKeys = verifierLogKeys(ctx, opts.logKey);
+  const pinned = registrationPin(opts.registration);
   const registration = readRegistration(paths);
   const manifest = existsSync(paths.manifest) ? readManifest(paths) : null;
   const commitment = existsSync(paths.commitment) ? readCommitment(paths) : null;
@@ -127,6 +134,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
       trustBundle: trustFor(ctx, opts.tsaTrust),
       ...(loaded ? { providerIdentity: loaded } : {}),
       ...(labelHistory !== undefined ? { labelHistory } : {}),
+      ...(pinned !== undefined ? { registrationSha256: pinned } : {}),
     },
   );
   if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);
@@ -175,6 +183,13 @@ function noteAccess(report: VerifyReport, found: { n: number; w: Withholding | n
     if (!w || !c) continue;
     unread.push(w);
     c.details.unshift(`INCOMPLETE ${w.reason}`);
+    // P5 (finding 7): only findings that came from the refused reads are lowered. A FAIL shown from local evidence
+    // alone (the ledger index, the checkpoint file, the registered identity or options) stays a FAIL.
+    const local = localFails(c);
+    if (c.status === "FAIL" && local.length) {
+      c.summary = `${local[0]!.replace(/^FAIL /, "")} (and reads refused without a credential: not established either)`;
+      continue;
+    }
     c.summary = c.status === "FAIL" ? "not established: read without its credential (its FAIL findings below may be the refused reads)" : `${c.summary} · not established: read without its credential`;
     c.status = "INCOMPLETE";
   }

@@ -18,8 +18,8 @@ import { recordedBeacon } from "./helpers/fixtures.js";
  *
  * The fakes (test/helpers/fake-org.ts, fake-github.ts) are this checkout's, copied into the master tree, so both builds
  * read the same synthetic data. Fixture kind: synthetic. The intended differences for single repos are listed below:
- * U8's (a repo deleted after freeze is INCOMPLETE) and time round B's (`timeRoundB`, which rewrites master's results
- * into what this branch must print, rule by rule, so that nothing else may differ).
+ * U8's (a repo deleted after freeze is INCOMPLETE), time round B's (`timeRoundB`, which rewrites master's results
+ * into what this branch must print, rule by rule, so that nothing else may differ) and P5's (`p5Steering`).
  */
 type Dump = Record<string, Record<string, unknown>>;
 type Step = { value?: unknown; threw?: string; exitCode?: number | null; out: string[] };
@@ -80,6 +80,27 @@ function timeRoundB(master: Dump): Dump {
       return [l];
     });
     void name;
+  }
+  return d;
+}
+
+/**
+ * P5's single-repo changes ("draws that cannot be steered"), applied after time round B's:
+ *  1. verify's check 1 prints the registration's full SHA-256 first (T14: the digest an auditor pins with --registration);
+ *  2. status of a frozen audit below the registered minimum reports the refusal sample gives, and exits 3 (finding 9).
+ * A single repo's draw order is its change-id order (the draw key's R is the registered path), so nothing else moves.
+ */
+function p5Steering(d: Dump): Dump {
+  for (const rec of Object.values(d)) {
+    const steps = rec.steps as Record<string, Step>;
+    const N = (rec["audit/2026-q3.manifest.json"] as { N?: number } | null)?.N ?? null;
+    for (const c of (steps.verify!.value as VerifyValue).checks) if (c[0] === 1) c[3] = ["registration sha256 <REG>", ...c[3]];
+    steps.verifyCommand!.out = steps.verifyCommand!.out.flatMap((l) => (l.startsWith("1. ") ? [l, "        registration sha256 <REG>"] : [l]));
+    const st = steps.status;
+    if (st && N !== null && N < 150 && st.value === 0 && st.out.length === 1 && / · frozen N \d+ · seed round \d+ published .*: run "pr-rla sample"/.test(st.out[0]!)) {
+      st.out = [st.out[0]!.replace(/ · seed round \d+ published .*: run "pr-rla sample"/, ` · REFUSED: population ${N} < the registered minimum 150: review all ${N} instead (sample draws nothing)`)];
+      st.value = 3;
+    }
   }
   return d;
 }
@@ -333,7 +354,7 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       expect(b.drawn.json400).toEqual(ids(now, "registration"));
       expect(b.drawn.json400).not.toEqual(a.drawn.json400);
       // 6. nothing else: commands, their stdout, the records and verify's results are master's, after time round B's rules.
-      expect(b.dump).toEqual(timeRoundB(a.dump));
+      expect(b.dump).toEqual(p5Steering(timeRoundB(a.dump)));
       // And the scenarios really ran: master's own outputs, checked here so that an empty dump cannot pass.
       const steps = (s: string) => now[s]!.steps as Record<string, { value?: unknown; threw?: string; out: string[] }>;
       expect(steps("json400").freeze!.value).toBe(0);

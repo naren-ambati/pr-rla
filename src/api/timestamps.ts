@@ -23,18 +23,19 @@ export function timestampingFor(config: PrRlaConfig, bundle: TrustBundle): Times
 }
 
 /** A v1 log entry's integratedTime, if its SET verifies under a key pinned in the package (status and register take no --log-key; the pinned operator is Sigstore). */
-export async function logBound(ctx: ApiContext, config: PrRlaConfig, signed: SignedRecord<unknown>): Promise<number | null> {
+export async function logBound(ctx: ApiContext, config: PrRlaConfig, signed: SignedRecord<unknown>, logKey: readonly string[] = []): Promise<number | null> {
   const log = signed.log;
   if (!log || "apiVersion" in log) return null;
-  const key = await logPublicKey(ctx, config, log.logUrl, undefined, true).catch(() => null);
+  // The pinned key for a pinned log; else the caller's own --log-key for exactly that log (P5: status takes them too).
+  const key = await logPublicKey(ctx, config, log.logUrl, logKey, true).catch(() => null);
   if (!key) return null;
   return verifyLoggedEntry(log as LoggedEntry, signed, key.publicKeyPem).ok ? log.integratedTime : null;
 }
 
 /** Offline assessment of a v2 record's stored evidence (for register/freeze output and status). */
-export async function assessRecord(ctx: ApiContext, config: PrRlaConfig, signed: SignedRecord<unknown>, signedTimeIso: string, ts: TimestampingParams, bundle: TrustBundle): Promise<TimeEvidenceSummary> {
+export async function assessRecord(ctx: ApiContext, config: PrRlaConfig, signed: SignedRecord<unknown>, signedTimeIso: string, ts: TimestampingParams, bundle: TrustBundle, logKey: readonly string[] = []): Promise<TimeEvidenceSummary> {
   const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
-  const integratedTime = await logBound(ctx, config, signed);
+  const integratedTime = await logBound(ctx, config, signed, logKey);
   return assessTimestamps({
     timestamps: signed.timestamps ?? [],
     data,

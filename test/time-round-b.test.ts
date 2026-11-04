@@ -383,11 +383,19 @@ describe("time review #9: the small verify items", () => {
     expect(r.checks[0]!.status).toBe("FAIL");
     expect(r.checks[0]!.details).toContain("FAIL the registration was re-signed: its envelope's key is not the signing key the registration names (publicKeyPem, inside the signed and time-stamped bytes)");
     expect(r.timestamps.registration!.proven).toBe(true); // the tokens are over the same digest: only the key binding catches it
-    // A registration from before the field (no publicKeyPem) can be re-keyed, and verify says so.
+    // A registration without the field can be re-keyed: since P5 (finding 10) check 1 FAILs it (it WARNed).
     const { publicKeyPem: _k, ...old } = reg.record;
     writeJ(s, p, { ...signRecord(old, other), timestamps: [] });
     const w = (await runVerify(s.ctx, { offline: true })).checks[0]!;
-    expect(w.details).toContain("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
+    expect(w.status).toBe("FAIL");
+    expect(w.details).toContain("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+    // P5: the field stripped while the old tokens are kept: the tokens no longer match the digest, and the key is missing.
+    const stripped = signRecord(old, other);
+    writeJ(s, p, { ...stripped, timestamps: reg.timestamps });
+    const k = (await runVerify(s.ctx, { offline: true })).checks[0]!;
+    expect(k.status).toBe("FAIL");
+    expect(k.details).toContain("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+    expect(k.details.filter((d) => /^FAIL registration token from test-[ab]: rule 2/.test(d))).toHaveLength(2);
   });
 });
 

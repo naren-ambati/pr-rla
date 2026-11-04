@@ -89,7 +89,8 @@ describe("schema v1 compatibility (NFR7)", () => {
   it("status on the v1 audit: TIMESTAMP NOT TAMPER-PROOF (its log key is not pinned in the package), so the certificate is withheld, exit 6", async () => {
     const a = v1Audit();
     expect(await statusCommand(a.ctx, {})).toBe(6);
-    expect(a.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .* · target reached · CERTIFICATE WITHHELD \(registration time unproven: no transparency-log entry verified under a pinned key; manifest commitment time unproven: no transparency-log entry verified under a pinned key\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
+    // P5: status runs verify's offline checks too, so check 6's legacy-schema INCOMPLETE withholds it as well.
+    expect(a.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .* · target reached · CERTIFICATE WITHHELD \(registration time unproven: no transparency-log entry verified under a pinned key; manifest commitment time unproven: no transparency-log entry verified under a pinned key; verify check 6 \(draws\) is not established: legacy schema: draws bound to the manifest\. .*\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
     expect(a.out.join("\n")).not.toMatch(/CERTIFIED \(risk/);
   });
 });

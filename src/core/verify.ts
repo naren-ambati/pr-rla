@@ -116,6 +116,12 @@ export interface VerifyDeps {
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
   /**
+   * P5 (T14): the registration's SHA-256 the verifier was given before R published (prospective: before the window
+   * opened), `verify --registration`. Check 1 FAILs a registration that is not it: another registration of the same audit,
+   * made to keep the best sample, is not the one handed over.
+   */
+  registrationSha256?: string;
+  /**
    * P5: whether the verifier's provider reads label history (its definition's `labelHistory`), when known. false makes a
    * labels stratum INCOMPLETE in check 2, offline too (status runs it); check 5 also holds each listing to `labelsAt`.
    */
@@ -149,6 +155,20 @@ export interface VerifyReport {
 }
 
 const n = (x: number) => x.toLocaleString("en-US");
+
+/**
+ * P5 (finding 7): the FAIL lines of a check shown from local evidence alone (files of the audit repo, the registration,
+ * the verifier's own configuration), never from what a provider or ledger read. A check whose reads were refused to a
+ * plugin running without its credential (src/api/access.ts) is lowered to INCOMPLETE only when it has none of these.
+ */
+const localFailures = new WeakMap<VerifyCheck, string[]>();
+function markLocal(c: VerifyCheck, lines: readonly string[]): void {
+  if (lines.length) localFailures.set(c, [...(localFailures.get(c) ?? []), ...lines]);
+}
+/** The FAIL lines of `c` that rest on local evidence only (empty when none). */
+export function localFails(c: VerifyCheck): string[] {
+  return localFailures.get(c) ?? [];
+}
 
 /** Adds anchor findings (ledger index binding, checkpoint coverage) to a check: FAIL beats WARN beats whatever it was. */
 function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): boolean {
@@ -230,6 +250,12 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     log: log.integratedTime !== null ? { operator: log.operator ?? deps.trustBundle.authorities.sigstore?.operator ?? "Sigstore", integratedTime: log.integratedTime } : null,
   });
   for (const f of ts.failed) {
+    // P5: a token whose only problem is that the verifier holds no anchor for its authority is not shown forged, only not
+    // shown genuine: its time stays unproven (INCOMPLETE below), as status reports it. Any other problem is a FAIL.
+    if (f.problems.every((p) => /^rule 6: authority ".*" is not in the trust bundle/.test(p))) {
+      c.details.push(`${what} token from ${f.tsa} not checked: ${f.problems.join("; ")}`);
+      continue;
+    }
     c.status = "FAIL";
     c.details.push(`FAIL ${what} token from ${f.tsa}: ${f.problems.join("; ")}`);
   }
@@ -263,7 +289,14 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const sig = verifySignedRecord(reg);
   if (!sig.ok) {
     c1.status = "FAIL";
-    c1.details.push(`registration signature: ${sig.reason}`);
+    c1.details.push(`FAIL registration signature: ${sig.reason}`);
+  }
+  // P5 (T14): the full digest, which the auditee hands the verifier before R publishes (prospective: before the window
+  // opens); `--registration` holds the audit to it.
+  c1.details.push(`registration sha256 ${reg.sha256}${deps.registrationSha256 === undefined ? "" : deps.registrationSha256 === reg.sha256 ? " (the one you pinned with --registration)" : ""}`);
+  if (deps.registrationSha256 !== undefined && deps.registrationSha256 !== reg.sha256) {
+    c1.status = "FAIL";
+    c1.details.push(`FAIL the registration is not the one you pinned: its sha256 is ${reg.sha256}, you gave ${deps.registrationSha256} (--registration). Another registration of this audit is not the one handed over before R`);
   }
   const regLog = await checkLog(reg.log, reg, "registration", deps, c1, v2);
   const win = windowProblem(reg.record.window);
@@ -275,8 +308,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // Time round B: a v2 registration names its own signing key inside the signed, time-stamped bytes.
     const bound = (reg.record as RegistrationRecordV2).publicKeyPem;
     if (bound === undefined) {
-      c1.details.push("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
-      c1.status = raiseStatus(c1.status, "WARN");
+      // P5 (finding 10): FAIL, not WARN. Only fixtures were written without it, and without it the registration can be
+      // re-signed under any key while its tokens still bind its digest.
+      c1.details.push("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+      c1.status = "FAIL";
     } else if (!sameKey(bound, reg.publicKeyPem)) {
       c1.status = "FAIL";
       c1.details.push("FAIL the registration was re-signed: its envelope's key is not the signing key the registration names (publicKeyPem, inside the signed and time-stamped bytes)");
@@ -304,7 +339,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (c1.status === "PASS") c1.status = "WARN";
   } else if (a.currentProtocolSha256 !== reg.record.protocolSha256) {
     c1.status = "FAIL";
-    c1.details.push(`review protocol changed: file hashes ${a.currentProtocolSha256.slice(0, 12)}…, registration says ${reg.record.protocolSha256.slice(0, 12)}…`);
+    c1.details.push(`FAIL review protocol changed: file hashes ${a.currentProtocolSha256.slice(0, 12)}…, registration says ${reg.record.protocolSha256.slice(0, 12)}…`);
   }
   const rt = registrationTime(reg);
   const unproven = v2 ? (!regTs?.proven ? " (unproven: too few timestamps)" : "") : !regLog.verified ? " (time unproven: no transparency-log entry verified under a trusted key)" : "";
@@ -465,8 +500,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // U3 hashed no population options, so the population hash alone would differ for nothing).
     const registered = v2 ? (reg.record as RegistrationRecordV2).plugins.provider : null;
     const id = deps.providerIdentity;
-    if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256)
+    if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256) {
       c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
+      markLocal(c5, [c5.details.at(-1)!]);
+    }
     // Every repo rebuilt from its frozen head and compared with the window as its current head shows it; the pool held to
     // the rule and the registered repos (src/core/rebuild.ts).
     // P3: each frozen head is held to the push log over the freeze span (the manifest's as-of time until R publishes),
@@ -669,7 +706,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
     // The index file is local: its hash is checked even when the tracker is not read.
     if (a.draws && a.ledgerIndex !== undefined) {
-      if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
+      const f = indexBindingFindings(a.draws, a.ledgerIndex);
+      markLocal(c7, f.fails.map((d) => `FAIL ${d}`));
+      if (addAnchor(c7, f)) c7.summary = "labels FAIL";
     }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
@@ -695,10 +734,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
       c7.status = "FAIL";
       c7.details.push(`FAIL the ledger verify loaded is not the registered one (${idDiffs.map((k) => `${k} ${show(registeredLedger![k])} → ${show(loadedId![k])}`).join("; ")}): verify with the registered ledger and options`);
+      markLocal(c7, [c7.details.at(-1)!]);
     }
     if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
       c7.status = "FAIL";
       c7.details.push(`FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})`);
+      markLocal(c7, [c7.details.at(-1)!]);
     }
     // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
     const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
@@ -762,6 +803,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     for (const p of a.checkpointProblems ?? []) {
       c7.status = "FAIL";
       c7.details.push(`FAIL checkpoint file: ${p}`);
+      markLocal(c7, [c7.details.at(-1)!]);
     }
     if (checkpoints.length && !ledger.readHistory) {
       c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
@@ -778,14 +820,21 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
           // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
           if (cp.line.timestamps.length && isRegistrationV2(reg)) {
+            const before = c7.details.length;
             const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7, "WARN");
+            // A checkpoint's tokens are local bytes over a local line: their rule failures are local evidence.
+            markLocal(c7, c7.details.slice(before).filter((d) => d.startsWith("FAIL ")));
             // Coverage counts only what the trusted-time rules count: ignored (unregistered) or failing tokens time-stamp nothing.
             stampedBy.set(cp, ts.counted.length > 0);
           }
         }
       }
     }
-    if (a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
+    if (a.ledgerIndex !== undefined) {
+      const f = indexBindingFindings(a.draws, a.ledgerIndex);
+      markLocal(c7, f.fails.map((d) => `FAIL ${d}`));
+      addAnchor(c7, f);
+    }
     addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0, timeStamped: (cp) => stampedBy.get(cp) ?? cp.line.timestamps.length > 0 }));
     c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
   }

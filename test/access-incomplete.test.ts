@@ -124,6 +124,25 @@ describe("the credential withheld (set, not approved for the self-hosted origin)
   });
 });
 
+describe("P5 (finding 7): a FAIL from local evidence is not lowered by a refused read", () => {
+  it("the ledger index edited after sample while the tracker is refused: check 7 FAILs (exit 1), and says the reads were refused too; the refused reads alone stay INCOMPLETE", async () => {
+    const s = as({ GITHUB_TOKEN: "verifier-token", PR_RLA_APPROVALS_FILE: approvals(false) });
+    const file = join(s.dir, W, "ledger-index.json");
+    const idx = JSON.parse(readFileSync(file, "utf8")) as { issues: { draw: number; number: number }[] };
+    idx.issues[0]!.number += 1000; // the draw -> issue mapping edited: its hash no longer matches draws.json's
+    writeFileSync(file, `${JSON.stringify(idx, null, 2)}\n`);
+    const r = await runVerify(s.ctx, {});
+    const c7 = r.checks.find((c) => c.n === 7)!;
+    expect(c7.status).toBe("FAIL");
+    expect(c7.summary).toMatch(/and reads refused without a credential: not established either\)$/);
+    expect(c7.details.some((d) => d.startsWith("FAIL "))).toBe(true);
+    expect(c7.details.some((d) => d.startsWith("INCOMPLETE ledger github-issues read"))).toBe(true);
+    expect(r).toMatchObject({ verdict: "FAILED", exitCode: 1, ok: false });
+    // Control: the same refused reads without the edit stay INCOMPLETE (the tests above).
+    expect((await runVerify(as({ GITHUB_TOKEN: "verifier-token", PR_RLA_APPROVALS_FILE: approvals(false) }).ctx, {})).checks.find((c) => c.n === 7)!.status).toBe("INCOMPLETE");
+  });
+});
+
 describe("the credential not set at all: the same, naming the variables", () => {
   it("status and verify: INCOMPLETE, exit 6, '… are not set'", async () => {
     const s = as({ PR_RLA_APPROVALS_FILE: approvals(false) });

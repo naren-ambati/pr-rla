@@ -2736,7 +2736,7 @@ class ShellCheck {
     this.runsPrRla = true;
     const env = this.ctx.env;
     const valueOpts = new Set(["-C", "--dir", "-c", "--config", "--from-file", "--plugins"]);
-    const valueAfter = new Set(["--window", "--max-patch-bytes", "--log-key", "--tsa-trust", "--beacon-file", "--population", "--defects", "--runs", "--seed", "--p0", "--p1", "--alpha", "--cap", "--fixture", "--kind", "--trust", "--reviewer", "--note", "--sign", "--rekor-url", "--rekor-api", "--key", "--out", "--through", "--remote", "--branch", "--repo", "--provider", "--resume", "--env", "--origin"]);
+    const valueAfter = new Set(["--window", "--max-patch-bytes", "--log-key", "--tsa-trust", "--registration", "--beacon-file", "--population", "--defects", "--runs", "--seed", "--p0", "--p1", "--alpha", "--cap", "--fixture", "--kind", "--trust", "--reviewer", "--note", "--sign", "--rekor-url", "--rekor-api", "--key", "--out", "--through", "--remote", "--branch", "--repo", "--provider", "--resume", "--env", "--origin"]);
     const isValue = (j) => valueOpts.has(rest[j - 1]?.s ?? "") || valueAfter.has(rest[j - 1]?.s ?? "");
     // --help or --version anywhere (but not as another option's value, such as --note --help) prints and exits.
     const helpOnly = rest.some((a, j) => ["-h", "--help", "-V", "--version"].includes(a.s ?? "") && !isValue(j)) && !rest.some((a) => a.s === "--accept-lock-grants" || a.s === "--submit");

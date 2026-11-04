@@ -14,7 +14,7 @@ import { ORG, type FakeOrg } from "./fake-org.js";
  */
 export const REPOS_RULE = `{ owner: ${ORG} }`;
 
-export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string; start?: string; window?: string; provider?: string; timestamping?: string; tsa?: Parameters<typeof setupAuditRepo>[0]["tsa"] } = {}) {
+export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string; start?: string; window?: string; provider?: string; timestamping?: string; tsa?: Parameters<typeof setupAuditRepo>[0]["tsa"]; scmClock?: boolean } = {}) {
   const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch, ...(o.tsa ? { tsa: o.tsa } : {}) });
   const clock = fakeClock(T(o.start ?? "2026-10-20T00:00:00Z"));
   const config = [
@@ -28,6 +28,9 @@ export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string
     "",
   ].join("\n");
   writeFileSync(join(s.dir, ".pr-rla.yml"), config);
+  // P5: `scmClock` gives the org the test's clock (OrgControl.now): nothing is pushed or merged before its time, so a
+  // registration dated before the window sees no head from the future, and an honest prospective pool can be hosted.
+  if (o.scmClock) org.control.now = () => clock.now();
   const ctxFor = (fetch: typeof globalThis.fetch = org.fetch, clk = clock): CommandContext => ({
     ...s.ctx,
     env: { GITHUB_TOKEN: "synthetic-token-not-real" },

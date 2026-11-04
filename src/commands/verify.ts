@@ -12,6 +12,8 @@ export interface VerifyOptions {
   verbose?: boolean;
   /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
   tsaTrust?: string[];
+  /** P5 (T14): `--registration <sha256>`, the registration you were handed: check 1 FAILs any other. */
+  registration?: string;
 }
 
 /** The verify report (src/api/read/verify.ts), for callers that format it themselves. */

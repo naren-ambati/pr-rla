@@ -468,10 +468,12 @@ describe("the bolt-1 demo, replayed from the live recording of 2026-11-03", () =
     expect(out.join("\n")).not.toContain(`registration ${RECORDING.digest.slice(0, 12)}…`);
   });
 
-  it("verify check 1 is not FAILED offline on the real tokens (it WARNs that the record names no key); a forged token makes it FAIL", async () => {
+  it("verify check 1 on the real tokens: all four verify, PROVEN, and check 1 FAILs only that the record names no key (P5; it WARNed); a forged token FAILs it too", async () => {
+    // The recording predates registrations naming their key, and cannot be regenerated without asking the authorities
+    // again (its tokens are over its digest). Since P5 (finding 10) the missing key FAILs check 1; the tokens still verify.
     const good = await runVerify(ctx, { offline: true });
-    expect(good.checks[0]!.status).toBe("WARN");
-    expect(good.checks[0]!.details).toContain("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
+    expect(good.checks[0]!.status).toBe("FAIL");
+    expect(good.checks[0]!.details.filter((d) => d.startsWith("FAIL "))).toEqual(["FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope"]);
     expect(good.timestamps.registration!.proven).toBe(true);
     expect(good.mode).toBe("PROSPECTIVE");
     const path = join(dir, "audit/demo-2026-q4/registration.json");
