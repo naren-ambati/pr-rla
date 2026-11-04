@@ -91,7 +91,8 @@ const key = (u: DcUser | null | undefined) => u?.slug ?? u?.name ?? "unknown";
  * - APPROVED -> APPROVED; a later UNAPPROVED by the same user -> that approval DISMISSED;
  * - REVIEWED (the reviewer marked the PR "needs work") -> CHANGES_REQUESTED;
  * - COMMENTED (comment added) by anyone but the author -> one COMMENTED per user;
- * - final status APPROVED / NEEDS_WORK with no such activity -> that state at the merge time.
+ * - final status APPROVED / NEEDS_WORK with no such activity -> that state with `timeUnknown` (P1): the
+ *   final status has no time of its own (the merge time is recorded beside it), so it is no human decision.
  */
 export function buildReviews(args: { author: DcUser; activities: readonly DcActivity[]; finals: readonly DcParticipant[]; mergedAtMs: number }): Review[] {
   const out: (Review & { key: string })[] = [];
@@ -118,8 +119,8 @@ export function buildReviews(args: { author: DcUser; activities: readonly DcActi
   const at = isoUtcSeconds(args.mergedAtMs);
   for (const p of args.finals) {
     const k = key(p.user);
-    if (p.status === "APPROVED" && !standing.has(k)) out.push({ author: normalizeUser(p.user), state: "APPROVED", submittedAt: at, key: k });
-    if (p.status === "NEEDS_WORK" && !out.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) out.push({ author: normalizeUser(p.user), state: "CHANGES_REQUESTED", submittedAt: at, key: k });
+    if (p.status === "APPROVED" && !standing.has(k)) out.push({ author: normalizeUser(p.user), state: "APPROVED", submittedAt: at, timeUnknown: true, key: k });
+    if (p.status === "NEEDS_WORK" && !out.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) out.push({ author: normalizeUser(p.user), state: "CHANGES_REQUESTED", submittedAt: at, timeUnknown: true, key: k });
   }
   return out.sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0)).map(({ key: _k, ...r }) => r);
 }

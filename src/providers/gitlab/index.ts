@@ -233,7 +233,7 @@ export class GitLabProvider implements ScmProvider {
       diagnostics.push({ label: "MRs merged into other branches in window (excluded)", value: otherBase });
       changes.push(...(await this.mergeRequestRecords(pid, req.repo, inWindow, req.signal)));
       if (this.unknownSize) diagnostics.push({ label: "MRs whose diff GitLab excluded (changedLinesUnknown: size unknown)", value: this.unknownSize });
-      if (this.unreadableResets) diagnostics.push({ label: "approval-reset notes that name no approver (approvals may be over-counted)", value: this.unreadableResets });
+      if (this.unreadableResets) diagnostics.push({ label: "approval-reset notes that name no approver (every approval before each was reset)", value: this.unreadableResets });
     }
     let headSha = req.head?.toLowerCase();
     let viaMerge = false;

@@ -92,7 +92,8 @@ export function normalizeCommitAuthor(c: Pick<BbCommit, "author">): Actor {
  * - `approval` -> APPROVED, `changes_requested` -> CHANGES_REQUESTED, at their dates;
  * - a `comment` by anyone but the author -> one COMMENTED per user, at the first;
  * - a participant whose final state is `approved` / `changes_requested` with no such
- *   activity -> that state at `participated_on` (or the merge time).
+ *   activity -> that state at `participated_on`; without `participated_on` its time is unknown
+ *   (`timeUnknown`, P1: the merge time is recorded, and it is no human decision).
  * Bitbucket drops an approval from the activity when it is withdrawn, so a revoked
  * approval leaves no trace (no DISMISSED, unlike GitHub and GitLab).
  */
@@ -125,8 +126,9 @@ export function buildReviews(args: { author: BbUser | null; activity: readonly B
   for (const p of args.participants) {
     const k = userKey(p.user);
     const at = isoUtcSeconds(p.participated_on ?? args.mergedAt);
-    if (p.state === "approved" && !reviews.some((r) => r.key === k && r.state === "APPROVED")) reviews.push({ author: account(p.user), state: "APPROVED", submittedAt: at, key: k });
-    if (p.state === "changes_requested" && !reviews.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) reviews.push({ author: account(p.user), state: "CHANGES_REQUESTED", submittedAt: at, key: k });
+    const unknown = p.participated_on ? {} : { timeUnknown: true as const };
+    if (p.state === "approved" && !reviews.some((r) => r.key === k && r.state === "APPROVED")) reviews.push({ author: account(p.user), state: "APPROVED", submittedAt: at, ...unknown, key: k });
+    if (p.state === "changes_requested" && !reviews.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) reviews.push({ author: account(p.user), state: "CHANGES_REQUESTED", submittedAt: at, ...unknown, key: k });
   }
   return reviews
     .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0))

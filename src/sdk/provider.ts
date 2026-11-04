@@ -48,6 +48,13 @@ export interface Review {
   state: ReviewState;
   /** ISO-8601 UTC, e.g. `2026-09-30T16:21:35Z`. */
   submittedAt: string;
+  /**
+   * Optional (P1): the SCM gives no time for this decision (a GitLab approval without `approved_at`, a
+   * reviewer state with only its assignment time, a Bitbucket final status without an activity). Then
+   * `submittedAt` is only the time the provider had (the merge, the assignment), the review stays on the
+   * record, and it is never a human decision: a review whose time is unknown cannot be shown to precede the merge.
+   */
+  timeUnknown?: true;
 }
 
 export type ChangeKind = "pull_request" | "direct_push";
@@ -711,6 +718,7 @@ export function changeRecordProblems(value: unknown): string[] {
       p.push(...actorProblems(rev.author, `reviews[${i}].author`));
       if (!REVIEW_STATES.includes(rev.state)) p.push(`reviews[${i}].state must be one of ${REVIEW_STATES.join(", ")}`);
       if (!isIsoUtc(rev.submittedAt)) p.push(`reviews[${i}].submittedAt must be ISO-8601 UTC`);
+      if (rev.timeUnknown !== undefined && rev.timeUnknown !== true) p.push(`reviews[${i}].timeUnknown must be true when present`);
     });
   if (typeof r.changedLines !== "number" || !Number.isInteger(r.changedLines) || r.changedLines < 0) p.push("changedLines must be a non-negative integer");
   if (r.changedLinesUnknown !== undefined && r.changedLinesUnknown !== true) p.push("changedLinesUnknown must be true when present");
