@@ -14,6 +14,7 @@ import {
   type ReviewGranularity,
   type ScmProvider,
 } from "../sdk/provider.js";
+import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "../net/scrub.js";
 import { PluginError } from "./errors.js";
 import type { LockedCredential } from "./lock.js";
 import {
@@ -89,8 +90,8 @@ export interface HostOptions {
   env: Readonly<Record<string, string>>;
   /** How messages name the plugin: its `use`. */
   label: string;
-  /** Secrets the broker may swap in; stripped from every response before the child sees it. */
-  secrets?: readonly { env: string; value: string }[];
+  /** Secrets the broker may swap in; stripped from every response before the child sees it (identities, `secret: false`, are left alone). */
+  secrets?: readonly SecretValue[];
   execPath?: string;
   heartbeatTimeoutMs?: number;
   heartbeatIntervalMs?: number;
@@ -131,29 +132,10 @@ export function closeAllPluginHosts(): void {
 
 type Refable = { ref?: () => void; unref?: () => void };
 
-/** Replaces each secret (and each Basic pair of them) with its placeholder, in bytes. */
-function scrubber(secrets: readonly { env: string; value: string }[]): (b: Buffer) => Buffer {
-  const pairs: [Buffer, Buffer][] = [];
-  for (const s of secrets) if (s.value) pairs.push([Buffer.from(s.value), Buffer.from(`prrla-cred:${s.env}`)]);
-  for (const a of secrets) for (const b of secrets) if (a.value && b.value) pairs.push([Buffer.from(Buffer.from(`${a.value}:${b.value}`).toString("base64")), Buffer.from(`prrla-basic:${a.env}:${b.env}`)]);
-  pairs.sort((x, y) => y[0].length - x[0].length);
-  return (buf) => {
-    let out = buf;
-    for (const [secret, placeholder] of pairs) {
-      let i = out.indexOf(secret);
-      if (i < 0) continue;
-      const parts: Buffer[] = [];
-      let from = 0;
-      while (i >= 0) {
-        parts.push(out.subarray(from, i), placeholder);
-        from = i + secret.length;
-        i = out.indexOf(secret, from);
-      }
-      parts.push(out.subarray(from));
-      out = Buffer.concat(parts);
-    }
-    return out;
-  };
+/** Replaces each secret, in every form a server may echo it in, with its placeholder (src/net/scrub.ts). */
+function scrubber(secrets: readonly SecretValue[]): { bytes: (b: Buffer) => Buffer; text: (s: string) => string } {
+  const pairs = scrubPairs(secrets);
+  return { bytes: (b) => scrubBytes(pairs, b), text: (t) => scrubText(pairs, t) };
 }
 
 function tooLarge(label: string, what: string, bytes: number, max: number): PluginError {
@@ -268,10 +250,11 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.acceptJson ? { acceptJson: () => null } : {}) };
       }
       const res = await io.fetch(m.url, init);
-      const body = scrub(Buffer.from(await res.arrayBuffer())).toString("base64");
-      const headers = [...res.headers].map(([k, v]) => [k, scrub(Buffer.from(v)).toString("utf8")] as [string, string]);
+      // Everything the child sees of the response is scrubbed: its body, headers, status text and final URL.
+      const body = scrub.bytes(Buffer.from(await res.arrayBuffer())).toString("base64");
+      const headers = [...res.headers].map(([k, v]) => [k, scrub.text(v)] as [string, string]);
       try {
-        post({ type: "fetchResult", fid: m.fid, status: res.status, statusText: res.statusText, headers, body, url: res.url });
+        post({ type: "fetchResult", fid: m.fid, status: res.status, statusText: scrub.text(res.statusText), headers, body, url: scrub.text(res.url) });
       } catch (e) {
         post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: (e as PluginError).code, message: (e as Error).message } });
       }
@@ -282,7 +265,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         fid: m.fid,
         error: {
           name: typeof err?.name === "string" ? err.name : "Error",
-          message: scrub(Buffer.from(typeof err?.message === "string" ? err.message : String(e))).toString("utf8"),
+          message: scrub.text(typeof err?.message === "string" ? err.message : String(e)),
           ...(typeof err?.code === "string" ? { code: err.code } : {}),
           ...(typeof err?.host === "string" ? { host: err.host } : {}),
           ...(typeof err?.next === "string" ? { next: err.next } : {}),
@@ -467,13 +450,13 @@ export async function describePlugin(host: PluginHost, options: unknown): Promis
  * `https:` URL's host (any other value grants it no host, so a token is never sent in clear text);
  * without the option it keeps its declared `hosts`. pr-rla computes this from the audit's own
  * options, not from the plugin's code, and the lock records the result, with any extra header
- * names the definition declares for it (lowercase).
+ * names the definition declares for it (lowercase) and whether it is an identity (`secret: false`).
  */
 export function credentialGrants(declared: readonly PluginCredential[], options: unknown): LockedCredential[] {
   const o = options && typeof options === "object" ? (options as Record<string, unknown>) : {};
   return declared.map((c) => {
     const key = c.hostFromOption;
-    const headers = c.headers?.length ? { headers: [...new Set(c.headers.map((h) => h.toLowerCase()))].sort() } : {};
+    const headers = { ...(c.headers?.length ? { headers: [...new Set(c.headers.map((h) => h.toLowerCase()))].sort() } : {}), ...(c.secret === false ? { secret: false as const } : {}) };
     if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort(), ...headers };
     let host: string | null = null;
     try {

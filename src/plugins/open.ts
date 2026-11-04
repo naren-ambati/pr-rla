@@ -32,8 +32,8 @@ export function fullTrustLine(entry: LockEntry): string {
   return `PLUGIN TRUST: full (${entry.name}@${entry.version ?? "unversioned"} runs with your environment and files)`;
 }
 
-function secretsFor(ctx: AuditContext, entry: LockEntry): { env: string; value: string }[] {
-  return entry.credentials.flatMap((c) => (typeof ctx.env[c.env] === "string" && ctx.env[c.env] ? [{ env: c.env, value: ctx.env[c.env]! }] : []));
+function secretsFor(ctx: AuditContext, entry: LockEntry): { env: string; value: string; secret: boolean }[] {
+  return entry.credentials.flatMap((c) => (typeof ctx.env[c.env] === "string" && ctx.env[c.env] ? [{ env: c.env, value: ctx.env[c.env]!, secret: c.secret !== false }] : []));
 }
 
 /** The credentials a lock entry grants that are set in this environment: what consent decides. */
@@ -68,7 +68,12 @@ async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", s
       ...within(asked.writePaths, entry.writePaths).map((w) => `write path ${w}`),
       ...declaredCredentials(host, spec.options).flatMap((c) => {
         const locked = entry.credentials.find((l) => l.env === c.env);
-        return locked ? [...within(c.hosts, locked.hosts).map((h) => `credential ${c.env} for ${h}`), ...within(c.headers ?? [], locked.headers ?? []).map((h) => `credential ${c.env} in header ${h}`)] : [`credential ${c.env}`];
+        if (!locked) return [`credential ${c.env}`];
+        return [
+          ...within(c.hosts, locked.hosts).map((h) => `credential ${c.env} for ${h}`),
+          ...within(c.headers ?? [], locked.headers ?? []).map((h) => `credential ${c.env} in header ${h}`),
+          ...(c.secret === false && locked.secret !== false ? [`credential ${c.env} as an identity (secret: false, not scrubbed)`] : []),
+        ];
       }),
     ];
     if (extra.length) throw new PluginError(`plugin ${spec.use} asks for ${extra.join(", ")}, which its lock entry does not grant (did its options change?)`, "LOCK_MISMATCH", lockAgain);

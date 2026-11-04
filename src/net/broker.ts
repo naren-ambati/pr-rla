@@ -6,6 +6,7 @@ import {
   BrokerTimeout,
   CredentialHeaderNotAllowed,
   CredentialHostMismatch,
+  CredentialIdentityOnly,
   CredentialNotApproved,
   DESTINATION_TIMEOUT_MS,
   HostNotAllowed,
@@ -17,6 +18,7 @@ import {
   type Destination,
 } from "./contract.js";
 import { isGraphqlPath, isQueryOnly } from "./graphql.js";
+import { scrubPairs, scrubText, type SecretValue } from "./scrub.js";
 import { RateGovernor, type GovernedRequest } from "./governor.js";
 import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
 
@@ -61,6 +63,8 @@ export interface Credential {
   hosts: Set<string>;
   /** Header names (lowercase), besides `authorization`, where its placeholder may be swapped (finding 5). */
   headers?: Set<string>;
+  /** false: an identity (a Basic username): sent only as the user part of prrla-basic:, and not scrubbed (finding 8). */
+  secret?: boolean;
   /**
    * Locked but not approved by the person running the command (src/plugins/approvals.ts): never
    * swapped; a placeholder for it is refused with CREDENTIAL_NOT_APPROVED, naming `approve`.
@@ -154,7 +158,9 @@ const realTimer = (fire: () => void, ms: number) => {
 
 const sha256 = (b: string | Uint8Array) => createHash("sha256").update(b).digest("hex");
 const scrubEmails = (s: string) => s.replace(EMAIL, (e) => `user-${sha256(e.toLowerCase()).slice(0, 8)}@example.invalid`);
-const scrubHeaders = (h: Headers): Record<string, string> => Object.fromEntries([...h].map(([k, v]) => [k, SECRET_HEADERS.has(k) ? "[scrubbed]" : scrubEmails(v)]));
+/** Secret values in every form (src/net/scrub.ts), then e-mail addresses. */
+const scrubAll = (pairs: readonly [string, string][], s: string) => scrubEmails(scrubText(pairs, s));
+const scrubHeaders = (pairs: readonly [string, string][], h: Headers): Record<string, string> => Object.fromEntries([...h].map(([k, v]) => [k, SECRET_HEADERS.has(k) ? "[scrubbed]" : scrubAll(pairs, v)]));
 
 function bodyBytes(body: Body | null | undefined): Uint8Array | string | null {
   if (body === null || body === undefined) return null;
@@ -228,10 +234,11 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   // Step 3. `downgraded`: an earlier hop of this request redirected from https to http.
   function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean, downgraded: boolean): Headers {
     const creds = p.credentialsFor(call.pluginId);
-    const secret = (env: string, header: string): string => {
+    const secret = (env: string, header: string, role: "user" | "token" = "token"): string => {
       const c = creds.get(env);
       if (c?.withheld) throw new CredentialNotApproved(env, url.host, call.pluginId, c.withheld.approve);
       if (header !== "authorization" && !c?.headers?.has(header)) throw new CredentialHeaderNotAllowed(env, header, url.host);
+      if (c?.secret === false && role !== "user") throw new CredentialIdentityOnly(env, url.host);
       const allowed = c ? [...c.hosts] : [];
       if (url.protocol !== "https:") throw new CredentialHostMismatch(env, url.host, allowed, { name: url.origin, overHttps: true });
       if (downgraded) throw new CredentialHostMismatch(env, url.host, allowed, { name: `${url.origin} after a redirect from https to http`, overHttps: true });
@@ -241,7 +248,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const out = new Headers();
     for (const [name, value] of original) {
       const basic = name === "authorization" ? BASIC.exec(value) : null;
-      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!, name)}:${secret(basic[2]!, name)}`).toString("base64")}`);
+      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!, name, "user")}:${secret(basic[2]!, name)}`).toString("base64")}`);
       else if (PLACEHOLDER.test(value)) out.set(name, value.replace(PLACEHOLDERS, (_m, env: string) => secret(env, name)));
       else if (crossOrigin && SECRET_HEADERS.has(name)) continue; // a raw secret never follows a redirect to another origin
       else out.append(name, value);
@@ -267,20 +274,22 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     }
   }
 
-  // Step 7.
+  // Step 7. Every secret value the caller holds is scrubbed wherever it appears, in every form (finding 5).
   async function record(call: Call, url: URL, method: string, headers: Headers, body: Body | null, res: Response): Promise<void> {
     if (!p.recorder) return;
     const bytes = bodyBytes(body);
+    const secrets: SecretValue[] = [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
+    const pairs = scrubPairs(secrets);
     p.recorder({
       pluginId: call.pluginId,
       destination: call.destination,
       method,
-      url: scrubEmails(url.href),
-      requestHeaders: scrubHeaders(headers),
+      url: scrubAll(pairs, url.href),
+      requestHeaders: scrubHeaders(pairs, headers),
       bodySha256: bytes === null ? null : sha256(bytes),
       status: res.status,
-      headers: scrubHeaders(res.headers),
-      response: scrubEmails(await res.clone().text()),
+      headers: scrubHeaders(pairs, res.headers),
+      response: scrubAll(pairs, await res.clone().text()),
     });
   }
 

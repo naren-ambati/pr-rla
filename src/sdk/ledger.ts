@@ -164,6 +164,8 @@ export interface LedgerCredential {
   hostFromOption?: string;
   /** Header names, besides `authorization`, where its placeholder may be swapped (as for providers, `PluginCredential.headers`). */
   headers?: string[];
+  /** `false`: an identity such as a Basic username, not scrubbed from responses (as for providers, `PluginCredential.secret`). */
+  secret?: boolean;
 }
 
 export interface LedgerDefinition<Options = Record<string, unknown>> {
@@ -221,6 +223,7 @@ export function assertLedgerDefinition(value: unknown, source: string): asserts 
     throw new Error(`${source}: ledger "${def.name}" a credential's hostFromOption must name an option (a string)`);
   if (def.credentials?.some((c) => c.headers !== undefined && !(Array.isArray(c.headers) && c.headers.every((h: unknown) => typeof h === "string" && /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(h)))))
     throw new Error(`${source}: ledger "${def.name}" a credential's headers must be a list of header names`);
+  if (def.credentials?.some((c) => c.secret !== undefined && typeof c.secret !== "boolean")) throw new Error(`${source}: ledger "${def.name}" a credential's secret must be true or false`);
   if (def.provenance !== undefined && !PROVENANCE_LEVELS.includes(def.provenance)) throw new Error(`${source}: ledger "${def.name}" provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
 }
 

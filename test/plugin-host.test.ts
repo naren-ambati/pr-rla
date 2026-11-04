@@ -20,7 +20,9 @@ import { scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
 const ROOT = join(import.meta.dirname, "..");
 const HOSTILE = join(ROOT, "test", "fixtures", "plugins", "hostile");
 const USE = "./plugins/hostile/index.mjs";
-const SECRETS = { GITHUB_TOKEN: "ghp_REALSECRET0123456789abcdef", GITHUB_USER: "alice", AWS_SECRET_ACCESS_KEY: "aws-real-secret-do-not-leak" };
+const SECRETS = { GITHUB_TOKEN: "ghp_REAL+SECRET/0123456789=abcdef", GITHUB_USER: "alice", AWS_SECRET_ACCESS_KEY: "aws-real-secret-do-not-leak" };
+/** Every form the fake host echoes the token in (src/net/scrub.ts covers each). */
+const tokenForms = (v: string) => [v, encodeURIComponent(v), new URLSearchParams({ t: v }).toString().slice(2), Buffer.from(v).toString("base64"), Buffer.from(v).toString("base64url")];
 const WINDOW = { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" };
 
 /** A Node at 25 or later, for the network-denial test: this one, PR_RLA_NODE25, or any `node` on PATH. */
@@ -66,7 +68,13 @@ async function setupHostile() {
   const server: { requests: { url: string; method: string; authorization: string | null }[] } = { requests: [] };
   const transport = (async (input: string | URL, init?: RequestInit) => {
     const h = new Headers(init?.headers);
+    const url = new URL(String(input));
     server.requests.push({ url: String(input), method: (init?.method ?? "GET").toUpperCase(), authorization: h.get("authorization") });
+    const token = (h.get("authorization") ?? "").replace(/^token /, "");
+    // An echoing host (finding 5): the token comes back raw, encoded, in a header, the status text and a redirect's URL.
+    if (url.pathname === "/echo-forms") return new Response(null, { status: 302, headers: { location: `/landing?t=${encodeURIComponent(token)}` } });
+    if (url.pathname === "/landing") return new Response(JSON.stringify({ forms: tokenForms(token) }), { status: 200, statusText: `OK ${token}`, headers: { "content-type": "application/json", "x-echo": token } });
+    if (url.pathname === "/participants") return new Response(JSON.stringify({ values: [{ user: { name: SECRETS.GITHUB_USER } }, { user: { name: `${SECRETS.GITHUB_USER}a` } }, { user: { name: `b${SECRETS.GITHUB_USER}` } }] }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({ authorization: h.get("authorization") }), { status: 200, headers: { "content-type": "application/json", "x-echo": h.get("authorization") ?? "" } });
   }) as unknown as typeof fetch;
   const ctx = createAuditContext({ mode: "read-write", env: SECRETS, fetch: transport });
@@ -78,7 +86,7 @@ async function openWithNode(ctx: AuditContext, dir: string, execPath: string, op
   const { entry, plugin } = verifyLocked(USE, dir);
   const id = `provider:${entry.name}`;
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: entry.credentials });
-  const host = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(entry.credentials, ctx.env), label: USE, secrets: entry.credentials.map((c) => ({ env: c.env, value: (SECRETS as Record<string, string>)[c.env]! })), execPath });
+  const host = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(entry.credentials, ctx.env), label: USE, secrets: entry.credentials.map((c) => ({ env: c.env, value: (SECRETS as Record<string, string>)[c.env]!, secret: c.secret !== false })), execPath });
   return hostedProvider(host, options, { cwd: dir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log });
 }
 
@@ -145,8 +153,24 @@ describe("the hostile fixture plugin, contained (functional-design.md §U2b; tes
         expect(seen.basicToUndeclaredHost).toMatchObject({ ok: false, code: "HOST_NOT_ALLOWED" });
         expect(seen.globalFetch).toMatchObject({ ok: false, code: "HOST_NOT_ALLOWED" });
         expect(seen.post).toMatchObject({ ok: false, code: "READ_ONLY_VIOLATION" });
-        expect(s.server.requests.map((r) => new URL(r.url).host)).toEqual(["api.github.com", "api.github.com"]);
-        expect(s.server.requests.every((r) => r.method === "GET")).toBe(true);
+        expect(s.server.requests.map((r) => new URL(r.url).pathname)).toEqual(["/echo", "/echo", "/echo-forms", "/landing", "/participants"]);
+        expect(s.server.requests.every((r) => new URL(r.url).host === "api.github.com" && r.method === "GET")).toBe(true);
+      });
+
+      it("a token the host echoes back reaches it only as a placeholder, in every form: body, header, status text, redirect URL (finding 5)", () => {
+        const e = seen.echoForms as { ok: boolean; value: { url: string; header: string; statusText: string; body: string } };
+        expect(e.ok).toBe(true);
+        expect(e.value.url).toBe("https://api.github.com/landing?t=prrla-cred:GITHUB_TOKEN");
+        expect(e.value.header).toBe("prrla-cred:GITHUB_TOKEN");
+        expect(e.value.statusText).toBe("OK prrla-cred:GITHUB_TOKEN");
+        expect(JSON.parse(e.value.body)).toEqual({ forms: ["prrla-cred:GITHUB_TOKEN", "prrla-cred:GITHUB_TOKEN", "prrla-cred:GITHUB_TOKEN", "prrla-cred:GITHUB_TOKEN", "prrla-cred:GITHUB_TOKEN"] });
+        for (const form of tokenForms(SECRETS.GITHUB_TOKEN)) expect(JSON.stringify(seen), form).not.toContain(form);
+      });
+
+      it("an identity (secret: false) is not scrubbed from responses, and is sent only as the user of prrla-basic: (finding 8)", () => {
+        // Before the fix: prrla-cred:GITHUB_USER, prrla-cred:GITHUB_USERa and bprrla-cred:GITHUB_USER.
+        expect(seen.identityEcho).toEqual({ ok: true, value: JSON.stringify({ values: [{ user: { name: "alice" } }, { user: { name: "alicea" } }, { user: { name: "balice" } }] }) });
+        expect(seen.identityAsToken).toMatchObject({ ok: false, code: "CREDENTIAL_IDENTITY_ONLY" });
       });
 
       it(major >= 25 ? "cannot open a socket (Node 25 or later, no --allow-net)" : "CAN open a socket: Node 22 and 24 have no network control (the stated limit)", async () => {

@@ -255,8 +255,9 @@ export default defineLedger({
   hosts: (options) => [settings(options).host],
   writePaths: (options) => [`${settings(options).host}/rest/api/3/issue`],
   // No fixed host: pr-rla sends these only to the host of options.base_url, and only when it is https.
+  // JIRA_EMAIL is the Basic username, an identity (secret: false): pr-rla does not scrub it from responses.
   credentials: [
-    { env: "JIRA_EMAIL", hosts: [], hostFromOption: "base_url" },
+    { env: "JIRA_EMAIL", hosts: [], hostFromOption: "base_url", secret: false },
     { env: "JIRA_TOKEN", hosts: [], hostFromOption: "base_url" },
   ],
   create: (options, ctx) => new JiraLedger(options, ctx),

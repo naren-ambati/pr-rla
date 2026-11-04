@@ -609,6 +609,24 @@ describe("step 7: the recorder", () => {
     expect(e.bodySha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("scrubs a secret the caller holds wherever it appears: raw, percent-encoded, base64, in headers, the body and a redirect's URL (finding 5)", async () => {
+    const token = "SECRET+TOKEN/123=";
+    const exchanges: RecordedExchange[] = [];
+    const t = transport((u, init) => {
+      const got = new Headers(init.headers).get("authorization")!.replace(/^Bearer /, "");
+      if (u.pathname === "/hop") return raw("", 302, { location: `/landing?t=${encodeURIComponent(got)}` });
+      return ok({ raw: got, pct: encodeURIComponent(got), form: new URLSearchParams({ t: got }).toString(), b64: Buffer.from(got).toString("base64"), b64url: Buffer.from(got).toString("base64url") }, { "x-echo": got, "x-echo-b64": Buffer.from(got).toString("base64") });
+    });
+    const creds = new Map([["JIRA_TOKEN", { value: token, hosts: new Set(["corp.atlassian.net"]) }]]);
+    const b = createBroker({ recorder: (e) => exchanges.push(e), credentialsFor: () => creds }, { fetch: t.f });
+    await b.bind("ledger:jira")("https://corp.atlassian.net/hop", { headers: { authorization: "Bearer prrla-cred:JIRA_TOKEN" } });
+    expect(exchanges.map((e) => e.url)).toEqual(["https://corp.atlassian.net/hop", "https://corp.atlassian.net/landing?t=prrla-cred:JIRA_TOKEN"]);
+    const all = JSON.stringify(exchanges);
+    for (const form of [token, encodeURIComponent(token), Buffer.from(token).toString("base64"), Buffer.from(token).toString("base64url"), new URLSearchParams({ t: token }).toString().slice(2)]) expect(all, form).not.toContain(form);
+    expect(exchanges[1]!.headers).toMatchObject({ "x-echo": "prrla-cred:JIRA_TOKEN", "x-echo-b64": "prrla-cred:JIRA_TOKEN" });
+    expect(JSON.parse(exchanges[1]!.response)).toEqual({ raw: "prrla-cred:JIRA_TOKEN", pct: "prrla-cred:JIRA_TOKEN", form: "t=prrla-cred:JIRA_TOKEN", b64: "prrla-cred:JIRA_TOKEN", b64url: "prrla-cred:JIRA_TOKEN" });
+  });
+
   it("is never installed in read-only mode", async () => {
     const { createAuditContext } = await import("../src/api/context.js");
     expect(() => createBroker({ mode: "read-only", recorder: () => {} })).toThrow(/never records in read-only mode/);

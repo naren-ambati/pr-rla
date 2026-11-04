@@ -227,7 +227,7 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
       hosts: ["acme.atlassian.net"],
       writePaths: ["acme.atlassian.net/rest/api/3/issue"],
       credentials: [
-        { env: "JIRA_EMAIL", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
+        { env: "JIRA_EMAIL", hosts: ["acme.atlassian.net"], hostFromOption: "base_url", secret: false },
         { env: "JIRA_TOKEN", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
       ],
     });

@@ -185,6 +185,14 @@ export interface PluginCredential {
    * (CREDENTIAL_HEADER_NOT_ALLOWED). `pr-rla plugin add` records them.
    */
   headers?: string[];
+  /**
+   * Optional (same API version): `false` marks an identity, not a secret: a Basic username or an
+   * account e-mail. pr-rla then leaves its value alone in responses (a list of participants that
+   * names the user still reads right), and sends it only as the user part of
+   * `prrla-basic:<USER_ENV>:<TOKEN_ENV>`. Absent or `true`: a secret, scrubbed from every response
+   * in every form pr-rla knows (raw, percent-encoded, base64).
+   */
+  secret?: boolean;
 }
 
 /** A header name (RFC 9110 token). */
@@ -278,6 +286,7 @@ export function pluginGrantProblems(def: { hosts?: unknown; credentials?: unknow
     if (!ok) return 'credentials must be a list of { env: "NAME", hosts: ["host", …] }';
     if (!(def.credentials as PluginCredential[]).every((c) => c.hostFromOption === undefined || (typeof c.hostFromOption === "string" && c.hostFromOption.length > 0))) return "a credential's hostFromOption must name an option (a string)";
     if (!(def.credentials as PluginCredential[]).every((c) => c.headers === undefined || (Array.isArray(c.headers) && c.headers.every((h) => typeof h === "string" && HEADER_NAME.test(h))))) return "a credential's headers must be a list of header names";
+    if (!(def.credentials as PluginCredential[]).every((c) => c.secret === undefined || typeof c.secret === "boolean")) return "a credential's secret must be true or false";
   }
   return null;
 }

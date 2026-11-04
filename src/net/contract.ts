@@ -167,3 +167,14 @@ export class CredentialHeaderNotAllowed extends BrokerError {
     this.name = "CredentialHeaderNotAllowed";
   }
 }
+
+/** Step 3: a credential its plugin declares an identity (`secret: false`) used anywhere but as the user of prrla-basic: (finding 8). Nothing was sent. */
+export class CredentialIdentityOnly extends BrokerError {
+  constructor(
+    readonly env: string,
+    host: string,
+  ) {
+    super(`credential ${env} is declared an identity (secret: false), so it is sent only as the user part of prrla-basic:<USER_ENV>:<TOKEN_ENV>; nothing was sent`, "CREDENTIAL_IDENTITY_ONLY", host, `use it as prrla-basic:${env}:<TOKEN_ENV>, or declare it a secret`);
+    this.name = "CredentialIdentityOnly";
+  }
+}

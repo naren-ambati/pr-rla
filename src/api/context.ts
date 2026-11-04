@@ -175,7 +175,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
         const value = env[c.env];
         // As the broker compares them: URL hosts of https origins (lowercase, the default port left out).
         const hosts = new Set(c.hosts.flatMap((h) => (httpsOrigin(h) ? [new URL(httpsOrigin(h)!).host] : [])));
-        const headers = c.headers?.length ? { headers: new Set(c.headers.map((h) => h.toLowerCase())) } : {};
+        const headers = { ...(c.headers?.length ? { headers: new Set(c.headers.map((h) => h.toLowerCase())) } : {}), ...(c.secret === false ? { secret: false } : {}) };
         if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts, ...headers, withheld: c.withheld } : { value, hosts, ...headers });
       }
       grants.set(pluginId, { trust: g.trust, hosts: new Set(g.hosts ?? []), writePaths: new Set(g.writePaths ?? []), credentials });
@@ -232,7 +232,7 @@ export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "
 }
 
 /** What a built-in may send, for the broker's grant (its recorder scrubs these values). */
-const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => granted.map((u) => ({ env: u.env, hosts: u.origins.map((o) => new URL(o).host) }));
+const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => granted.map((u) => ({ env: u.env, hosts: u.origins.map((o) => new URL(o).host), ...(u.secret ? {} : { secret: false }) }));
 
 /** Opens the configured provider with its fetch bound to the broker as `provider:<name>`. */
 export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {

