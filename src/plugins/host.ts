@@ -83,6 +83,11 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
 const realSleep = abortableSleep;
 /** The longest wait a plugin's ctx.sleep is served for (the SDK's own cap on a single wait). */
 export const MAX_PLUGIN_SLEEP_MS = MAX_WAIT_MS;
+/**
+ * Fetches one child may have in flight. Each holds its request (up to a frame, 64 MiB) in the parent
+ * until it is answered, so this bounds what a child can make the parent hold; real plugins stay far below.
+ */
+export const MAX_PLUGIN_FETCHES = 64;
 const realTimer = (fire: () => void, ms: number) => {
   const t = setTimeout(fire, ms);
   return () => clearTimeout(t);
@@ -349,6 +354,12 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   }
 
   async function serveFetch(m: FetchMessage): Promise<void> {
+    // Like a sleep, a fetch is served only while a call is in flight, and only so many at once.
+    const refusal = loading || pending.size === 0 ? "the plugin fetched outside a call; nothing was sent" : fetches.size >= MAX_PLUGIN_FETCHES ? `the plugin has ${MAX_PLUGIN_FETCHES} fetches in flight already; nothing was sent` : null;
+    if (refusal) {
+      post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: "PLUGIN_FETCH_REFUSED", message: refusal } });
+      return;
+    }
     const ctrl = new AbortController();
     fetches.set(m.fid, ctrl);
     busy();
@@ -487,7 +498,8 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         child.kill("SIGKILL");
     }
   }
-  child.on("exit", (code, signal) => {
+  // "close", not "exit": it comes after the child's pipes are drained, so a last error frame (a load failure) is read first.
+  child.on("close", (code, signal) => {
     if (!closed) die(new PluginError(withTail(`plugin ${o.label} exited (${signal ? `signal ${signal}` : `code ${code}`})`), "PLUGIN_HOST_FAILED", "check the plugin's output above"));
     live.delete(host);
   });

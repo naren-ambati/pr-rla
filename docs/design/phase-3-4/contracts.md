@@ -196,7 +196,7 @@ The parent and the child exchange JSON objects in frames on the child's file des
 **Failure behaviour:**
 - No heartbeat for 60 s while a call is in flight, counted from `ready`, kills the child; so does a start-up that has not reported `ready` within its own limit (60 s by default). The command then fails with the plugin's stderr tail and writes no partial output.
 - A frame over 64 MiB is refused from its length, before any of its payload is buffered, in both directions (`MESSAGE_TOO_LARGE`; the parent stops the child).
-- A `sleep` is served only while a call is in flight, for at most 15 minutes (the SDK's `MAX_WAIT_MS`), and is cancelled when the calls end or the host closes.
+- A `sleep` is served only while a call is in flight, for at most 15 minutes (the SDK's `MAX_WAIT_MS`), and is cancelled when the calls end or the host closes. A `fetch` too is served only while a call is in flight, and at most 64 at once; any other is answered with `PLUGIN_FETCH_REFUSED`, unsent.
 - Results are re-validated by the core (`population.ts`) whatever the child returns.
 
 **Compatibility.** v2 has v1's messages and adds `accept` / `acceptResult`; what changed is the framing, from Node's IPC channel (which buffers and parses a whole message before anyone can measure it) to these frames. The parent and the child ship together in one pr-rla, and the parent refuses a child that reports another protocol. No plugin, lock or audit file carries the protocol, so nothing else changes.

@@ -58,16 +58,29 @@ async function fail(code: string, message: string, id: number | null = null): Pr
   process.exit(1);
 }
 
-let inbox: Buffer = Buffer.alloc(0);
+// Chunks are joined only once a whole frame is in, so a large frame costs one copy, not one per chunk.
+let chunks: Buffer[] = [];
+let have = 0;
+let need: number | null = null;
+const take = (n: number): Buffer => {
+  const all = chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks);
+  chunks = all.length > n ? [all.subarray(n)] : [];
+  have -= n;
+  return all.subarray(0, n);
+};
 pipe.on("data", (chunk: Buffer) => {
-  inbox = inbox.length ? Buffer.concat([inbox, chunk]) : chunk;
-  while (inbox.length >= 4) {
-    const n = inbox.readUInt32BE(0);
-    // The parent never sends more; if it did, stop rather than buffer it.
-    if (n > boot.maxMessageBytes) process.exit(1);
-    if (inbox.length < 4 + n) return;
-    const frame = inbox.subarray(4, 4 + n);
-    inbox = inbox.subarray(4 + n);
+  chunks.push(chunk);
+  have += chunk.length;
+  for (;;) {
+    if (need === null) {
+      if (have < 4) return;
+      need = take(4).readUInt32BE(0);
+      // The parent never sends more; if it did, stop rather than buffer it.
+      if (need > boot.maxMessageBytes) process.exit(1);
+    }
+    if (have < need) return;
+    const frame = take(need);
+    need = null;
     receive(JSON.parse(frame.toString("utf8")) as ParentMessage);
   }
 });

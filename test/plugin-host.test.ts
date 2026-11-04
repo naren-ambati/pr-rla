@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../src/api/context.js";
 import { buildProgram } from "../src/cli.js";
 import { hostedProviderConformance, readRecordedFixture } from "../src/plugins/check.js";
-import { abortableSleep, closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, MAX_PLUGIN_SLEEP_MS, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
+import { abortableSleep, closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, MAX_PLUGIN_FETCHES, MAX_PLUGIN_SLEEP_MS, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
 import { placeholderEnv, readGrants, resolvePlugin, verifyLocked } from "../src/plugins/lock.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS, IPC_PROTOCOL, MAX_MESSAGE_BYTES } from "../src/plugins/protocol.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
@@ -259,6 +259,20 @@ describe("the hostile fixture's dependency names cannot widen its read grant (fi
     expect(out).toEqual([`ERR pr-rla: plugin ${USE}: its package.json names the dependency "../../..", which is not an npm package name; refusing it before anything is granted or run`, "ERR   next: a dependency must be name or @scope/name, installed in node_modules"]);
   });
 
+  it("the plugin's own package may be linked from a local directory, but not one that holds the audit repo (review of this round)", async () => {
+    const dir = realpathSync(auditDirWith({}));
+    cpSync(HOSTILE, join(dir, "vendor", "hostile"), { recursive: true });
+    mkdirSync(join(dir, "node_modules"));
+    symlinkSync("../vendor/hostile", join(dir, "node_modules", "pr-rla-provider-hostile"));
+    expect(resolvePlugin("pr-rla-provider-hostile", dir).root).toBe(join(dir, "vendor", "hostile"));
+    const evil = realpathSync(auditDirWith({}));
+    writeFileSync(join(evil, "package.json"), JSON.stringify({ name: "pr-rla-provider-evil", version: "1.0.0", main: "index.mjs" }));
+    writeFileSync(join(evil, "index.mjs"), "export default {};\n");
+    mkdirSync(join(evil, "node_modules"));
+    symlinkSync("..", join(evil, "node_modules", "pr-rla-provider-evil"));
+    expect(() => resolvePlugin("pr-rla-provider-evil", evil)).toThrow(/package pr-rla-provider-evil resolves to .*, which contains the audit directory/);
+  });
+
   it("scoped and pnpm-style (symlinked inside node_modules) dependencies still resolve", async () => {
     const dir = hostileWith({ dependencies: { "@acme/util": "1.0.0", "left-pad": "1.3.0" } });
     const nm = join(dir, "plugins", "hostile", "node_modules");
@@ -508,6 +522,42 @@ describe("a plugin's sleep: capped, only during a call, cancelled on close (find
       c.abort();
       await sleeping;
       expect(Date.now() - started).toBeLessThan(1000);
+    }
+  });
+});
+
+describe("a plugin's fetches: only during a call, at most MAX_PLUGIN_FETCHES at once (review of this round)", () => {
+  it("a fan-out past the limit is refused unsent, and a fetch after the call returned is never sent", async () => {
+    const plugin = resolvePlugin("./hostile/index.mjs", auditDirWith({ hostile: HOSTILE }));
+    const host = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "hostile" });
+    const sent: string[] = [];
+    let inFlight = 0;
+    let most = 0;
+    const transport = (async (input: string | URL) => {
+      sent.push(String(input));
+      most = Math.max(most, ++inFlight);
+      await new Promise((r) => setTimeout(r, 300));
+      inFlight--;
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+    try {
+      const fan = await hostedProvider(host, { fanOut: MAX_PLUGIN_FETCHES + 36 }, { cwd: ".", fetch: transport, log: () => {} });
+      const codes = JSON.parse((await fan.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).limitations[0]!) as string[];
+      expect(codes.filter((c) => c === "sent")).toHaveLength(MAX_PLUGIN_FETCHES);
+      expect(codes.filter((c) => c === "PLUGIN_FETCH_REFUSED")).toHaveLength(36);
+      expect(most).toBeLessThanOrEqual(MAX_PLUGIN_FETCHES);
+    } finally {
+      host.close();
+    }
+    const late = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "hostile" });
+    try {
+      sent.length = 0;
+      const p = await hostedProvider(late, { fetchAfterReturn: true }, { cwd: ".", fetch: transport, log: () => {} });
+      expect((await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).limitations).toEqual(["returned"]);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(sent).toEqual([]);
+    } finally {
+      late.close();
     }
   });
 });

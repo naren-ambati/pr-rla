@@ -214,14 +214,16 @@ const NPM_NAME = /^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*\/)?[A-Za-z0-9~-][A-Za-z0-9.
 export const isNpmPackageName = (name: string): boolean => name.length > 0 && name.length <= 214 && NPM_NAME.test(name);
 
 /**
- * Refuses a resolved package directory that is not an installed package: it must sit in a
- * `node_modules` directory (as `node_modules/<name>` or `node_modules/@scope/<name>`, after symlinks),
- * and must not contain the audit directory. Checked before anything is hashed, granted or run.
+ * Refuses a resolved package directory that cannot be what it claims (finding 3): it must not contain
+ * the audit directory, and a dependency must sit in a `node_modules` directory (as
+ * `node_modules/<name>` or `node_modules/@scope/<name>`, after symlinks). The plugin's own package
+ * may be a link to a local directory (`npm install ../plugin`), which npm records with no integrity
+ * and the tree hash pins. Checked before anything is hashed, granted or run.
  */
-function checkPackageDir(use: string, what: string, name: string, dir: string, auditDir: string): void {
+function checkPackageDir(use: string, what: string, name: string, dir: string, auditDir: string, linkable = false): void {
   const parent = dirname(dir);
   const holder = name.startsWith("@") ? dirname(parent) : parent;
-  if (basename(holder) !== "node_modules" || (name.startsWith("@") && !basename(parent).startsWith("@")))
+  if (!linkable && (basename(holder) !== "node_modules" || (name.startsWith("@") && !basename(parent).startsWith("@"))))
     throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which is not in a node_modules directory; refusing it before anything is granted or run`, "TREE_ESCAPE", "install it with npm (npm ci --ignore-scripts); a linked or vendored copy outside node_modules is not a dependency pr-rla can pin");
   if (isInside(auditDir, dir)) throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which contains the audit directory ${auditDir}; refusing it before anything is granted or run`, "TREE_ESCAPE", "remove that dependency from the plugin");
 }
@@ -332,7 +334,7 @@ export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
     if (!isNpmPackageName(use)) throw new PluginError(`plugin ${JSON.stringify(use)} is neither a path (./…, ../…, /…, file:) nor an npm package name`, "PLUGIN_INVALID", "use the package's name, or a path relative to the audit directory");
     const found = findPackage(use, dir);
     if (!found) throw new PluginError(`cannot find package ${use} from ${dir}`, "PLUGIN_UNRESOLVED", `install it in the audit repo (npm install --save-exact ${use} --ignore-scripts), or use it by path`);
-    checkPackageDir(use, "package", use, found.dir, dir);
+    checkPackageDir(use, "package", use, found.dir, dir, true);
     const pkg = readPackageJson(found.dir) ?? {};
     const npm = npmLockEntry(use, found.installedAt);
     return {

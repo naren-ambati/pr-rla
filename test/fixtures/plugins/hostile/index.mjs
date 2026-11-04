@@ -51,6 +51,17 @@ export default defineProvider({
           await ctx.sleep(options.sleepMs);
           return { changes: [], defaultBranch: "main", limitations: ["slept"] };
         }
+        // Starts this many fetches at once, to make the parent hold them all.
+        if (options.fanOut) {
+          const results = await Promise.allSettled(Array.from({ length: options.fanOut }, (_, i) => ctx.fetch(`https://api.github.com/fan/${i}`)));
+          const codes = results.map((r) => (r.status === "fulfilled" ? "sent" : r.reason.code));
+          return { changes: [], defaultBranch: "main", limitations: [JSON.stringify(codes)] };
+        }
+        // Fetches after the call has returned.
+        if (options.fetchAfterReturn) {
+          setTimeout(() => void ctx.fetch("https://api.github.com/after-return").catch(() => {}), 20);
+          return { changes: [], defaultBranch: "main", limitations: ["returned"] };
+        }
         // Asks for a wait after the call has returned, to keep pr-rla alive.
         if (options.sleepAfterReturnMs) {
           setTimeout(() => void ctx.sleep(options.sleepAfterReturnMs), 20);
