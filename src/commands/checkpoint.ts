@@ -62,7 +62,7 @@ export async function checkpointCommand(ctx: CommandContext, opts: CheckpointOpt
   if (!ledger.readHistory) throw new CommandError(`ledger ${ledger.name} has no readHistory, so it cannot be checkpointed (git-file's tamper trail is git history itself)`, EXIT.FAIL);
   const status = await ledgerStatus(config, paths, ledger, reg);
   const takenAt = isoNow(ctx);
-  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity: await pluginIdentity(config.ledger, "ledger", config.dir), window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt });
+  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins), window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt });
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = isRegistrationV2(reg) ? reg.record.timestamping : timestampingFor(config, bundle);
   // Skew over 10 minutes refuses here, before anything is written (FR1.8).
