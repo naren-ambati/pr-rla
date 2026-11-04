@@ -54,9 +54,14 @@ interface ScmProvider {
   // U8 fix round (2026-11-04), all optional:
   estimateRequests?(req: ListChangesRequest): Promise<RequestEstimate>;
   describeRepo?(ref: { repo: string; id?: string }): Promise<RepoRef>;     // throws RepoUnavailableError(404) when gone
-  listingVisibility?(set: RepoSetRule): Promise<ListingVisibility>;        // per visibility: provably complete, and why
+  listingVisibility?(set: RepoSetRule): Promise<ListingVisibility>;        // per visibility: provably complete, and why; P3: expected counts
   firstParentPath?(req: { repo: string; base: string; head: string }): Promise<{ sha: string; committedAt: string }[] | null>;
+  // P3 (2026-11-04), optional: the branch's push log, newest first, back to the newest update at or before `since`
+  pushLog?(req: { repo: string; branch: string; since: string }): Promise<{ events: { id: string; before: string; after: string; at: string; kind: "fast-forward" | "forced" | "created" | "deleted" | "unknown" }[]; limitations?: string[] }>;
 }
+// P3: ListChangesResult.unreachable?: string[]  (pull requests merged in the window whose merge commit headSha does not reach)
+// P3: ListingVisibility.expected?: { visibilities, count, source }[]  (the SCM's own count, e.g. total_private_repos)
+// P3: RetryHints.rateLimitBody?: string; RetryHints.blindRateLimitWaitMs?: number  (pr-rla/http; the broker honours them)
 interface RepoRef { repo: string; id: string; defaultBranch: string; archived: boolean; fork: boolean; visibility: "public" | "private" | "internal"; createdAt?: string }
 interface ChangeDescription {
   changeId: string;
@@ -301,7 +306,8 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 | `timestamping` | `{ authorities: string[], minTokens: number, toleranceSeconds: 600, defaultAccuracySeconds: 60, bundle: string }` | `minTokens` defaults to 2 |
 | `plugins` | `{ provider: PluginIdentity, ledger: PluginIdentity }` | |
 | `verdicts` | `{ minProvenance: ProvenanceLevel, reviewers: string[] \| null, require_signed?: boolean, allowed_signers?: string[] }` | `reviewers` are logins or account ids (who may count); `allowed_signers` (U9 fix round) are OpenSSH allowed-signers lines, sorted, present only when keys are registered; `require_signed` only when true, and only with the built-in git-file ledger |
-| `registeredRepos?` | `{ repo, repoId }[]` | A `rule` only (U8 fix round): the repos the rule matched at `register`, by id, sorted. Freeze includes each that still exists, whatever its attributes |
+| `registeredRepos?` | `{ repo, repoId }[]` | A `rule` only (U8 fix round): the repos the rule matched at `register`, by id, sorted. Freeze includes each that still exists, whatever its attributes. Required for a rule (P3): check 2 FAILs a rule registration without it |
+| `registeredVisibility?` | `{ identity, visibility: { <v>: { listed, complete, reason } } }` | A `rule` only (P3): what the registering token could prove it saw. A visibility the rule admits whose proof is not complete leaves check 5 INCOMPLETE |
 
 ### `PluginIdentity`
 
@@ -314,7 +320,7 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 
 `{ schema, registrationSha256, repos: [{ repo, repoId, defaultBranch, headSha }], provider: PluginIdentity & { reviewGranularity }, frozenAt, changes: ChangeRecord[] }`
 
-`repos` and `changes` are both sorted. A pool adds (U8 fix round): `repoListing` (a rule: the owner's unfiltered listing at freeze, `{ owner, identity, visibility: { <v>: { listed, complete, reason } }, repos: [{ repo, repoId, defaultBranch, archived, fork, visibility, createdAt, excludedBy }] }`) and `goneRepos` (`[{ repo, repoId, status, detail, probedAt }]`, registered repos a repo-level probe found gone).
+`repos` and `changes` are both sorted. A pool adds (U8 fix round): `repoListing` (a rule: the owner's unfiltered listing at freeze, `{ owner, identity, visibility: { <v>: { listed, complete, reason } }, repos: [{ repo, repoId, defaultBranch, archived, fork, visibility, createdAt, excludedBy }] }`) and `goneRepos` (`[{ repo, repoId, status, detail, probedAt }]`, registered repos a repo-level probe found gone). P3 adds `headEvidence` (`[{ repo, headSha, status: "tip" | "unproven", since?, event?, detail }]`, sorted by repo, present when the provider has a push log): what the push log showed at freeze about each pinned head. Informational; verify reads the log again.
 
 ### `pr-rla/commitment/v2` (signed)
 
@@ -394,7 +400,7 @@ It runs outside the broker, because git speaks its own protocols and authenticat
 With no authority configured at all, `register` and `freeze` exit 0 with the `TIMESTAMP NOT TAMPER-PROOF` warning (FR1.6, FR1.11).
 
 **`--json`:**
-- The `--json` output of each command is the AuditApi result object. `verify --json` carries `verdict` (`VERIFIED`, `INCOMPLETE` or `FAILED`), and `ok` is true only for `VERIFIED`; a check's `status` can be `INCOMPLETE`.
+- The `--json` output of each command is the AuditApi result object. `verify --json` carries `verdict` (`VERIFIED`, `INCOMPLETE` or `FAILED`), and `ok` is true only for `VERIFIED`; a check's `status` can be `INCOMPLETE`. A check may carry `verbose` (P3): the per-item lines a summary line in `details` stands for, printed by `verify --verbose`.
 - Adding a field is compatible. Renaming or removing a field is a minor version below 1.0 and is listed in the CHANGELOG.
 - Errors print `{ "error": { "code", "message", "host"?, "next"? } }` to stdout with `--json`, and a plain sentence plus the next step to stderr without it (NFR17).
 
