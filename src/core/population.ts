@@ -1,4 +1,5 @@
 import { assertChangeRecord, isCommitId, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
+import { splitChangeId } from "./draw-key.js";
 import { sortChanges, type ManifestEntry } from "./records.js";
 import { applySelector, reviewsAsOf, type ActorAliases, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
@@ -76,6 +77,8 @@ export function checkListed(providerName: string, listed: ListChangesResult, arg
     if (!inWindow(c.mergedAt, args.window)) throw new Error(`provider ${providerName} returned ${c.id} landed ${c.mergedAt}, outside the window`);
     if (!args.selector.kinds.includes(c.kind)) throw new Error(`provider ${providerName} returned ${c.id} of kind ${c.kind}, which was not requested`);
     if (c.repo !== args.repo) throw new Error(`provider ${providerName} returned ${c.id} from repo ${c.repo}, not ${args.repo}`);
+    // P5: the id names that repo byte for byte (a draw key takes the id's scheme and its #n or @sha).
+    if (!splitChangeId(c.id, c.repo)) throw new Error(`provider ${providerName} returned ${c.id}, whose id does not name its repo ${c.repo} byte for byte`);
   }
   // P3: `unreachable` names pull requests of this listing.
   if (listed.unreachable !== undefined) {

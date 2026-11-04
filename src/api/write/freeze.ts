@@ -11,7 +11,8 @@ import {
   type RekorV2Entry,
   type SignedRecord,
 } from "../../core/records.js";
-import { isRegistrationV2 } from "../../core/records.js";
+import { canonicalOrder } from "../../core/draw-key.js";
+import { isRegistrationV2, registrationRepoSet } from "../../core/records.js";
 import { unixToIso } from "../../core/seed.js";
 import { loadOrCreateKey, signRecord } from "../../core/signing.js";
 import { providerTraits } from "../../provider-traits.js";
@@ -161,6 +162,10 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
   const registered = v2reg.record.plugins.provider;
   if (providerId.name !== registered.name || providerId.optionsSha256 !== registered.optionsSha256)
     ctx.err(`note: the provider in .pr-rla.yml (${providerId.name}) differs from the registered one (${registered.name}, options ${registered.optionsSha256.slice(0, 8)}…); verify rebuilds the population with the provider it is given`);
+  // P5: a v2 manifest stores its changes in canonical order, by draw key (contracts.md §5): a rule pool's repositories
+  // by stable id, a repo's or a list's by the registered path. draws.json's `index` points into this order.
+  const order = canonicalOrder(registrationRepoSet(v2reg), run.repos, pop.entries);
+  if (order.problems.length) throw new AuditError(`the population has no canonical order, so it cannot be frozen: ${order.problems.join("; ")}`);
   const body: Omit<ManifestV2, "sha256"> = {
     schema: "pr-rla/manifest/v2",
     registrationSha256: v2reg.sha256,
@@ -179,7 +184,7 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
     funnel: pop.selection.funnel,
     limitations: pop.limitations,
     N,
-    changes: pop.entries,
+    changes: order.order,
     prRlaVersion: PR_RLA_VERSION,
   };
   const manifest: ManifestV2 = { ...body, sha256: manifestSha256(body) };

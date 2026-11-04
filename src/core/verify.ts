@@ -11,7 +11,9 @@ import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { createPublicKey } from "node:crypto";
 import { canonicalJson, sha256Hex } from "./canonical.js";
 import { assemblePopulation, manifestAliases, type Population } from "./population.js";
+import { drawOrder, storedInCanonicalOrder } from "./draw-key.js";
 import { checkPool } from "./rebuild.js";
+import { ruleRepoNameFindings } from "./repo-names.js";
 import { poolRecordProblems } from "./repo-set.js";
 import {
   auditMode,
@@ -30,7 +32,6 @@ import {
   registrationRepoSet,
   registrationTime,
   reviewHorizonFor,
-  sortChanges,
   type AnyCommitment,
   type AnyManifest,
   type AnyRegistration,
@@ -318,7 +319,11 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (m.changes.length !== m.N) c2.details.push(`manifest lists ${m.changes.length} changes but N = ${m.N}`);
     const ids = m.changes.map((x) => x.id);
     if (new Set(ids).size !== ids.length) c2.details.push("manifest lists a change twice");
-    if (ids.some((id, i) => i > 0 && compareChangeIds(ids[i - 1]!, id) > 0)) c2.details.push("manifest changes are not sorted by id");
+    // P5: the canonical order is by draw key (contracts.md §5), never by a spelling the auditee picks; v1 keeps the id order.
+    const order = drawOrder(reg, m);
+    c2.details.push(...order.problems);
+    if (!order.problems.length && !storedInCanonicalOrder(order, m.changes)) c2.details.push(order.basis === "id" ? "manifest changes are not sorted by id" : "manifest changes are not in canonical order (by draw key, contracts.md §5)");
+    else if (order.basis === "id" && ids.some((id, i) => i > 0 && compareChangeIds(ids[i - 1]!, id) > 0)) c2.details.push("manifest changes are not sorted by id");
     if (m.registrationSha256 !== reg.sha256) c2.details.push("manifest names a different registration");
     if (isManifestV2(m) !== v2 || isCommitmentV2(cm) !== v2) c2.details.push("registration, manifest and commitment use different schema versions");
     for (const [k, mine, theirs] of [
@@ -451,6 +456,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       freezeSpan: { from: m.frozenAt, until: unixToIso(derived.publishesAt) },
     });
     if (pool.verbose.length) c5.verbose = pool.verbose;
+    // P5: check 2's online part. A rule pool's manifest names its repositories as registered (by id) or as the SCM does
+    // now; the draws do not depend on it (repo-id keys), but a name the auditee picked FAILs.
+    if (set.kind === "rule" && v2 && cm) {
+      const names = await ruleRepoNameFindings(provider, { registered: registeredRepos(reg), repos: mrepos, owner: pool.owner });
+      c2.details.push(...names.fails.map((f) => `FAIL ${f}`), ...names.incompletes.map((f) => `INCOMPLETE ${f}`), ...names.notes);
+      if (names.fails.length) {
+        if (c2.status !== "FAIL") c2.summary = "manifest inconsistent";
+        c2.status = "FAIL";
+      } else if (names.incompletes.length) c2.status = raiseStatus(c2.status, "INCOMPLETE");
+    }
     const count = (repo: string) => m.changes.filter((x) => x.repo === repo).length;
     let unverified = 0;
     const unrebuilt = new Set<string>();
@@ -550,9 +565,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   } else {
     const cap = effectiveCap(reg.record.parameters);
     const binding = drawBinding(reg, m);
-    const order = sortChanges(m.changes);
+    // P5: the population in canonical order (by draw key for v2: contracts.md §5), the order draws index.
+    const canonical = drawOrder(reg, m);
+    const order = canonical.order;
     let all: { draw: number; index: number; changeId: string; url: string; mergeSha: string; firstOccurrence: boolean }[] = [];
     try {
+      if (canonical.problems.length) throw new Error(`the population has no canonical order (${canonical.problems.join("; ")})`);
       if (m.N !== order.length) throw new Error(`the manifest says N = ${n(m.N)} but lists ${n(order.length)} changes`);
       const seen = new Set<string>();
       all = computeDraws(beacon.randomness, binding.hex, m.N, cap).map((d) => {
@@ -597,8 +615,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const reproduced = recomputed ? Math.max(0, file.issued - missing.length - bad.filter((k) => k <= file.issued).length) : 0;
     c6.status = c6.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : "PASS";
     if (c6.status === "PASS")
-      c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} change ids in canonical order`);
+      c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} changes in canonical order (${canonical.basis === "registered" ? "by draw key: the registered path, or a rule pool's repo id" : "by change id (schema v1)"})`);
     c6.summary = c6.status === "PASS" ? `${n(reproduced)}/${n(a.draws.issued)} draws reproduce` : bad.length ? `${n(bad.length)} draws do not reproduce` : c6.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "");
+    // P5 (finding 3): a schema-v1 audit's draws hash its manifest, so whoever wrote one by hand could freeze again before R
+    // and keep the sample it liked (no v1 release exists). It is read for compatibility, and never VERIFIED or CERTIFIED.
+    if (binding.derivation === "manifest" && c6.status === "PASS") {
+      c6.status = "INCOMPLETE";
+      c6.summary += " · legacy schema: draws bound to the manifest";
+      c6.details.unshift("INCOMPLETE legacy schema: draws bound to the manifest. A schema-v1 audit's draws hash the manifest, which is written at freeze, so freezing again before R gives another sample to keep: its draws reproduce, but they are not shown to be the only ones it could have drawn (schema v2 binds them to the registration). Read for compatibility; never VERIFIED or CERTIFIED");
+    }
   }
   checks.push(c6);
 

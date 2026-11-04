@@ -296,6 +296,8 @@ export interface PoolCheck {
   rebuilt: RepoRebuild[];
   /** P3 (#10): the lines a summary line in `lines` stands for (one per repo); printed with --verbose, always in --json. */
   verbose: string[];
+  /** P5: a rule's owner listing as it is now (null for a repo or a list, or when it could not be listed). */
+  owner: RepoRef[] | null;
 }
 
 /** The window changes a repo lists now (from its current head), for a repo outside the manifest; or why it could not be counted. */
@@ -489,6 +491,10 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
         return { line: `FAIL repo ${r.repo} was archived at freeze (the manifest's listing records it so), yet ${changes}${afterReg ? `, after it was created on ${r.createdAt}, after the registration` : ", all after the registration"}: an archived repository is read-only, so it was archived after them, and archiving it took them out of the pool` };
       if (afterReg !== false)
         return { line: `INCOMPLETE repo ${r.repo} ${seen}${atFreeze ? "" : `, is excluded by ${describeExclusions(exclNow)} now`}, and ${changes}, but ${afterReg === null ? `provider ${provider.name} gives no creation time, so whether it existed at registration is unknown` : `it was created on ${r.createdAt}, after the registration, so it could not be registered`}: whether it was excluded when its changes landed is unverified` };
+      // P5 (finding 5): the rule matches it now, it is not in the pool and was not registered. Its exclusion at freeze
+      // (a name or a visibility) is the manifest's own word, which nothing can check now: in or out would be N's choice.
+      if (exclNow.length === 0)
+        return { line: `INCOMPLETE repo ${r.repo} matches the registered rule now but is not in the pool, and was not registered; the freeze's listing excluded it (${describeExclusions(excl)}), an attribute its owners can change, which nothing can check now, and ${changes}: whether it was excluded when its changes landed is not established` };
       const then = atFreeze ? (JSON.stringify(atFreeze.excludedBy) === JSON.stringify(exclNow) ? "" : atFreeze.excludedBy.length ? `, by ${describeExclusions(atFreeze.excludedBy)} at freeze` : ", and the rule matched it at freeze") : ", and the freeze's listing did not show it";
       const what = exclNow.length ? `is excluded by ${describeExclusions(exclNow)} now${then}` : `was excluded by ${describeExclusions(excl)} at freeze and the rule matches it now`;
       return { warn: `WARN repo ${r.repo} ${what}, an attribute its owners can change, and has ${n(c.count)} changes in the window that are not in the population (${retro(true)})`, count: c.count };
@@ -509,5 +515,5 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
     }
     if (quiet) lines.push(`${n(quiet)} repo(s) excluded only by attributes their owners can change (name, archive state, visibility) list no change in the window`);
   }
-  return { lines, rebuilt, verbose };
+  return { lines, rebuilt, verbose, owner: now };
 }

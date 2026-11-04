@@ -291,7 +291,8 @@ describe("pass-2 review #2: a v1 envelope's unverified integratedTime cannot cho
     a.git("commit", "-qm", "v1 audit, steered before the first commit");
     const r = await runVerify(a.ctx, {});
     expect(r.derivedRound).toBe(NEW);
-    expect(r.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
+    // Check 6 is INCOMPLETE too since P5: a v1 audit's draws are bound to the manifest (legacy schema).
+    expect(r.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:INCOMPLETE", "7:PASS"]);
     expect(r.checks[2]!.details.join("\n")).toMatch(/INCOMPLETE R is derived from the registration time .*\(no transparency-log entry verified under a trusted key\): it could have been written after round 33,244,800 was public, to choose R/);
     expect(r).toMatchObject({ ok: false, verdict: "INCOMPLETE", exitCode: 6, certificate: { state: "WITHHELD" } });
     expect(r.statusLine).not.toMatch(/CERTIFIED \(/);
@@ -327,7 +328,7 @@ describe("time review #9: the small verify items", () => {
   it("check 6 compares every entry and needs every issued draw: an empty draws[], a dropped issued draw, a duplicate or a changed entry FAIL", async () => {
     const good = (await runVerify(cloneScenario(base).ctx, { offline: true })).checks[5]!;
     expect(good).toMatchObject({ status: "PASS", summary: "36/36 draws reproduce" });
-    expect(good.details).toEqual(["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 400 change ids in canonical order"]);
+    expect(good.details).toEqual(["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 400 changes in canonical order (by draw key: the registered path, or a rule pool's repo id)"]);
     const edit = async (f: (d: DrawsFile) => void) => {
       const s = cloneScenario(base);
       const d = readJ<DrawsFile>(s, `${W}/draws.json`);
