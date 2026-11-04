@@ -284,7 +284,7 @@ export default defineLedger({
   it("register's preflight, record and verify --offline read an isolated ledger through its host, never by importing it", async () => {
     const { s, setLedger } = withTracker();
     await lockPlugin(s.dir, TRACKER_USE, { kind: "ledger", options: { base_url: "https://tracker.example" } });
-    expect(await ledgerTraits({ use: TRACKER_USE, options: { base_url: "https://tracker.example" } }, s.dir)).toEqual({ name: "tracker", provenance: "account", hosts: ["tracker.example"] });
+    expect(await ledgerTraits({ use: TRACKER_USE, options: { base_url: "https://tracker.example" } }, s.dir)).toEqual({ name: "tracker", provenance: "account", hosts: ["tracker.example"], maxProvenance: "account" });
     s.clock.now = T("2026-06-20T00:00:00Z");
     // The preflight runs hosts(), writePaths() and create() in the child; the provenance it reports is the default minimum.
     expect(await registerCommand(s.ctx, { dryRun: true })).toBe(0);

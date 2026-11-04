@@ -1,6 +1,7 @@
 import { isRegistrationV2 } from "../core/records.js";
 import { ledgerTraits } from "../ledger-traits.js";
 import { verdictIneligibility } from "../sdk/ledger.js";
+import { allowedSignersOf, signedCommitHint } from "../core/presence/index.js";
 import { auditContextFor, configFor, CommandError, isoNow, ledgerFor, readDraws, readRegistration, type CommandContext } from "./context.js";
 
 export async function recordCommand(ctx: CommandContext, drawArg: string, verdictArg: string, opts: { reviewer?: string; note?: string; force?: boolean }): Promise<number> {
@@ -32,6 +33,8 @@ export async function recordCommand(ctx: CommandContext, drawArg: string, verdic
   });
   ctx.out(`recorded draw #${draw} ${d.changeId}: ${verdictArg} (per protocol ${reg.record.protocolSha256.slice(0, 8)}…) in ledger ${ledger.name}`);
   if (ledger.name === "git-file") ctx.out("commit the ledger file now: git history is the tamper trail");
+  const hint = ledger.name === "git-file" ? signedCommitHint(allowedSignersOf(reviewers)) : null;
+  if (hint) ctx.out(hint);
   else if (recordsActor) ctx.out(`the tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer`);
   return 0;
 }

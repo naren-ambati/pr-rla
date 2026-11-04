@@ -1,5 +1,6 @@
 import { PROVENANCE_LEVELS, verdictIneligibility, type ProvenanceLevel, type VerdictEvent } from "../sdk/ledger.js";
 import { evaluateSequence, type SequenceResult, type SprtParams } from "./sprt.js";
+import { provenanceLabel } from "./presence/provenance.js";
 
 export interface DrawnChange {
   draw: number;
@@ -39,9 +40,12 @@ export interface StatusReport {
 /** A verdict's provenance level; a ledger that says nothing is `self-asserted`. */
 export const provenanceOf = (v: VerdictEvent): ProvenanceLevel => v.provenance?.level ?? "self-asserted";
 
-/** `VERDICT PROVENANCE: account (12) · presence (24)`, the line every certificate prints (FR3.8, NFR4). */
+/**
+ * `VERDICT PROVENANCE: account (12) · presence (user-presence flag verified; key hardware not attested) (24)`,
+ * the line every certificate prints (FR3.8, FR9.6, NFR4).
+ */
 export function provenanceLine(p: StatusReport["provenance"]): string {
-  return `VERDICT PROVENANCE: ${p.length ? p.map((x) => `${x.level} (${x.count})`).join(" · ") : "none counted"}`;
+  return `VERDICT PROVENANCE: ${p.length ? p.map((x) => `${provenanceLabel(x.level)} (${x.count})`).join(" · ") : "none counted"}`;
 }
 
 /**

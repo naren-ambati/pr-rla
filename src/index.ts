@@ -9,6 +9,26 @@ export * from "./core/population.js";
 export * from "./core/status.js";
 export * from "./core/simulate.js";
 export * from "./core/verify.js";
+export {
+  verifySshsig,
+  parseSshsig,
+  dearmorSshsig,
+  parsePublicKeyText,
+  parseAllowedSigner,
+  allowedSignersOf,
+  splitCommitSignature,
+  checkCommitSignature,
+  analyzeSignedVerdicts,
+  provenanceLabel,
+  verdictRuleFailures,
+  PRESENCE_LABEL,
+  PRESENCE_LIMIT,
+  type SshsigCheck,
+  type SshPublicKey,
+  type AllowedSigner,
+  type CommitSignatureCheck,
+  type VerdictRules,
+} from "./core/presence/index.js";
 export { verifyQuicknetBeacon, fetchQuicknetBeacon, QUICKNET_CHAIN_INFO } from "./beacon/drand.js";
 export { RekorClient, buildHashedRekord, verifyLoggedEntry } from "./translog/rekor.js";
 export { RekorV2Client, buildHashedRekordV002, verifyRekorV2Entry, REKOR_V2_WARNING } from "./translog/rekor-v2.js";

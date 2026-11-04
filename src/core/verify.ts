@@ -1,4 +1,4 @@
-import { provenanceRank, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
+import type { Ledger, ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
@@ -32,7 +32,8 @@ import {
 import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
-import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "./status.js";
+import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
+import { PRESENCE_LIMIT, capProvenance, provenanceLabel, rulesLine, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL" | "SKIP";
 
@@ -64,6 +65,12 @@ export interface VerifyDeps {
   ledger: Ledger | null;
   /** Why the ledger was not read (an offline verify of a ledger that lives in a tracker); check 7 then SKIPs saying so. */
   ledgerSkipped?: string;
+  /**
+   * The most the ledger's verdicts can count as (U9: `presence` only for git-file, whose signatures
+   * pr-rla checks; `account` for the issue ledgers). A verdict claiming more is counted at this level
+   * and check 7 WARNs. Absent: no cap.
+   */
+  provenanceCeiling?: ProvenanceLevel;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL, or null if none is available. */
@@ -182,7 +189,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     regTs = await checkTimestamps(reg, reg.record.registeredAt, reg.record.timestamping, regLog, "registration", deps, c1);
     if (!regTs.proven) tamperProof = false;
     else mode = regTs.ukMs! < Date.parse(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
-    c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${reg.record.verdicts.minProvenance}`);
+    c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${provenanceLabel(reg.record.verdicts.minProvenance)}${reg.record.verdicts.require_signed ? " · signed verdict commits required" : ""}`);
   } else if (!regLog.verified) tamperProof = false;
   if (a.currentProtocolSha256 === null) {
     c1.details.push("review protocol file not found: cannot confirm it is the registered one");
@@ -374,9 +381,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         return null;
       }
     };
-    const verdicts = await attempt("readVerdicts", () => ledger.readVerdicts());
+    const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
-    const minProvenance: ProvenanceLevel = regVerdicts?.minProvenance ?? "self-asserted";
+    const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
+    // A ledger cannot raise a verdict above what it can attest (presence: only pr-rla's own signature check).
+    const capped = read ? capProvenance(read, deps.provenanceCeiling, ledger.name) : null;
+    const verdicts = capped?.verdicts ?? null;
+    if (capped?.notes.length) {
+      c7.details.push(...capped.notes);
+      if (c7.status === "PASS") c7.status = "WARN";
+    }
     if (verdicts) {
       status = computeStatus({
         N: m.N,
@@ -396,13 +410,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           c7.status = "FAIL";
           c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
         }
-        // FR3.8: a counted verdict below the registered minimum provenance FAILs.
-        if (v && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance)) {
+        // FR3.8, FR9.4: a counted verdict below the registered minimum provenance FAILs; FR9.1: so does one
+        // its registered reviewer did not sign, under require_signed.
+        for (const failure of v ? verdictRuleFailures(v, rules) : []) {
           c7.status = "FAIL";
-          c7.details.push(`verdict on draw #${v.draw} (${id}) is ${provenanceOf(v)}; the registration requires ${minProvenance}`);
+          c7.details.push(failure);
         }
       }
-      c7.details.push(`${provenanceLine(status.provenance)} (registered minimum: ${minProvenance})`);
+      c7.details.push(`${provenanceLine(status.provenance)} (${rulesLine(rules)})`);
+      if (rules.minProvenance === "presence" || status.provenance.some((p) => p.level === "presence")) c7.details.push(PRESENCE_LIMIT);
       for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
       for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
       if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";

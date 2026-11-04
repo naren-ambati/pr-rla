@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import type { AuditParameters } from "./core/records.js";
 import { normalizeSelector, type Selector } from "./core/selector.js";
+import { isAllowedSignerEntry, parseAllowedSigner } from "./core/presence/allowed-signers.js";
 import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
 import { parseRate, type RateLimitOverrides } from "./net/rate-limits.js";
@@ -34,6 +35,7 @@ export interface PrRlaConfig {
   /**
    * `verdicts:` (FR3.8): the minimum provenance a counted verdict needs (null: the ledger's own level,
    * `account` for issue ledgers, else `self-asserted`) and the reviewers whose verdicts count (null: any non-bot account).
+   * A reviewer is a login, `id:<account id>`, or (git-file, U9) an allowed-signers line `principal keytype key`.
    */
   verdicts: { minProvenance: ProvenanceLevel | null; reviewers: string[] | null };
 }
@@ -129,7 +131,7 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   };
 }
 
-/** `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>"] }`. */
+/** `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>", "<principal> <keytype> <base64 key>"] }`. */
 function parseVerdicts(raw: unknown, configPath: string): PrRlaConfig["verdicts"] {
   if (raw === undefined || raw === null) return { minProvenance: null, reviewers: null };
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${configPath}: verdicts must be a mapping, e.g. verdicts: { min_provenance: account, reviewers: [alice] }`);
@@ -139,9 +141,18 @@ function parseVerdicts(raw: unknown, configPath: string): PrRlaConfig["verdicts"
   if (min !== undefined && min !== null && !PROVENANCE_LEVELS.includes(min as ProvenanceLevel)) throw new Error(`${configPath}: verdicts.min_provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
   let reviewers: string[] | null = null;
   if (v.reviewers !== undefined && v.reviewers !== null) {
-    if (!Array.isArray(v.reviewers) || v.reviewers.some((r) => typeof r !== "string" || r.trim() === "")) throw new Error(`${configPath}: verdicts.reviewers must be a list of logins (or "id:<account id>")`);
+    if (!Array.isArray(v.reviewers) || v.reviewers.some((r) => typeof r !== "string" || r.trim() === ""))
+      throw new Error(`${configPath}: verdicts.reviewers must be a list of logins (or "id:<account id>", or allowed-signers lines "<principal> <keytype> <key>" for signed git-file verdicts)`);
     const bad = (v.reviewers as string[]).find((r) => /[<>]/.test(r));
     if (bad) throw new Error(`${configPath}: verdicts.reviewers: replace the placeholder ${JSON.stringify(bad)} with a login`);
+    for (const r of v.reviewers as string[]) {
+      if (!isAllowedSignerEntry(r)) continue;
+      try {
+        parseAllowedSigner(r);
+      } catch (e) {
+        throw new Error(`${configPath}: verdicts.reviewers: ${(e as Error).message}`);
+      }
+    }
     if (v.reviewers.length === 0) throw new Error(`${configPath}: verdicts.reviewers is empty, so no verdict could count; list the reviewers, or leave it out to accept any account that is not a bot`);
     reviewers = [...new Set((v.reviewers as string[]).map((r) => r.trim()))].sort();
   }

@@ -60,6 +60,7 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
       provider,
       ledger,
       ...(skipLedger ? { ledgerSkipped: `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; run verify without --offline to check the verdicts` } : {}),
+      provenanceCeiling: lt.maxProvenance,
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
