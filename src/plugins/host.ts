@@ -522,8 +522,14 @@ const withoutSignal = (req: ListChangesRequest): Omit<ListChangesRequest, "signa
   return rest;
 };
 
-/** A ScmProvider whose methods run in the host. The context's fetch, sleep and log serve the child. */
-export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number) => Promise<void>; log: (line: string) => void }): Promise<ScmProvider> {
+/** Both signals, when there are two (a request's and the call's). */
+const either = (a?: AbortSignal, b?: AbortSignal): AbortSignal | undefined => (a && b ? AbortSignal.any([a, b]) : (a ?? b));
+
+/**
+ * A ScmProvider whose methods run in the host. The context's fetch, sleep and log serve the child.
+ * `ctx.signal` (the call's, U5) cancels every method call, as a request's own signal does.
+ */
+export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number) => Promise<void>; log: (line: string) => void; signal?: AbortSignal }): Promise<ScmProvider> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log });
   const c = await createInstance(host, options, { cwd: ctx.cwd });
   if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(c.apiVersion as number)) throw new ProviderApiVersionError(String(host.ready.name), c.apiVersion);
@@ -532,22 +538,24 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   const p: ScmProvider = {
     apiVersion: c.apiVersion as number,
     name: c.name as string,
-    listChanges: (req) => host.call("listChanges", [withoutSignal(req)], req.signal) as never,
+    listChanges: (req) => host.call("listChanges", [withoutSignal(req)], either(req.signal, ctx.signal)) as never,
   };
-  if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], req.signal) as never;
-  for (const m of ["listRepos", "describeChange"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args);
+  if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], either(req.signal, ctx.signal)) as never;
+  if (has.has("listRepos")) (p as unknown as Record<string, unknown>).listRepos = (...args: unknown[]) => host.call("listRepos", args, ctx.signal);
+  // describeChange(change, { signal }): only the change crosses to the child; the signal stays here.
+  if (has.has("describeChange")) p.describeChange = (change, o) => host.call("describeChange", [change], either(o?.signal, ctx.signal)) as never;
   return p;
 }
 
 /** A Ledger whose methods run in the host. */
-export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore }): Promise<Ledger> {
+export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore; signal?: AbortSignal }): Promise<Ledger> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log, ...(ctx.index ? { index: ctx.index } : {}) });
   const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}) });
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(c.apiVersion as number)) throw new LedgerApiVersionError(String(host.ready.name), c.apiVersion);
   const has = new Set(c.methods);
   for (const m of ["readVerdicts", "appendVerdict"]) if (!has.has(m)) throw new PluginError(`ledger "${host.label}" has no ${m}()`, "PLUGIN_INVALID");
   const l = { apiVersion: c.apiVersion as number, name: c.name as string } as Record<string, unknown>;
-  for (const m of ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const) if (has.has(m)) l[m] = (...args: unknown[]) => host.call(m, args);
+  for (const m of ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const) if (has.has(m)) l[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
   return l as unknown as Ledger;
 }
 

@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -110,7 +110,7 @@ describe("API functions return the same objects as --json (contracts.md §7)", (
 
   it("simulate", async () => {
     const r = await cli(gitFile, "simulate", "--population", "400", "--defects", "40", "--runs", "500", "--json");
-    expect(JSON.parse(r.out)).toEqual(read.simulate({ population: 400, defects: 40, runs: 500 }));
+    expect(JSON.parse(r.out)).toEqual(await read.simulate({ population: 400, defects: 40, runs: 500 }));
   });
 
   it("the CLI text is the API's line: status prints the result's line first", async () => {
@@ -191,7 +191,7 @@ describe("pr-rla/api/read reads only", () => {
       await read.drawContext({ dir: s.dir, draw: 1 }, opts(s));
       await read.verify({ dir: s.dir }, opts(s));
       await read.freezePreview({ dir: s.dir }, opts(s));
-      read.simulate({ population: 100, defects: 1, runs: 10 });
+      await read.simulate({ population: 100, defects: 1, runs: 10 });
       expect(treeHash(s.dir)).toBe(before);
     }
   });
@@ -284,15 +284,17 @@ describe("freezePreview: in memory, cached 600 s by (window, registration digest
 describe("roots: confine refuses what the caller may not open", () => {
   it("the config, the protocol and a json-file path outside the allowed directory are refused", async () => {
     const seen: string[] = [];
+    // Files are checked by their real path as they are opened, directories as configured: either may come.
+    const roots = [gitFile.dir, realpathSync(gitFile.dir)];
     const inside = (p: string, what: string) => {
       seen.push(what);
-      if (!p.startsWith(gitFile.dir)) throw Object.assign(new Error(`${what} ${p} is outside the roots`), { code: "ROOT_ESCAPE" });
+      if (!roots.some((r) => p.startsWith(r))) throw Object.assign(new Error(`${what} is outside the roots`), { code: "ROOT_ESCAPE" });
     };
     await read.status({ dir: gitFile.dir }, opts(gitFile, { confine: inside }));
     expect(seen).toEqual(expect.arrayContaining([".pr-rla.yml", "audit_dir", "protocol", "the json-file provider's path"]));
     const s = setupAuditRepo({ changes: makeChanges(10) });
     appendFileSync(join(s.dir, ".pr-rla.yml"), "protocol: /etc/hosts\n");
-    await expect(read.status({ dir: s.dir }, opts(s, { confine: (p, w) => inside(p.replace(s.dir, gitFile.dir), w) }))).rejects.toMatchObject({ code: "ROOT_ESCAPE" });
+    await expect(read.status({ dir: s.dir }, opts(s, { confine: (p, w) => inside(p.replace(realpathSync(s.dir), gitFile.dir).replace(s.dir, gitFile.dir), w) }))).rejects.toMatchObject({ code: "ROOT_ESCAPE" });
   });
 });
 

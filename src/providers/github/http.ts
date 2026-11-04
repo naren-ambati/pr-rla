@@ -87,6 +87,8 @@ export class GitHubHttp {
         }
       } catch (e) {
         if (e instanceof GitHubHttpError) throw e;
+        // A stopped call (its signal aborted) is not a failure to retry or to wrap.
+        if ((base.signal as AbortSignal | null | undefined)?.aborted) throw e;
         const gaveUp = exhaustion(e);
         if (gaveUp) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: gave up after ${gaveUp.attempts} attempts (${gaveUp.problem})`, GAVE_UP);
         if (e instanceof BrokerError) throw e;
@@ -99,9 +101,9 @@ export class GitHubHttp {
   }
 
   /** GET a REST path (or absolute URL). Returns parsed JSON and the rel="next" link if any. */
-  async rest<T>(pathOrUrl: string): Promise<{ data: T; next: string | null }> {
+  async rest<T>(pathOrUrl: string, signal?: AbortSignal): Promise<{ data: T; next: string | null }> {
     const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${this.apiUrl}${pathOrUrl}`;
-    const { body, res } = await this.request<T>(url, { headers: this.headers() });
+    const { body, res } = await this.request<T>(url, { headers: this.headers(), ...(signal ? { signal } : {}) });
     const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get("link") ?? "")?.[1] ?? null;
     return { data: body, next };
   }

@@ -8,6 +8,7 @@ import {
   type ListChangesResult,
   type ProviderContext,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
 import { describeGitLabChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
@@ -115,8 +116,8 @@ export class GitLabProvider implements ScmProvider {
   }
 
   /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
-  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
-    return describeGitLabChange(this.http, change);
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeGitLabChange(this.http, change, opts);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

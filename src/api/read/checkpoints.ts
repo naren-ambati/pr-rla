@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { readTextConfined } from "../../io/confine.js";
 import { CHECKPOINTS_FILE, HISTORY_DIR, historyFileName, parseCheckpointLines, parseHistoryFile, type CheckpointArtifact } from "../../core/checkpoint.js";
 import type { LedgerHistoryEvent } from "../../sdk/ledger.js";
 
@@ -15,13 +16,15 @@ export const historyDirPath = (windowDir: string) => join(windowDir, HISTORY_DIR
 export function readCheckpoints(windowDir: string): { checkpoints: CheckpointArtifact[]; problems: string[] } {
   const file = checkpointsPath(windowDir);
   if (!existsSync(file)) return { checkpoints: [], problems: [] };
-  const { lines, problems } = parseCheckpointLines(readFileSync(file, "utf8"), CHECKPOINTS_FILE);
+  const { lines, problems } = parseCheckpointLines(readTextConfined(file, CHECKPOINTS_FILE), CHECKPOINTS_FILE);
   const checkpoints = lines.map((line) => {
     const rel = `${HISTORY_DIR}/${historyFileName(line.takenAt, line.eventsSha256)}`;
     let events: LedgerHistoryEvent[] | null = null;
     try {
-      events = parseHistoryFile(readFileSync(join(windowDir, rel), "utf8"));
-    } catch {
+      events = parseHistoryFile(readTextConfined(join(windowDir, rel), "a ledger-history file"));
+    } catch (e) {
+      // A history file outside the roots is refused, not read; one that is missing or malformed is reported by verify.
+      if ((e as { code?: unknown }).code === "ROOT_ESCAPE") throw e;
       events = null;
     }
     return { line, events, file: rel };

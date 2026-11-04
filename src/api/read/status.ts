@@ -148,8 +148,10 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     let nSoFar: number | null = null;
     if (!opts.offline && now >= opens) {
       const provider = await providerFor(ctx, config);
-      const pop = await buildPopulation(provider, { repo: registrationRepo(reg), window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
+      ctx.onProgress?.({ done: 0, message: `listing ${registrationRepo(reg)} on ${provider.name} for N so far` });
+      const pop = await buildPopulation(provider, { repo: registrationRepo(reg), window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), ...(ctx.signal ? { signal: ctx.signal } : {}) });
       nSoFar = pop.entries.length;
+      ctx.onProgress?.({ done: 1, total: 1, message: `N so far ${fmt(nSoFar)}` });
     }
     const soFar = nSoFar === null ? "" : ` · N so far ${fmt(nSoFar)}`;
     const line = `${mode} · ${windowPhase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${timestampNote}`;
@@ -170,6 +172,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     }
   }
   const ledger = await ledgerFor(ctx, config, paths);
+  ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${ledger.name}` });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,

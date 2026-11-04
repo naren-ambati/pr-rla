@@ -1,12 +1,12 @@
 {
- "description": "Real GitHub API responses for describeChange on 4 of the 36 changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid. Kept: 4 of the 36 recorded changes (draws 5, 7, 13 and 31).",
+ "description": "Real GitHub API responses for describeChange on 4 of the 36 changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid. Kept: 4 of the 36 recorded changes (draws 5, 7, 13, 31).",
  "source": "recorded",
- "recordedAt": "2026-11-04T02:21:27.654Z",
+ "recordedAt": "2026-11-04T04:50:30.823Z",
  "changes": [
-  "github:github/gh-aw#42597",
   "github:github/gh-aw#43382",
-  "github:github/gh-aw#47149",
-  "github:github/gh-aw#49685"
+  "github:github/gh-aw#42597",
+  "github:github/gh-aw#49685",
+  "github:github/gh-aw#47149"
  ],
  "exchanges": [
   {
@@ -18,9 +18,12 @@
    "response": {
     "number": 43382,
     "title": "require-await-core-summary-write: tighten isCoreLikeIdentifier to exact alias set",
-    "body": "`isCoreLikeIdentifier` used `/^core/i`, which over-matches any identifier starting with `core` \u2014 `coreCache`, `coreData`, `coreference`, etc. \u2014 none of which are `@actions/core` bindings.\n\n## Changes\n\n- **`require-await-core-summary-write.ts`**: Replace the broad regex with an exact `Set`-based allow-list containing the two verified corpus aliases:\n  ```ts\n  // \"core\"    \u2014 conventional require(\"@actions/core\") name in github-script steps\n  // \"coreObj\" \u2014 alias used in parse_mcp_gateway_log.cjs\n  const CORE_ALIASES = new Set([\"core\", \"coreObj\"]);\n\n  function isCoreLikeIdentifier(name: string): boolean {\n    return CORE_ALIASES.has(name);\n  }\n  ```\n  Comment documents the decision and instructs maintainers where to add new aliases.\n\n- **`rootsSummary` JSDoc**: Updated `coreObj.summary (any identifier alias)` \u2192 `coreObj.summary (known @actions/core alias \u2014 see CORE_ALIASES)`.\n\n- **`require-await-core-summary-write.test.ts`**: New `valid` test block asserting `coreCache`, `coreData`, and `coreference` are not flagged, codifying the tightened boundary against future regressions.",
+    "body": "`isCoreLikeIdentifier` used `/^core/i`, which over-matches any identifier starting with `core` — `coreCache`, `coreData`, `coreference`, etc. — none of which are `@actions/core` bindings.\n\n## Changes\n\n- **`require-await-core-summary-write.ts`**: Replace the broad regex with an exact `Set`-based allow-list containing the two verified corpus aliases:\n  ```ts\n  // \"core\"    — conventional require(\"@actions/core\") name in github-script steps\n  // \"coreObj\" — alias used in parse_mcp_gateway_log.cjs\n  const CORE_ALIASES = new Set([\"core\", \"coreObj\"]);\n\n  function isCoreLikeIdentifier(name: string): boolean {\n    return CORE_ALIASES.has(name);\n  }\n  ```\n  Comment documents the decision and instructs maintainers where to add new aliases.\n\n- **`rootsSummary` JSDoc**: Updated `coreObj.summary (any identifier alias)` → `coreObj.summary (known @actions/core alias — see CORE_ALIASES)`.\n\n- **`require-await-core-summary-write.test.ts`**: New `valid` test block asserting `coreCache`, `coreData`, and `coreference` are not flagged, codifying the tightened boundary against future regressions.",
     "head": {
      "sha": "89d2b454b30d828e60429774d236cc458f785d8c"
+    },
+    "base": {
+     "sha": "0f1f3a21f0b6ee560dc49038a82fca45d15d5e0d"
     },
     "changed_files": 2,
     "html_url": "https://github.com/github/gh-aw/pull/43382"
@@ -38,20 +41,33 @@
      "status": "modified",
      "additions": 9,
      "deletions": 0,
-     "patch": "@@ -98,6 +98,15 @@ describe(\"require-await-core-summary-write\", () => {\n     });\n   });\n \n+  it(\"valid: identifiers outside CORE_ALIASES are not flagged even with .summary.write() chain\", () => {\n+    // Codifies the tightened heuristic: only exact known aliases (\"core\", \"coreObj\") are matched.\n+    // Objects that merely start with \"core\" (e.g. coreCache, coreData) must not be flagged.\n+    cjsRuleTester.run(\"require-await-core-summary-write\", requireAwaitCoreSummaryWriteRule, {\n+      valid: [`async function f() { coreCache.summary.write(); }`, `async function f() { coreData.summary.write(); }`, `async function f() { coreference.summary.write(); }`],\n+      invalid: [],\n+    });\n+  });\n+\n   it(\"invalid: flagged outside async function \u2014 no suggestion offered\", () => {\n     cjsRuleTester.run(\"require-await-core-summary-write\", requireAwaitCoreSummaryWriteRule, {\n       valid: [],"
+     "patch": "@@ -98,6 +98,15 @@ describe(\"require-await-core-summary-write\", () => {\n     });\n   });\n \n+  it(\"valid: identifiers outside CORE_ALIASES are not flagged even with .summary.write() chain\", () => {\n+    // Codifies the tightened heuristic: only exact known aliases (\"core\", \"coreObj\") are matched.\n+    // Objects that merely start with \"core\" (e.g. coreCache, coreData) must not be flagged.\n+    cjsRuleTester.run(\"require-await-core-summary-write\", requireAwaitCoreSummaryWriteRule, {\n+      valid: [`async function f() { coreCache.summary.write(); }`, `async function f() { coreData.summary.write(); }`, `async function f() { coreference.summary.write(); }`],\n+      invalid: [],\n+    });\n+  });\n+\n   it(\"invalid: flagged outside async function — no suggestion offered\", () => {\n     cjsRuleTester.run(\"require-await-core-summary-write\", requireAwaitCoreSummaryWriteRule, {\n       valid: [],"
     },
     {
      "filename": "eslint-factory/src/rules/require-await-core-summary-write.ts",
      "status": "modified",
      "additions": 12,
      "deletions": 2,
-     "patch": "@@ -21,8 +21,18 @@ function getRootIdentifier(node: TSESTree.Node): string | null {\n   return null;\n }\n \n+// Tightened from the prior `/^core/i` heuristic to an exact allow-list.\n+// Only identifiers that are verified @actions/core bindings in the corpus are\n+// matched; broad prefix matching would silently flag unrelated objects such as\n+// `coreCache`, `coreData`, or `coreference` that happen to start with \"core\".\n+//\n+// Known aliases (extend here when a new verified binding is introduced):\n+//   \"core\"    \u2014 conventional require(\"@actions/core\") name in github-script steps\n+//   \"coreObj\" \u2014 alias used in parse_mcp_gateway_log.cjs\n+const CORE_ALIASES = new Set([\"core\", \"coreObj\"]);\n+\n function isCoreLikeIdentifier(name: string): boolean {\n-  return /^core/i.test(name);\n+  return CORE_ALIASES.has(name);\n }\n \n /**\n@@ -33,7 +43,7 @@ function isCoreLikeIdentifier(name: string): boolean {\n  *   - `core.summary`\n  *   - `core.summary.addRaw(x)`\n  *   - `core.summary.addHeading(...).addRaw(x)`\n- *   - `coreObj.summary` (any identifier alias)\n+ *   - `coreObj.summary` (known @actions/core alias \u2014 see CORE_ALIASES)\n  */\n function rootsSummary(node: TSESTree.Node): boolean {\n   const rootIdentifier = getRootIdentifier(node);"
+     "patch": "@@ -21,8 +21,18 @@ function getRootIdentifier(node: TSESTree.Node): string | null {\n   return null;\n }\n \n+// Tightened from the prior `/^core/i` heuristic to an exact allow-list.\n+// Only identifiers that are verified @actions/core bindings in the corpus are\n+// matched; broad prefix matching would silently flag unrelated objects such as\n+// `coreCache`, `coreData`, or `coreference` that happen to start with \"core\".\n+//\n+// Known aliases (extend here when a new verified binding is introduced):\n+//   \"core\"    — conventional require(\"@actions/core\") name in github-script steps\n+//   \"coreObj\" — alias used in parse_mcp_gateway_log.cjs\n+const CORE_ALIASES = new Set([\"core\", \"coreObj\"]);\n+\n function isCoreLikeIdentifier(name: string): boolean {\n-  return /^core/i.test(name);\n+  return CORE_ALIASES.has(name);\n }\n \n /**\n@@ -33,7 +43,7 @@ function isCoreLikeIdentifier(name: string): boolean {\n  *   - `core.summary`\n  *   - `core.summary.addRaw(x)`\n  *   - `core.summary.addHeading(...).addRaw(x)`\n- *   - `coreObj.summary` (any identifier alias)\n+ *   - `coreObj.summary` (known @actions/core alias — see CORE_ALIASES)\n  */\n function rootsSummary(node: TSESTree.Node): boolean {\n   const rootIdentifier = getRootIdentifier(node);"
     }
    ]
   },
   {
    "method": "GET",
    "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=6c40101796e79a8b963f65242c857a737ad09014",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBt\nZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJzCiMgVXNlIGJk\nIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMvaXNzdWVzLmpz\nb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9bGZzIGRpZmY9\nbGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZpbHRlcj1sZnMg\nZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVzLyoqIGZpbHRl\ncj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0aHViL3dvcmtm\nbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=0f1f3a21f0b6ee560dc49038a82fca45d15d5e0d",
    "bodySha256": null,
    "status": 200,
    "headers": {},
@@ -388,6 +404,7 @@
    "headers": {},
    "response": {
     "state": "pending",
+    "total_count": 0,
     "statuses": []
    }
   },
@@ -400,9 +417,12 @@
    "response": {
     "number": 42597,
     "title": "Add `tone_variant` A/B campaign to `breaking-change-checker` workflow",
-    "body": "This updates `breaking-change-checker` to run an A/B experiment on reporting tone (`neutral` vs `urgent`) without changing breaking-change detection logic. The campaign metadata and prompt conditionals were added so tone can be assigned at runtime and compared against engagement and guardrail metrics.\n\n- **Experiment frontmatter**\n  - Added `experiments.tone_variant` in rich-object form with:\n    - `variants`, `description`, `hypothesis`\n    - `metric`, `secondary_metrics`\n    - `guardrail_metrics` (`run_success_rate`, `empty_output_rate`)\n    - `min_samples`, `weight`, `start_date`, `issue`\n\n- **Prompt-body tone branching**\n  - Added variant-aware handlebars conditionals in the issue-generation instructions:\n    - tone guidance block (`urgent` vs `neutral`)\n    - `Summary -> Status` line (`Requires Immediate Review` vs `Review Recommended`)\n    - `Recommendations` wording (prioritized risk/action framing vs neutral guidance)\n\n- **Compiled workflow output**\n  - Regenerated `breaking-change-checker.lock.yml` from the markdown workflow so runtime experiment selection and outputs reflect the new campaign.\n\n```md\n{{#if experiments.tone_variant == \"urgent\" }}\n- **Status**: \u26a0\ufe0f Requires Immediate Review\n{{else}}\n- **Status**: Review Recommended\n{{/if}}\n```",
+    "body": "This updates `breaking-change-checker` to run an A/B experiment on reporting tone (`neutral` vs `urgent`) without changing breaking-change detection logic. The campaign metadata and prompt conditionals were added so tone can be assigned at runtime and compared against engagement and guardrail metrics.\n\n- **Experiment frontmatter**\n  - Added `experiments.tone_variant` in rich-object form with:\n    - `variants`, `description`, `hypothesis`\n    - `metric`, `secondary_metrics`\n    - `guardrail_metrics` (`run_success_rate`, `empty_output_rate`)\n    - `min_samples`, `weight`, `start_date`, `issue`\n\n- **Prompt-body tone branching**\n  - Added variant-aware handlebars conditionals in the issue-generation instructions:\n    - tone guidance block (`urgent` vs `neutral`)\n    - `Summary -> Status` line (`Requires Immediate Review` vs `Review Recommended`)\n    - `Recommendations` wording (prioritized risk/action framing vs neutral guidance)\n\n- **Compiled workflow output**\n  - Regenerated `breaking-change-checker.lock.yml` from the markdown workflow so runtime experiment selection and outputs reflect the new campaign.\n\n```md\n{{#if experiments.tone_variant == \"urgent\" }}\n- **Status**: ⚠️ Requires Immediate Review\n{{else}}\n- **Status**: Review Recommended\n{{/if}}\n```",
     "head": {
      "sha": "df78190d1a1480cac734571c469b0176ac0cc0f8"
+    },
+    "base": {
+     "sha": "eaef881ecdb70de471a8f737fb13f7799032620a"
     },
     "changed_files": 3,
     "html_url": "https://github.com/github/gh-aw/pull/42597"
@@ -427,7 +447,7 @@
      "status": "modified",
      "additions": 33,
      "deletions": 1,
-     "patch": "@@ -12,6 +12,24 @@ permissions:\n engine:\n   id: copilot\n   copilot-sdk: true\n+experiments:\n+  tone_variant:\n+    variants: [neutral, urgent]\n+    description: \"Measure whether a more urgent compatibility-reporting tone improves issue triage engagement versus a neutral engineering tone.\"\n+    hypothesis: \"H0: no change in issue_engagement_rate. H1: urgent increases issue_engagement_rate by >=7 percentage points without degrading run_success_rate.\"\n+    metric: issue_engagement_rate\n+    secondary_metrics: [issue_comment_count_72h, time_to_first_assignee_action_hours]\n+    guardrail_metrics:\n+      - name: run_success_rate\n+        direction: min\n+        threshold: 0.9\n+      - name: empty_output_rate\n+        direction: min\n+        threshold: 0.0\n+    min_samples: 194\n+    weight: [50, 50]\n+    start_date: \"2026-06-30\"\n+    issue: 42467\n tracker-id: breaking-change-checker\n sandbox:\n   agent:\n@@ -162,7 +180,13 @@ Do NOT create an issue if there are no breaking changes.\n \n ### If Breaking Changes Found\n \n-Create an issue with the following structure:\n+Create an issue with the following structure.\n+\n+{{#if experiments.tone_variant == 'urgent' }}\n+Use an urgent but evidence-based tone. Use phrases like \"high compatibility risk\", \"immediate maintainer action recommended\", and \"user-facing impact likely\" when supported by evidence. Emphasize user impact, compatibility risk, and the need for immediate maintainer review while keeping all claims tied to observed code changes.\n+{{else}}\n+Use a neutral engineering tone. Prefer phrasing like \"potential compatibility concern\", \"review recommended\", and \"migration guidance provided\". Emphasize factual compatibility analysis, concrete evidence, and migration guidance without urgency-heavy wording.\n+{{/if}}\n \n **Title**: Daily Breaking Change Analysis - [DATE]\n \n@@ -174,7 +198,11 @@ Create an issue with the following structure:\n - **Total Breaking Changes**: [NUMBER]\n - **Severity**: [CRITICAL/HIGH/MEDIUM]\n - **Commits Analyzed**: [NUMBER]\n+{{#if experiments.tone_variant == 'urgent' }}\n - **Status**: \u26a0\ufe0f Requires Immediate Review\n+{{else}}\n+- **Status**: Review Recommended\n+{{/if}}\n \n ### Critical Breaking Changes\n \n@@ -216,7 +244,11 @@ Complete the following items to address these breaking changes:\n \n ### Recommendations\n \n+{{#if experiments.tone_variant == 'urgent' }}\n+[Prioritized migration steps, version bump guidance, explicit owner action items, and a short statement of end-user risk.]\n+{{else}}\n [Migration steps, version bump guidance, and action items - always visible]\n+{{/if}}\n \n ### Reference\n "
+     "patch": "@@ -12,6 +12,24 @@ permissions:\n engine:\n   id: copilot\n   copilot-sdk: true\n+experiments:\n+  tone_variant:\n+    variants: [neutral, urgent]\n+    description: \"Measure whether a more urgent compatibility-reporting tone improves issue triage engagement versus a neutral engineering tone.\"\n+    hypothesis: \"H0: no change in issue_engagement_rate. H1: urgent increases issue_engagement_rate by >=7 percentage points without degrading run_success_rate.\"\n+    metric: issue_engagement_rate\n+    secondary_metrics: [issue_comment_count_72h, time_to_first_assignee_action_hours]\n+    guardrail_metrics:\n+      - name: run_success_rate\n+        direction: min\n+        threshold: 0.9\n+      - name: empty_output_rate\n+        direction: min\n+        threshold: 0.0\n+    min_samples: 194\n+    weight: [50, 50]\n+    start_date: \"2026-06-30\"\n+    issue: 42467\n tracker-id: breaking-change-checker\n sandbox:\n   agent:\n@@ -162,7 +180,13 @@ Do NOT create an issue if there are no breaking changes.\n \n ### If Breaking Changes Found\n \n-Create an issue with the following structure:\n+Create an issue with the following structure.\n+\n+{{#if experiments.tone_variant == 'urgent' }}\n+Use an urgent but evidence-based tone. Use phrases like \"high compatibility risk\", \"immediate maintainer action recommended\", and \"user-facing impact likely\" when supported by evidence. Emphasize user impact, compatibility risk, and the need for immediate maintainer review while keeping all claims tied to observed code changes.\n+{{else}}\n+Use a neutral engineering tone. Prefer phrasing like \"potential compatibility concern\", \"review recommended\", and \"migration guidance provided\". Emphasize factual compatibility analysis, concrete evidence, and migration guidance without urgency-heavy wording.\n+{{/if}}\n \n **Title**: Daily Breaking Change Analysis - [DATE]\n \n@@ -174,7 +198,11 @@ Create an issue with the following structure:\n - **Total Breaking Changes**: [NUMBER]\n - **Severity**: [CRITICAL/HIGH/MEDIUM]\n - **Commits Analyzed**: [NUMBER]\n+{{#if experiments.tone_variant == 'urgent' }}\n - **Status**: ⚠️ Requires Immediate Review\n+{{else}}\n+- **Status**: Review Recommended\n+{{/if}}\n \n ### Critical Breaking Changes\n \n@@ -216,7 +244,11 @@ Complete the following items to address these breaking changes:\n \n ### Recommendations\n \n+{{#if experiments.tone_variant == 'urgent' }}\n+[Prioritized migration steps, version bump guidance, explicit owner action items, and a short statement of end-user risk.]\n+{{else}}\n [Migration steps, version bump guidance, and action items - always visible]\n+{{/if}}\n \n ### Reference\n "
     },
     {
      "filename": ".github/workflows/pr-code-quality-reviewer.lock.yml",
@@ -453,6 +473,67 @@
   },
   {
    "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=eaef881ecdb70de471a8f737fb13f7799032620a",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBt\nZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJzCiMgVXNlIGJk\nIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMvaXNzdWVzLmpz\nb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9bGZzIGRpZmY9\nbGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZpbHRlcj1sZnMg\nZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVzLyoqIGZpbHRl\ncj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0aHViL3dvcmtm\nbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=eaef881ecdb70de471a8f737fb13f7799032620a",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=30b3a152ecda66706632abcaf228fd7e2cdf3b03",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=eaef881ecdb70de471a8f737fb13f7799032620a",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=30b3a152ecda66706632abcaf228fd7e2cdf3b03",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
    "url": "https://api.github.com/repos/github/gh-aw/commits/df78190d1a1480cac734571c469b0176ac0cc0f8/check-runs?per_page=100",
    "bodySha256": null,
    "status": 200,
@@ -470,6 +551,7 @@
    "headers": {},
    "response": {
     "state": "pending",
+    "total_count": 0,
     "statuses": []
    }
   },
@@ -482,9 +564,12 @@
    "response": {
     "number": 49685,
     "title": "fix: move Python venv out of agent artifact upload path to restore MCP telemetry observability",
-    "body": "The `daily-performance-summary` workflow was flagged as missing MCP telemetry (`gateway.jsonl` / `rpc-messages.jsonl`) \u2014 but both files ARE generated. The root cause: shared Python setup components created a venv at `/tmp/gh-aw/agent/venv`, which is unconditionally included in the compiler-generated agent artifact upload path (`/tmp/gh-aw/agent/`). This inflated the artifact to ~253 MB / ~19,448 files (numpy, pandas, matplotlib, scipy + all deps), causing observability report downloads to time out before locating the MCP telemetry files.\n\n## Changes\n\n- **`shared/trending-charts-simple.md`**, **`shared/python-nlp.md`**, **`shared/python-dataviz.md`**: Changed Python venv location from `/tmp/gh-aw/agent/venv` \u2192 `/tmp/gh-aw/python/venv`\n\n`/tmp/gh-aw/python/` is not in the artifact upload path list, so the venv is no longer uploaded. Agent artifacts for affected workflows drop from ~253 MB back to a few MB of actual log files.\n\n```diff\n- if [ ! -d /tmp/gh-aw/agent/venv ]; then\n-   python3 -m venv /tmp/gh-aw/agent/venv\n+ # Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\n+ if [ ! -d /tmp/gh-aw/python/venv ]; then\n+   python3 -m venv /tmp/gh-aw/python/venv\n  fi\n- echo \"/tmp/gh-aw/agent/venv/bin\" >> \"$GITHUB_PATH\"\n+ echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n```\n\nAll 268 workflows recompiled. Affects any workflow importing these shared components.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #49365",
+    "body": "The `daily-performance-summary` workflow was flagged as missing MCP telemetry (`gateway.jsonl` / `rpc-messages.jsonl`) — but both files ARE generated. The root cause: shared Python setup components created a venv at `/tmp/gh-aw/agent/venv`, which is unconditionally included in the compiler-generated agent artifact upload path (`/tmp/gh-aw/agent/`). This inflated the artifact to ~253 MB / ~19,448 files (numpy, pandas, matplotlib, scipy + all deps), causing observability report downloads to time out before locating the MCP telemetry files.\n\n## Changes\n\n- **`shared/trending-charts-simple.md`**, **`shared/python-nlp.md`**, **`shared/python-dataviz.md`**: Changed Python venv location from `/tmp/gh-aw/agent/venv` → `/tmp/gh-aw/python/venv`\n\n`/tmp/gh-aw/python/` is not in the artifact upload path list, so the venv is no longer uploaded. Agent artifacts for affected workflows drop from ~253 MB back to a few MB of actual log files.\n\n```diff\n- if [ ! -d /tmp/gh-aw/agent/venv ]; then\n-   python3 -m venv /tmp/gh-aw/agent/venv\n+ # Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\n+ if [ ! -d /tmp/gh-aw/python/venv ]; then\n+   python3 -m venv /tmp/gh-aw/python/venv\n  fi\n- echo \"/tmp/gh-aw/agent/venv/bin\" >> \"$GITHUB_PATH\"\n+ echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n```\n\nAll 268 workflows recompiled. Affects any workflow importing these shared components.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #49365",
     "head": {
      "sha": "97721a3e9b8c3fbb082665e4760c6eb74cb1deed"
+    },
+    "base": {
+     "sha": "84d1e352bac7f7431302041dd36dc9bae2eadbf2"
     },
     "changed_files": 28,
     "html_url": "https://github.com/github/gh-aw/pull/49685"
@@ -502,7 +587,7 @@
      "status": "modified",
      "additions": 12,
      "deletions": 2,
-     "patch": "@@ -38,7 +38,12 @@ steps:\n   - name: Setup Python environment\n     run: |\n       mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\n-      pip install --user --quiet numpy pandas matplotlib seaborn scipy\n+      # Use /tmp/gh-aw/python/venv \u2014 keeps the venv out of /tmp/gh-aw/agent/ (the artifact upload path)\n+      if [ ! -d /tmp/gh-aw/python/venv ]; then\n+        python3 -m venv /tmp/gh-aw/python/venv\n+      fi\n+      echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet numpy pandas matplotlib seaborn scipy\n safe-outputs:\n   upload-asset:\n     max: 3\n@@ -74,7 +79,12 @@ steps:\n   - name: Setup Python environment\n     run: |\n       mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\n-      pip install --user --quiet numpy pandas matplotlib seaborn scipy\n+      # Use /tmp/gh-aw/python/venv \u2014 keeps the venv out of /tmp/gh-aw/agent/ (the artifact upload path)\n+      if [ ! -d /tmp/gh-aw/python/venv ]; then\n+        python3 -m venv /tmp/gh-aw/python/venv\n+      fi\n+      echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet numpy pandas matplotlib seaborn scipy\n ```\n \n Rules:"
+     "patch": "@@ -38,7 +38,12 @@ steps:\n   - name: Setup Python environment\n     run: |\n       mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\n-      pip install --user --quiet numpy pandas matplotlib seaborn scipy\n+      # Use /tmp/gh-aw/python/venv — keeps the venv out of /tmp/gh-aw/agent/ (the artifact upload path)\n+      if [ ! -d /tmp/gh-aw/python/venv ]; then\n+        python3 -m venv /tmp/gh-aw/python/venv\n+      fi\n+      echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet numpy pandas matplotlib seaborn scipy\n safe-outputs:\n   upload-asset:\n     max: 3\n@@ -74,7 +79,12 @@ steps:\n   - name: Setup Python environment\n     run: |\n       mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\n-      pip install --user --quiet numpy pandas matplotlib seaborn scipy\n+      # Use /tmp/gh-aw/python/venv — keeps the venv out of /tmp/gh-aw/agent/ (the artifact upload path)\n+      if [ ! -d /tmp/gh-aw/python/venv ]; then\n+        python3 -m venv /tmp/gh-aw/python/venv\n+      fi\n+      echo \"/tmp/gh-aw/python/venv/bin\" >> \"$GITHUB_PATH\"\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet numpy pandas matplotlib seaborn scipy\n ```\n \n Rules:"
     },
     {
      "filename": ".github/workflows/api-consumption-report.lock.yml",
@@ -614,7 +699,7 @@
      "status": "modified",
      "additions": 11,
      "deletions": 10,
-     "patch": "@@ -42,9 +42,10 @@ tools:\n steps:\n   - name: Install DataFlow\n     run: |\n-      python3 -m venv /tmp/gh-aw/agent/venv\n-      /tmp/gh-aw/agent/venv/bin/pip install --quiet open-dataflow\n-      /tmp/gh-aw/agent/venv/bin/python3 -c \"\n+      mkdir -p /tmp/gh-aw/python\n+      python3 -m venv /tmp/gh-aw/python/venv\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet open-dataflow\n+      /tmp/gh-aw/python/venv/bin/python3 -c \"\n       import dataflow\n       print('DataFlow', getattr(dataflow, '__version__', 'installed'), 'ready')\n       # Print available operators for reference\n@@ -120,7 +121,7 @@ Inputs:\n - PRs: `/tmp/gh-aw/agent/dataflow/input/prs.json`\n \n Output: `/tmp/gh-aw/agent/dataflow/output/dataset_clean.jsonl`\n-Venv: `/tmp/gh-aw/agent/venv/bin/python3`\n+Venv: `/tmp/gh-aw/python/venv/bin/python3`\n \n Normalise both sources into unified JSONL (fields: id, source, text, url, author, created_at).\n Filter with min_len=50 and alpha_ratio>0.25.\n@@ -143,7 +144,7 @@ Build a cleaned, quality-scored, and deduplicated JSONL dataset from this reposi\n - **Data available**:\n   - Discussions: `/tmp/gh-aw/agent/discussions-data/discussions.json` (pre-fetched by shared component)\n   - PRs: `/tmp/gh-aw/agent/dataflow/input/prs.json` (pre-fetched in `steps:`)\n-- **DataFlow venv**: `/tmp/gh-aw/agent/venv/bin/python3`\n+- **DataFlow venv**: `/tmp/gh-aw/python/venv/bin/python3`\n - **Output dir**: `/tmp/gh-aw/agent/dataflow/output/`\n \n ## Pipeline Overview\n@@ -181,7 +182,7 @@ GitHub Discussions + PRs\n Before building the pipeline, discover which operators are installed:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 -c \"\n+/tmp/gh-aw/python/venv/bin/python3 -c \"\n import pkgutil, dataflow.operators as ops\n for m in pkgutil.iter_modules(ops.__path__):\n     print(m.name)\n@@ -191,7 +192,7 @@ for m in pkgutil.iter_modules(ops.__path__):\n Then list classes in the `filter` and `dedup` sub-modules (if present):\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 -c \"\n+/tmp/gh-aw/python/venv/bin/python3 -c \"\n import inspect\n try:\n     import dataflow.operators.filter as f\n@@ -285,7 +286,7 @@ print(f\"Total records written: {len(records)} \u2192 {OUT}\")\n Run it:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/01_normalise.py\n+/tmp/gh-aw/python/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/01_normalise.py\n ```\n \n ### Step 3: Build and Run the DataFlow Pipeline\n@@ -447,7 +448,7 @@ print(json.dumps(stats, indent=2))\n Run it:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/02_pipeline.py\n+/tmp/gh-aw/python/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/02_pipeline.py\n ```\n \n Verify output:\n@@ -512,7 +513,7 @@ print('Run appended to history')\n Read the clean output and compute a per-source breakdown:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 - << 'EOF'\n+/tmp/gh-aw/python/venv/bin/python3 - << 'EOF'\n import json\n from collections import Counter\n from pathlib import Path"
+     "patch": "@@ -42,9 +42,10 @@ tools:\n steps:\n   - name: Install DataFlow\n     run: |\n-      python3 -m venv /tmp/gh-aw/agent/venv\n-      /tmp/gh-aw/agent/venv/bin/pip install --quiet open-dataflow\n-      /tmp/gh-aw/agent/venv/bin/python3 -c \"\n+      mkdir -p /tmp/gh-aw/python\n+      python3 -m venv /tmp/gh-aw/python/venv\n+      /tmp/gh-aw/python/venv/bin/pip install --quiet open-dataflow\n+      /tmp/gh-aw/python/venv/bin/python3 -c \"\n       import dataflow\n       print('DataFlow', getattr(dataflow, '__version__', 'installed'), 'ready')\n       # Print available operators for reference\n@@ -120,7 +121,7 @@ Inputs:\n - PRs: `/tmp/gh-aw/agent/dataflow/input/prs.json`\n \n Output: `/tmp/gh-aw/agent/dataflow/output/dataset_clean.jsonl`\n-Venv: `/tmp/gh-aw/agent/venv/bin/python3`\n+Venv: `/tmp/gh-aw/python/venv/bin/python3`\n \n Normalise both sources into unified JSONL (fields: id, source, text, url, author, created_at).\n Filter with min_len=50 and alpha_ratio>0.25.\n@@ -143,7 +144,7 @@ Build a cleaned, quality-scored, and deduplicated JSONL dataset from this reposi\n - **Data available**:\n   - Discussions: `/tmp/gh-aw/agent/discussions-data/discussions.json` (pre-fetched by shared component)\n   - PRs: `/tmp/gh-aw/agent/dataflow/input/prs.json` (pre-fetched in `steps:`)\n-- **DataFlow venv**: `/tmp/gh-aw/agent/venv/bin/python3`\n+- **DataFlow venv**: `/tmp/gh-aw/python/venv/bin/python3`\n - **Output dir**: `/tmp/gh-aw/agent/dataflow/output/`\n \n ## Pipeline Overview\n@@ -181,7 +182,7 @@ GitHub Discussions + PRs\n Before building the pipeline, discover which operators are installed:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 -c \"\n+/tmp/gh-aw/python/venv/bin/python3 -c \"\n import pkgutil, dataflow.operators as ops\n for m in pkgutil.iter_modules(ops.__path__):\n     print(m.name)\n@@ -191,7 +192,7 @@ for m in pkgutil.iter_modules(ops.__path__):\n Then list classes in the `filter` and `dedup` sub-modules (if present):\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 -c \"\n+/tmp/gh-aw/python/venv/bin/python3 -c \"\n import inspect\n try:\n     import dataflow.operators.filter as f\n@@ -285,7 +286,7 @@ print(f\"Total records written: {len(records)} → {OUT}\")\n Run it:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/01_normalise.py\n+/tmp/gh-aw/python/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/01_normalise.py\n ```\n \n ### Step 3: Build and Run the DataFlow Pipeline\n@@ -447,7 +448,7 @@ print(json.dumps(stats, indent=2))\n Run it:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/02_pipeline.py\n+/tmp/gh-aw/python/venv/bin/python3 /tmp/gh-aw/agent/dataflow/pipeline/02_pipeline.py\n ```\n \n Verify output:\n@@ -512,7 +513,7 @@ print('Run appended to history')\n Read the clean output and compute a per-source breakdown:\n \n ```bash\n-/tmp/gh-aw/agent/venv/bin/python3 - << 'EOF'\n+/tmp/gh-aw/python/venv/bin/python3 - << 'EOF'\n import json\n from collections import Counter\n from pathlib import Path"
     },
     {
      "filename": ".github/workflows/detection-analysis-report.lock.yml",
@@ -649,7 +734,7 @@
      "status": "modified",
      "additions": 3,
      "deletions": 3,
-     "patch": "@@ -1,4 +1,4 @@\n-# gh-aw-metadata: {\"schema_version\":\"v4\",\"frontmatter_hash\":\"fcb6d602a66a3af669a0ae8b2b1504d0655850856f515c3850e3d900e8b4e9f2\",\"body_hash\":\"ef6c7a9bc55573a2f261045680c7b96569f47f295d8d736194b3d9191bf77177\",\"strict\":true,\"agent_id\":\"claude\",\"engine_versions\":{\"claude\":\"2.1.220\"}}\n+# gh-aw-metadata: {\"schema_version\":\"v4\",\"frontmatter_hash\":\"3018266bd13f7ac2b51ad5d7a4d128bf076c1f48f99783bb02a68e6d9cddb8b0\",\"body_hash\":\"ef6c7a9bc55573a2f261045680c7b96569f47f295d8d736194b3d9191bf77177\",\"strict\":true,\"agent_id\":\"claude\",\"engine_versions\":{\"claude\":\"2.1.220\"}}\n # gh-aw-manifest: {\"version\":1,\"secrets\":[\"ANTHROPIC_API_KEY\",\"COPILOT_GITHUB_TOKEN\",\"GH_AW_GITHUB_MCP_SERVER_TOKEN\",\"GH_AW_GITHUB_TOKEN\",\"GH_AW_OTEL_GRAFANA_AUTHORIZATION\",\"GH_AW_OTEL_GRAFANA_ENDPOINT\",\"GH_AW_OTEL_SENTRY_AUTHORIZATION\",\"GH_AW_OTEL_SENTRY_ENDPOINT\",\"GITHUB_TOKEN\"],\"actions\":[{\"repo\":\"actions/cache\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/cache/restore\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/cache/save\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/checkout\",\"sha\":\"3d3c42e5aac5ba805825da76410c181273ba90b1\",\"version\":\"v7.0.1\"},{\"repo\":\"actions/download-artifact\",\"sha\":\"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c\",\"version\":\"v8.0.1\"},{\"repo\":\"actions/github-script\",\"sha\":\"3a2844b7e9c422d3c10d287c895573f7108da1b3\",\"version\":\"v9.0.0\"},{\"repo\":\"actions/setup-go\",\"sha\":\"b7ad1dad31e06c5925ef5d2fc7ad053ef454303e\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/setup-node\",\"sha\":\"820762786026740c76f36085b0efc47a31fe5020\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/setup-python\",\"sha\":\"5fda3b95a4ea91299a34e894583c3862153e4b97\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/upload-artifact\",\"sha\":\"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\",\"version\":\"v7.0.1\"},{\"repo\":\"docker/build-push-action\",\"sha\":\"53b7df96c91f9c12dcc8a07bcb9ccacbed38856a\",\"version\":\"v7.3.0\"},{\"repo\":\"docker/setup-buildx-action\",\"sha\":\"bb05f3f5519dd87d3ba754cc423b652a5edd6d2c\",\"version\":\"v4.2.0\"}],\"containers\":[{\"image\":\"ghcr.io/github/gh-aw-firewall/agent:0.27.43\",\"digest\":\"sha256:04e2d1987a565000a8f114b89d806ae7a3864dd4f944be65275b28c93d8690e6\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/agent:0.27.43@sha256:04e2d1987a565000a8f114b89d806ae7a3864dd4f944be65275b28c93d8690e6\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.43\",\"digest\":\"sha256:d85f57975af5ea23af4996e41ed73fbc8f5b4a47402472bfe82e508f352cb0c1\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.43@sha256:d85f57975af5ea23af4996e41ed73fbc8f5b4a47402472bfe82e508f352cb0c1\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/cli-proxy:0.27.43\",\"digest\":\"sha256:65c45ea2967984d0024f3df61bc71335658a77ede96c8d9665da7a5f33a795ab\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/cli-proxy:0.27.43@sha256:65c45ea2967984d0024f3df61bc71335658a77ede96c8d9665da7a5f33a795ab\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/squid:0.27.43\",\"digest\":\"sha256:26be5e0b8c8f4c41c8a59126b29bb5d80b07253597472ded2a16bdd75abcbf9d\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/squid:0.27.43@sha256:26be5e0b8c8f4c41c8a59126b29bb5d80b07253597472ded2a16bdd75abcbf9d\"},{\"image\":\"ghcr.io/github/gh-aw-mcpg:v0.4.7\",\"digest\":\"sha256:7545220a9aca134b71e51193ee0eaf4c50756ebf8fbd25a63ae7556e62815c00\",\"pinned_image\":\"ghcr.io/github/gh-aw-mcpg:v0.4.7@sha256:7545220a9aca134b71e51193ee0eaf4c50756ebf8fbd25a63ae7556e62815c00\"},{\"image\":\"ghcr.io/github/gh-aw-node\",\"digest\":\"sha256:a8082161d7dceda14b68f32eb39d0eaa96b825d07f5895b096afab9d9e0c7748\",\"pinned_image\":\"ghcr.io/github/gh-aw-node@sha256:a8082161d7dceda14b68f32eb39d0eaa96b825d07f5895b096afab9d9e0c7748\"},{\"image\":\"ghcr.io/github/github-mcp-server:v1.8.0\",\"digest\":\"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520\",\"pinned_image\":\"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520\"}]}\n # This file was automatically generated by gh-aw. DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md\n #\n@@ -586,9 +586,9 @@ jobs:\n         name: Fetch Copilot PR data\n         run: \"# Create output directories\\nmkdir -p /tmp/gh-aw/agent/pr-data\\nmkdir -p /tmp/gh-aw/cache-memory\\n\\n# Get today's date for cache identification\\nTODAY=$(date '+%Y-%m-%d')\\nCACHE_DIR=\\\"/tmp/gh-aw/cache-memory\\\"\\n\\n# Check if cached data exists from today\\nif [ -f \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" ] && [ -s \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" ]; then\\n  echo \\\"\u2713 Found cached PR data from ${TODAY}\\\"\\n  cp \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" /tmp/gh-aw/agent/pr-data/copilot-prs.json\\n  \\n  # Regenerate schema if missing\\n  if [ ! -f \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\" ]; then\\n    ./.github/skills/jqschema/jqschema.sh < /tmp/gh-aw/agent/pr-data/copilot-prs.json > \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\"\\n  fi\\n  cp \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\" /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\n  \\n  echo \\\"Using cached data from ${TODAY}\\\"\\n  echo \\\"Total PRs in cache: $(jq 'length' /tmp/gh-aw/agent/pr-data/copilot-prs.json)\\\"\\nelse\\n  echo \\\"\u2b07 Downloading fresh PR data...\\\"\\n  \\n  # Calculate date 30 days ago\\n  DATE_30_DAYS_AGO=$(date -d '30 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-30d '+%Y-%m-%d')\\n\\n  # Search for PRs from copilot/* branches in the last 30 days using gh CLI\\n  # Using branch prefix search (head:copilot/) instead of author for reliability\\n  echo \\\"Fetching Copilot PRs from the last 30 days...\\\"\\n  gh pr list --repo \\\"$GITHUB_REPOSITORY\\\" \\\\\\n    --search \\\"head:copilot/ created:>=${DATE_30_DAYS_AGO}\\\" \\\\\\n    --state all \\\\\\n    --json number,title,author,headRefName,createdAt,state,url,body,labels,updatedAt,closedAt,mergedAt \\\\\\n    --limit 1000 \\\\\\n    > /tmp/gh-aw/agent/pr-data/copilot-prs.json\\n\\n  # Generate schema for reference\\n  ./.github/skills/jqschema/jqschema.sh < /tmp/gh-aw/agent/pr-data/copilot-prs.json > /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\n\\n  # Store in cache with today's date\\n  cp /tmp/gh-aw/agent/pr-data/copilot-prs.json \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\"\\n  cp /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\"\\n\\n  echo \\\"\u2713 PR data saved to cache: copilot-prs-${TODAY}.json\\\"\\n  echo \\\"Total PRs found: $(jq 'length' /tmp/gh-aw/agent/pr-data/copilot-prs.json)\\\"\\nfi\\n\\n# Always ensure data is available at expected locations for backward compatibility\\necho \\\"PR data available at: /tmp/gh-aw/agent/pr-data/copilot-prs.json\\\"\\necho \\\"Schema available at: /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\\"\\n\"\n       - name: Setup Python NLP environment\n-        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\nif [ ! -d /tmp/gh-aw/agent/venv ]; then\\n  python3 -m venv /tmp/gh-aw/agent/venv\\nfi\\necho \\\"/tmp/gh-aw/agent/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n/tmp/gh-aw/agent/venv/bin/pip install --quiet nltk scikit-learn textblob wordcloud\\n\\n# Download required NLTK corpora\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"\\nimport nltk\\nfor corpus in ['punkt_tab', 'stopwords', 'vader_lexicon', 'averaged_perceptron_tagger_eng']:\\n    nltk.download(corpus, quiet=True)\\nprint('NLTK corpora ready')\\n\\\"\\n\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"import sklearn; print(f'scikit-learn {sklearn.__version__}')\\\"\\n\"\n+        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\n# Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\\nif [ ! -d /tmp/gh-aw/python/venv ]; then\\n  python3 -m venv /tmp/gh-aw/python/venv\\nfi\\necho \\\"/tmp/gh-aw/python/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n/tmp/gh-aw/python/venv/bin/pip install --quiet nltk scikit-learn textblob wordcloud\\n\\n# Download required NLTK corpora\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"\\nimport nltk\\nfor corpus in ['punkt_tab', 'stopwords', 'vader_lexicon', 'averaged_perceptron_tagger_eng']:\\n    nltk.download(corpus, quiet=True)\\nprint('NLTK corpora ready')\\n\\\"\\n\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"import sklearn; print(f'scikit-learn {sklearn.__version__}')\\\"\\n\"\n       - name: Setup Python environment\n-        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\nif [ ! -d /tmp/gh-aw/agent/venv ]; then\\n  python3 -m venv /tmp/gh-aw/agent/venv\\nfi\\necho \\\"/tmp/gh-aw/agent/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n# Reinstall chart libraries every run so chart generation never depends on stale state.\\n/tmp/gh-aw/agent/venv/bin/pip install --quiet --upgrade --force-reinstall numpy pandas matplotlib seaborn scipy\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"import numpy,pandas,matplotlib,seaborn,scipy;print('chart-libraries-ready')\\\"\\n\"\n+        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\n# Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\\nif [ ! -d /tmp/gh-aw/python/venv ]; then\\n  python3 -m venv /tmp/gh-aw/python/venv\\nfi\\necho \\\"/tmp/gh-aw/python/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n# Reinstall chart libraries every run so chart generation never depends on stale state.\\n/tmp/gh-aw/python/venv/bin/pip install --quiet --upgrade --force-reinstall numpy pandas matplotlib seaborn scipy\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"import numpy,pandas,matplotlib,seaborn,scipy;print('chart-libraries-ready')\\\"\\n\"\n       - if: always()\n         name: Upload source files and data\n         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+     "patch": "@@ -1,4 +1,4 @@\n-# gh-aw-metadata: {\"schema_version\":\"v4\",\"frontmatter_hash\":\"fcb6d602a66a3af669a0ae8b2b1504d0655850856f515c3850e3d900e8b4e9f2\",\"body_hash\":\"ef6c7a9bc55573a2f261045680c7b96569f47f295d8d736194b3d9191bf77177\",\"strict\":true,\"agent_id\":\"claude\",\"engine_versions\":{\"claude\":\"2.1.220\"}}\n+# gh-aw-metadata: {\"schema_version\":\"v4\",\"frontmatter_hash\":\"3018266bd13f7ac2b51ad5d7a4d128bf076c1f48f99783bb02a68e6d9cddb8b0\",\"body_hash\":\"ef6c7a9bc55573a2f261045680c7b96569f47f295d8d736194b3d9191bf77177\",\"strict\":true,\"agent_id\":\"claude\",\"engine_versions\":{\"claude\":\"2.1.220\"}}\n # gh-aw-manifest: {\"version\":1,\"secrets\":[\"ANTHROPIC_API_KEY\",\"COPILOT_GITHUB_TOKEN\",\"GH_AW_GITHUB_MCP_SERVER_TOKEN\",\"GH_AW_GITHUB_TOKEN\",\"GH_AW_OTEL_GRAFANA_AUTHORIZATION\",\"GH_AW_OTEL_GRAFANA_ENDPOINT\",\"GH_AW_OTEL_SENTRY_AUTHORIZATION\",\"GH_AW_OTEL_SENTRY_ENDPOINT\",\"GITHUB_TOKEN\"],\"actions\":[{\"repo\":\"actions/cache\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/cache/restore\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/cache/save\",\"sha\":\"55cc8345863c7cc4c66a329aec7e433d2d1c52a9\",\"version\":\"v6.1.0\"},{\"repo\":\"actions/checkout\",\"sha\":\"3d3c42e5aac5ba805825da76410c181273ba90b1\",\"version\":\"v7.0.1\"},{\"repo\":\"actions/download-artifact\",\"sha\":\"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c\",\"version\":\"v8.0.1\"},{\"repo\":\"actions/github-script\",\"sha\":\"3a2844b7e9c422d3c10d287c895573f7108da1b3\",\"version\":\"v9.0.0\"},{\"repo\":\"actions/setup-go\",\"sha\":\"b7ad1dad31e06c5925ef5d2fc7ad053ef454303e\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/setup-node\",\"sha\":\"820762786026740c76f36085b0efc47a31fe5020\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/setup-python\",\"sha\":\"5fda3b95a4ea91299a34e894583c3862153e4b97\",\"version\":\"v7.0.0\"},{\"repo\":\"actions/upload-artifact\",\"sha\":\"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\",\"version\":\"v7.0.1\"},{\"repo\":\"docker/build-push-action\",\"sha\":\"53b7df96c91f9c12dcc8a07bcb9ccacbed38856a\",\"version\":\"v7.3.0\"},{\"repo\":\"docker/setup-buildx-action\",\"sha\":\"bb05f3f5519dd87d3ba754cc423b652a5edd6d2c\",\"version\":\"v4.2.0\"}],\"containers\":[{\"image\":\"ghcr.io/github/gh-aw-firewall/agent:0.27.43\",\"digest\":\"sha256:04e2d1987a565000a8f114b89d806ae7a3864dd4f944be65275b28c93d8690e6\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/agent:0.27.43@sha256:04e2d1987a565000a8f114b89d806ae7a3864dd4f944be65275b28c93d8690e6\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.43\",\"digest\":\"sha256:d85f57975af5ea23af4996e41ed73fbc8f5b4a47402472bfe82e508f352cb0c1\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.43@sha256:d85f57975af5ea23af4996e41ed73fbc8f5b4a47402472bfe82e508f352cb0c1\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/cli-proxy:0.27.43\",\"digest\":\"sha256:65c45ea2967984d0024f3df61bc71335658a77ede96c8d9665da7a5f33a795ab\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/cli-proxy:0.27.43@sha256:65c45ea2967984d0024f3df61bc71335658a77ede96c8d9665da7a5f33a795ab\"},{\"image\":\"ghcr.io/github/gh-aw-firewall/squid:0.27.43\",\"digest\":\"sha256:26be5e0b8c8f4c41c8a59126b29bb5d80b07253597472ded2a16bdd75abcbf9d\",\"pinned_image\":\"ghcr.io/github/gh-aw-firewall/squid:0.27.43@sha256:26be5e0b8c8f4c41c8a59126b29bb5d80b07253597472ded2a16bdd75abcbf9d\"},{\"image\":\"ghcr.io/github/gh-aw-mcpg:v0.4.7\",\"digest\":\"sha256:7545220a9aca134b71e51193ee0eaf4c50756ebf8fbd25a63ae7556e62815c00\",\"pinned_image\":\"ghcr.io/github/gh-aw-mcpg:v0.4.7@sha256:7545220a9aca134b71e51193ee0eaf4c50756ebf8fbd25a63ae7556e62815c00\"},{\"image\":\"ghcr.io/github/gh-aw-node\",\"digest\":\"sha256:a8082161d7dceda14b68f32eb39d0eaa96b825d07f5895b096afab9d9e0c7748\",\"pinned_image\":\"ghcr.io/github/gh-aw-node@sha256:a8082161d7dceda14b68f32eb39d0eaa96b825d07f5895b096afab9d9e0c7748\"},{\"image\":\"ghcr.io/github/github-mcp-server:v1.8.0\",\"digest\":\"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520\",\"pinned_image\":\"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520\"}]}\n # This file was automatically generated by gh-aw. DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md\n #\n@@ -586,9 +586,9 @@ jobs:\n         name: Fetch Copilot PR data\n         run: \"# Create output directories\\nmkdir -p /tmp/gh-aw/agent/pr-data\\nmkdir -p /tmp/gh-aw/cache-memory\\n\\n# Get today's date for cache identification\\nTODAY=$(date '+%Y-%m-%d')\\nCACHE_DIR=\\\"/tmp/gh-aw/cache-memory\\\"\\n\\n# Check if cached data exists from today\\nif [ -f \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" ] && [ -s \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" ]; then\\n  echo \\\"✓ Found cached PR data from ${TODAY}\\\"\\n  cp \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\" /tmp/gh-aw/agent/pr-data/copilot-prs.json\\n  \\n  # Regenerate schema if missing\\n  if [ ! -f \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\" ]; then\\n    ./.github/skills/jqschema/jqschema.sh < /tmp/gh-aw/agent/pr-data/copilot-prs.json > \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\"\\n  fi\\n  cp \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\" /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\n  \\n  echo \\\"Using cached data from ${TODAY}\\\"\\n  echo \\\"Total PRs in cache: $(jq 'length' /tmp/gh-aw/agent/pr-data/copilot-prs.json)\\\"\\nelse\\n  echo \\\"⬇ Downloading fresh PR data...\\\"\\n  \\n  # Calculate date 30 days ago\\n  DATE_30_DAYS_AGO=$(date -d '30 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-30d '+%Y-%m-%d')\\n\\n  # Search for PRs from copilot/* branches in the last 30 days using gh CLI\\n  # Using branch prefix search (head:copilot/) instead of author for reliability\\n  echo \\\"Fetching Copilot PRs from the last 30 days...\\\"\\n  gh pr list --repo \\\"$GITHUB_REPOSITORY\\\" \\\\\\n    --search \\\"head:copilot/ created:>=${DATE_30_DAYS_AGO}\\\" \\\\\\n    --state all \\\\\\n    --json number,title,author,headRefName,createdAt,state,url,body,labels,updatedAt,closedAt,mergedAt \\\\\\n    --limit 1000 \\\\\\n    > /tmp/gh-aw/agent/pr-data/copilot-prs.json\\n\\n  # Generate schema for reference\\n  ./.github/skills/jqschema/jqschema.sh < /tmp/gh-aw/agent/pr-data/copilot-prs.json > /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\n\\n  # Store in cache with today's date\\n  cp /tmp/gh-aw/agent/pr-data/copilot-prs.json \\\"$CACHE_DIR/copilot-prs-${TODAY}.json\\\"\\n  cp /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json \\\"$CACHE_DIR/copilot-prs-${TODAY}-schema.json\\\"\\n\\n  echo \\\"✓ PR data saved to cache: copilot-prs-${TODAY}.json\\\"\\n  echo \\\"Total PRs found: $(jq 'length' /tmp/gh-aw/agent/pr-data/copilot-prs.json)\\\"\\nfi\\n\\n# Always ensure data is available at expected locations for backward compatibility\\necho \\\"PR data available at: /tmp/gh-aw/agent/pr-data/copilot-prs.json\\\"\\necho \\\"Schema available at: /tmp/gh-aw/agent/pr-data/copilot-prs-schema.json\\\"\\n\"\n       - name: Setup Python NLP environment\n-        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\nif [ ! -d /tmp/gh-aw/agent/venv ]; then\\n  python3 -m venv /tmp/gh-aw/agent/venv\\nfi\\necho \\\"/tmp/gh-aw/agent/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n/tmp/gh-aw/agent/venv/bin/pip install --quiet nltk scikit-learn textblob wordcloud\\n\\n# Download required NLTK corpora\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"\\nimport nltk\\nfor corpus in ['punkt_tab', 'stopwords', 'vader_lexicon', 'averaged_perceptron_tagger_eng']:\\n    nltk.download(corpus, quiet=True)\\nprint('NLTK corpora ready')\\n\\\"\\n\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"import sklearn; print(f'scikit-learn {sklearn.__version__}')\\\"\\n\"\n+        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\n# Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\\nif [ ! -d /tmp/gh-aw/python/venv ]; then\\n  python3 -m venv /tmp/gh-aw/python/venv\\nfi\\necho \\\"/tmp/gh-aw/python/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n/tmp/gh-aw/python/venv/bin/pip install --quiet nltk scikit-learn textblob wordcloud\\n\\n# Download required NLTK corpora\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"\\nimport nltk\\nfor corpus in ['punkt_tab', 'stopwords', 'vader_lexicon', 'averaged_perceptron_tagger_eng']:\\n    nltk.download(corpus, quiet=True)\\nprint('NLTK corpora ready')\\n\\\"\\n\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"import sklearn; print(f'scikit-learn {sklearn.__version__}')\\\"\\n\"\n       - name: Setup Python environment\n-        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\nif [ ! -d /tmp/gh-aw/agent/venv ]; then\\n  python3 -m venv /tmp/gh-aw/agent/venv\\nfi\\necho \\\"/tmp/gh-aw/agent/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n# Reinstall chart libraries every run so chart generation never depends on stale state.\\n/tmp/gh-aw/agent/venv/bin/pip install --quiet --upgrade --force-reinstall numpy pandas matplotlib seaborn scipy\\n/tmp/gh-aw/agent/venv/bin/python3 -c \\\"import numpy,pandas,matplotlib,seaborn,scipy;print('chart-libraries-ready')\\\"\\n\"\n+        run: \"mkdir -p /tmp/gh-aw/python/{data,charts,artifacts}\\n# Create a virtual environment for proper package isolation (avoids --break-system-packages)\\n# Use /tmp/gh-aw/python/venv to avoid polluting the agent artifact upload path (/tmp/gh-aw/agent/)\\nif [ ! -d /tmp/gh-aw/python/venv ]; then\\n  python3 -m venv /tmp/gh-aw/python/venv\\nfi\\necho \\\"/tmp/gh-aw/python/venv/bin\\\" >> \\\"$GITHUB_PATH\\\"\\n# Reinstall chart libraries every run so chart generation never depends on stale state.\\n/tmp/gh-aw/python/venv/bin/pip install --quiet --upgrade --force-reinstall numpy pandas matplotlib seaborn scipy\\n/tmp/gh-aw/python/venv/bin/python3 -c \\\"import numpy,pandas,matplotlib,seaborn,scipy;print('chart-libraries-ready')\\\"\\n\"\n       - if: always()\n         name: Upload source files and data\n         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
     },
     {
      "filename": ".github/workflows/python-data-charts.lock.yml",
@@ -710,6 +795,67 @@
   },
   {
    "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=84d1e352bac7f7431302041dd36dc9bae2eadbf2",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=84d1e352bac7f7431302041dd36dc9bae2eadbf2",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=a118914edf6b397f4ec83a8614aead9968317510",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=84d1e352bac7f7431302041dd36dc9bae2eadbf2",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=a118914edf6b397f4ec83a8614aead9968317510",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
    "url": "https://api.github.com/repos/github/gh-aw/commits/97721a3e9b8c3fbb082665e4760c6eb74cb1deed/check-runs?per_page=100",
    "bodySha256": null,
    "status": 200,
@@ -734,6 +880,7 @@
    "headers": {},
    "response": {
     "state": "pending",
+    "total_count": 0,
     "statuses": []
    }
   },
@@ -746,9 +893,12 @@
    "response": {
     "number": 47149,
     "title": "Update gh-aw-threat-detection to v0.3.0",
-    "body": "Bump the pinned `gh-aw-threat-detection` binary from `v0.2.2` to `v0.3.0`. The version is a single source constant that flows into all detection workflow lock files at compile time.\n\n## Changes\n\n- **`pkg/constants/version_constants.go`** \u2014 updated `DefaultThreatDetectVersion` from `v0.2.2` to `v0.3.0`:\n\n  ```go\n  const DefaultThreatDetectVersion Version = \"v0.3.0\"\n  ```\n\n- **Recompiled workflows** \u2014 `make recompile` propagated the new pin (`install_threat_detect_binary.sh v0.3.0`) into 89 `.lock.yml` files. No lock files were hand-edited.\n\n## Notes\n\n- Verified the `v0.3.0` release and its runtime assets (`checksums.txt`, `threat-detect-linux-amd64`, `threat-detect-linux-arm64`) exist in `github/gh-aw-threat-detection` before pinning, since the install script fetches them from GitHub Releases at runtime.\n- The isolation test (`threat_detection_isolation_test.go`) reads the constant dynamically, so it validates the new pin without edits.\n- One incidental change: `smoke-call-workflow.lock.yml` had stale imported permissions (`actions: write`); recompile synchronized it to `actions: read` to match its source workflow `smoke-workflow-call.lock.yml`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #47148\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [\ud83d\udc68\u200d\ud83c\udf73 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29873842709) \u00b7 gpt54 20.4 AIC \u00b7 \u2316 8.66 AIC \u00b7 \u229e 7K \u00b7 [\u25f7](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29873842709, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29873842709 -->\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [\ud83d\udc68\u200d\ud83c\udf73 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29877220652) \u00b7 gpt54 12.8 AIC \u00b7 \u2316 6.96 AIC \u00b7 \u229e 7K \u00b7 [\u25f7](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29877220652, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29877220652 -->\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [\ud83d\udc68\u200d\ud83c\udf73 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29881378283) \u00b7 gpt54 11.8 AIC \u00b7 \u2316 10.8 AIC \u00b7 \u229e 7K \u00b7 [\u25f7](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29881378283, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29881378283 -->\n\n---\n\nRun: https://github.com/github/gh-aw/actions/runs/29883079375\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [\ud83d\udc68\u200d\ud83c\udf73 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29883079375) \u00b7 gpt54 8.98 AIC \u00b7 \u2316 8.2 AIC \u00b7 \u229e 7K \u00b7 [\u25f7](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29883079375, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29883079375 -->",
+    "body": "Bump the pinned `gh-aw-threat-detection` binary from `v0.2.2` to `v0.3.0`. The version is a single source constant that flows into all detection workflow lock files at compile time.\n\n## Changes\n\n- **`pkg/constants/version_constants.go`** — updated `DefaultThreatDetectVersion` from `v0.2.2` to `v0.3.0`:\n\n  ```go\n  const DefaultThreatDetectVersion Version = \"v0.3.0\"\n  ```\n\n- **Recompiled workflows** — `make recompile` propagated the new pin (`install_threat_detect_binary.sh v0.3.0`) into 89 `.lock.yml` files. No lock files were hand-edited.\n\n## Notes\n\n- Verified the `v0.3.0` release and its runtime assets (`checksums.txt`, `threat-detect-linux-amd64`, `threat-detect-linux-arm64`) exist in `github/gh-aw-threat-detection` before pinning, since the install script fetches them from GitHub Releases at runtime.\n- The isolation test (`threat_detection_isolation_test.go`) reads the constant dynamically, so it validates the new pin without edits.\n- One incidental change: `smoke-call-workflow.lock.yml` had stale imported permissions (`actions: write`); recompile synchronized it to `actions: read` to match its source workflow `smoke-workflow-call.lock.yml`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #47148\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [👨‍🍳 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29873842709) · gpt54 20.4 AIC · ⌖ 8.66 AIC · ⊞ 7K · [◷](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29873842709, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29873842709 -->\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [👨‍🍳 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29877220652) · gpt54 12.8 AIC · ⌖ 6.96 AIC · ⊞ 7K · [◷](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29877220652, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29877220652 -->\n\n---\n\n\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [👨‍🍳 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29881378283) · gpt54 11.8 AIC · ⌖ 10.8 AIC · ⊞ 7K · [◷](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29881378283, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29881378283 -->\n\n---\n\nRun: https://github.com/github/gh-aw/actions/runs/29883079375\n\n> [!WARNING]\n> <details>\n> <summary>Firewall blocked 1 domain</summary>\n>\n> The following domain was blocked by the firewall during workflow execution:\n>\n> - `pi.dev`\n>> To allow these domains, add them to the `network.allowed` list in your workflow frontmatter:\n>\n> ```yaml\n> network:\n>   allowed:\n>     - defaults\n>     - \"pi.dev\"\n> ```\n>\n> See [Network Configuration](https://github.github.com/gh-aw/reference/network/) for more information.\n>\n> </details>\n\n\n> Generated by [👨‍🍳 PR Sous Chef](https://github.com/github/gh-aw/actions/runs/29883079375) · gpt54 8.98 AIC · ⌖ 8.2 AIC · ⊞ 7K · [◷](https://github.com/search?q=repo%3Agithub%2Fgh-aw+%22gh-aw-workflow-call-id%3A+github%2Fgh-aw%2Fpr-sous-chef%22&type=pullrequests)\n> <sub>Comment <em>/souschef</em> to run again</sub>\n\n<!-- gh-aw-agentic-workflow: PR Sous Chef, engine: pi, model: copilot/gpt-5.4, id: 29883079375, workflow_id: pr-sous-chef, run: https://github.com/github/gh-aw/actions/runs/29883079375 -->",
     "head": {
      "sha": "4a756b6bddc9bac3407676c510e4605c68257f03"
+    },
+    "base": {
+     "sha": "2a7ac3d34e2d1795112b2e8d6703b17cc42dfe73"
     },
     "changed_files": 91,
     "html_url": "https://github.com/github/gh-aw/pull/47149"
@@ -1415,6 +1565,67 @@
   },
   {
    "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=2a7ac3d34e2d1795112b2e8d6703b17cc42dfe73",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=2a7ac3d34e2d1795112b2e8d6703b17cc42dfe73",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=e9c7186c6bff49181e286da6caa9566b1ba06b1f",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=2a7ac3d34e2d1795112b2e8d6703b17cc42dfe73",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=e9c7186c6bff49181e286da6caa9566b1ba06b1f",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
    "url": "https://api.github.com/repos/github/gh-aw/commits/4a756b6bddc9bac3407676c510e4605c68257f03/check-runs?per_page=100",
    "bodySha256": null,
    "status": 200,
@@ -1949,6 +2160,7 @@
    "headers": {},
    "response": {
     "state": "pending",
+    "total_count": 0,
     "statuses": []
    }
   }

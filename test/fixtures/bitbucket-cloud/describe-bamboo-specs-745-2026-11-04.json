@@ -1,7 +1,7 @@
 {
  "description": "Bitbucket Cloud 2.0 responses for describeChange on atlassian/bamboo-specs #745 (anonymous, read-only)",
  "source": "recorded",
- "recordedAt": "2026-11-04T03:17:27.401Z",
+ "recordedAt": "2026-11-04T04:52:25.390Z",
  "provider": "bitbucket-cloud",
  "options": {},
  "change": {
@@ -56,7 +56,16 @@
     "url": "https://bitbucket.org/atlassian/bamboo-specs/pipelines/results/2221"
    }
   ],
-  "truncated": false
+  "truncated": false,
+  "attributes": {
+   "baseSha": "c2cef06b7807",
+   "base": {
+    "": null
+   },
+   "head": {
+    "": null
+   }
+  }
  },
  "exchanges": [
   {
@@ -514,6 +523,21 @@
   {
    "method": "GET",
    "url": "https://api.bitbucket.org/2.0/repositories/atlassian/bamboo-specs/src/02ca9f0da4f80418f1e20f47e02a392ce939954e/.gitattributes",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {
+    "content-type": "application/json; charset=utf-8"
+   },
+   "response": {
+    "type": "error",
+    "error": {
+     "message": "No such file or directory: .gitattributes"
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.bitbucket.org/2.0/repositories/atlassian/bamboo-specs/src/c2cef06b7807/.gitattributes",
    "bodySha256": null,
    "status": 404,
    "headers": {

@@ -7,6 +7,7 @@ import {
   type ListChangesResult,
   type ProviderContext,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { describeGitHubChange } from "./describe.js";
@@ -218,8 +219,8 @@ export class GitHubProvider implements ScmProvider {
   }
 
   /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
-  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
-    return describeGitHubChange(this.http, change);
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeGitHubChange(this.http, change, opts);
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */

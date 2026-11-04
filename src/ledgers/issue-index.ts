@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readTextConfined } from "../io/confine.js";
 import { join } from "node:path";
 import { writeFileAtomic } from "../io/atomic.js";
 import type { DrawForLedger, PublishContext, Verdict } from "../sdk/ledger.js";
@@ -50,7 +51,13 @@ export function indexPath(windowDir: string): string {
 export function readIndex(windowDir: string): LedgerIndex | null {
   const p = indexPath(windowDir);
   if (!existsSync(p)) return null;
-  const v = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
+  let v: LedgerIndex;
+  try {
+    v = JSON.parse(readTextConfined(p, "the ledger index")) as LedgerIndex;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new Error(`${p}: not valid JSON`);
+    throw e;
+  }
   if (v.schema !== "pr-rla/ledger-index/v1") throw new Error(`${p}: not a pr-rla ledger index (schema ${String(v.schema)})`);
   return v;
 }

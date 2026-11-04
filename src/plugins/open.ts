@@ -1,7 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { readTextConfined } from "../io/confine.js";
 import { pathToFileURL } from "node:url";
 import type { AuditContext } from "../api/context.js";
+import { signalledFetch, signalledSleep } from "../net/abort.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import { INDEX_FILE } from "../ledgers/issue-index.js";
 import type { PluginSpec } from "../registry.js";
@@ -9,7 +11,7 @@ import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VER
 import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
 import { PluginError } from "./errors.js";
 import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
-import { placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
+import { placeholderEnv, readGrants, refuseFullTrust, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
 
 /**
  * How the PluginRegistry opens an external plugin for a command (functional-design.md §U2b):
@@ -64,9 +66,10 @@ async function importInProcess(kind: "provider" | "ledger", spec: PluginSpec, en
   return def;
 }
 
-export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {
+export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, cwd: string, o: { signal?: AbortSignal } = {}): Promise<ScmProvider> {
   refuseIfBuiltinOnly(ctx.plugins, "provider", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
+  refuseFullTrust(ctx.plugins, "provider", spec.use, entry);
   const id = `provider:${entry.name}`;
   if (entry.trust === "full") {
     ctx.log(fullTrustLine(entry));
@@ -80,7 +83,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: entry.credentials });
   const host = await startLockedHost(ctx, "provider", spec, entry, plugin);
   try {
-    const p = await hostedProvider(host, spec.options, { cwd, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log });
+    const p = await hostedProvider(host, spec.options, { cwd, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal), log: ctx.log, ...(o.signal ? { signal: o.signal } : {}) });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return p;
   } catch (e) {
@@ -97,7 +100,15 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
 export function ledgerIndexStore(ctx: Pick<AuditContext, "mode">, windowDir: string): LedgerIndexStore {
   const path = join(windowDir, INDEX_FILE);
   return {
-    read: async () => (existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as unknown) : null),
+    read: async () => {
+      if (!existsSync(path)) return null;
+      try {
+        return JSON.parse(readTextConfined(path, "the ledger index")) as unknown;
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new PluginError(`${path}: not valid JSON`, "PLUGIN_INVALID");
+        throw e;
+      }
+    },
     write: async (value) => {
       if (ctx.mode === "read-only") throw Object.assign(new Error(`${path}: this audit context is read-only`), { code: "READ_ONLY_VIOLATION" });
       if (!value || typeof value !== "object") throw new PluginError(`${path}: a ledger index must be a JSON object`, "PLUGIN_INVALID");
@@ -106,11 +117,12 @@ export function ledgerIndexStore(ctx: Pick<AuditContext, "mode">, windowDir: str
   };
 }
 
-export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } = {}): Promise<Ledger> {
+export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null; signal?: AbortSignal } = {}): Promise<Ledger> {
   const reviewers = opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {};
   const index = ledgerIndexStore(ctx, windowDir);
   refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
+  refuseFullTrust(ctx.plugins, "ledger", spec.use, entry);
   const id = `ledger:${entry.name}`;
   if (entry.trust === "full") {
     ctx.log(fullTrustLine(entry));
@@ -124,7 +136,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: entry.credentials });
   const host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
   try {
-    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log, index, ...reviewers });
+    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: signalledFetch(ctx.broker.bind(id), opts.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, opts.signal), opts.signal), log: ctx.log, index, ...reviewers, ...(opts.signal ? { signal: opts.signal } : {}) });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return l;
   } catch (e) {

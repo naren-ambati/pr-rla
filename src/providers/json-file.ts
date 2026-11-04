@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readTextConfinedAsync } from "../io/confine.js";
 import { isAbsolute, resolve } from "node:path";
 import {
   PROVIDER_API_VERSION,
@@ -31,7 +31,16 @@ export interface ChangesFile {
   descriptions?: Record<string, ChangeDescription>;
 }
 
-/** Thrown by the json-file provider's describeChange when the export recorded no description for the change. */
+/** JSON.parse of the export, with an error that never quotes the file. */
+function parseExport(text: string, file: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${file}: not valid JSON`);
+  }
+}
+
+/** Thrown by the json-file provider's describeChange when the export recorded no description for the change (pr-rla's own class: draw-context honours only it). */
 export class NoRecordedDescription extends Error {
   readonly code = "NO_DESCRIPTION";
   constructor(file: string, id: string) {
@@ -55,7 +64,7 @@ export class JsonFileProvider implements ScmProvider {
   constructor(private readonly file: string) {}
 
   async load(): Promise<{ repo: string | null; defaultBranch: string; limitations: string[]; changes: ChangeRecord[] }> {
-    const raw = JSON.parse(await readFile(this.file, "utf8")) as unknown;
+    const raw = parseExport(await readTextConfinedAsync(this.file, "the json-file provider's export"), this.file) as unknown;
     const env: Partial<ChangesFile> = Array.isArray(raw) ? { changes: raw as ChangeRecord[] } : (raw as Partial<ChangesFile>);
     if (!Array.isArray(env.changes)) throw new Error(`${this.file}: expected an array of changes or {"schema":"pr-rla/changes/v1","changes":[...]}`);
     if (env.schema !== undefined && env.schema !== "pr-rla/changes/v1") throw new Error(`${this.file}: unsupported schema ${String(env.schema)}`);
@@ -70,7 +79,7 @@ export class JsonFileProvider implements ScmProvider {
 
   /** The description the export recorded for the change (U5), or NoRecordedDescription. */
   async describeChange(change: ChangeRecord): Promise<ChangeDescription> {
-    const raw = JSON.parse(await readFile(this.file, "utf8")) as Partial<ChangesFile> | unknown[];
+    const raw = parseExport(await readTextConfinedAsync(this.file, "the json-file provider's export"), this.file) as Partial<ChangesFile> | unknown[];
     const d = Array.isArray(raw) ? undefined : raw.descriptions?.[change.id];
     if (!d) throw new NoRecordedDescription(this.file, change.id);
     return structuredClone(d);

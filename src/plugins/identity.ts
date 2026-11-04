@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PluginError } from "./errors.js";
 import { definitionTraits, describePlugin, startPluginHost, type DefinitionTraits } from "./host.js";
-import { readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type ResolvedPlugin } from "./lock.js";
+import { readGrants, refuseFullTrust, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type ResolvedPlugin } from "./lock.js";
 import { PROVENANCE_LEVELS, type ProvenanceLevel } from "../sdk/ledger.js";
 
 /**
@@ -24,6 +24,7 @@ const memo = new Map<string, { traits: DefinitionTraits; provenance: ProvenanceL
 export async function externalPluginInfo(use: string, kind: "provider" | "ledger", auditDir: string, policy: PluginPolicy, options: Record<string, unknown> = {}): Promise<ExternalPluginInfo> {
   refuseIfBuiltinOnly(policy, kind, use);
   const { entry, plugin } = verifyLocked(use, auditDir);
+  refuseFullTrust(policy, kind, use, entry);
   const key = `${kind}\u0000${plugin.entry}\u0000${entry.treeSha256}\u0000${entry.trust}`;
   let known = memo.get(key);
   if (!known) {

@@ -1,12 +1,17 @@
-import type { ChangeCheck, ChangeDescription, ChangeRecord, ChangedFile, ChangedFileStatus, CheckState } from "../../sdk/provider.js";
+import type { ChangeCheck, ChangeDescription, ChangeRecord, ChangedFile, ChangedFileStatus, CheckState, DescribeChangeOptions } from "../../sdk/provider.js";
+import { attributesPath, encodePath, readChangeAttributes } from "../attributes.js";
 import type { HttpClient } from "../http.js";
+import { followPages, type Paged } from "../paging.js";
 
 /**
  * `describeChange` for Bitbucket Data Center (functional-design.md §U5): the PR, its `changes`
- * and `diff` (REST 1.0's JSON diff, turned into unified hunks), `raw/.gitattributes?at=<mergeSha>`,
- * and the build statuses at the PR's source commit (`/rest/build-status/1.0/commits/<sha>`).
- * A direct push: `commits/<sha>`, its `changes` and `diff`. GETs only. Unverified against a live
- * server, like the rest of this provider: built from Atlassian's documented response shapes.
+ * (paged) and `diff` (REST 1.0's JSON diff, turned into unified hunks), the `.gitattributes` files
+ * at the PR's target commit (`toRef.latestCommit`) and at its merge commit
+ * (`raw/<dir>/.gitattributes?at=`), and the build statuses at the PR's source commit
+ * (`/rest/build-status/1.0/commits/<sha>`, paged). A direct push: `commits/<sha>`, its `changes`
+ * and `diff`; its base is its first parent. A COPY is an added file with its source as
+ * previousPath. GETs only. Unverified against a live server, like the rest of this provider: built
+ * from Atlassian's documented response shapes.
  */
 
 interface DcPage<T> {
@@ -40,7 +45,7 @@ interface DcFileDiff {
   binary?: boolean;
 }
 
-/** A Data Center change type on the contract's statuses. */
+/** A Data Center change type on the contract's statuses (a COPY is an added file; its source is the previousPath). */
 export function dcFileStatus(type: string): ChangedFileStatus {
   if (type === "ADD" || type === "COPY") return "added";
   if (type === "DELETE") return "removed";
@@ -74,51 +79,55 @@ export function dcPatch(d: DcFileDiff): { patch: string | null; additions: numbe
   return { patch: out.join("\n"), additions, deletions };
 }
 
-async function all<T>(http: HttpClient, path: string): Promise<T[]> {
-  const out: T[] = [];
-  let start: number | undefined = 0;
-  while (start !== undefined) {
-    const sep = path.includes("?") ? "&" : "?";
-    const { data }: { data: DcPage<T> } = await http.get<DcPage<T>>(`${path}${sep}start=${start}&limit=1000`);
-    out.push(...data.values);
-    start = data.isLastPage ? undefined : data.nextPageStart;
-  }
-  return out;
+/** Every page from start 0; a repeated or missing nextPageStart, or the page cap, ends the walk as incomplete. */
+function all<T>(http: HttpClient, path: string, signal?: AbortSignal): Promise<Paged<T>> {
+  const sep = path.includes("?") ? "&" : "?";
+  return followPages<T, number>(0, async (start) => {
+    const { data } = await http.get<DcPage<T>>(`${path}${sep}start=${start}&limit=1000`, signal);
+    const next = data.isLastPage ? null : typeof data.nextPageStart === "number" ? data.nextPageStart : start;
+    return { items: data.values, next };
+  });
 }
 
-export async function describeBitbucketDcChange(http: HttpClient, root: string, change: ChangeRecord): Promise<ChangeDescription> {
+export async function describeBitbucketDcChange(http: HttpClient, root: string, change: ChangeRecord, opts: DescribeChangeOptions = {}): Promise<ChangeDescription> {
   const [project, slug] = change.repo.split("/") as [string, string];
   const repo = `/projects/${encodeURIComponent(project)}/repos/${encodeURIComponent(slug)}`;
+  const signal = opts.signal;
   let title: string;
   let body: string;
   let head: string;
-  let base: string;
+  let resource: string;
+  let base: string | null;
   if (change.kind === "pull_request") {
     const id = Number(/#(\d+)$/.exec(change.id)?.[1]);
     if (!Number.isInteger(id)) throw new Error(`bitbucket-data-center: cannot read a PR id from ${change.id}`);
-    const { data: pr } = await http.get<{ title: string; description?: string | null; fromRef?: { latestCommit?: string } }>(`${repo}/pull-requests/${id}`);
+    const { data: pr } = await http.get<{ title: string; description?: string | null; fromRef?: { latestCommit?: string }; toRef?: { latestCommit?: string } }>(`${repo}/pull-requests/${id}`, signal);
     title = pr.title;
     body = pr.description ?? "";
     head = pr.fromRef?.latestCommit ?? change.mergeSha;
-    base = `${repo}/pull-requests/${id}`;
+    base = pr.toRef?.latestCommit ?? null;
+    resource = `${repo}/pull-requests/${id}`;
   } else {
-    const { data: c } = await http.get<{ message: string }>(`${repo}/commits/${change.mergeSha}`);
+    const { data: c } = await http.get<{ message: string; parents?: { id?: string }[] }>(`${repo}/commits/${change.mergeSha}`, signal);
     const nl = c.message.indexOf("\n");
     title = nl < 0 ? c.message : c.message.slice(0, nl);
     body = nl < 0 ? "" : c.message.slice(nl + 1).replace(/^\n+/, "");
     head = change.mergeSha;
-    base = `${repo}/commits/${change.mergeSha}`;
+    base = c.parents?.[0]?.id ?? null;
+    resource = `${repo}/commits/${change.mergeSha}`;
   }
-  const changes = await all<DcChange>(http, `${base}/changes`);
-  const { data: diff } = await http.get<{ diffs?: DcFileDiff[]; truncated?: boolean }>(`${base}/diff?contextLines=3`);
+  const changes = await all<DcChange>(http, `${resource}/changes`, signal);
+  const { data: diff } = await http.get<{ diffs?: DcFileDiff[]; truncated?: boolean }>(`${resource}/diff?contextLines=3`, signal);
   const byPath = new Map((diff.diffs ?? []).map((d) => [(d.destination ?? d.source)?.toString ?? "", d]));
-  const files: ChangedFile[] = changes.map((c) => {
+  const files: ChangedFile[] = changes.items.map((c) => {
     const p = byPath.get(c.path.toString);
     const counted = p ? dcPatch(p) : { patch: null, additions: 0, deletions: 0 };
-    return { path: c.path.toString, ...(c.type === "MOVE" && c.srcPath ? { previousPath: c.srcPath.toString } : {}), status: dcFileStatus(c.type), ...counted };
+    return { path: c.path.toString, ...((c.type === "MOVE" || c.type === "COPY") && c.srcPath ? { previousPath: c.srcPath.toString } : {}), status: dcFileStatus(c.type), ...counted };
   });
-  const gitattributes = await http.getText(`${repo}/raw/.gitattributes?at=${change.mergeSha}`);
-  const { data: builds } = await http.get<{ values: { key: string; name?: string | null; state: string; url?: string | null }[] }>(`${root}/rest/build-status/1.0/commits/${head}`);
-  const checks: ChangeCheck[] = builds.values.map((b) => ({ name: b.name || b.key, state: dcBuildState(b.state), url: b.url ?? null }));
-  return { changeId: change.id, title, body, files, gitattributes, checks, truncated: !!diff.truncated };
+  const readAttributes = (dir: string, ref: string) => http.getText(`${repo}/raw/${encodePath(attributesPath(dir))}?at=${ref}`, signal);
+  const gitattributes = await readAttributes("", change.mergeSha);
+  const attributes = base ? await readChangeAttributes(files, { base, head: change.mergeSha }, gitattributes, readAttributes) : undefined;
+  const builds = await all<{ key: string; name?: string | null; state: string; url?: string | null }>(http, `${root}/rest/build-status/1.0/commits/${head}`, signal);
+  const checks: ChangeCheck[] = builds.items.map((b) => ({ name: b.name || b.key, state: dcBuildState(b.state), url: b.url ?? null }));
+  return { changeId: change.id, title, body, files, gitattributes, checks, truncated: !!diff.truncated || !changes.complete, ...(attributes ? { attributes } : {}), ...(!builds.complete ? { checksTruncated: true } : {}) };
 }

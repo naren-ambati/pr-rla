@@ -7,6 +7,7 @@ import {
   type ListChangesResult,
   type ProviderContext,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
 import { describeBitbucketDcChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
@@ -105,8 +106,8 @@ export class BitbucketDataCenterProvider implements ScmProvider {
   }
 
   /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
-  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
-    return describeBitbucketDcChange(this.http, this.root, change);
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeBitbucketDcChange(this.http, this.root, change, opts);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { abortable, sleepFor } from "./abort.js";
 import { DEFAULT_MAX_RETRIES, backoffMs, checkJsonBody, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   BrokerError,
@@ -94,7 +95,8 @@ export interface BrokerDeps {
   fetch?: typeof fetch;
   /** Milliseconds since the epoch; the command's clock, so retry deadlines run on it. */
   now?: () => number;
-  sleep?: (ms: number) => Promise<void>;
+  /** Waits (the governor's and retry backoff). Passed the request's signal, which also cuts the wait short (U5). */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** In [0, 1): backoff jitter. */
   random?: () => number;
   /** Starts a request's timeout and returns its cancel (tests use it against hanging servers). */
@@ -132,7 +134,6 @@ const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}
 /** Connection errors that mean the request never reached the server (safe to retry a write). */
 const BEFORE_SEND = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
 
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const realTimer = (fire: () => void, ms: number) => {
   const t = setTimeout(fire, ms);
   return () => clearTimeout(t);
@@ -184,7 +185,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   if (p.mode === "read-only" && p.recorder) throw new Error("the fetch broker never records in read-only mode (contracts.md §2 step 7)");
   const doFetch = deps.fetch ?? globalThis.fetch;
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? realSleep;
+  const sleep = deps.sleep ?? sleepFor;
+  /** A wait that the caller's signal ends early (a stopped job never sits out a rate-limit wait). */
+  const pause = (ms: number, signal?: AbortSignal | null) => abortable(sleep(ms, signal ?? undefined), signal);
   const random = deps.random ?? Math.random;
   const setTimer = deps.setTimer ?? realTimer;
   const log = deps.log ?? (() => {});
@@ -217,6 +220,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const secret = (env: string): string => {
       const c = creds.get(env);
       if (!c || !(c.hosts.has(url.host) || c.hosts.has(url.hostname))) throw new CredentialHostMismatch(env, url.host, c ? [...c.hosts] : []);
+      // Read-only mode (U5 fix round): a secret is never sent in clear text.
+      if (p.mode === "read-only" && url.protocol !== "https:")
+        throw new BrokerError(`credential ${env} is sent only over https; ${url.protocol}//${url.host} was refused and nothing was sent`, "CREDENTIAL_HOST_MISMATCH", url.host, "use the service's https:// URL");
       return c.value;
     };
     const out = new Headers();
@@ -289,9 +295,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       const wait = governor.reserve(g);
       if (wait > 0) {
         if (wait >= 1000) log(`${url.host}: rate budget; waiting ${Math.ceil(wait / 1000)}s before ${method} ${url.pathname}`);
-        await sleep(wait);
+        await pause(wait, call.req.signal);
       }
-      const release = await governor.slot(url.hostname);
+      const release = await governor.slot(url.hostname, call.req.signal ?? undefined);
       let res: Response;
       try {
         res = await send(call, url, method, headers, body);
@@ -366,7 +372,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       }
       const wait = told ? 0 : backoffMs(errors, random());
       log(`${call.url.host}: ${problem} on ${call.req.method ?? "GET"} ${call.url.pathname}; retrying ${told ? "when the rate limit allows" : `in ${Math.round(wait / 1000)}s`}`);
-      if (wait > 0) await sleep(wait);
+      if (wait > 0) await pause(wait, call.req.signal);
     }
   }
 
@@ -395,7 +401,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       deps.onAttempt?.({ host: call.url.host, destination: call.destination, attempt: n, atMs: at - start, outcome: problem });
       const wait = told ?? backoffMs(n, random(), 30_000);
       if (now() + wait - start > deadline) throw new BrokerRetriesExhausted(call.url.host, n, now() - start, problem);
-      if (told === null) await sleep(wait);
+      if (told === null) await pause(wait, call.req.signal);
     }
   }
 

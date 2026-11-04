@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
+import { confinedPath, readTextConfinedAsync } from "../io/confine.js";
+import { GIT_READ_CONFIG, gitReadEnv } from "../io/git-read.js";
 import {
   LEDGER_API_VERSION,
   defineLedger,
@@ -17,6 +19,9 @@ export interface GitFileLedgerOptions {
   /** File name inside the window directory (default verdicts.jsonl). */
   file?: string;
 }
+
+/** The file the git-file ledger reads and appends to: `file` (default verdicts.jsonl) joined to the window directory. */
+export const gitFilePath = (windowDir: string, options?: GitFileLedgerOptions) => join(windowDir, options?.file ?? "verdicts.jsonl");
 
 /**
  * Verdicts appended, one JSON object per line, to `audit/<window>/verdicts.jsonl`.
@@ -48,7 +53,7 @@ export class GitFileLedger implements Ledger {
 
   async readVerdicts(): Promise<VerdictEvent[]> {
     if (!existsSync(this.file)) return [];
-    return GitFileLedger.parse(await readFile(this.file, "utf8"), this.file);
+    return GitFileLedger.parse(await readTextConfinedAsync(this.file, "the git-file ledger's file"), this.file);
   }
 
   async appendVerdict(event: VerdictEvent): Promise<void> {
@@ -60,12 +65,17 @@ export class GitFileLedger implements Ledger {
   }
 
   async verifyIntegrity(): Promise<LedgerIntegrityReport> {
-    const git = (args: string[], cwd: string) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+    // Reads only: no lazy fetch on a partial clone, no optional locks or housekeeping, no repository above the roots (src/io/git-read.ts).
+    const env = gitReadEnv();
+    const git = (args: string[], cwd: string) => execFileSync("git", [...GIT_READ_CONFIG, ...args], { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
     const dir = dirname(this.file);
     let top: string;
     try {
       top = git(["rev-parse", "--show-toplevel"], existsSync(dir) ? dir : process.cwd()).trim();
-    } catch {
+      // A .git file can point anywhere ("gitdir: …"): in a confined call, the repository git reads must be inside the roots too.
+      for (const d of git(["rev-parse", "--git-dir", "--git-common-dir"], top).split("\n").filter(Boolean)) confinedPath(isAbsolute(d) ? d : resolve(top, d), "the git-file ledger's git directory");
+    } catch (e) {
+      if ((e as { code?: unknown }).code === "ROOT_ESCAPE") throw e;
       return { ok: true, tamperTrail: false, findings: ["verdicts are not in a git repository: there is no tamper trail"] };
     }
     // Resolve symlinks (e.g. macOS /var -> /private/var) so the path is relative to git's real toplevel.
@@ -86,7 +96,14 @@ export class GitFileLedger implements Ledger {
         content = git(["show", `${sha}:${rel}`], top);
       } catch {
         ok = false;
-        findings.push(`${rel} was deleted in commit ${sha.slice(0, 10)}`);
+        // A path the commit's tree has but whose object this clone lacks (a partial clone) is missing, not deleted.
+        let listed: string | null;
+        try {
+          listed = git(["ls-tree", sha, "--", rel], top).trim();
+        } catch {
+          listed = null;
+        }
+        findings.push(listed === "" ? `${rel} was deleted in commit ${sha.slice(0, 10)}` : `${rel} at commit ${sha.slice(0, 10)} cannot be read: its object is not in this clone (a partial or shallow clone?); verify from a full clone`);
         prev = "";
         continue;
       }
@@ -96,7 +113,7 @@ export class GitFileLedger implements Ledger {
       }
       prev = content;
     }
-    const current = existsSync(this.file) ? await readFile(this.file, "utf8") : "";
+    const current = existsSync(this.file) ? await readTextConfinedAsync(this.file, "the git-file ledger's file") : "";
     if (!current.startsWith(prev)) {
       ok = false;
       findings.push(`${rel} in the working tree rewrites its committed history`);
@@ -113,5 +130,5 @@ export default defineLedger<GitFileLedgerOptions>({
   ledgerApiVersion: LEDGER_API_VERSION,
   name: "git-file",
   description: "verdicts.jsonl in the audit repo; git history is the tamper trail",
-  create: (options: GitFileLedgerOptions, ctx: LedgerContext) => new GitFileLedger(join(ctx.windowDir, options?.file ?? "verdicts.jsonl")),
+  create: (options: GitFileLedgerOptions, ctx: LedgerContext) => new GitFileLedger(gitFilePath(ctx.windowDir, options)),
 });

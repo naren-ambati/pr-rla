@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { canonicalJson, sha256Hex } from "../../core/canonical.js";
+import { readConfined } from "../../io/confine.js";
 import { buildPopulation, type Population } from "../../core/population.js";
 import { derivedRoundFor, isRegistrationV2, registrationRepo, type AnyRegistration, type AuditParameters, type SignedRecord } from "../../core/records.js";
 import { isoToUnix, unixToIso } from "../../core/seed.js";
@@ -199,12 +201,23 @@ export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions 
 
 /**
  * The key a finished preview is cached under (contracts.md §4): the window, the registration digest
- * and `estimate`. Unregistered, the digest is over what the preview is built from in .pr-rla.yml.
+ * and `estimate`; and, so a preview built by another provider is never served (U5 fix round), the
+ * digest of the provider spec, of the config file, and of a json-file export's bytes. Unregistered,
+ * the registration digest is over what the preview is built from in .pr-rla.yml.
  */
 export function freezePreviewKey(ctx: ApiContext, opts: { window?: string; estimate?: boolean } = {}): string {
   const { config, paths } = configFor(ctx, opts.window);
   const digest = existsSync(paths.registration)
     ? readRegistration(paths).sha256
     : sha256Hex(canonicalJson({ unregistered: true, repo: config.repo, window: config.window, selector: config.selector, provider: config.provider }));
-  return canonicalJson({ dir: config.dir, window: opts.window ?? config.window.name, registration: digest, estimate: !!opts.estimate });
+  const exportPath = (config.provider.use === "json-file" || config.provider.use === "json") && typeof config.provider.options.path === "string" ? resolve(config.dir, config.provider.options.path) : null;
+  return canonicalJson({
+    dir: config.dir,
+    window: opts.window ?? config.window.name,
+    registration: digest,
+    estimate: !!opts.estimate,
+    provider: sha256Hex(canonicalJson(config.provider)),
+    config: existsSync(config.configPath) ? sha256Hex(readConfined(config.configPath, "the config file")) : null,
+    export: exportPath && existsSync(exportPath) ? sha256Hex(readConfined(exportPath, "the json-file provider's export")) : null,
+  });
 }

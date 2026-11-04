@@ -1,7 +1,7 @@
 {
  "description": "GitLab REST responses for describeChange on gitlab-org/cli !4191 (anonymous, read-only)",
  "source": "recorded",
- "recordedAt": "2026-11-04T03:17:25.259Z",
+ "recordedAt": "2026-11-04T04:52:22.314Z",
  "provider": "gitlab",
  "options": {},
  "change": {
@@ -72,7 +72,16 @@
     "url": "https://gitlab.com/gitlab-org/cli/-/pipelines/2997205784"
    }
   ],
-  "truncated": false
+  "truncated": false,
+  "attributes": {
+   "baseSha": "3cfa7871e3809f1bc58254abfce6387c662b5ce2",
+   "base": {
+    "": null
+   },
+   "head": {
+    "": null
+   }
+  }
  },
  "exchanges": [
   {
@@ -99,7 +108,7 @@
      "name": "Jay McCure",
      "state": "active",
      "locked": false,
-     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
      "web_url": "https://gitlab.com/jay_mccure"
     },
     "merge_user": {
@@ -109,7 +118,7 @@
      "name": "Jay McCure",
      "state": "active",
      "locked": false,
-     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
      "web_url": "https://gitlab.com/jay_mccure"
     },
     "merged_at": "2026-10-30T01:59:12.209Z",
@@ -127,7 +136,7 @@
      "name": "Jay McCure",
      "state": "active",
      "locked": false,
-     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
      "web_url": "https://gitlab.com/jay_mccure",
      "bot": false
     },
@@ -139,7 +148,7 @@
       "name": "Jay McCure",
       "state": "active",
       "locked": false,
-      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
       "web_url": "https://gitlab.com/jay_mccure"
      }
     ],
@@ -150,7 +159,7 @@
      "name": "Jay McCure",
      "state": "active",
      "locked": false,
-     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+     "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
      "web_url": "https://gitlab.com/jay_mccure"
     },
     "reviewers": [
@@ -161,7 +170,7 @@
       "name": "🤖 GitLab Bot 🤖",
       "state": "active",
       "locked": false,
-      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/1786152/avatar.png?v=1793759538",
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/1786152/avatar.png?v=1793766982",
       "web_url": "https://gitlab.com/gitlab-bot"
      },
      {
@@ -261,7 +270,7 @@
       "name": "Jay McCure",
       "state": "active",
       "locked": false,
-      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793758594",
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11809982/avatar.png?v=1793767689",
       "web_url": "https://gitlab.com/jay_mccure"
      },
      "started_at": "2026-10-30T01:41:53.921Z",
@@ -375,6 +384,18 @@
   {
    "method": "GET",
    "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/repository/files/.gitattributes/raw?ref=74ed9d6efae754a5ad773183746d844944c0ff86",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {
+    "content-type": "application/json"
+   },
+   "response": {
+    "message": "404 File Not Found"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/repository/files/.gitattributes/raw?ref=3cfa7871e3809f1bc58254abfce6387c662b5ce2",
    "bodySha256": null,
    "status": 404,
    "headers": {

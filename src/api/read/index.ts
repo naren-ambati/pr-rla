@@ -1,14 +1,22 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { resolve } from "node:path";
-import { createAuditContext, type AuditContext } from "../context.js";
-import { auditContextFor, bindAuditContext, type ApiContext } from "../session.js";
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { withConfinement, type Confinement } from "../../io/confine.js";
+import { sleepFor } from "../../net/abort.js";
+import { DESTINATION_TIMEOUT_MS } from "../../net/contract.js";
+import { BUDGET_FAMILIES } from "../../net/rate-limits.js";
 import { withPluginHostScope } from "../../plugins/host.js";
 import { pluginPolicy } from "../../plugins/lock.js";
+import { createAuditContext, type AuditContext } from "../context.js";
+import { AuditError } from "../errors.js";
+import { auditContextFor, bindAuditContext, type ApiContext } from "../session.js";
+import { readError } from "./errors.js";
 import { auditList as auditListApi, type AuditWindowSummary } from "./audit-list.js";
 import { drawContext as drawContextApi, type DrawContext } from "./draw-context.js";
 import { draws as drawsApi, type DrawsView } from "./draws.js";
 import { freezePreview as freezePreviewApi, freezePreviewKey, type FreezePreview } from "./freeze-preview.js";
-import { simulate as simulateApi, type SimulateInput, type SimulateReport } from "./simulate.js";
+import { simulateBounded, type SimulateInput, type SimulateReport } from "./simulate.js";
+export { SIMULATE_MAX_DRAWS } from "./simulate.js";
 import { status as statusApi, type StatusResult } from "./status.js";
 import { verify as verifyApi, type VerifyResult } from "./verify.js";
 
@@ -43,10 +51,12 @@ export interface ReadOptions {
   log?: (line: string) => void;
   /** Progress of a long call (a freeze preview, an online verify). */
   onProgress?: (p: { done: number; total?: number; message: string }) => void;
-  /** Aborts the call's provider requests. */
+  /** Stops the call: every request, wait and plugin call it makes (U5 fix round). */
   signal?: AbortSignal;
-  /** Refuses a file or directory the call may not open (the MCP server's roots); throw to refuse. */
+  /** Refuses a file or directory the call may not open (the MCP server's roots); throw to refuse. Every file is checked by its real path as it is opened. */
   confine?: (path: string, what: string) => void;
+  /** The directories the call may open: git never looks for a repository above them (GIT_CEILING_DIRECTORIES). */
+  roots?: readonly string[];
   /** `builtin-only` refuses every external plugin (as PR_RLA_PLUGINS=builtin-only in `env` does). */
   plugins?: "builtin-only";
   /** Calls passing the same object share one fetch broker per audit directory, and its per-host budgets. */
@@ -70,8 +80,44 @@ export interface AuditInput {
 const current = new AsyncLocalStorage<ReadOptions>();
 const sessions = new WeakMap<object, Map<string, AuditContext>>();
 
+/**
+ * How long one long read call may run in all (the MCP server's per-job deadline), derived from the
+ * broker's budgets rather than picked: the longest default budget window of any host (GitHub's
+ * and Bitbucket Cloud's hourly budgets: 1 h), so a call can wait out one full refill of its host's
+ * budget, plus one SCM request's timeout (30 s), so a request sent just before then can finish.
+ * The measured gh-aw Q3 freeze (about 22 min, nfr-design.md §3) fits. A call that needs more has
+ * exhausted a budget and is waiting on the next one: the CLI, which keeps checkpoints and resumes,
+ * is the place for it.
+ */
+export const LONG_CALL_DEADLINE_MS = Math.max(...Object.values(BUDGET_FAMILIES).flatMap((f) => f.rules.map((r) => r.perMs))) + DESTINATION_TIMEOUT_MS.scm;
+
+/** The caller's `confine`, its refusals as ROOT_ESCAPE in pr-rla's error. */
+function confinement(o: ReadOptions): Confinement | undefined {
+  if (!o.confine && !o.roots) return undefined;
+  const roots = (o.roots ?? []).map((r) => realpathSync(r));
+  const inside = (real: string) => roots.some((r) => {
+    const rel = relative(r, real);
+    return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
+  });
+  const confine = (path: string, what: string) => {
+    if (!o.confine) {
+      if (!inside(path)) throw new AuditError(`${what} resolves outside the roots this call may open`, 1, "ROOT_ESCAPE");
+      return;
+    }
+    try {
+      o.confine(path, what);
+    } catch (e) {
+      if (e instanceof AuditError) throw e;
+      const x = e as { message?: unknown; next?: unknown };
+      throw new AuditError(typeof x?.message === "string" ? x.message : `${what} is outside the roots`, 1, "ROOT_ESCAPE", typeof x?.next === "string" ? x.next : undefined);
+    }
+  };
+  return { confine, gitCeilings: roots };
+}
+
 function readContext(input: AuditInput, o: ReadOptions): ApiContext {
   const cwd = resolve(input.dir);
+  const c = confinement(o);
   const ctx: ApiContext = {
     cwd,
     ...(input.config ? { configPath: resolve(cwd, input.config) } : {}),
@@ -81,7 +127,7 @@ function readContext(input: AuditInput, o: ReadOptions): ApiContext {
     err: (l) => o.log?.(l),
     ...(o.sleep ? { sleep: o.sleep } : {}),
     ...(o.plugins ? { plugins: o.plugins } : {}),
-    ...(o.confine ? { confine: o.confine } : {}),
+    ...(c ? { confine: c.confine } : {}),
     ...(o.signal ? { signal: o.signal } : {}),
     ...(o.onProgress ? { onProgress: o.onProgress } : {}),
     mode: "read-only",
@@ -96,7 +142,7 @@ function readContext(input: AuditInput, o: ReadOptions): ApiContext {
         mode: "read-only",
         env: ctx.env,
         nowMs: () => ctx.nowMs(),
-        sleep: (ms) => (o.sleep ?? ((t: number) => new Promise<void>((r) => setTimeout(r, t))))(ms),
+        sleep: (ms, signal) => (o.sleep ? o.sleep(ms) : sleepFor(ms, signal)),
         log: (l) => (current.getStore() ?? o).log?.(l),
         fetch: ((i, init) => (o.fetch ?? globalThis.fetch)(i, init)) as typeof fetch,
         plugins: pluginPolicy(o.plugins, ctx.env),
@@ -108,8 +154,23 @@ function readContext(input: AuditInput, o: ReadOptions): ApiContext {
   return ctx;
 }
 
-/** Runs one read call: its notes go to its own options, and the plugin hosts it started stop when it ends. */
-const run = <T>(o: ReadOptions, fn: () => Promise<T>): Promise<T> => current.run(o, () => withPluginHostScope(fn));
+/**
+ * Runs one read call: its notes go to its own options, every file it opens is confined to the
+ * caller's roots, the plugin hosts it started stop when it ends, and what it throws is pr-rla's
+ * error, with anything pr-rla did not write in `untrusted` (./errors.ts).
+ */
+const run = <T>(o: ReadOptions, fn: () => Promise<T>): Promise<T> =>
+  current.run(o, () =>
+    withConfinement(confinement(o), () =>
+      withPluginHostScope(async () => {
+        try {
+          return await fn();
+        } catch (e) {
+          throw readError(e);
+        }
+      }),
+    ),
+  );
 
 /** The audit directory's windows and the phase of each (offline). */
 export function auditList(input: AuditInput, options: ReadOptions = {}): Promise<{ dir: string; windows: AuditWindowSummary[] }> {
@@ -159,7 +220,11 @@ export function freezePreview(input: AuditInput & { window?: string; estimate?: 
   });
 }
 
-/** The scoring code against an oracle population. Pure. */
-export function simulate(input: SimulateInput): SimulateReport {
-  return simulateApi(input);
+/**
+ * The scoring code against an oracle population. Pure: no file, no network. An input whose worst
+ * case is over SIMULATE_MAX_DRAWS (runs × cap) is refused with TOO_MUCH_WORK before it starts; the
+ * rest runs in slices that yield to other calls, and stops when `options.signal` aborts.
+ */
+export function simulate(input: SimulateInput, options: ReadOptions = {}): Promise<SimulateReport> {
+  return simulateBounded(input, { ...(options.signal ? { signal: options.signal } : {}), ...(options.onProgress ? { onProgress: options.onProgress } : {}) });
 }

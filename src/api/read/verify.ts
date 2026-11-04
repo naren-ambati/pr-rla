@@ -4,7 +4,9 @@ import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
 import { verifyAudit, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits } from "../../ledger-traits.js";
 import { pluginIdentity } from "../../registry.js";
+import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
+import { AuditError } from "../errors.js";
 import { readCheckpoints } from "./checkpoints.js";
 import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { logPublicKey } from "../translog.js";
@@ -48,8 +50,12 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins);
   const skipLedger = !!opts.offline && lt.hosts.length > 0;
   const { checkpoints, problems } = readCheckpoints(paths.windowDir);
-  const provider = opts.offline ? null : await providerFor(ctx, config);
+  const provider = opts.offline ? null : withProgress(ctx, await providerFor(ctx, config));
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
+  if (ledger) {
+    const read = ledger.readVerdicts.bind(ledger);
+    ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), read());
+  }
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
   const report = await verifyAudit(
@@ -62,7 +68,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
           if (await verifyQuicknetBeacon(draws.beacon, round)) return draws.beacon;
-          throw new Error("the beacon recorded in draws.json fails BLS verification");
+          throw new AuditError("the beacon recorded in draws.json fails BLS verification", 1, "FAILED", "the audit's draws.json was altered: verify against the published beacon (pr-rla verify without --offline)");
         }
         if (opts.offline && !opts.beaconFile && !ctx.beacon) return null;
         try {
@@ -85,6 +91,20 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
   };
+}
+
+/** The provider, reporting the population rebuild of check 5 as progress (an online verify of a large window takes minutes). */
+function withProgress(ctx: ApiContext, provider: ScmProvider): ScmProvider {
+  if (!ctx.onProgress) return provider;
+  const list = provider.listChanges.bind(provider);
+  return Object.assign(Object.create(provider) as ScmProvider, {
+    listChanges: async (req: Parameters<ScmProvider["listChanges"]>[0]) => {
+      ctx.onProgress?.({ done: 0, message: `check 5: listing ${req.repo} on ${provider.name} to rebuild the population` });
+      const r = await list({ ...req, ...(ctx.signal && !req.signal ? { signal: ctx.signal } : {}) });
+      ctx.onProgress?.({ done: 1, message: `check 5: ${r.changes.length.toLocaleString("en-US")} changes listed` });
+      return r;
+    },
+  });
 }
 
 /**

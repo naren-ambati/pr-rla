@@ -1,16 +1,19 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { sha256Hex } from "../../core/canonical.js";
-import { DEFAULT_MAX_PATCH_BYTES, MAX_PATCH_BYTES_LIMIT, buildDrawContext, type DrawContext } from "../../core/draw-context.js";
+import { DEFAULT_MAX_PATCH_BYTES, MAX_PATCH_BYTES_LIMIT, buildDrawContext, type DrawContext, type RecordTarget } from "../../core/draw-context.js";
 import { isRegistrationV2, type DrawsFile } from "../../core/records.js";
 import { computeStatus } from "../../core/status.js";
 import type { PrRlaConfig, WindowPaths } from "../../config.js";
+import { readTextConfined } from "../../io/confine.js";
+import { gitFilePath } from "../../ledgers/git-file.js";
 import { ledgerTraits, type LedgerTraits } from "../../ledger-traits.js";
+import { NoRecordedDescription } from "../../providers/json-file.js";
 import type { VerdictEvent } from "../../sdk/ledger.js";
 import { changeDescriptionProblems, type ChangeDescription } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, ledgerFor, protocolPath, providerFor, readDraws, readManifest, readRegistration, type ApiContext } from "../session.js";
+import { auditContextFor, configFor, ledgerFor, providerFor, readDraws, readManifest, readProtocol, readRegistration, type ApiContext } from "../session.js";
 
 export type { DrawContext } from "../../core/draw-context.js";
 
@@ -32,26 +35,35 @@ export function issuedDraws(paths: WindowPaths, window: string): DrawsFile {
   return readDraws(paths);
 }
 
-/** The draw a person records a verdict on, and how, for this ledger (the assistant never records). */
-export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerTraits, draw: number, changeId: string): string {
+/**
+ * How a person records a verdict on the draw, for this ledger, in pr-rla's words (the assistant
+ * never records). For a tracker ledger, the issue and the verdict labels come from the ledger's
+ * index, which holds the tracker's text: they are returned apart, as `target`, for the fence.
+ */
+export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerTraits, draw: number, changeId: string): { text: string; target: RecordTarget | null } {
   if (lt.name === "git-file") {
-    const file = relative(config.dir, join(paths.windowDir, typeof config.ledger.options.file === "string" ? config.ledger.options.file : "verdicts.jsonl"));
-    return `pr-rla record ${draw} pass|fail --reviewer <you> --note "<one line>", then commit ${file}`;
+    const file = relative(config.dir, gitFilePath(paths.windowDir, config.ledger.options as { file?: string }));
+    return { text: `pr-rla record ${draw} pass|fail --reviewer <you> --note "<one line>", then commit ${file}`, target: null };
   }
   if (lt.provenance === "account") {
-    let where = "";
+    let target: RecordTarget | null = null;
+    const indexFile = join(paths.windowDir, "ledger-index.json");
     try {
-      const index = JSON.parse(readFileSync(join(paths.windowDir, "ledger-index.json"), "utf8")) as { labels?: Record<string, { name?: string }>; issues?: { changeId: string; url: string }[] };
-      const issue = index.issues?.find((i) => i.changeId === changeId);
-      const pass = index.labels?.pass?.name;
-      const fail = index.labels?.fail?.name;
-      if (issue && pass && fail) where = `apply ${pass} or ${fail} to ${issue.url} yourself, in the tracker (it records who applied it and when); or `;
-    } catch {
-      where = "";
+      if (existsSync(indexFile)) {
+        const index = JSON.parse(readTextConfined(indexFile, "the ledger index")) as { labels?: Record<string, { name?: unknown }>; issues?: { changeId: string; url: unknown }[] };
+        const issue = index.issues?.find((i) => i.changeId === changeId);
+        const pass = index.labels?.pass?.name;
+        const fail = index.labels?.fail?.name;
+        if (issue && typeof issue.url === "string" && typeof pass === "string" && typeof fail === "string") target = { issueUrl: issue.url, passLabel: pass, failLabel: fail };
+      }
+    } catch (e) {
+      if ((e as { code?: unknown }).code === "ROOT_ESCAPE") throw e;
+      target = null;
     }
-    return `${where}run "pr-rla record ${draw} pass|fail" with your own token (ledger ${lt.name})`;
+    const where = target ? "apply the pass or the fail label named in the fence to the tracker issue named there, yourself, in the tracker (it records who applied it and when); or " : "";
+    return { text: `${where}run "pr-rla record ${draw} pass|fail" with your own token (ledger ${lt.name})`, target };
   }
-  return `pr-rla record ${draw} pass|fail --reviewer <you> (ledger ${lt.name})`;
+  return { text: `pr-rla record ${draw} pass|fail --reviewer <you> (ledger ${lt.name})`, target: null };
 }
 
 /**
@@ -77,8 +89,9 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   // The verdict state, from the ledger (a tracker ledger is read: draw_context is an online call).
   const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins);
   let verdict: VerdictEvent | null = null;
-  let verdictUnread: string | undefined;
+  let verdictUnread: { ledger: string; error: string } | undefined;
   let blocksPrefix = false;
+  ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${lt.name}` });
   try {
     const ledger = await ledgerFor(ctx, config, paths);
     const report = computeStatus({
@@ -94,29 +107,34 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
     verdict = report.firstVerdicts.find((v) => v.changeId === change.id) ?? null;
     blocksPrefix = report.blockingDraw?.draw === n;
   } catch (e) {
-    verdictUnread = `ledger ${lt.name}: ${(e as Error).message}`;
+    // A stopped call stops; a file outside the roots is refused; anything else the ledger says goes in the fence.
+    if (ctx.signal?.aborted || (e as { code?: unknown }).code === "ROOT_ESCAPE") throw e;
+    verdictUnread = { ledger: lt.name, error: (e as Error)?.message ?? String(e) };
   }
 
-  const ppath = protocolPath(config);
-  const bytes = existsSync(ppath) ? readFileSync(ppath) : null;
-
+  const bytes = readProtocol(config);
   const provider = await providerFor(ctx, config);
   let description: ChangeDescription | null = null;
   let descriptionNote: string | undefined;
   if (!provider.describeChange) descriptionNote = `provider ${provider.name} has no describeChange; open the URL`;
   else {
+    ctx.onProgress?.({ done: 1, message: `asking ${provider.name} for ${change.id}` });
+    let got: unknown;
     try {
-      ctx.onProgress?.({ done: 0, message: `asking ${provider.name} for ${change.id}` });
-      description = await provider.describeChange(change);
+      got = await provider.describeChange(change, ctx.signal ? { signal: ctx.signal } : {});
     } catch (e) {
-      if ((e as { code?: unknown }).code === "NO_DESCRIPTION") descriptionNote = `${(e as Error).message}; open the URL`;
-      else throw e;
+      // Only pr-rla's own "no description" is a note, and in pr-rla's words; a plugin's error is an error.
+      if (!(e instanceof NoRecordedDescription)) throw e;
+      descriptionNote = "the json-file export records no description for this change; open the URL";
     }
-    if (description) {
-      const problems = changeDescriptionProblems(description, change.id);
+    if (descriptionNote === undefined) {
+      // Every return is checked, a falsy one included.
+      const problems = changeDescriptionProblems(got, change.id);
       if (problems.length) throw new AuditError(`provider ${provider.name} described ${change.id} wrongly: ${problems.slice(0, 5).join("; ")}`, 1, "PROVIDER_ERROR");
+      description = got as ChangeDescription;
     }
   }
+  const record = howToRecord(config, paths, lt, firstDraw, change.id);
   return buildDrawContext({
     window,
     draw: n,
@@ -132,7 +150,8 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
     ...(descriptionNote ? { descriptionNote } : {}),
     excludeGenerated: reg.record.selector.exclude_generated,
     maxPatchBytes,
-    howToRecord: howToRecord(config, paths, lt, firstDraw, change.id),
+    howToRecord: record.text,
+    recordTarget: record.target,
     fenceId: opts.fenceId ?? randomBytes(16).toString("hex"),
   });
 }

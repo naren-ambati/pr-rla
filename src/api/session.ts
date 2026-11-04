@@ -1,15 +1,18 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fetchQuicknetBeacon, verifyQuicknetBeacon, type Beacon } from "../beacon/drand.js";
 import { sha256Hex } from "../core/canonical.js";
 import { isRegistrationV2, type AnyCommitment, type AnyManifest, type AnyRegistration, type DrawsFile, type SignedRecord } from "../core/records.js";
-import { CONFIG_FILE, loadConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
+import { CONFIG_FILE, parseConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
+import { readTextConfined, readConfined } from "../io/confine.js";
+import { gitFilePath } from "../ledgers/git-file.js";
+import { signalledFetch, sleepFor } from "../net/abort.js";
 import type { BrokerFetch } from "../net/contract.js";
 import { pluginPolicy } from "../plugins/lock.js";
 import type { Ledger } from "../sdk/ledger.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
-import { createAuditContext, openLedger, openProvider, type AuditContext, type AuditMode } from "./context.js";
+import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditContext, type AuditMode } from "./context.js";
 import { AuditError, type AuditErrorCode } from "./errors.js";
 
 /**
@@ -60,7 +63,6 @@ export interface ApiContext {
 }
 
 const auditContexts = new WeakMap<ApiContext, AuditContext>();
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * The call's AuditContext (src/api/context.ts), made once per ApiContext so every request of the
@@ -75,7 +77,7 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
       mode: ctx.mode ?? "read-write",
       env: ctx.env,
       nowMs: () => ctx.nowMs(),
-      sleep: (ms) => (ctx.sleep ?? realSleep)(ms),
+      sleep: (ms, signal) => (ctx.sleep ? ctx.sleep(ms) : sleepFor(ms, signal)),
       log: (l) => ctx.err(l),
       fetch: ((input, init) => ctx.fetch(input, init)) as typeof fetch,
       plugins: pluginPolicy(ctx.plugins, ctx.env),
@@ -93,6 +95,15 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
 export function bindAuditContext(ctx: ApiContext, actx: AuditContext): void {
   if ((ctx.mode ?? "read-write") !== actx.mode) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode cannot use a ${actx.mode} AuditContext`);
   auditContexts.set(ctx, actx);
+}
+
+/**
+ * Refuses a write operation on a read-only ApiContext, before it starts. It reads the context's
+ * mode only: it builds no AuditContext, so it never evaluates the plugin policy (an invalid
+ * PR_RLA_PLUGINS still fails where it always did, not in `init` or before `plugin add`'s own checks).
+ */
+export function requireWritable(ctx: Pick<ApiContext, "mode">, operation: string): void {
+  if ((ctx.mode ?? "read-write") === "read-only") throw new AuditApiError(`${operation} writes, and this audit context is read-only`, "READ_ONLY_VIOLATION", `run "pr-rla ${operation}" yourself from the CLI`);
 }
 
 /** The fetch broker for this call: shared by every caller, on the context's clock. */
@@ -114,8 +125,8 @@ function confineConfig(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths)
   c(isAbsolute(config.protocol) ? config.protocol : join(config.dir, config.protocol), "protocol");
   const path = config.provider.options.path;
   if ((config.provider.use === "json-file" || config.provider.use === "json") && typeof path === "string") c(isAbsolute(path) ? path : resolve(config.dir, path), "the json-file provider's path");
-  const file = config.ledger.options.file;
-  if (typeof file === "string") c(resolve(paths.windowDir, file), "the ledger's file");
+  // The path the git-file ledger opens (its own computation); every read is confined again when it opens it.
+  if (config.ledger.use === "git-file") c(gitFilePath(paths.windowDir, config.ledger.options as { file?: string }), "the ledger's file");
   if (config.transparencyLog.publicKeyFile) c(resolve(config.dir, config.transparencyLog.publicKeyFile), "transparency_log.public_key_file");
 }
 
@@ -126,9 +137,11 @@ export function configFor(ctx: ApiContext, window?: string): { config: PrRlaConf
   if (!existsSync(path)) throw new AuditError(`no ${CONFIG_FILE} at ${path} (run "pr-rla init")`, 1, "NO_AUDIT");
   let config: PrRlaConfig;
   try {
-    config = loadConfig(path, ctx.fromFile ? { fromFile: resolve(ctx.cwd, ctx.fromFile) } : {});
+    config = parseConfig(readTextConfined(path, CONFIG_FILE), path, ctx.fromFile ? { fromFile: resolve(ctx.cwd, ctx.fromFile) } : {});
   } catch (e) {
-    throw new AuditError((e as Error).message, 1, "NO_AUDIT");
+    if ((e as { code?: unknown }).code === "ROOT_ESCAPE") throw e;
+    // One line, never a YAML code frame: an error message carries no file contents.
+    throw new AuditError(firstLine((e as Error).message), 1, "NO_AUDIT");
   }
   auditContextFor(ctx).setRateLimits(config.rateLimits);
   let paths = windowPaths(config);
@@ -144,23 +157,34 @@ export function configFor(ctx: ApiContext, window?: string): { config: PrRlaConf
 
 /** The configured provider, its requests through the context's broker. */
 export async function providerFor(ctx: ApiContext, config: PrRlaConfig): Promise<ScmProvider> {
-  return openProvider(auditContextFor(ctx), config.provider, config.dir);
+  return openProvider(auditContextFor(ctx), config.provider, config.dir, ctx.signal ? { signal: ctx.signal } : {});
 }
 
 /** The configured ledger, its requests through the context's broker, told the registered reviewers once a registration exists. */
 export async function ledgerFor(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths): Promise<Ledger> {
   const reg = existsSync(paths.registration) ? readRegistration(paths) : null;
   const reviewers = reg && isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
-  return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, { reviewers });
+  return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, { reviewers, ...(ctx.signal ? { signal: ctx.signal } : {}) });
 }
 
-/** Reads an audit record. A missing one is NO_AUDIT (nothing to report yet); an unreadable one too. */
+/** The first line of an error message, at most 300 characters: what a parser's message says, without the text it quotes. */
+export function firstLine(message: string): string {
+  const l = message.split(/\r?\n/)[0]!.replace(/:\s*$/, "");
+  return l.length > 300 ? `${l.slice(0, 300)}…` : l;
+}
+
+/**
+ * Reads an audit record: confined to the caller's roots when it has any (src/io/confine.ts), the
+ * path checked being the path opened. A missing one is NO_AUDIT (nothing to report yet); an
+ * unreadable one too. The error never quotes the file (JSON.parse's message would).
+ */
 export function readJson<T>(path: string, what: string, code: AuditErrorCode = "NO_AUDIT"): T {
   if (!existsSync(path)) throw new AuditError(`${what} not found at ${path}`, 1, code);
+  const text = readTextConfined(path, what);
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as T;
-  } catch (e) {
-    throw new AuditError(`${what} at ${path} is not valid JSON: ${(e as Error).message}`, 1, code);
+    return JSON.parse(text) as T;
+  } catch {
+    throw new AuditError(`${what} at ${path} is not valid JSON`, 1, code);
   }
 }
 
@@ -171,7 +195,13 @@ export function protocolPath(config: PrRlaConfig): string {
 export function protocolSha256(config: PrRlaConfig): string {
   const p = protocolPath(config);
   if (!existsSync(p)) throw new AuditError(`review protocol not found at ${p} (run "pr-rla init" or set protocol: in ${CONFIG_FILE})`, 1, "NO_AUDIT");
-  return sha256Hex(readFileSync(p));
+  return sha256Hex(readConfined(p, "protocol"));
+}
+
+/** The review protocol's bytes, confined, or null when the file is missing. */
+export function readProtocol(config: PrRlaConfig): Buffer | null {
+  const p = protocolPath(config);
+  return existsSync(p) ? readConfined(p, "protocol") : null;
 }
 
 export const readRegistration = (paths: WindowPaths) => readJson<SignedRecord<AnyRegistration>>(paths.registration, "registration");
@@ -186,7 +216,7 @@ export async function getBeacon(ctx: ApiContext, round: number, beaconFile?: str
     return b;
   }
   if (ctx.beacon) return ctx.beacon(round);
-  return fetchQuicknetBeacon(round, { fetch: auditContextFor(ctx).componentFetch("pr-rla/drand", "beacon"), nowUnix: Math.floor(ctx.nowMs() / 1000) });
+  return fetchQuicknetBeacon(round, { fetch: signalledFetch(auditContextFor(ctx).componentFetch("pr-rla/drand", "beacon"), ctx.signal), nowUnix: Math.floor(ctx.nowMs() / 1000) });
 }
 
 export const fmt = (n: number) => n.toLocaleString("en-US");
