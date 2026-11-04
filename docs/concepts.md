@@ -115,10 +115,12 @@ prefix 0/36 · fails 0 · claim D (detected-defect rate ≤ 10%, protocol f484�
 ```output
 $ pr-rla verify --offline
 1. INCOMPLETE registration: registration after window close → RETROSPECTIVE (a demonstration) (unproven: too few timestamps)
+        registration sha256 1a619c365fb07deaf9c9e39f5a0396628ff252a83259ffe431a9a86689a3a3a5
         registration timestamps: no authority configured · TIMESTAMP NOT TAMPER-PROOF
         TIMESTAMP NOT TAMPER-PROOF: the registration's time is the signer's own clock
         registered with pr-rla 0.1.0 · provider json-file (builtin 0.1.0) · ledger git-file · verdict provenance self-asserted
 2. INCOMPLETE manifest before seed: manifest written (signed time, unproven) 2026-10-20T12:00:00Z: not shown to precede R
+        WARN the registration does not bind its selector's logins (copilot-swe-agent[bot]) to account ids (no accounts field: its provider could not resolve them, or it was written before P5), so they match as logins: an account renamed before the freeze, or a login written onto another account's change, could move a change in or out of the stratum (a retrospective audit: register warned)
         manifest commitment timestamps: no authority configured · TIMESTAMP NOT TAMPER-PROOF
         TIMESTAMP NOT TAMPER-PROOF: the manifest commitment's time is the signer's own clock
         frozen with pr-rla 0.1.0 · provider json-file (builtin 0.1.0)
@@ -128,7 +130,7 @@ $ pr-rla verify --offline
         round 33245812 randomness f9b8c2fb7b8afe1e… verified with drand-client against pinned quicknet key
 5. SKIP population: offline: population not rebuilt
 6. PASS draws: 36/36 draws reproduce
-        144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 1,589 change ids in canonical order
+        144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 1,589 changes in canonical order (by draw key: the registered path, or a rule pool's repo id)
 7. WARN labels: labels (prefix 0, 0 events)
         VERDICT PROVENANCE: none counted (registered minimum: self-asserted)
         verdicts are not in a git repository: there is no tamper trail

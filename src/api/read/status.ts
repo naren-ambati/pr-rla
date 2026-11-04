@@ -3,7 +3,7 @@ import { buildPopulation } from "../../core/population.js";
 import { perRepoRows, type RepoRow } from "../../core/pooled-report.js";
 import { PRESENCE_LIMIT, auditBinding, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
 import type { GateLedger } from "../../core/ledger-gate.js";
-import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
+import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registeredAccounts, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
 import { describeRepoSet } from "../../core/repo-set.js";
 import { dropPrefix, foreign, foreignError, said, wordsOf } from "../../core/said.js";
 import { unixToIso } from "../../core/seed.js";
@@ -22,6 +22,8 @@ import { bindRegisteredPlugin, callerOf, readOnlyContext, auditContextFor, confi
 import { accessShortfall } from "../access.js";
 import { assessRecord, logBound } from "../timestamps.js";
 import { fenceStatus, renderResult } from "./untrusted.js";
+import { registrationPin, statusCore } from "./offline-core.js";
+import type { CoreGate } from "../../core/verify-core.js";
 
 /**
  * `status` (functional-design.md §U5): where an audit stands, as one result object per phase.
@@ -44,6 +46,16 @@ export interface StatusOptions {
    * status needs the same anchors verify is given for an authority outside the shipped bundle.
    */
   tsaTrust?: string[];
+  /**
+   * P5: the verifier's transparency-log keys, `<log url>=<pem file>` each, as verify's `--log-key`: a v1 record's log
+   * entry proves its time only under a key the caller trusts (the pinned ones always do).
+   */
+  logKey?: string[];
+  /**
+   * P5 (T14): the registration's SHA-256 you were given before R published (prospective: before the window opened), as
+   * verify's `--registration`: the offline checks FAIL a registration that is not it.
+   */
+  registration?: string;
 }
 
 interface TimeStanding {
@@ -70,7 +82,15 @@ interface SeedRound {
 export type StatusResult =
   | { phase: "unregistered"; window: string; start: string; end: string; line: string }
   | ({ phase: "registered"; window: string; windowPhase: string; nSoFar: number | null; line: string } & TimeStanding & SeedRound)
-  | ({ phase: "frozen"; window: string; N: number; line: string } & TimeStanding & SeedRound)
+  | ({
+      phase: "frozen";
+      window: string;
+      N: number;
+      line: string;
+      /** P5 (finding 9): N below the registered minimum: the registration says review all N instead (exit 3). Null otherwise. */
+      refusal: string | null;
+    } & TimeStanding &
+      SeedRound)
   | ({
       phase: "sampled";
       window: string;
@@ -109,6 +129,13 @@ export type StatusResult =
       certified: boolean;
       /** Read-only mode (S1): what ledger lines said (a reviewer, a note, an app's name), which the fields above point to as `untrusted.errors[i]`. */
       untrusted?: { errors: string[] };
+      /**
+       * P5 (finding 6): verify's offline checks (1, 2, 3, 4 and 6, src/core/verify-core.ts) as status ran them on the same
+       * records; check 5 (the SCM) and the tracker reads of check 7 need `pr-rla verify`.
+       */
+      offlineChecks: { n: number; name: string; status: string; summary: string }[];
+      /** What of `offlineChecks` would FAIL in verify: status exits 1 on any, whatever the sequence's state. */
+      offlineFails: string[];
       /** The certificate line (or the refusal), as the CLI prints it first. */
       line: string;
     } & TimeStanding &
@@ -134,23 +161,24 @@ export type StatusResult =
  * anchor and its independence (NFR4), or is empty. `withheld` has one INCOMPLETE withholding per record
  * whose time is not proven (time round B): a certificate cannot stand on it.
  */
-export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>, tsaTrust: readonly string[] = []): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string[]; withheld: Withholding[] }> {
+export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>, tsaTrust: readonly string[] = [], logKey: readonly string[] = []): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string[]; withheld: Withholding[] }> {
   if (!isRegistrationV2(reg)) {
     const withheld: Withholding[] = [];
-    if ((await logBound(ctx, config, reg)) === null) withheld.push({ verdict: "INCOMPLETE", reason: "registration time unproven: no transparency-log entry verified under a pinned key" });
-    if (existsSync(paths.commitment) && (await logBound(ctx, config, readCommitment(paths))) === null) withheld.push({ verdict: "INCOMPLETE", reason: "manifest commitment time unproven: no transparency-log entry verified under a pinned key" });
+    const keys = logKey.length ? " or the --log-key you gave" : "";
+    if ((await logBound(ctx, config, reg, logKey)) === null) withheld.push({ verdict: "INCOMPLETE", reason: `registration time unproven: no transparency-log entry verified under a pinned key${keys}` });
+    if (existsSync(paths.commitment) && (await logBound(ctx, config, readCommitment(paths), logKey)) === null) withheld.push({ verdict: "INCOMPLETE", reason: `manifest commitment time unproven: no transparency-log entry verified under a pinned key${keys}` });
     return { mode: auditMode(reg), note: withheld.length ? " · TIMESTAMP NOT TAMPER-PROOF" : "", tamperProof: !withheld.length, anchors: [], withheld };
   }
   const v2 = reg as SignedRecord<RegistrationRecordV2>;
   const bundle = trustFor(ctx, tsaTrust);
   const ts = v2.record.timestamping;
-  const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle);
+  const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle, logKey);
   let short = r.proven ? null : r;
   const withheld: Withholding[] = r.proven ? [] : [{ verdict: "INCOMPLETE", reason: `registration time unproven (${notTamperProof(r)})` }];
   const anchors = anchorLines(r);
   if (existsSync(paths.commitment)) {
     const cm = readCommitment(paths);
-    const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle);
+    const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle, logKey);
     if (!c.proven && !short) short = c;
     if (!c.proven) withheld.push({ verdict: "INCOMPLETE", reason: `manifest commitment time unproven (${notTamperProof(c)})` });
     for (const l of anchorLines(c)) if (!anchors.includes(l)) anchors.push(l);
@@ -166,8 +194,12 @@ export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: 
  */
 export function statusExitCode(r: StatusResult): number {
   if (r.phase === "unregistered") return 1;
+  // P5 (finding 9): frozen below the registered minimum is the refusal sample gives (review all N), exit 3.
+  if (r.phase === "frozen") return r.refusal ? 3 : 0;
   if (r.phase !== "sampled" || !r.verdictsRead) return 0;
   if (r.certificate.state === "REFUSED") return 3;
+  // P5 (finding 6): a check verify would FAIL on these records fails status too, whatever the sequence's state.
+  if (r.offlineFails.length) return 1;
   if (r.certificate.state === "ESCALATE") return 2;
   if (r.certificate.state === "WITHHELD" || r.certificate.state === "INCOMPLETE") return verdictExitCode(withheldVerdict(r.certificate.withheld));
   return 0;
@@ -247,11 +279,12 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   ctx = readOnlyContext(ctx); // P1: status only reads (--checkpoint is a separate write, on the caller's own context)
   const { config, paths } = configFor(ctx, opts.window);
   const window = opts.window ?? config.window.name;
+  const pinned = registrationPin(opts.registration); // a malformed --registration is a usage error, in every phase
   if (!existsSync(paths.registration)) {
     return { phase: "unregistered", window, start: config.window.start, end: config.window.end, line: `not registered: window ${window} (${config.window.start}..${config.window.end}). Run "pr-rla register".` };
   }
   const reg = readRegistration(paths);
-  const { mode, note: timestampNote, tamperProof: timestampTamperProof, anchors: timestampAnchors, withheld: timeWithheld } = await timeStanding(ctx, config, paths, reg, opts.tsaTrust ?? []);
+  const { mode, note: timestampNote, tamperProof: timestampTamperProof, anchors: timestampAnchors, withheld: timeWithheld } = await timeStanding(ctx, config, paths, reg, opts.tsaTrust ?? [], opts.logKey ?? []);
   const standing: TimeStanding = { mode, timestampTamperProof, timestampNote, timestampAnchors, timeWithheld };
   const w = reg.record.window;
   const now = Math.floor(ctx.nowMs() / 1000);
@@ -267,7 +300,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     if (!opts.offline && now >= opens && set.kind === "repo") {
       const provider = await providerFor(ctx, config, { registration: reg, command: "status" });
       ctx.onProgress?.({ done: 0, message: `listing ${set.repo} on ${provider.name} for N so far` });
-      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), accounts: registeredAccounts(reg), ...(ctx.signal ? { signal: ctx.signal } : {}) });
       nSoFar = pop.entries.length;
       soFar = ` · N so far ${fmt(nSoFar)}`;
       ctx.onProgress?.({ done: 1, total: 1, message: `N so far ${fmt(nSoFar)}` });
@@ -279,8 +312,11 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   }
   const manifest = readManifest(paths);
   if (!existsSync(paths.draws)) {
-    const line = `${mode} · frozen N ${fmt(manifest.N)} · seed round ${round} ${now < publishesAt ? `publishes ${unixToIso(publishesAt)}` : `published ${unixToIso(publishesAt)}: run "pr-rla sample"`}${timestampNote}`;
-    return { phase: "frozen", window, N: manifest.N, line, ...standing, ...seed };
+    // P5 (finding 9): below the registered minimum, sample refuses (exit 3); status says so now, with the same exit.
+    const min = reg.record.parameters.minPopulation;
+    const refusal = manifest.N < min ? `REFUSED: population ${fmt(manifest.N)} < the registered minimum ${fmt(min)}: review all ${fmt(manifest.N)} instead (sample draws nothing)` : null;
+    const line = `${mode} · frozen N ${fmt(manifest.N)} · ${refusal ?? `seed round ${round} ${now < publishesAt ? `publishes ${unixToIso(publishesAt)}` : `published ${unixToIso(publishesAt)}: run "pr-rla sample"`}`}${timestampNote}`;
+    return { phase: "frozen", window, N: manifest.N, line, refusal, ...standing, ...seed };
   }
   const draws = readDraws(paths);
   // P1: status reads only the registered ledger, and refuses any other before anything is read (even offline).
@@ -367,11 +403,18 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   // The one certificate rule (src/core/verdict.ts): what status can establish offline withholds it. The times give
   // INCOMPLETE withholdings; a status-side gate of check 7 (P4's git-file walk, P1's local gate) adds its FAIL reasons
   // here as failedWithholdings(...), so status never shows CERTIFIED where verify would not.
-  const withholdings = [
-    ...timeWithheld,
-    ...failedWithholdings(withheld.map((w) => `verify check 7 would FAIL: ${w}`)),
-    ...gate.unestablished.map((w): Withholding => ({ verdict: "INCOMPLETE", reason: `verify check 7 would be INCOMPLETE: ${w}` })),
-  ];
+  // P5 (finding 6): verify's offline checks 1, 2, 3, 4 and 6 on the same records (src/core/verify-core.ts): nothing they
+  // FAIL shows as CERTIFIED, and what they cannot establish withholds it. P1's check-7 local gate (computed above, which
+  // also feeds `ledgerGate` and `certificateWithheld`) plugs into the same call as a CoreGate: one path.
+  const check7: CoreGate = {
+    n: 7,
+    name: "labels",
+    reason: { fail: "verify check 7 would FAIL: ", incomplete: "verify check 7 would be INCOMPLETE: " },
+    run: async () => ({ fails: withheld, incompletes: gate.unestablished }),
+  };
+  const core = await statusCore(ctx, config, { registration: reg, manifest, commitment: existsSync(paths.commitment) ? readCommitment(paths) : null, draws }, { tsaTrust: opts.tsaTrust ?? [], logKey: opts.logKey ?? [], ...(pinned !== undefined ? { registrationSha256: pinned } : {}) }, [check7]);
+  const offlineFails = core.withholdings.filter((w) => w.verdict === "FAILED").map((w) => w.reason);
+  const withholdings = [...timeWithheld, ...core.withholdings];
   const certificate = certificateFor(report.sequence.state, report.refusal, withholdings, unread ? [unread] : []);
   const line =
     report.refusal ??
@@ -400,6 +443,8 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     certificateWithheld: withheld,
     certificate,
     certified: isCertified(certificate),
+    offlineChecks: core.checks.map((c) => ({ n: c.n, name: c.name, status: c.status, summary: c.summary })),
+    offlineFails,
     line,
   });
 }

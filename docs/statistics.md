@@ -27,17 +27,17 @@ pr-rla runs a ballot-polling risk-limiting audit, the design of BRAVO (Lindeman,
 - **ESCALATE** at the cap, which defaults to 4 × the zero-failure stopping point (144 draws with the defaults), **or earlier**, as soon as the target can no longer be reached within the cap even if every remaining draw passes. ESCALATE means the claim cannot be certified from this sample: review every change, or narrow the claim and register a new audit.
 - **Not yet:** otherwise `status` says how many more passing draws it needs (`36 more passing draws needed (36 total)`).
 
-`register --dry-run` prints the stopping table and the cap for the registered parameters. On the phase-1 demo configuration, `examples/gh-aw-q3/.pr-rla.yml`, run 2026-11-04, offline (`npm run docs:outputs` regenerates it; the registration's hash and the seed round depend on the clock): <!-- docs-output: register-dry-run -->
+`register --dry-run` prints the stopping table and the cap for the registered parameters. On the phase-1 demo configuration, `examples/gh-aw-q3/.pr-rla.yml`, run 2026-11-04, offline, with its one author named by account id (`id:198982749`, Copilot's, because `register` looks a login up on the SCM and this run reaches none; `npm run docs:outputs` regenerates it; the registration's hash and the seed round depend on the clock): <!-- docs-output: register-dry-run -->
 
 ```output
 $ pr-rla register --dry-run
-[dry run] registration 3148c0b677b5… · github/gh-aw · window 2026-q3 (2026-07-01..2026-09-30)
+[dry run] registration 723e9b66258f… · github/gh-aw · window 2026-q3 (2026-07-01..2026-09-30)
   claim D: detected-defect rate <= 10% (p1 2%, risk 5%) · certify after 36 / 56 / 75 draws with 0/1/2 fails · cap 144
-  selector {"kinds":["pull_request","direct_push"],"authors":["copilot-swe-agent[bot]"],"labels":[],"unreviewed":"no-human-review","merged_by":"any","max_changed_lines":200,"exclude_generated":true,"bots":[],"direct_push_via_merge":"include"}
+  selector {"kinds":["pull_request","direct_push"],"authors":["id:198982749"],"labels":[],"unreviewed":"no-human-review","merged_by":"any","max_changed_lines":200,"exclude_generated":true,"bots":[],"direct_push_via_merge":"include"}
   protocol 9f9ec5b6c79d… (../../docs/design/review-protocol.example.md)
   provider github (builtin 0.1.0) · ledger git-file · verdict provenance self-asserted
   warning: the git-file ledger is not in a git repository, so its path cannot be registered and it has no tamper trail; register from a clone of the audit repository
-  seed round R = 33692004 (drand quicknet), publishes 2026-11-05T11:49:36Z: 24 h after the registration
+  seed round R = 33697561 (drand quicknet), publishes 2026-11-05T16:27:27Z: 24 h after the registration
   RETROSPECTIVE (registered after the window opened: a demonstration, not evidence)
   timestamps: not requested (dry run) · authorities sigstore, digicert, globalsign, microsoft · k = 2
 (exit 0)
@@ -117,7 +117,7 @@ Nothing about the sample is chosen by anyone: it follows from records fixed befo
    index_i = int_be( SHA-256( randomness ‖ binding ‖ uint64be(*i*) ) ) mod N
 
    where `binding` is the registration's `sha256` for a schema-v2 audit (the manifest's for a v1 audit, as v1 audits were drawn), `uint64be(i)` is *i* as 8 bytes big-endian, the hashed message is exactly 72 bytes, and the digest is read as an unsigned 256-bit big-endian integer (`drawIndex` in `src/core/seed.ts`; [`contracts.md` §5](design/phase-3-4/contracts.md), "Draws").
-4. **What the index points into.** The population's change ids in canonical order: ascending by UTF-16 code units (JavaScript's `<` on strings). The manifest stores its changes in that order, and check 2 fails one that is not.
+4. **What the index points into.** The population in canonical order: ascending by **draw key**, `scheme ":" R " " L` (`R` is the SCM's stable repo id for a rule pool, `id:<repoId>`, or the path exactly as the signed registration names it for a repo or a list; `L` is `#n` or `@sha`), compared by UTF-16 code units (JavaScript's `<` on strings). A single repo's order is its change-id order. No name the auditee picks can move a draw: renaming or respelling a repository between freezes changes nothing for a rule pool, and check 2 fails a manifest that spells a repo or a list entry other than the registration does ([`contracts.md` §5](design/phase-3-4/contracts.md), "Draws"). The manifest stores its changes in that order, and check 2 fails one that is not; a schema-v1 audit, whose order is its change ids, is INCOMPLETE in check 6 (its draws are bound to the manifest).
 
 **Why the registration and not the manifest.** Before time round B, the binding was the manifest's hash, which covers what the freezer chooses: the freeze time, the funnel, the limitations, the pr-rla version. One registration frozen a dozen times before R could give a dozen samples to choose from. Bound to the signed registration, the draws depend only on the registration, the beacon and the set of change ids, so freezing again cannot move a draw (BUILD-NOTES, "P2 time round B"). What can still move N is SCM state that changes after a change landed and that pr-rla reads as of the freeze: labels (a `labels:` stratum), an approval dismissed after the merge, an account renamed. Those are stated limits ([`security-model.md`](security-model.md)).
 

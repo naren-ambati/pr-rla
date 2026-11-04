@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { RoundNotYetPublished } from "../../beacon/drand.js";
+import { drawOrder, storedInCanonicalOrder } from "../../core/draw-key.js";
+import { quoted } from "../../core/said.js";
 import { PUBLICATION_FILE, appendPublicationFile, indexExtensionProblems, issueOrderProblems, type LedgerPublicationRecord, type ReadPublications, type SignedPublication } from "../../core/ledger-publication.js";
 import { compareChangeIds, derivedRoundFor, drawBinding, isRegistrationV2, manifestSha256, repoLabel, type AnyRegistration, type DrawsFile, type SignedRecord, type TimestampEvidence } from "../../core/records.js";
 import { loadOrCreateKey, signRecord, type SigningKey } from "../../core/signing.js";
@@ -80,8 +82,10 @@ export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise
   const commitment = readCommitment(paths);
   if (manifestSha256(manifest) !== manifest.sha256) throw new AuditError("manifest hash does not match its contents");
   if (commitment.record.manifestSha256 !== manifest.sha256) throw new AuditError("manifest commitment names a different manifest");
-  // Draw indexes point into the change ids in canonical order (contracts.md §5): the manifest must list them so.
-  if (manifest.changes.some((c, i) => i > 0 && compareChangeIds(manifest.changes[i - 1]!.id, c.id) >= 0)) throw new AuditError("manifest changes are not sorted by id (or one is listed twice): the draws cannot be taken from it");
+  // Draw indexes point into the population in canonical order (contracts.md §5: by draw key, P5): the manifest must list it so.
+  const order = drawOrder(reg, manifest);
+  if (order.problems.length) throw new AuditError(`the draws cannot be taken from this manifest: ${order.problems.map(quoted).join("; ")}`);
+  if (!storedInCanonicalOrder(order, manifest.changes)) throw new AuditError(`manifest changes are not in canonical order (${order.basis === "id" ? "by id" : "by draw key, contracts.md §5"}): the draws cannot be taken from it`);
   const p = reg.record.parameters;
   if (manifest.N < p.minPopulation) return { outcome: "below-minimum", N: manifest.N, minPopulation: p.minPopulation, line: `population ${manifest.N.toLocaleString("en-US")} < ${p.minPopulation}: review all ${manifest.N.toLocaleString("en-US")} instead` };
   const { round, publishesAt } = derivedRoundFor(reg);

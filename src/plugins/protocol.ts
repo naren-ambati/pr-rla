@@ -32,7 +32,7 @@ export type PluginKind = "provider" | "ledger";
  * `writePaths(options)` without creating an instance; `create` makes the instance; the rest
  * are the SDK's instance methods.
  */
-export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog"] as const;
+export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog", "resolveAccounts"] as const;
 export const LEDGER_METHODS = ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const;
 export type PluginMethod = "describe" | "create" | (typeof PROVIDER_METHODS)[number] | (typeof LEDGER_METHODS)[number];
 
@@ -74,10 +74,11 @@ export interface ReadyMessage {
 export interface DescribeResult {
   hosts: unknown;
   writePaths: unknown;
-  /** The definition's `reviewGranularity`, `populationOptions` and `reportsLandedVia`, when it declares them. */
+  /** The definition's `reviewGranularity`, `populationOptions` and `reportsLandedVia` (and P5's `labelHistory`), when it declares them. */
   reviewGranularity?: unknown;
   populationOptions?: unknown;
   reportsLandedVia?: unknown;
+  labelHistory?: unknown;
   /** A ledger definition's `provenance` (U4), when it declares one. */
   provenance?: unknown;
 }

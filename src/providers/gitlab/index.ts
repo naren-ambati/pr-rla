@@ -19,6 +19,7 @@ import {
   type RepoVisibility,
   type ScmProvider,
   type DescribeChangeOptions,
+  type AccountLookup,
 } from "../../sdk/provider.js";
 import { firstParentChain } from "../first-parent.js";
 import { describeGitLabChange } from "./describe.js";
@@ -26,6 +27,7 @@ import { attributeCommits } from "../attribution.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError, isoUtcSeconds, nextLink } from "../http.js";
 import {
+  BOT_SUFFIX,
   buildReviews,
   countDiffLines,
   normalizeDirectPush,
@@ -188,6 +190,22 @@ export class GitLabProvider implements ScmProvider {
    * transfer), else by its path. GitLab answers 404 for a project that does not exist and for a private one the token
    * cannot see; that is a RepoUnavailableError(404).
    */
+  /**
+   * P5: each login's stable user id, `GET /users?username=<login>` (`id`, as `Actor.id` carries it); a bot's `[bot]`
+   * suffix, which pr-rla adds, is dropped for the lookup. No user of that username: null.
+   */
+  async resolveAccounts(logins: readonly string[], opts: { signal?: AbortSignal } = {}): Promise<AccountLookup[]> {
+    const out: AccountLookup[] = [];
+    for (const login of logins) {
+      const name = login.endsWith(BOT_SUFFIX) ? login.slice(0, -BOT_SUFFIX.length) : login;
+      const { data } = await this.http.get<{ id?: unknown; username?: string }[]>(`/users?username=${encodeURIComponent(name)}`, opts.signal);
+      const u = Array.isArray(data) ? data.find((x) => typeof x?.username === "string" && x.username.toLowerCase() === name.toLowerCase()) : undefined;
+      const id = u ? userId({ id: u.id as GlUser["id"] }) : undefined;
+      out.push(id !== undefined ? { login, id } : { login, id: null, detail: `GitLab has no user ${name} (GET /users?username=${name} listed none)` });
+    }
+    return out;
+  }
+
   async describeRepo(ref: { repo: string; id?: string }): Promise<RepoRef> {
     try {
       return projectRef((await this.http.get<GlProject>(`/projects/${ref.id ? enc(ref.id) : enc(ref.repo)}`)).data);

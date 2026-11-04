@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { describeRepoSet, registerRuleRepos, RepoSetError, resolveRepoSet } from "../../core/repo-set.js";
-import { beaconParams, derivedRoundFor, type AuditMode, type LoggedEntry, type RegisteredRepo, type RegisteredVisibility, type RegistrationRecordV2, type RekorV2Entry, type SignedRecord } from "../../core/records.js";
+import { beaconParams, derivedRoundFor, type AuditMode, type LoggedEntry, type RegisteredAccount, type RegisteredRepo, type RegisteredVisibility, type RegistrationRecordV2, type RekorV2Entry, type SignedRecord } from "../../core/records.js";
+import { selectorLogins } from "../../core/selector.js";
+import { normalizeLogin } from "../../sdk/provider.js";
 import { unixToIso } from "../../core/seed.js";
 import { ephemeralKey, loadOrCreateKey, signRecord } from "../../core/signing.js";
 import { effectiveCap, stoppingTable } from "../../core/sprt.js";
@@ -76,6 +78,11 @@ export interface RegistrationPlan {
   pool: { describe: string; count: number; registeredById: boolean; warnings: string[] } | null;
   /** The built-in git-file ledger's path from the toplevel, signed in (P4), or why there is none; null for other ledgers. */
   ledgerPath: { path: string } | { path: null; why: string } | null;
+  /**
+   * P5: the selector's logins and the account ids signed for them (`accounts`), or, for a retrospective audit whose provider
+   * could not resolve them, why not (printed loud: they then match as logins). null when the selector names no login.
+   */
+  accounts: { bound: RegisteredAccount[] } | { bound: null; warning: string } | null;
 }
 
 /** What `register` wrote. */
@@ -166,6 +173,38 @@ async function preflightRepoSet(ctx: ApiContext, config: PrRlaConfig): Promise<{
 }
 
 /**
+ * P5 (the second review's alias finding): every login the selector names (`authors`, `bots`) is resolved to its account
+ * id through the provider and the map is signed into the registration, so selection and verify match those entries by id
+ * only: a login written onto another account's change in a manifest, or an account renamed, moves nothing. A provider
+ * that cannot resolve them (no `resolveAccounts`, or a login it has no account for) refuses a prospective audit: its
+ * claim rests on a population fixed before the window, and a login stratum without ids is not. A retrospective audit (a
+ * demonstration) matches logins as logins, and register and verify say so.
+ */
+async function resolveSelectorAccounts(ctx: ApiContext, config: PrRlaConfig, prospective: boolean): Promise<RegistrationPlan["accounts"]> {
+  const logins = selectorLogins(config.selector);
+  if (!logins.length) return null;
+  const provider = await providerFor(ctx, config);
+  let why: string[];
+  if (typeof provider.resolveAccounts !== "function") why = [`provider ${provider.name} cannot resolve a login to an account id (it has no resolveAccounts)`];
+  else {
+    const got = await provider.resolveAccounts(logins, ctx.signal ? { signal: ctx.signal } : {});
+    if (!Array.isArray(got)) throw new AuditError(`provider ${provider.name}: resolveAccounts returned ${typeof got}, not a list`);
+    const byLogin = new Map(got.filter((g) => g && typeof g.login === "string").map((g) => [normalizeLogin(g.login), g]));
+    const bound: RegisteredAccount[] = [];
+    why = [];
+    for (const login of logins) {
+      const g = byLogin.get(normalizeLogin(login));
+      if (g && typeof g.id === "string" && /^[^\s]+$/.test(g.id)) bound.push({ login, id: g.id });
+      else why.push(`${login}: ${g ? (g.detail ?? "no account") : "not answered"}`);
+    }
+    if (!why.length) return { bound };
+  }
+  const fix = 'name those accounts by id ("id:<account id>" entries in authors or bots), or use a provider that resolves logins';
+  if (prospective) throw new AuditError(`a prospective registration binds every login its selector names to an account id, so that no login written onto another account's change, and no account renamed, can move a change in or out of the stratum; ${why.join("; ")}. Nothing was written: ${fix}`);
+  return { bound: null, warning: `the selector's logins (${logins.join(", ")}) are not bound to account ids (${why.join("; ")}): they match as logins, so an account renamed before the freeze could move changes in or out of the stratum, and one renamed after it makes verify FAIL check 5; verify check 2 WARNs about it. To bind them, ${fix}` };
+}
+
+/**
  * `register` (write side): signs the selector, window, parameters, protocol hash and plugins,
  * time-stamps the registration with the configured authorities and writes it. A dry run signs
  * with a throwaway key and writes nothing. CLI only; refused in a read-only context.
@@ -180,6 +219,9 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
   // P4: the built-in git-file ledger's path from the repository's toplevel is signed in; verify reads it only there.
   const ledgerPath = builtinLedgerName(config.ledger.use) === "git-file" ? registeredLedgerPath(paths.windowDir, config.ledger.options) : null;
   const pool = await preflightRepoSet(ctx, config);
+  const registeredAt = isoNow(ctx);
+  // P5: the selector's logins, bound to account ids (refused for a prospective audit when the provider cannot).
+  const accounts = await resolveSelectorAccounts(ctx, config, Date.parse(registeredAt) < Date.parse(config.window.opensAt));
   const record: RegistrationRecordV2 = {
     schema: "pr-rla/registration/v2",
     repos: config.repoSet,
@@ -190,18 +232,23 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     protocolSha256: protocolSha256(config),
     parameters: config.parameters,
     beacon: beaconParams(),
-    registeredAt: isoNow(ctx),
+    registeredAt,
     timestamping,
     plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx)), ledger: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) },
     ...(ledgerPath?.path ? { ledgerPath: ledgerPath.path } : {}),
     // FR3.8: `account` by default with an issue ledger, `self-asserted` with git-file.
     verdicts,
     prRlaVersion: PR_RLA_VERSION,
+    ...(accounts?.bound ? { accounts: accounts.bound } : {}),
   };
-  // Time round B: the population must be fixed by the registration and the SCM's record at landing. Labels are not:
-  // freeze reads them as they are then, so whoever can relabel before the freeze can change N, and so the draws.
-  if (config.selector.labels.length)
-    ctx.err(`note: the stratum selects by labels (${config.selector.labels.join(", ")}), which can change after a change lands; freeze reads them as they are then, so whoever can relabel before the freeze can change N and the draws. A stratum without labels cannot be moved that way`);
+  // P5 (finding 4): the population must be fixed by the registration and the SCM's record at landing. A labels stratum
+  // needs each change's labels as they were when it landed, from label history; a provider without it is refused.
+  if (config.selector.labels.length) {
+    const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx));
+    if (!traits.labelHistory)
+      throw new AuditError(`the stratum selects by labels (${config.selector.labels.join(", ")}), and provider ${traits.name} reads no label history: labels can be changed after a change lands, so read as they are at freeze they would let whoever relabels choose N, and so the draws. Nothing was written: register a stratum without labels, or use a provider that reads each change's labels at landing (github)`);
+    ctx.err(`note: the stratum selects by labels (${config.selector.labels.join(", ")}); provider ${traits.name} reads each change's labels as they were when it landed, from its label history (on GitHub, one request per pull request), so nothing done after landing moves a change in or out`);
+  }
   if (!opts.dryRun && existsSync(paths.registration) && !opts.force)
     throw new AuditError(`${paths.registration} exists. A new registration replaces the selector; use --force only if the old one was never shown to anyone.`);
   const url = opts.submit && !opts.dryRun ? submitUrl(config, opts.rekorUrl) : null;
@@ -229,6 +276,7 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     verdictWarnings,
     pool: pool ? { describe: describeRepoSet(config.repoSet), count: pool.count, registeredById: !!pool.registered, warnings: pool.warnings } : null,
     ledgerPath,
+    accounts,
   };
   hooks.onHeader?.(plan);
   if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {

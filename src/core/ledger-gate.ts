@@ -40,6 +40,12 @@ export interface GateLine {
   /** A line (src/core/said.ts): what the ledger said in it is carried as foreign text (S1). */
   text: Line;
   rule: GateRule;
+  /**
+   * P5 (finding 7): the line rests on local evidence alone (the audit repo's files, the registration, the verifier's own
+   * configuration), never on what the ledger returned. A FAIL like that survives a ledger read refused for want of a
+   * credential (src/api/access.ts); one that depends on the read does not.
+   */
+  local?: boolean;
 }
 
 export interface LedgerGate {
@@ -145,15 +151,15 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
   const v2 = isRegistrationV2(reg) ? reg : null;
   const registeredLedger = v2 ? v2.record.plugins.ledger : null;
   const groups: { reason: string; lines: GateLine[] }[] = [];
-  const add = (rule: GateRule, reason: string, lines: Omit<GateLine, "rule">[]) => groups.push({ reason, lines: lines.map((l) => ({ ...l, rule })) });
+  const add = (rule: GateRule, reason: string, lines: Omit<GateLine, "rule">[], local = false) => groups.push({ reason, lines: lines.map((l) => ({ ...l, rule, local: l.local ?? local })) });
 
   // The ledger in .pr-rla.yml is the registered one (P1).
   const idDiffs = registeredLedger && i.ledgerIdentity ? identityDiffs(registeredLedger, i.ledgerIdentity) : [];
-  if (idDiffs.length) add("identity", "the ledger is not the registered one", [{ level: "fail", text: `FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): ${i.ledger ? "verify with the registered ledger and options" : "verify did not read it; verify with the registered ledger and options"}` }]);
-  for (const o of i.testOnlyOptions ?? []) add("identity", "the ledger runs with a test-only option", [{ level: "fail", text: `FAIL the ledger runs with ${o}, a test-only option (recorded public timelines of issues pr-rla did not open): an audit never sets it, and it turns off the issues' body-marker check` }]);
+  if (idDiffs.length) add("identity", "the ledger is not the registered one", [{ level: "fail", text: `FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): ${i.ledger ? "verify with the registered ledger and options" : "verify did not read it; verify with the registered ledger and options"}` }], true);
+  for (const o of i.testOnlyOptions ?? []) add("identity", "the ledger runs with a test-only option", [{ level: "fail", text: `FAIL the ledger runs with ${o}, a test-only option (recorded public timelines of issues pr-rla did not open): an audit never sets it, and it turns off the issues' body-marker check` }], true);
   const rules: VerdictRules = { minProvenance: v2?.record.verdicts.minProvenance ?? "self-asserted", requireSigned: v2?.record.verdicts.require_signed === true };
   if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger))
-    add("signatures", "require_signed needs the built-in git-file ledger", [{ level: "fail", text: `FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})` }]);
+    add("signatures", "require_signed needs the built-in git-file ledger", [{ level: "fail", text: `FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})` }], true);
 
   // The counted verdicts against the registered rules (FR3.8, FR9.1, FR9.4) and the seed.
   const counted = i.ledger?.counted ?? [];
@@ -190,11 +196,11 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
 
   // The checkpoints: the file, the ledger each names, the comparison with the history now, and their tokens.
   const cp: Omit<GateLine, "rule">[] = [];
-  for (const p of i.checkpointProblems) cp.push({ level: "fail", text: `FAIL checkpoint file: ${p}` });
+  for (const p of i.checkpointProblems) cp.push({ level: "fail", text: `FAIL checkpoint file: ${p}`, local: true });
   if (registeredLedger)
     for (const c of i.checkpoints) {
       const d = c.line.ledger && typeof c.line.ledger === "object" ? identityDiffs(registeredLedger, c.line.ledger) : ["ledger (none recorded)"];
-      if (d.length) cp.push({ level: "fail", text: `FAIL checkpoint ${c.line.takenAt} was taken of a ledger that is not the registered one (${d.join("; ")})` });
+      if (d.length) cp.push({ level: "fail", text: `FAIL checkpoint ${c.line.takenAt} was taken of a ledger that is not the registered one (${d.join("; ")})`, local: true });
     }
   if (i.ledger && i.checkpoints.length) {
     if (!i.ledger.checkpointable) cp.push({ level: "warn", text: `${i.checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${i.ledger.name} has no readHistory: they cannot be compared` });
@@ -207,12 +213,12 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
   }
   for (const c of i.checkpoints) {
     const ts = i.checkpointStamps.get(c);
-    if (ts && c.line.timestamps.length) cp.push(...tokenLines(`checkpoint ${c.line.takenAt}`, ts, "warn"));
+    if (ts && c.line.timestamps.length) cp.push(...tokenLines(`checkpoint ${c.line.takenAt}`, ts, "warn").map((l) => ({ ...l, local: true })));
   }
   add("checkpoints", "a ledger checkpoint FAILs", cp);
 
   // The draw → issue index bound to draws.json (master-ledgers-review #3).
-  if (i.drawsFile && i.ledgerIndex !== undefined) add("index", "the ledger index is not the one bound to the draws", fromAnchor(indexBindingFindings(i.drawsFile, i.ledgerIndex)));
+  if (i.drawsFile && i.ledgerIndex !== undefined) add("index", "the ledger index is not the one bound to the draws", fromAnchor(indexBindingFindings(i.drawsFile, i.ledgerIndex)), true);
 
   // The ledger publication record (P1, pass-2 review #1).
   const required = publicationRequired(reg, i.ledger, !!i.ledgerIndex || !!i.publications?.publications.length || !!i.publications?.problems.length);
@@ -239,7 +245,7 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
       counted: i.ledger ? counted : null,
     });
     const dedupe = (xs: string[]) => [...new Set(xs)];
-    add("publication", "the draw → issue publication record FAILs", [...stampLines, ...fromAnchor({ fails: dedupe(f.fails), incompletes: dedupe(f.incompletes), warns: dedupe(f.warns), notes: f.notes })]);
+    add("publication", "the draw → issue publication record FAILs", [...stampLines, ...fromAnchor({ fails: dedupe(f.fails), incompletes: dedupe(f.incompletes), warns: dedupe(f.warns), notes: f.notes })], true);
   }
 
   // Coverage (pass-2 review #5): a checkpoint covers the last counted verdict only when its tokens are proven, with U_k at or after it.

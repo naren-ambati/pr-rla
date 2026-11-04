@@ -69,7 +69,7 @@ describe("finding 11: a git-file audit with no keys verifies as before U9", () =
       { n: 4, status: "PASS", summary: expect.any(String) },
       { n: 5, status: "PASS", summary: "population 200/200 match" },
       // Time round B: check 6 says what it compared, and the derivation it compared against.
-      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: ["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 200 change ids in canonical order"] },
+      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: ["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 200 changes in canonical order (by draw key: the registered path, or a rule pool's repo id)"] },
       { n: 7, status: "PASS", summary: `labels (prefix 36, ${n} events)`, details: [`VERDICT PROVENANCE: self-asserted (${n}) (registered minimum: self-asserted)`] },
     ]);
   });

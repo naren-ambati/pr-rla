@@ -12,6 +12,7 @@ import {
   type RepoSetRule,
   type ScmProvider,
   type DescribeChangeOptions,
+  type AccountLookup,
 } from "../../sdk/provider.js";
 import { describeBitbucketDcChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
@@ -132,6 +133,25 @@ export class BitbucketDataCenterProvider implements ScmProvider {
   async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
     const repos = await this.paged<DcRepo>(`/projects/${encodeURIComponent(set.owner)}/repos`);
     return repos.map((r) => dcRepoRef(r, set.owner));
+  }
+
+  /**
+   * P5: each login's stable user id, `GET /users/{userSlug}` (`id`, as `Actor.id` carries it); the `[bot]` suffix pr-rla
+   * adds to a SERVICE user is dropped for the lookup. 404: no such user. UNVERIFIED against a live server.
+   */
+  async resolveAccounts(logins: readonly string[], opts: { signal?: AbortSignal } = {}): Promise<AccountLookup[]> {
+    const out: AccountLookup[] = [];
+    for (const login of logins) {
+      const slug = login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+      try {
+        const { data } = await this.http.get<{ id?: unknown }>(`/users/${encodeURIComponent(slug)}`, opts.signal);
+        out.push(typeof data?.id === "number" && Number.isSafeInteger(data.id) ? { login, id: String(data.id) } : { login, id: null, detail: `the server's /users/${slug} sent no user id` });
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) out.push({ login, id: null, detail: `the server has no user ${slug} (HTTP 404 on /users/${slug})` });
+        else throw e;
+      }
+    }
+    return out;
   }
 
   /** One repository's metadata (U8): `GET /projects/{KEY}/repos/{slug}`. A 404 is a RepoUnavailableError(404). UNVERIFIED against a live server. */

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../src/beacon/drand.js";
@@ -102,18 +102,15 @@ describe("time review #2: freezing again cannot move a draw (the draws are bound
 });
 
 describe("time review #2's input audit: a label stratum is the one registered input read as of the freeze", () => {
-  it("register notes it, and verify check 2 WARNs that whoever could relabel before the freeze could change N and the draws", async () => {
+  // This test enshrined check 2's WARN. P5 (finding 4) decided the input must be read at landing: a provider without label
+  // history (json-file here) is refused at register; github reads it (test/p5-labels.test.ts).
+  it("on a provider without label history the stratum is refused at register (it was a note, and check 2 WARNed)", async () => {
     const s = proven(makeChanges(400, { bad: 40 }));
     writeFileSync(join(s.dir, ".pr-rla.yml"), readFileSync(join(s.dir, ".pr-rla.yml"), "utf8").replace("unreviewed: no-human-review", "unreviewed: no-human-review, labels: [known-bad]"));
     s.git("commit", "-qam", "a label stratum");
     at(s, "2026-10-20T00:00:00Z");
-    expect(await registerCommand(s.ctx, {})).toBe(0);
-    expect(s.out).toContain("ERR note: the stratum selects by labels (known-bad), which can change after a change lands; freeze reads them as they are then, so whoever can relabel before the freeze can change N and the draws. A stratum without labels cannot be moved that way");
-    at(s, "2026-10-20T12:00:00Z");
-    expect(await freezeCommand(s.ctx, {})).toBe(0);
-    const c2 = (await runVerify(s.ctx, { offline: true })).checks[1]!;
-    expect(c2.status).toBe("WARN");
-    expect(c2.details).toContain("WARN the registered stratum selects by labels (known-bad), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws");
+    await expect(registerCommand(s.ctx, {})).rejects.toThrow(/^the stratum selects by labels \(known-bad\), and provider json-file reads no label history: labels can be changed after a change lands/);
+    expect(existsSync(join(s.dir, W, "registration.json"))).toBe(false);
   });
 });
 
@@ -291,7 +288,8 @@ describe("pass-2 review #2: a v1 envelope's unverified integratedTime cannot cho
     a.git("commit", "-qm", "v1 audit, steered before the first commit");
     const r = await runVerify(a.ctx, {});
     expect(r.derivedRound).toBe(NEW);
-    expect(r.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
+    // Check 6 is INCOMPLETE too since P5: a v1 audit's draws are bound to the manifest (legacy schema).
+    expect(r.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:INCOMPLETE", "7:PASS"]);
     expect(r.checks[2]!.details.join("\n")).toMatch(/INCOMPLETE R is derived from the registration time .*\(no transparency-log entry verified under a trusted key\): it could have been written after round 33,244,800 was public, to choose R/);
     expect(r).toMatchObject({ ok: false, verdict: "INCOMPLETE", exitCode: 6, certificate: { state: "WITHHELD" } });
     expect(r.statusLine).not.toMatch(/CERTIFIED \(/);
@@ -327,7 +325,7 @@ describe("time review #9: the small verify items", () => {
   it("check 6 compares every entry and needs every issued draw: an empty draws[], a dropped issued draw, a duplicate or a changed entry FAIL", async () => {
     const good = (await runVerify(cloneScenario(base).ctx, { offline: true })).checks[5]!;
     expect(good).toMatchObject({ status: "PASS", summary: "36/36 draws reproduce" });
-    expect(good.details).toEqual(["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 400 change ids in canonical order"]);
+    expect(good.details).toEqual(["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 400 changes in canonical order (by draw key: the registered path, or a rule pool's repo id)"]);
     const edit = async (f: (d: DrawsFile) => void) => {
       const s = cloneScenario(base);
       const d = readJ<DrawsFile>(s, `${W}/draws.json`);
@@ -385,11 +383,19 @@ describe("time review #9: the small verify items", () => {
     expect(r.checks[0]!.status).toBe("FAIL");
     expect(r.checks[0]!.details).toContain("FAIL the registration was re-signed: its envelope's key is not the signing key the registration names (publicKeyPem, inside the signed and time-stamped bytes)");
     expect(r.timestamps.registration!.proven).toBe(true); // the tokens are over the same digest: only the key binding catches it
-    // A registration from before the field (no publicKeyPem) can be re-keyed, and verify says so.
+    // A registration without the field can be re-keyed: since P5 (finding 10) check 1 FAILs it (it WARNed).
     const { publicKeyPem: _k, ...old } = reg.record;
     writeJ(s, p, { ...signRecord(old, other), timestamps: [] });
     const w = (await runVerify(s.ctx, { offline: true })).checks[0]!;
-    expect(w.details).toContain("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
+    expect(w.status).toBe("FAIL");
+    expect(w.details).toContain("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+    // P5: the field stripped while the old tokens are kept: the tokens no longer match the digest, and the key is missing.
+    const stripped = signRecord(old, other);
+    writeJ(s, p, { ...stripped, timestamps: reg.timestamps });
+    const k = (await runVerify(s.ctx, { offline: true })).checks[0]!;
+    expect(k.status).toBe("FAIL");
+    expect(k.details).toContain("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+    expect(k.details.filter((d) => /^FAIL registration token from test-[ab]: rule 2/.test(d))).toHaveLength(2);
   });
 });
 

@@ -298,7 +298,7 @@ export function fakeOrg(spec: OrgSpec) {
     }
     const body = init?.body ? String(init.body) : "";
     let full: string | null = null;
-    const m = /^\/repos\/([^/]+)\/([^/]+)\/(?:pulls|activity|compare\/.*)$/.exec(url.pathname);
+    const m = /^\/repos\/([^/]+)\/([^/]+)\/(?:pulls|activity|compare\/.*|issues\/\d+\/events)$/.exec(url.pathname);
     if (m) full = `${m[1]}/${m[2]}`;
     else if (url.pathname === "/graphql") {
       const v = (JSON.parse(body) as { variables: { owner?: string; name?: string } }).variables;

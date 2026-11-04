@@ -50,15 +50,17 @@ describe("schema v1 compatibility (NFR7)", () => {
     expect(reg.timestamps).toBeUndefined();
   });
 
-  it("a v1 audit written by phase 2 still verifies 7/7 and prints the v1 summary, with the verifier's --log-key", async () => {
+  it("a v1 audit written by phase 2 still reads, and passes every check but 6, with the verifier's --log-key; check 6 is INCOMPLETE (P5: its draws are bound to the manifest)", async () => {
     const a = v1Audit();
     const report = await runVerify(a.ctx, { logKey: LOG_KEY_ARG });
-    expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:PASS", "2:PASS", "3:PASS", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
+    expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:PASS", "2:PASS", "3:PASS", "4:PASS", "5:PASS", "6:INCOMPLETE", "7:PASS"]);
+    expect(report.checks[5]!.summary).toBe("36/36 draws reproduce · legacy schema: draws bound to the manifest");
+    expect(report).toMatchObject({ verdict: "INCOMPLETE", ok: false, certified: false });
     expect(report.timestampTamperProof).toBe(true);
     expect(report.timestamps).toEqual({ registration: null, commitment: null });
-    expect(await verifyCommand(a.ctx, { logKey: LOG_KEY_ARG })).toBe(0);
-    expect(a.out.join("\n")).toMatch(/registration after window close → RETROSPECTIVE \(a demonstration\) · manifest logged .* before R ✓ · R = 33,245,812: first round ≥ 24 h after registration ✓ · BLS ✓ · population 200\/200 match ✓ · 36\/36 draws reproduce ✓ · labels/);
-    expect(a.out.at(-1)).toBe("VERIFIED");
+    expect(await verifyCommand(a.ctx, { logKey: LOG_KEY_ARG })).toBe(6);
+    expect(a.out.join("\n")).toMatch(/registration after window close → RETROSPECTIVE \(a demonstration\) · manifest logged .* before R ✓ · R = 33,245,812: first round ≥ 24 h after registration ✓ · BLS ✓ · population 200\/200 match ✓ · 36\/36 draws reproduce · legacy schema: draws bound to the manifest \(incomplete\) · labels/);
+    expect(a.out.at(-1)).toBe("INCOMPLETE: check 6 (draws) could not be established; nothing failed, but this is not a verification (exit 6)");
   });
 
   it("review finding 3 and pass-2 review #2: without --log-key the audit repo's own key is not trusted, the v1 times are unproven, and so is R: INCOMPLETE, never VERIFIED", async () => {
@@ -67,7 +69,7 @@ describe("schema v1 compatibility (NFR7)", () => {
     // R is still derived from the logged integratedTime (the v1 contract, so every verifier computes the same R), but
     // that time is in the unsigned envelope and nothing vouches for it: check 3 is INCOMPLETE, not PASS (it was PASS,
     // and checks 1 and 2 WARNed, before time round B).
-    expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
+    expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE", "4:PASS", "5:PASS", "6:INCOMPLETE", "7:PASS"]);
     expect(report.verdict).toBe("INCOMPLETE");
     expect(report.ok).toBe(false);
     expect(report.timestampTamperProof).toBe(false);
@@ -81,13 +83,14 @@ describe("schema v1 compatibility (NFR7)", () => {
     expect(report.statusLine).not.toMatch(/CERTIFIED \(/);
     expect(await verifyCommand(a.ctx, {})).toBe(6);
     expect(a.out.join("\n")).toMatch(/TIMESTAMP NOT TAMPER-PROOF: registration and\/or manifest times are self-asserted \(no transparency-log entry was verified\)/);
-    expect(a.out.join("\n")).toMatch(/· target reached · CERTIFICATE WITHHELD \(verify check 1 \(registration\) incomplete; verify check 2 \(manifest before seed\) incomplete; verify check 3 \(seed round\) incomplete\) · RETROSPECTIVE/);
+    expect(a.out.join("\n")).toMatch(/· target reached · CERTIFICATE WITHHELD \(verify check 1 \(registration\) incomplete; verify check 2 \(manifest before seed\) incomplete; verify check 3 \(seed round\) incomplete; verify check 6 \(draws\) incomplete\) · RETROSPECTIVE/);
   });
 
   it("status on the v1 audit: TIMESTAMP NOT TAMPER-PROOF (its log key is not pinned in the package), so the certificate is withheld, exit 6", async () => {
     const a = v1Audit();
     expect(await statusCommand(a.ctx, {})).toBe(6);
-    expect(a.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .* · target reached · CERTIFICATE WITHHELD \(registration time unproven: no transparency-log entry verified under a pinned key; manifest commitment time unproven: no transparency-log entry verified under a pinned key\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
+    // P5: status runs verify's offline checks too, so check 6's legacy-schema INCOMPLETE withholds it as well.
+    expect(a.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .* · target reached · CERTIFICATE WITHHELD \(registration time unproven: no transparency-log entry verified under a pinned key; manifest commitment time unproven: no transparency-log entry verified under a pinned key; verify check 6 \(draws\) is not established: legacy schema: draws bound to the manifest\. .*\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
     expect(a.out.join("\n")).not.toMatch(/CERTIFIED \(risk/);
   });
 });

@@ -48,7 +48,7 @@ describe("provider traits across the plugin host (U3 fields over describe)", () 
     const options = { base_url: "https://forge.example.com", bots: BOTS, page_size: 3 };
     await lockPlugin(dir, USE, { options });
     expect(readLock(dir).plugins[USE]!.trust).toBe("isolated");
-    expect(await providerTraits({ use: USE, options }, dir)).toEqual({ name: "gitea", reviewGranularity: "submission", reportsLandedVia: false, populationOptions: ["base_url", "bots"] });
+    expect(await providerTraits({ use: USE, options }, dir)).toEqual({ name: "gitea", reviewGranularity: "submission", reportsLandedVia: false, populationOptions: ["base_url", "bots"], labelHistory: false });
     // The registration's identity hashes exactly those keys: page_size is not one of them.
     const id = await pluginIdentity({ use: USE, options }, "provider", dir);
     expect(id).toMatchObject({ name: "gitea", source: "path", trust: "isolated", integrity: readLock(dir).plugins[USE]!.treeSha256 });

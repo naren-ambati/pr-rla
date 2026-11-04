@@ -601,7 +601,7 @@ describe("time round B's new check lines quote the registration as pieces (fix/p
     const c1 = r.checks.find((c) => c.n === 1)!;
     expect(c1.status).toBe("FAIL");
     expect(c1.details).toContainEqual(expect.stringMatching(/^FAIL the registered window is malformed: the reason, which quotes the registered window; what it said is in untrusted\.errors\[\d+\]$/));
-    expect(r.checks.find((c) => c.n === 2)!.details).toContainEqual(expect.stringMatching(/^WARN the registered stratum selects by labels \(a registered label; what it said is in untrusted\.errors\[\d+\]\), which can change/));
+    expect(r.checks.find((c) => c.n === 2)!.details).toContainEqual(expect.stringMatching(/^INCOMPLETE the registered stratum selects by labels \(a registered label; what it said is in untrusted\.errors\[\d+\]\), and the provider reads no label history/));
     expect(JSON.stringify({ ...r, untrusted: null })).not.toContain(INJECT);
     expect(JSON.stringify(r.untrusted ?? null)).toContain(INJECT);
     // The CLI's own result quotes both in place, as every CLI line quotes what it shows.

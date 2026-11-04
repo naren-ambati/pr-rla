@@ -1,6 +1,7 @@
 import { assertChangeRecord, isCommitId, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
+import { splitChangeId } from "./draw-key.js";
 import { sortChanges, type ManifestEntry } from "./records.js";
-import { applySelector, reviewsAsOf, type ActorAliases, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
+import { applySelector, reviewsAsOf, type AccountMap, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
 /** Added to every manifest whose selector includes direct pushes, whatever the provider says. */
@@ -42,8 +43,8 @@ export interface PopulationArgs {
   signal?: AbortSignal;
   /** Walk history from this default-branch commit (verify passes the manifest's headSha). */
   head?: string;
-  /** Account id -> login at freeze, so renamed accounts still match the selector (verify). */
-  aliases?: ActorAliases;
+  /** The registration's account map (P5, `registeredAccounts`): login entries match by these ids only. Never a manifest's. */
+  accounts?: AccountMap | null;
   /** Which reviews `no-review` sees (`ReviewHorizon`; `reviewHorizonFor(registration)`): `landing` unless a v1 audit passes `cutoff`. */
   horizon?: ReviewHorizon;
 }
@@ -54,8 +55,20 @@ export type PoolArgs = Omit<PopulationArgs, "repo" | "head">;
 /** Lists one repo's changes in the window. The listing is checked by `checkListed` before it is used. */
 export async function listRepoChanges(provider: ScmProvider, args: Pick<PopulationArgs, "repo" | "window" | "selector" | "signal" | "head">): Promise<ListChangesResult> {
   if (args.head !== undefined && !isCommitId(args.head)) throw new Error(`the pinned default-branch head ${JSON.stringify(args.head)} is not a commit id (40 to 64 lowercase hex characters); the manifest was edited or is not from this pr-rla`);
-  const req = { repo: args.repo, window: { opensAt: args.window.opensAt, closesAt: args.window.closesAt }, kinds: args.selector.kinds, ...(args.signal ? { signal: args.signal } : {}), ...(args.head !== undefined ? { head: args.head } : {}) };
+  // P5: a labels stratum asks for each change's labels as they were at landing (`labelsNotAtLanding` holds the answer to it).
+  const req = { repo: args.repo, window: { opensAt: args.window.opensAt, closesAt: args.window.closesAt }, kinds: args.selector.kinds, ...(args.selector.labels.length ? { labelsAt: "landing" as const } : {}), ...(args.signal ? { signal: args.signal } : {}), ...(args.head !== undefined ? { head: args.head } : {}) };
   return provider.listChanges(req);
+}
+
+/**
+ * P5: for a stratum that selects by labels, the repos whose listing does not say its labels are as at landing
+ * (`ListChangesResult.labelsAt`): a provider that reads no label history, or ignored the request. Labels read as they
+ * are now would let whoever relabels after landing choose N. Empty for a stratum without labels.
+ */
+export function labelsNotAtLanding(selector: Pick<Selector, "labels">, listings: readonly { repo: string; listed: ListChangesResult }[]): string[] {
+  if (!selector.labels.length) return [];
+  // A repo with nothing in the window has no labels to read (an empty repository's listing carries no flag).
+  return listings.filter((l) => l.listed.labelsAt !== "landing" && l.listed.changes.length > 0).map((l) => l.repo);
 }
 
 /**
@@ -76,6 +89,8 @@ export function checkListed(providerName: string, listed: ListChangesResult, arg
     if (!inWindow(c.mergedAt, args.window)) throw new Error(`provider ${providerName} returned ${c.id} landed ${c.mergedAt}, outside the window`);
     if (!args.selector.kinds.includes(c.kind)) throw new Error(`provider ${providerName} returned ${c.id} of kind ${c.kind}, which was not requested`);
     if (c.repo !== args.repo) throw new Error(`provider ${providerName} returned ${c.id} from repo ${c.repo}, not ${args.repo}`);
+    // P5: the id names that repo byte for byte (a draw key takes the id's scheme and its #n or @sha).
+    if (!splitChangeId(c.id, c.repo)) throw new Error(`provider ${providerName} returned ${c.id}, whose id does not name its repo ${c.repo} byte for byte`);
   }
   // P3: `unreachable` names pull requests of this listing.
   if (listed.unreachable !== undefined) {
@@ -108,7 +123,7 @@ export function assemblePopulation(providerName: string, unordered: readonly { r
     if (schemes.size > 1) throw new Error(`a pooled audit uses one provider, but provider ${providerName} returned changes of ${[...schemes].sort().join(" and ")}; register one audit per provider`);
   }
   const listed: ListChangesResult = only ?? mergeListings(perRepo.map((r) => r.listed), changes);
-  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, { ...(args.aliases ? { aliases: args.aliases } : {}), ...(args.horizon ? { horizon: args.horizon } : {}) });
+  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, { ...(args.accounts ? { accounts: args.accounts } : {}), ...(args.horizon ? { horizon: args.horizon } : {}) });
   const entries = sortChanges(selection.selected.map((c) => ({ ...c, reviews: reviewsAsOf(c, args.cutoffIso) })));
   const byKind = { pull_request: 0, direct_push: 0 };
   for (const c of listed.changes) byKind[c.kind]++;
@@ -130,6 +145,7 @@ function mergeListings(parts: readonly ListChangesResult[], changes: ChangeRecor
     defaultBranch: branches.size === 1 ? [...branches][0]! : "(varies by repo)",
     limitations: [...new Set(parts.flatMap((p) => p.limitations))],
     ...(diag.size ? { diagnostics: [...diag].map(([label, value]) => ({ label, value })) } : {}),
+    ...(parts.length && parts.every((p) => p.labelsAt === "landing" || p.changes.length === 0) ? { labelsAt: "landing" as const } : {}),
   };
 }
 
@@ -185,12 +201,3 @@ export async function buildPooledPopulation(provider: ScmProvider, args: PoolArg
   return assemblePopulation(provider.name, perRepo, args);
 }
 
-/**
- * The login each account id had in a frozen manifest (author, merger, reviews), for `verify`:
- * a renamed account keeps its id, so it still matches the logins the selector names (FR7.3).
- */
-export function manifestAliases(changes: readonly ChangeRecord[]): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const c of changes) for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) if (a.id !== undefined && !out.has(a.id)) out.set(a.id, a.login);
-  return out;
-}

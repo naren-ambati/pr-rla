@@ -29,7 +29,8 @@ function quote(a) {
 }
 
 /**
- * Every generated block, by id. `copy` lists [from, to] paths (relative to the repository and to the
+ * Every generated block, by id. `edit` lists [file, from, to] replacements applied to the copy (a login named by id,
+ * where `register` would look the login up on the SCM). `copy` lists [from, to] paths (relative to the repository and to the
  * temporary directory) and `cwd` is where the commands run in it; `mask` lists what differs from run
  * to run (the clock), replaced before a block is compared with a fresh run.
  */
@@ -40,6 +41,9 @@ export const OUTPUTS = {
   "register-dry-run": {
     // The phase-1 demo config, with the protocol it names, at the paths it names it by.
     copy: [["examples/gh-aw-q3", "examples/gh-aw-q3"], ["docs/design/review-protocol.example.md", "docs/design/review-protocol.example.md"]],
+    // P5: register binds a selector's logins to account ids through the SCM, which this run cannot reach; the demo's one
+    // login is named by its account id instead (copilot-swe-agent's, as recorded in test/fixtures/github/gh-aw-2026-11-02.json).
+    edit: [["examples/gh-aw-q3/.pr-rla.yml", 'authors: ["copilot-swe-agent[bot]"]', 'authors: ["id:198982749"]']],
     cwd: "examples/gh-aw-q3",
     runs: [pr("register", "--dry-run")],
     // The registration hashes its own registeredAt (now), and R is 24 h after it.
@@ -76,6 +80,11 @@ export function runOutput(id) {
     for (const [from, to] of spec.copy ?? []) {
       mkdirSync(dirname(join(tmp, to)), { recursive: true });
       cpSync(join(ROOT, from), join(tmp, to), { recursive: true });
+    }
+    for (const [file, from, to] of spec.edit ?? []) {
+      const text = readFileSync(join(tmp, file), "utf8");
+      if (!text.includes(from)) throw new Error(`docs-outputs: ${id}: ${file} no longer contains ${from}`);
+      writeFileSync(join(tmp, file), text.replace(from, to));
     }
     const cwd = join(tmp, spec.cwd ?? ".");
     mkdirSync(cwd, { recursive: true });

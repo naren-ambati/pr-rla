@@ -56,7 +56,7 @@ describe("FR7.3: a renamed account stays the same actor in verify (Actor.id)", (
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("PASS");
     expect(c5.summary).toBe(`population ${m.N}/${m.N} match`);
-    expect(c5.details).toContain("1 account(s) renamed since freeze, matched by account id: claude[bot] → claude-code[bot]");
+    expect(c5.details).toContain("1 account(s) renamed since registration, matched by the account id the registration signed: claude[bot] → claude-code[bot]");
   });
 
   it("without ids (a phase-2 provider), the same rename drops the account's changes: check 5 fails", async () => {
@@ -78,8 +78,9 @@ describe("FR7.1: the registered bot list is signed into the registration and re-
     expect(m.selector.bots).toEqual(["maint"]);
     expect(m.N).toBe(360); // the 360 PRs (every 10th generated change is a direct push, which merged_by never matches)
     expect(m.changes.every((c) => c.mergedBy?.kind === "bot" && c.mergedBy.login === "maint")).toBe(true);
-    // 360 mergers plus the 40 direct pushes' commit author, also maint.
-    expect(m.funnel[1]).toEqual({ step: "actors re-labelled as bot by selector", count: 400 });
+    // The 360 mergers. The 40 direct pushes' commit author is the git identity "maint" with no account id: since P5 the
+    // registered login matches by the account id register resolved (5) only, so a git name is not the account.
+    expect(m.funnel[1]).toEqual({ step: "actors re-labelled as bot by selector", count: 360 });
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("PASS");
   });

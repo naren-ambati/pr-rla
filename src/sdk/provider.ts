@@ -135,6 +135,12 @@ export interface ListChangesRequest {
    * passes that SHA back, so a commit dated in the window but pushed after freeze is not reachable.
    */
   head?: string;
+  /**
+   * Optional (P5, same API version): `"landing"` when the registered stratum selects by labels: return each change's
+   * `labels` as they were when it landed (its label history up to `mergedAt`, inclusive), not as they are now, and say
+   * so with `ListChangesResult.labelsAt`. Only a provider whose definition declares `labelHistory` is asked.
+   */
+  labelsAt?: "landing";
 }
 
 export interface ListChangesResult {
@@ -159,6 +165,11 @@ export interface ListChangesResult {
    * head's listing names any: a frozen head older than the window's merges hides its direct pushes too.
    */
   unreachable?: string[];
+  /**
+   * Optional (P5): `"landing"` when every change's `labels` are its labels at landing (the request asked for it). A
+   * labels stratum needs it: `freeze` refuses a listing without it, and `verify` is INCOMPLETE.
+   */
+  labelsAt?: "landing";
 }
 
 export interface ProviderContext {
@@ -410,6 +421,17 @@ export interface ScmProvider {
    */
   pushLog?(request: PushLogRequest): Promise<PushLog>;
   /**
+   * Optional (P5, same API version): the SCM's stable account id for each login, as `Actor.id` carries it (GitHub's
+   * user id, which GraphQL calls `databaseId`; GitLab's and Bitbucket Data Center's user id). `register` resolves every
+   * login the selector names (`authors`, `bots`) and signs the map into the registration; selection then matches those
+   * entries by id only, so a login written into a manifest for another account, or an account renamed, moves nothing.
+   * Logins come as the selector writes them (bots with their `[bot]` suffix). `id: null` when the SCM has no such
+   * account, with `detail` saying what it answered. Throw, as any read does, when it cannot be asked. Without it,
+   * `register` refuses a prospective audit that names logins, and a retrospective one matches logins as logins and
+   * says so.
+   */
+  resolveAccounts?(logins: readonly string[], opts?: { signal?: AbortSignal }): Promise<AccountLookup[]>;
+  /**
    * Optional: provider-native counts for a selector (e.g. a search-API figure)
    * printed next to pr-rla's own population so readers see the difference.
    */
@@ -424,6 +446,13 @@ export interface ScmProvider {
    * `opts.signal` aborts (a stopped job; every request through `ctx.fetch` is aborted with it too).
    */
   describeChange?(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription>;
+}
+
+/** One login `resolveAccounts` looked up (P5): its stable account id, or null with what the SCM answered. */
+export interface AccountLookup {
+  login: string;
+  id: string | null;
+  detail?: string;
 }
 
 export interface DescribeChangeOptions {
@@ -612,6 +641,12 @@ export interface ProviderDefinition<Options = Record<string, unknown>> {
    * `direct_push_via_merge: exclude` has no effect.
    */
   readonly reportsLandedVia?: boolean;
+  /**
+   * Optional (P5): true when the provider reads label history, so it can answer `ListChangesRequest.labelsAt: "landing"`
+   * with each change's labels at landing. Without it, `register` refuses a stratum that selects by labels: labels can be
+   * changed after a change lands, and read as they are at freeze they would let whoever relabels choose N.
+   */
+  readonly labelHistory?: boolean;
   create(options: Options, context: ProviderContext): ScmProvider | Promise<ScmProvider>;
 }
 
@@ -655,11 +690,12 @@ export function assertProviderDefinition(value: unknown, source: string): assert
   if (problem) throw new Error(`${source}: provider "${def.name}" ${problem}`);
 }
 
-/** Checks the optional U3 definition fields `reviewGranularity`, `populationOptions` and `reportsLandedVia`. */
-export function providerTraitProblems(def: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown }): string | null {
+/** Checks the optional U3 definition fields `reviewGranularity`, `populationOptions` and `reportsLandedVia`, and P5's `labelHistory`. */
+export function providerTraitProblems(def: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown; labelHistory?: unknown }): string | null {
   if (def.reviewGranularity !== undefined && !REVIEW_GRANULARITIES.includes(def.reviewGranularity as ReviewGranularity)) return `reviewGranularity must be ${REVIEW_GRANULARITIES.map((g) => `"${g}"`).join(" or ")}`;
   if (def.populationOptions !== undefined && (!Array.isArray(def.populationOptions) || def.populationOptions.some((k) => typeof k !== "string" || k.length === 0))) return "populationOptions must be a list of option names";
   if (def.reportsLandedVia !== undefined && typeof def.reportsLandedVia !== "boolean") return "reportsLandedVia must be true or false";
+  if (def.labelHistory !== undefined && typeof def.labelHistory !== "boolean") return "labelHistory must be true or false";
   return null;
 }
 

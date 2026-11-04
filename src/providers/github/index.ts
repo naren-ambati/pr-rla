@@ -19,6 +19,7 @@ import {
   type RequestEstimate,
   type ScmProvider,
   type DescribeChangeOptions,
+  type AccountLookup,
 } from "../../sdk/provider.js";
 import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
@@ -51,6 +52,14 @@ interface RestPull {
   updated_at: string;
   merge_commit_sha: string | null;
   base: { ref: string };
+}
+
+/** One `GET /repos/{owner}/{repo}/issues/{n}/events` entry (REST API version 2022-11-28): the fields a label replay reads. */
+interface RestIssueEvent {
+  id: number | string;
+  event: string;
+  created_at?: string;
+  label?: { name?: string } | null;
 }
 
 interface RestRepo {
@@ -109,6 +118,10 @@ export const GITHUB_LIMITATIONS = [
   "pull_request: only PRs merged into the default branch count; reviews are as of freeze time.",
 ];
 
+/** P5: what a labels stratum's manifest says about where its labels come from. */
+export const GITHUB_LABELS_LIMITATION =
+  "labels: as at landing, replayed from each pull request's issue events (GET /repos/{owner}/{repo}/issues/{n}/events, one request per pull request) up to its merge time; GitHub's REST events keep a label's name as it was when it was applied, so a rename after landing changes nothing. Direct pushes carry no labels.";
+
 export class GitHubProvider implements ScmProvider {
   readonly apiVersion = PROVIDER_API_VERSION;
   readonly name = "github";
@@ -150,9 +163,12 @@ export class GitHubProvider implements ScmProvider {
     const diagnostics: { label: string; value: number }[] = [];
     // The PR listing is needed for direct pushes too: a PR's merge commit is never a direct push.
     const listed = await this.listMergedPullNumbers(req, ref.name);
+    const atLanding = req.labelsAt === "landing";
     if (req.kinds.includes("pull_request")) {
       diagnostics.push({ label: "PRs merged into other branches in window (excluded)", value: listed.otherBase });
       const prs = await this.fetchPullRequests(owner, name, listed.intoDefault);
+      // P5: a labels stratum reads each PR's labels as they were when it merged, from its issue events.
+      if (atLanding) for (const pr of prs) pr.labels = await this.labelsAtLanding(owner, name, pr, req.signal);
       for (const pr of prs) changes.push(pr);
     }
     let viaMerge = false;
@@ -167,7 +183,41 @@ export class GitHubProvider implements ScmProvider {
       // P3: a pull request merged in the window whose merge commit the walk from the head did not reach.
       if (req.kinds.includes("pull_request")) unreachable = await this.unreachablePulls(req, headSha, changes.filter((c) => c.kind === "pull_request" && !visited.has(c.mergeSha)));
     }
-    return { changes, defaultBranch: ref.name, limitations: viaMerge ? [...GITHUB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITHUB_LIMITATIONS, diagnostics, headSha, ...(unreachable ? { unreachable } : {}) };
+    const limitations = [...GITHUB_LIMITATIONS, ...(viaMerge ? [LANDED_VIA_LIMITATION] : []), ...(atLanding ? [GITHUB_LABELS_LIMITATION] : [])];
+    return { changes, defaultBranch: ref.name, limitations, diagnostics, headSha, ...(unreachable ? { unreachable } : {}), ...(atLanding ? { labelsAt: "landing" as const } : {}) };
+  }
+
+  /**
+   * A pull request's labels when it merged (P5): its issue events (`GET /repos/{owner}/{repo}/issues/{n}/events`, paged,
+   * oldest first), `labeled` and `unlabeled` at or before `mergedAt` replayed in order. GitHub's REST events keep each
+   * label's name as it was when it was applied (recorded 2026-11-04: rust-lang/rust #30003 and #30010, where GraphQL shows
+   * the renamed label's current name), so a rename after landing changes nothing, and nothing done after landing does.
+   * A label event that names no label is refused, never guessed.
+   */
+  async labelsAtLanding(owner: string, name: string, pr: ChangeRecord, signal?: AbortSignal): Promise<string[]> {
+    const number = Number(pr.id.slice(pr.id.lastIndexOf("#") + 1));
+    const merged = Date.parse(pr.mergedAt);
+    let url: string | null = `/repos/${owner}/${name}/issues/${number}/events?per_page=${this.pageSize}`;
+    const events: { at: number; id: number; add: boolean; name: string }[] = [];
+    while (url) {
+      signal?.throwIfAborted();
+      const page: { data: RestIssueEvent[]; next: string | null } = await this.http.rest<RestIssueEvent[]>(url);
+      if (!Array.isArray(page.data)) throw new GitHubHttpError(`GitHub GET /repos/${owner}/${name}/issues/${number}/events: not a list`, 200);
+      for (const e of page.data) {
+        if (e.event !== "labeled" && e.event !== "unlabeled") continue;
+        const at = Date.parse(e.created_at ?? "");
+        if (typeof e.label?.name !== "string" || !Number.isFinite(at)) throw new Error(`github: ${pr.id}: issue event ${String(e.id)} (${e.event}) names no label or no time; its labels at landing cannot be read`);
+        events.push({ at, id: Number(e.id), add: e.event === "labeled", name: e.label.name });
+      }
+      url = page.next;
+    }
+    const labels = new Set<string>();
+    for (const e of events.sort((a, b) => a.at - b.at || a.id - b.id)) {
+      if (Math.floor(e.at / 1000) * 1000 > merged) break;
+      if (e.add) labels.add(e.name);
+      else labels.delete(e.name);
+    }
+    return [...labels].sort();
   }
 
   /**
@@ -616,6 +666,8 @@ export class GitHubProvider implements ScmProvider {
     const restPages = (pullPages ?? Math.max(2, Math.ceil(updatedSinceOpens / this.pageSize))) + 1;
     let graphql = 1;
     graphql += wantPrs ? Math.ceil(merged / this.batchSize) : 0;
+    // P5: a labels stratum reads one page of issue events per pull request.
+    const labelPages = wantPrs && req.labelsAt === "landing" ? Math.round(merged) : 0;
 
     if (wantPushes) {
       type Page = { repository: { object: { history: { pageInfo: { hasNextPage: boolean }; nodes: { committedDate: string }[] } } | null } };
@@ -632,7 +684,26 @@ export class GitHubProvider implements ScmProvider {
       }
       graphql += Math.max(1, Math.ceil(commits / this.historyPageSize));
     }
-    return { requests: Math.round(restPages + graphql), graphql: Math.round(graphql), probed };
+    return { requests: Math.round(restPages + labelPages + graphql), graphql: Math.round(graphql), probed };
+  }
+
+  /**
+   * P5: each login's stable account id, `GET /users/{login}` (`id`; GraphQL's `databaseId` for the same account, which
+   * `Actor.id` carries). A bot is looked up by its `[bot]` login, as GitHub names bot users. 404: no such account.
+   */
+  async resolveAccounts(logins: readonly string[], opts: { signal?: AbortSignal } = {}): Promise<AccountLookup[]> {
+    const out: AccountLookup[] = [];
+    for (const login of logins) {
+      opts.signal?.throwIfAborted();
+      try {
+        const { data } = await this.http.rest<{ login?: string; id?: unknown }>(`/users/${encodeURIComponent(login)}`);
+        out.push(typeof data?.id === "number" && Number.isSafeInteger(data.id) ? { login, id: String(data.id) } : { login, id: null, detail: `GitHub's /users/${login} sent no account id` });
+      } catch (e) {
+        if (e instanceof GitHubHttpError && e.status === 404) out.push({ login, id: null, detail: `GitHub has no account ${login} (HTTP 404 on /users/${login})` });
+        else throw e;
+      }
+    }
+    return out;
   }
 
   /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
@@ -672,5 +743,6 @@ export default defineProvider<GitHubProviderOptions>({
   reviewGranularity: "submission",
   populationOptions: ["base_url", "api_url", "graphql_url"],
   reportsLandedVia: true,
+  labelHistory: true,
   create: (options, ctx) => new GitHubProvider(options ?? {}, ctx),
 });

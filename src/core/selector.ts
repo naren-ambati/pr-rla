@@ -88,32 +88,45 @@ export function normalizeBotList(bots: readonly string[]): string[] {
 }
 
 /**
- * Account ids mapped to the login they had when the manifest was frozen. `verify` passes the
- * manifest's, so an account renamed after freeze still matches a login in the selector (FR7.3).
+ * The registration's account map (P5, `RegistrationRecordV2.accounts`): each login the selector names (normalized,
+ * `normalizeLogin`) mapped to the stable account id the provider resolved it to at `register`. Selection matches a login
+ * entry by that id only: a login written onto another account's change, or an account renamed, moves nothing. Never
+ * read from a manifest (the second P2 review: a manifest's own records named the aliases verify matched with).
+ * `null` or absent: the registration binds no ids (a provider that cannot resolve them, or a registration from before
+ * P5), and a login matches the actor's login, case-insensitively, as written; check 2 says so.
  */
-export type ActorAliases = ReadonlyMap<string, string>;
+export type AccountMap = ReadonlyMap<string, string>;
 
 /**
- * Whether a selector entry names this actor: `id:<v>` matches `Actor.id`; a login matches the
- * actor's login (case-insensitive), or the login its id had at freeze (`aliases`).
+ * Whether a selector entry names this actor: `id:<v>` matches `Actor.id`; a login matches by the account id the
+ * registration bound it to (`accounts`), else, when the registration binds none, by the actor's login.
  */
-export function actorMatches(actor: Actor, entry: string, aliases?: ActorAliases): boolean {
+export function actorMatches(actor: Actor, entry: string, accounts?: AccountMap | null): boolean {
   if (entry.startsWith("id:")) return actor.id !== undefined && actor.id === entry.slice(3);
-  const want = normalizeLogin(entry);
-  if (normalizeLogin(actor.login) === want) return true;
-  const frozen = actor.id !== undefined ? aliases?.get(actor.id) : undefined;
-  return frozen !== undefined && normalizeLogin(frozen) === want;
+  if (accounts) {
+    const id = accounts.get(normalizeLogin(entry));
+    return id !== undefined && actor.id === id;
+  }
+  return normalizeLogin(actor.login) === normalizeLogin(entry);
+}
+
+/** The login entries of a selector (`authors` when a list, and `bots`), as written: what `register` resolves to account ids. */
+export function selectorLogins(sel: Pick<Selector, "authors" | "bots">): string[] {
+  const entries = [...(sel.authors === "any" ? [] : sel.authors), ...(sel.bots ?? [])].filter((e) => !e.startsWith("id:"));
+  const byKey = new Map<string, string>();
+  for (const e of entries) if (!byKey.has(normalizeLogin(e))) byKey.set(normalizeLogin(e), e);
+  return [...byKey.values()].sort((a, b) => (normalizeLogin(a) < normalizeLogin(b) ? -1 : normalizeLogin(a) > normalizeLogin(b) ? 1 : 0));
 }
 
 /**
  * Re-labels every actor the registered bot list names as `kind: "bot"`: author, merger and every
  * review, on copies. Logins are kept. Returns how many actor entries changed from human to bot.
  */
-export function applyBotList(changes: readonly ChangeRecord[], bots: readonly string[], aliases?: ActorAliases): { changes: ChangeRecord[]; relabelled: number } {
+export function applyBotList(changes: readonly ChangeRecord[], bots: readonly string[], accounts?: AccountMap | null): { changes: ChangeRecord[]; relabelled: number } {
   if (bots.length === 0) return { changes: [...changes], relabelled: 0 };
   let relabelled = 0;
   const fix = (a: Actor): Actor => {
-    if (a.kind === "bot" || !bots.some((b) => actorMatches(a, b, aliases))) return a;
+    if (a.kind === "bot" || !bots.some((b) => actorMatches(a, b, accounts))) return a;
     relabelled++;
     return { ...a, kind: "bot" };
   };
@@ -177,9 +190,9 @@ export function matchesUnreviewed(change: ChangeRecord, mode: Unreviewed, cutoff
   return !hasHumanDecision(change, reviews);
 }
 
-export function matchesAuthor(change: ChangeRecord, authors: Selector["authors"], aliases?: ActorAliases): boolean {
+export function matchesAuthor(change: ChangeRecord, authors: Selector["authors"], accounts?: AccountMap | null): boolean {
   if (authors === "any") return true;
-  return authors.some((a) => actorMatches(change.author, a, aliases));
+  return authors.some((a) => actorMatches(change.author, a, accounts));
 }
 
 /** A direct push has no known pusher, so it only matches `merged_by: any`. */
@@ -207,10 +220,10 @@ export interface SelectionResult {
  * reviews `no-review` sees (`ReviewHorizon`): a v1 audit passes `cutoff`.
  * The registered bot list is applied first (on copies), and selected changes carry its labels.
  */
-export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string, opts: { aliases?: ActorAliases; horizon?: ReviewHorizon } = {}): SelectionResult {
+export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string, opts: { accounts?: AccountMap | null; horizon?: ReviewHorizon } = {}): SelectionResult {
   const funnel: FunnelStep[] = [{ step: "landed in window", count: changes.length }];
   const bots = sel.bots ?? [];
-  const relabel = applyBotList(changes, bots, opts.aliases);
+  const relabel = applyBotList(changes, bots, opts.accounts);
   if (bots.length > 0) funnel.push({ step: BOT_LIST_STEP, count: relabel.relabelled });
   let cur = relabel.changes.filter((c) => sel.kinds.includes(c.kind));
   funnel.push({ step: `kinds ${sel.kinds.join("+")}`, count: cur.length });
@@ -218,7 +231,7 @@ export function applySelector(changes: readonly ChangeRecord[], sel: Selector, c
     cur = cur.filter((c) => !(c.kind === "direct_push" && c.landedVia !== undefined));
     funnel.push({ step: VIA_MERGE_STEP, count: cur.length });
   }
-  cur = cur.filter((c) => matchesAuthor(c, sel.authors, opts.aliases));
+  cur = cur.filter((c) => matchesAuthor(c, sel.authors, opts.accounts));
   funnel.push({ step: sel.authors === "any" ? "any author" : `author ${sel.authors.join("|")}`, count: cur.length });
   if (sel.labels.length > 0) {
     cur = cur.filter((c) => sel.labels.every((l) => c.labels.includes(l)));

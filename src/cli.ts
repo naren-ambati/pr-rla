@@ -137,7 +137,9 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
     .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable), as verify's: a certificate needs its times proven", collect)
-    .addHelpText("after", "\nExit codes: 0 · 1 not registered, or a check verify would FAIL withholds the certificate · 2 ESCALATE · 3 population below the registered minimum · 6 the SPRT target is reached but the certificate is withheld (the registration or commitment time is not proven by k operators), or the verdicts could not be read")
+    .option("--log-key <url=pem>", "a transparency log you trust, as <log url>=<PEM file> (repeatable), as verify's", collect)
+    .option("--registration <sha256>", "the registration's SHA-256 you were handed before R published (prospective: before the window opened); status withholds the certificate, exit 1, from any other")
+    .addHelpText("after", "\nExit codes: 0 · 1 not registered, or a check verify would FAIL on these records (a FAILED withholding: a swapped draw, a re-signed registration, a manifest that does not match) · 2 ESCALATE · 3 population below the registered minimum (frozen or sampled) · 6 the certificate is withheld as not established (a time not proven by k operators, a legacy schema-v1 audit) or the verdicts were read without the ledger's credential and refused\nWith --checkpoint: a FAIL (1) first, then the checkpoint's 4 or 5, then status's 2, 3 or 6, else the checkpoint's")
     .action(function (this: Command) {
       return run((ctx) => statusCommand(ctx, this.opts()), !!this.opts().json)();
     });
@@ -158,6 +160,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .description("third-party check of the seven audit properties")
     .option("--offline", "skip the population rebuild and any network fetch")
     .option("--log-key <url=pem>", "a transparency log you trust, as <log url>=<PEM file> (repeatable); it counts only for that log, as operator \"log at <host>\"; Sigstore's pinned logs always use their pinned keys", collect)
+    .option("--registration <sha256>", "the registration's SHA-256 you were handed before R published (prospective: before the window opened): check 1 FAILs any other")
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")

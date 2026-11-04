@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { statusLine, stratumChoices } from "../src/commands/status.js";
-import { buildPopulation, manifestAliases } from "../src/core/population.js";
+import { buildPopulation } from "../src/core/population.js";
 import { actorMatches, applyBotList, applySelector, BOT_LIST_STEP, normalizeSelector, VIA_MERGE_STEP } from "../src/core/selector.js";
 import { landedViaMerges } from "../src/providers/landed-via.js";
 import type { ChangeRecord, ListChangesRequest, ScmProvider } from "../src/sdk/provider.js";
@@ -46,16 +46,21 @@ describe("selector.bots (FR7.1): registered, applied by the core to every actor"
     expect(applySelector(changes, normalizeSelector({ kinds: ["pull_request"] }), "2026-08-02T00:00:00Z").funnel.map((s) => s.step)).not.toContain(BOT_LIST_STEP);
   });
 
-  it("id:<n> matches Actor.id, never a login; a login matches case-insensitively or through a frozen alias", () => {
+  it("id:<n> matches Actor.id, never a login; a login matches by the registered account id, or as a login when none is registered", () => {
     expect(actorMatches(human("gitlab-bot", "1786152"), "id:1786152")).toBe(true);
     expect(actorMatches(human("1786152"), "id:1786152")).toBe(false);
+    // No account map registered: the login, case-insensitively, and nothing else.
     expect(actorMatches(human("Alice"), "alice")).toBe(true);
     expect(actorMatches(human("alice-renamed", "42"), "alice")).toBe(false);
-    expect(actorMatches(human("alice-renamed", "42"), "alice", new Map([["42", "alice"]]))).toBe(true);
+    // P5: with the registration's map (login -> id), by that id only: a rename matches, another account using the login does not.
+    const accounts = new Map([["alice", "42"]]);
+    expect(actorMatches(human("alice-renamed", "42"), "alice", accounts)).toBe(true);
+    expect(actorMatches(human("alice", "43"), "ALICE", accounts)).toBe(false);
+    expect(actorMatches(human("alice"), "alice", accounts)).toBe(false); // a git identity with no account never matches a bound login
     const renamed = [pr(1, human("carol", "3"), human("alice-renamed", "42"))];
     const sel = normalizeSelector({ kinds: ["pull_request"], authors: ["alice"], unreviewed: "any" });
     expect(applySelector(renamed, sel, W.closesAt).selected).toHaveLength(0);
-    expect(applySelector(renamed, sel, W.closesAt, { aliases: manifestAliases([pr(1, human("carol", "3"), human("alice", "42"))]) }).selected).toHaveLength(1);
+    expect(applySelector(renamed, sel, W.closesAt, { accounts }).selected).toHaveLength(1);
     expect(applySelector(renamed, normalizeSelector({ kinds: ["pull_request"], authors: ["id:42"], unreviewed: "any" }), W.closesAt).selected).toHaveLength(1);
   });
 });

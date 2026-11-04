@@ -4,7 +4,7 @@ import type { LedgerIndexDocument } from "./ledger-anchor.js";
 import { assessedLedgerGate, type Check7Artifacts, type GateLedger, type LedgerGate } from "./ledger-gate.js";
 import type { ReadPublications } from "./ledger-publication.js";
 import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
-import type { ScmProvider } from "../sdk/provider.js";
+import { isChangeId, normalizeLogin, type ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
 import { logKeySource, type TrustedLogKey } from "../translog/keys.js";
@@ -12,8 +12,11 @@ import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { createPublicKey } from "node:crypto";
 import { canonicalJson, sha256Hex } from "./canonical.js";
-import { assemblePopulation, manifestAliases, type Population } from "./population.js";
+import { assemblePopulation, labelsNotAtLanding, type Population } from "./population.js";
+import { drawOrder, storedInCanonicalOrder } from "./draw-key.js";
 import { checkPool } from "./rebuild.js";
+import { ruleRepoNameFindings } from "./repo-names.js";
+import { accountFindings, unselectedManifestChanges } from "./registered-selection.js";
 import { poolRecordProblems } from "./repo-set.js";
 import {
   auditMode,
@@ -27,12 +30,12 @@ import {
   manifestRepos,
   manifestSha256,
   recordedRegisteredRepos,
+  registeredAccounts,
   registeredRepos,
   registeredVisibility,
   registrationRepoSet,
   registrationTime,
   reviewHorizonFor,
-  sortChanges,
   type AnyCommitment,
   type AnyManifest,
   type AnyRegistration,
@@ -132,6 +135,17 @@ export interface VerifyDeps {
   /** Test-only options the ledger runs with (P1, src/ledger-traits.ts): check 7 FAILs each. */
   ledgerTestOnlyOptions?: readonly string[];
   /**
+   * P5 (T14): the registration's SHA-256 the verifier was given before R published (prospective: before the window
+   * opened), `verify --registration`. Check 1 FAILs a registration that is not it: another registration of the same audit,
+   * made to keep the best sample, is not the one handed over.
+   */
+  registrationSha256?: string;
+  /**
+   * P5: whether the verifier's provider reads label history (its definition's `labelHistory`), when known. false makes a
+   * labels stratum INCOMPLETE in check 2, offline too (status runs it); check 5 also holds each listing to `labelsAt`.
+   */
+  labelHistory?: boolean;
+  /**
    * What the configured provider is (P1). For a v2 registration it must be the registered provider (name,
    * source, files, trust, every option), or check 5 FAILs; verify then does not open it (`provider` is null).
    */
@@ -165,6 +179,20 @@ const n = (x: number) => x.toLocaleString("en-US");
 export function countedFirstVerdicts(status: StatusReport, draws: readonly { changeId: string }[]): VerdictEvent[] {
   const ids = new Set(draws.slice(0, status.sequence.draws).map((d) => d.changeId));
   return status.firstVerdicts.filter((v) => ids.has(v.changeId));
+}
+
+/**
+ * P5 (finding 7): the FAIL lines of a check shown from local evidence alone (files of the audit repo, the registration,
+ * the verifier's own configuration), never from what a provider or ledger read. A check whose reads were refused to a
+ * plugin running without its credential (src/api/access.ts) is lowered to INCOMPLETE only when it has none of these.
+ */
+const localFailures = new WeakMap<VerifyCheck, Line[]>();
+function markLocal(c: VerifyCheck, lines: readonly Line[]): void {
+  if (lines.length) localFailures.set(c, [...(localFailures.get(c) ?? []), ...lines]);
+}
+/** The FAIL lines of `c` that rest on local evidence only (empty when none). */
+export function localFails(c: VerifyCheck): Line[] {
+  return localFailures.get(c) ?? [];
 }
 
 
@@ -245,6 +273,12 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     log: log.integratedTime !== null ? { operator: log.operator ?? deps.trustBundle.authorities.sigstore?.operator ?? "Sigstore", integratedTime: log.integratedTime } : null,
   });
   for (const f of ts.failed) {
+    // P5: a token whose only problem is that the verifier holds no anchor for its authority is not shown forged, only not
+    // shown genuine: its time stays unproven (INCOMPLETE below), as status reports it. Any other problem is a FAIL.
+    if (f.problems.every((p) => /^rule 6: authority ".*" is not in the trust bundle/.test(p))) {
+      c.details.push(`${what} token from ${f.tsa} not checked: ${f.problems.join("; ")}`);
+      continue;
+    }
     c.status = "FAIL";
     c.details.push(`FAIL ${what} token from ${f.tsa}: ${f.problems.join("; ")}`);
   }
@@ -278,7 +312,14 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const sig = verifySignedRecord(reg);
   if (!sig.ok) {
     c1.status = "FAIL";
-    c1.details.push(`registration signature: ${sig.reason}`);
+    c1.details.push(`FAIL registration signature: ${sig.reason}`);
+  }
+  // P5 (T14): the full digest, which the auditee hands the verifier before R publishes (prospective: before the window
+  // opens); `--registration` holds the audit to it.
+  c1.details.push(`registration sha256 ${reg.sha256}${deps.registrationSha256 === undefined ? "" : deps.registrationSha256 === reg.sha256 ? " (the one you pinned with --registration)" : ""}`);
+  if (deps.registrationSha256 !== undefined && deps.registrationSha256 !== reg.sha256) {
+    c1.status = "FAIL";
+    c1.details.push(`FAIL the registration is not the one you pinned: its sha256 is ${reg.sha256}, you gave ${deps.registrationSha256} (--registration). Another registration of this audit is not the one handed over before R`);
   }
   const regLog = await checkLog(reg.log, reg, "registration", deps, c1, v2);
   const win = windowProblem(reg.record.window);
@@ -290,8 +331,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // Time round B: a v2 registration names its own signing key inside the signed, time-stamped bytes.
     const bound = (reg.record as RegistrationRecordV2).publicKeyPem;
     if (bound === undefined) {
-      c1.details.push("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
-      c1.status = raiseStatus(c1.status, "WARN");
+      // P5 (finding 10): FAIL, not WARN. Only fixtures were written without it, and without it the registration can be
+      // re-signed under any key while its tokens still bind its digest.
+      c1.details.push("FAIL the registration does not name its signing key (publicKeyPem, inside the signed and time-stamped bytes): anyone can re-sign it under another key, and the commitment's key is then checked only against this envelope");
+      c1.status = "FAIL";
     } else if (!sameKey(bound, reg.publicKeyPem)) {
       c1.status = "FAIL";
       c1.details.push("FAIL the registration was re-signed: its envelope's key is not the signing key the registration names (publicKeyPem, inside the signed and time-stamped bytes)");
@@ -319,7 +362,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (c1.status === "PASS") c1.status = "WARN";
   } else if (a.currentProtocolSha256 !== reg.record.protocolSha256) {
     c1.status = "FAIL";
-    c1.details.push(`review protocol changed: file hashes ${a.currentProtocolSha256.slice(0, 12)}…, registration says ${reg.record.protocolSha256.slice(0, 12)}…`);
+    c1.details.push(`FAIL review protocol changed: file hashes ${a.currentProtocolSha256.slice(0, 12)}…, registration says ${reg.record.protocolSha256.slice(0, 12)}…`);
   }
   const rt = registrationTime(reg);
   const unproven = v2 ? (!regTs?.proven ? " (unproven: too few timestamps)" : "") : !regLog.verified ? " (time unproven: no transparency-log entry verified under a trusted key)" : "";
@@ -341,7 +384,11 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (m.changes.length !== m.N) c2.details.push(`manifest lists ${m.changes.length} changes but N = ${m.N}`);
     const ids = m.changes.map((x) => x.id);
     if (new Set(ids).size !== ids.length) c2.details.push("manifest lists a change twice");
-    if (ids.some((id, i) => i > 0 && compareChangeIds(ids[i - 1]!, id) > 0)) c2.details.push("manifest changes are not sorted by id");
+    // P5: the canonical order is by draw key (contracts.md §5), never by a spelling the auditee picks; v1 keeps the id order.
+    const order = drawOrder(reg, m);
+    c2.details.push(...order.problems);
+    if (!order.problems.length && !storedInCanonicalOrder(order, m.changes)) c2.details.push(order.basis === "id" ? "manifest changes are not sorted by id" : "manifest changes are not in canonical order (by draw key, contracts.md §5)");
+    else if (order.basis === "id" && ids.some((id, i) => i > 0 && compareChangeIds(ids[i - 1]!, id) > 0)) c2.details.push("manifest changes are not sorted by id");
     if (m.registrationSha256 !== reg.sha256) c2.details.push("manifest names a different registration");
     if (isManifestV2(m) !== v2 || isCommitmentV2(cm) !== v2) c2.details.push("registration, manifest and commitment use different schema versions");
     for (const [k, mine, theirs] of [
@@ -355,6 +402,17 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // every registered repo included, and a listing that agrees with itself (U8, FR5.1/FR5.2; the review's finding 1).
     const mv2 = isManifestV2(m) ? m : null;
     c2.details.push(...poolRecordProblems(registrationRepoSet(reg), { repos: manifestRepos(m), changeRepos: m.changes.map((x) => x.repo), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], registered: isRegistrationV2(reg) ? recordedRegisteredRepos(reg) : [], ...(mv2?.headEvidence ? { headEvidence: mv2.headEvidence } : {}) }));
+    // P5: the selector's logins are bound to the account ids the registration signed, and every manifest change is one
+    // the registered selector selects, on the manifest's own records (a login written onto another account's change).
+    const acct = accountFindings(reg, mode);
+    c2.details.push(...acct.fails);
+    let unselected: string[] = [];
+    try {
+      unselected = unselectedManifestChanges(reg, m);
+    } catch (e) {
+      c2.details.push(`the registered selector cannot be applied to the manifest's records: ${(e as Error).message}`);
+    }
+    if (unselected.length) c2.details.push(said`manifest lists ${n(unselected.length)} change(s) the registered selector does not select, applied to the manifest's own records with the registration's account ids (e.g. ${joinLines(unselected.slice(0, 3).map((id) => (isChangeId(id) ? id : foreign("a change id the manifest gives", id))), ", ")})`);
     const csig = verifySignedRecord(cm);
     if (!csig.ok) c2.details.push(`commitment signature: ${csig.reason}`);
     if (!sameKey(cm.publicKeyPem, reg.publicKeyPem)) c2.details.push("commitment is signed by a different key than the registration");
@@ -370,9 +428,19 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (isoToUnix(cm.record.frozenAt) < isoToUnix(m.frozenAt)) c2.details.push(`commitment dated ${cm.record.frozenAt}, before the manifest's as-of time ${m.frozenAt}`);
     else if (registrationRepoSet(reg).kind === "repo" && cm.record.frozenAt !== m.frozenAt) c2.details.push(`commitment dated ${cm.record.frozenAt}, but a single-repo freeze signs it at the manifest's own time ${m.frozenAt}`);
     if (c2.details.length) c2.status = "FAIL";
-    if (labelled.length) {
-      c2.details.push(said`WARN the registered stratum selects by labels (${joinLines(labelled.map((l) => ident("a registered label", l)), ", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
+    for (const x of acct.incompletes) {
+      c2.details.push(said`INCOMPLETE ${x}`);
+      c2.status = raiseStatus(c2.status, "INCOMPLETE");
+    }
+    for (const x of acct.warns) {
+      c2.details.push(said`WARN ${x}`);
       c2.status = raiseStatus(c2.status, "WARN");
+    }
+    // P5 (finding 4): a labels stratum is read as at landing, from label history (check 5 rebuilds it so). A provider that
+    // reads none cannot establish it: register refuses such a stratum now; one registered before is INCOMPLETE.
+    if (labelled.length && deps.labelHistory === false) {
+      c2.details.push(said`INCOMPLETE the registered stratum selects by labels (${joinLines(labelled.map((l) => ident("a registered label", l)), ", ")}), and the provider reads no label history: labels can change after a change lands, and read as they are at freeze they would let whoever relabels choose N, and so the draws`);
+      c2.status = raiseStatus(c2.status, "INCOMPLETE");
     }
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
     if (v2 && isRegistrationV2(reg)) {
@@ -455,8 +523,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const mv2 = isManifestV2(m) ? m : null;
     // A pool: more than one repo, or a list or rule (which may resolve to one).
     const pooled = set.kind !== "repo" || mrepos.length !== 1;
-    // Walk the frozen history (FR7.2) and match renamed accounts by id (FR7.3).
-    const aliases = manifestAliases(m.changes);
+    // Walk the frozen history (FR7.2) and match the selector's logins by the account ids the registration signed (FR7.3;
+    // P5: never by what the manifest's own records say an account is called).
+    const accounts = registeredAccounts(reg);
     const window = reg.record.window;
     const selector = reg.record.selector;
     if (frozenWithFail) c5.details.push(frozenWithFail);
@@ -480,6 +549,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       freezeSpan: { from: m.frozenAt, until: unixToIso(derived.publishesAt) },
     });
     if (pool.verbose.length) c5.verbose = pool.verbose;
+    // P5: check 2's online part. A rule pool's manifest names its repositories as registered (by id) or as the SCM does
+    // now; the draws do not depend on it (repo-id keys), but a name the auditee picked FAILs.
+    if (set.kind === "rule" && v2 && cm) {
+      const names = await ruleRepoNameFindings(provider, { registered: registeredRepos(reg), repos: mrepos, owner: pool.owner });
+      c2.details.push(...names.fails.map((f) => said`FAIL ${f}`), ...names.incompletes.map((f) => said`INCOMPLETE ${f}`), ...names.notes);
+      if (names.fails.length) {
+        if (c2.status !== "FAIL") c2.summary = "manifest inconsistent";
+        c2.status = "FAIL";
+      } else if (names.incompletes.length) c2.status = raiseStatus(c2.status, "INCOMPLETE");
+    }
     const count = (repo: string) => m.changes.filter((x) => x.repo === repo).length;
     let unverified = 0;
     const unrebuilt = new Set<string>();
@@ -494,12 +573,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     }
     c5.details.push(...pool.lines);
     const listings = pool.rebuilt.filter((b) => b.listed).map((b) => ({ repo: b.repo, listed: b.listed! }));
+    // P5 (finding 4): a labels stratum needs the labels each change had at landing (ListChangesResult.labelsAt).
+    const notAtLanding = labelsNotAtLanding(selector, listings);
+    if (notAtLanding.length) c5.details.push(said`INCOMPLETE the stratum selects by labels (${joinLines(selector.labels.map((l) => ident("a registered label", l)), ", ")}), and provider ${provider.name} did not give the labels the changes of ${n(notAtLanding.length)} repo(s) had when they landed (${notAtLanding.slice(0, 3).join(", ")}): it reads no label history, so the stratum read from labels as they are now is not established`);
     let pop: Population;
     try {
-      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
+      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, accounts, horizon: reviewHorizonFor(reg) });
     } catch (e) {
       c5.details.push(said`FAIL population: the rebuilt population is malformed: ${foreignError(e)}`);
-      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
+      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, accounts, horizon: reviewHorizonFor(reg) });
     }
     const verifiable = m.changes.filter((x) => !unrebuilt.has(x.repo));
     const mine = new Map(verifiable.map((x) => [x.id, x]));
@@ -541,13 +623,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         if (pinnedCount > 0) c5.details.push(`history walked from the frozen heads of ${n(pinnedCount)} repo(s)`);
       }
     }
+    // The registered logins whose accounts the SCM names otherwise now (P5: from the registration's account map).
     const renamed = new Map<string, string>();
+    const registeredLogin = new Map((isRegistrationV2(reg) ? (reg.record.accounts ?? []) : []).map((x) => [x.id, x.login]));
     for (const c of pop.listed.changes)
       for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) {
-        const was = a.id !== undefined ? aliases.get(a.id) : undefined;
-        if (was !== undefined && was !== a.login) renamed.set(`${was} → ${a.login}`, a.id!);
+        const was = a.id !== undefined ? registeredLogin.get(a.id) : undefined;
+        if (was !== undefined && normalizeLogin(was) !== normalizeLogin(a.login)) renamed.set(`${was} → ${a.login}`, a.id!);
       }
-    if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since freeze, matched by account id: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
+    if (renamed.size) c5.details.push(said`${n(renamed.size)} account(s) renamed since registration, matched by the account id the registration signed: ${joinLines([...renamed.keys()].slice(0, 5).map((k) => foreign("a login change the SCM reports", k)), ", ")}`);
     const has = (p: string) => c5.details.some((d) => wordsOf(d).startsWith(p));
     c5.status = has("FAIL ") ? "FAIL" : has("INCOMPLETE ") ? "INCOMPLETE" : unpinned || has("WARN ") ? "WARN" : "PASS";
     const others = c5.details.filter((d) => wordsOf(d).startsWith("INCOMPLETE ")).length - pool.rebuilt.filter((b) => !b.listed).reduce((k, b) => k + b.incomplete.length, 0);
@@ -579,9 +663,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   } else {
     const cap = effectiveCap(reg.record.parameters);
     const binding = drawBinding(reg, m);
-    const order = sortChanges(m.changes);
+    // P5: the population in canonical order (by draw key for v2: contracts.md §5), the order draws index.
+    const canonical = drawOrder(reg, m);
+    const order = canonical.order;
     let all: { draw: number; index: number; changeId: string; url: string; mergeSha: string; firstOccurrence: boolean }[] = [];
+    let noOrder: Line | null = null;
     try {
+      if (canonical.problems.length) {
+        noOrder = said`the population has no canonical order (${joinLines(canonical.problems, "; ")})`;
+        throw new Error("no canonical order");
+      }
       if (m.N !== order.length) throw new Error(`the manifest says N = ${n(m.N)} but lists ${n(order.length)} changes`);
       const seen = new Set<string>();
       all = computeDraws(beacon.randomness, binding.hex, m.N, cap).map((d) => {
@@ -592,7 +683,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       });
       recomputed = all.map(({ draw, index, changeId, url }) => ({ draw, index, changeId, url }));
     } catch (e) {
-      c6.details.push(`FAIL the draws cannot be recomputed: ${(e as Error).message}`);
+      c6.details.push(noOrder ? said`FAIL the draws cannot be recomputed: ${noOrder}` : `FAIL the draws cannot be recomputed: ${(e as Error).message}`);
     }
     if (a.draws.manifestSha256 !== m.sha256) c6.details.push("FAIL draws file names a different manifest");
     if (a.draws.N !== m.N) c6.details.push("FAIL draws file names a different N");
@@ -626,8 +717,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const reproduced = recomputed ? Math.max(0, file.issued - missing.length - bad.filter((k) => k <= file.issued).length) : 0;
     c6.status = c6.details.some((d) => wordsOf(d).startsWith("FAIL ")) ? "FAIL" : "PASS";
     if (c6.status === "PASS")
-      c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} change ids in canonical order`);
+      c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} changes in canonical order (${canonical.basis === "registered" ? "by draw key: the registered path, or a rule pool's repo id" : "by change id (schema v1)"})`);
     c6.summary = c6.status === "PASS" ? `${n(reproduced)}/${n(a.draws.issued)} draws reproduce` : bad.length ? `${n(bad.length)} draws do not reproduce` : dropPrefix(c6.details.find((d) => wordsOf(d).startsWith("FAIL "))!, "FAIL ");
+    // P5 (finding 3): a schema-v1 audit's draws hash its manifest, so whoever wrote one by hand could freeze again before R
+    // and keep the sample it liked (no v1 release exists). It is read for compatibility, and never VERIFIED or CERTIFIED.
+    if (binding.derivation === "manifest" && c6.status === "PASS") {
+      c6.status = "INCOMPLETE";
+      c6.summary += " · legacy schema: draws bound to the manifest";
+      c6.details.unshift("INCOMPLETE legacy schema: draws bound to the manifest. A schema-v1 audit's draws hash the manifest, which is written at freeze, so freezing again before R gives another sample to keep: its draws reproduce, but they are not shown to be the only ones it could have drawn (schema v2 binds them to the registration). Read for compatibility; never VERIFIED or CERTIFIED");
+    }
   }
   checks.push(c6);
 
@@ -652,6 +750,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   /** The gate's lines (shared with status): FAIL beats INCOMPLETE beats WARN beats whatever check 7 was. */
   const applyGate = (g: LedgerGate) => {
     c7.details.push(...g.lines.map((l) => l.text));
+    markLocal(c7, g.lines.filter((l) => l.level === "fail" && l.local).map((l) => l.text));
     if (g.fails.length) c7.status = "FAIL";
     else if (g.incompletes.length) c7.status = raiseStatus(c7.status, "INCOMPLETE");
     else if (g.warns.length && c7.status === "PASS") c7.status = "WARN";
@@ -662,6 +761,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // What is local is checked even when the tracker is not read: the ledger's identity, the index and its publication, the checkpoint file.
     const g = await gateFor(null);
     c7.details.push(...g.lines.map((l) => l.text));
+    markLocal(c7, g.lines.filter((l) => l.level === "fail" && l.local).map((l) => l.text));
     if (g.fails.length) {
       c7.status = "FAIL";
       c7.summary = "labels FAIL";

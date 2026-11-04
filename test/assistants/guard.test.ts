@@ -806,8 +806,8 @@ describe("guard.mjs: the hook protocol", () => {
     // Options that only read, filter or format, on the commands the assistant may run (status --checkpoint, like plain checkpoint, is pr-rla's own local append).
     const reads: Record<string, Set<string>> = {
       "": new Set(["--dir", "--config", "--from-file", "--plugins"]),
-      status: new Set(["--json", "--offline", "--checkpoint", "--tsa-trust"]),
-      verify: new Set(["--offline", "--log-key", "--tsa-trust", "--beacon-file", "--json", "--verbose"]),
+      status: new Set(["--json", "--offline", "--checkpoint", "--tsa-trust", "--log-key", "--registration"]),
+      verify: new Set(["--offline", "--log-key", "--registration", "--tsa-trust", "--beacon-file", "--json", "--verbose"]),
       "draw-context": new Set(["--max-patch-bytes", "--json"]),
       checkpoint: new Set(["--tsa-trust"]),
       "plugin check": new Set(["--fixture", "--offline", "--kind"]),
@@ -826,6 +826,8 @@ describe("guard.mjs: the hook protocol", () => {
     for (const [line, decision] of [
       ["pr-rla verify --log-key https://rekor.example.org=log-key.pem --tsa-trust anchors.json", "allowed"],
       ["pr-rla status --tsa-trust anchors.json --json", "allowed"],
+      ["pr-rla status --log-key https://rekor.example.org=log-key.pem --registration 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "allowed"],
+      ["pr-rla verify --registration 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --offline", "allowed"],
       ["pr-rla --accept-lock-grants status --tsa-trust anchors.json", "blocked"],
       ["pr-rla checkpoint --push --tsa-trust anchors.json", "blocked"],
     ] as const) expect(`${line}: ${guard.checkShell(line, { cwd: w.audit, env: w.env }).length ? "blocked" : "allowed"}`).toBe(`${line}: ${decision}`);

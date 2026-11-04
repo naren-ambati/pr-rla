@@ -674,16 +674,19 @@ export interface DefinitionTraits {
   reportsLandedVia: boolean;
   /** Option keys whose values `populationOptionsSha256` hashes. */
   populationOptions: string[];
+  /** P5: whether the provider reads label history (answers `labelsAt: "landing"`). */
+  labelHistory: boolean;
 }
 
 /** The U3 traits of a definition (or of what a child reported), validated with the SDK's own check, defaults applied. */
-export function definitionTraits(raw: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown }, label: string): DefinitionTraits {
+export function definitionTraits(raw: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown; labelHistory?: unknown }, label: string): DefinitionTraits {
   const problem = providerTraitProblems(raw);
   if (problem) throw new PluginError(`plugin ${label}: ${problem}`, "PLUGIN_INVALID");
   return {
     reviewGranularity: (raw.reviewGranularity as ReviewGranularity | undefined) ?? DEFAULT_REVIEW_GRANULARITY,
     reportsLandedVia: raw.reportsLandedVia === true,
     populationOptions: [...((raw.populationOptions as string[] | undefined) ?? [])],
+    labelHistory: raw.labelHistory === true,
   };
 }
 
@@ -764,6 +767,8 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], either(req.signal, ctx.signal)) as never;
   if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], either(signal, ctx.signal)) as never;
   if (has.has("pushLog")) p.pushLog = ({ signal, ...req }) => host.call("pushLog", [req], either(signal, ctx.signal)) as never;
+  // resolveAccounts(logins, { signal }) (P5): only the logins cross to the child; the signal stays here.
+  if (has.has("resolveAccounts")) p.resolveAccounts = (logins, o) => host.call("resolveAccounts", [[...logins]], either(o?.signal, ctx.signal)) as never;
   for (const m of ["listRepos", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
   // describeChange(change, { signal }): only the change crosses to the child; the signal stays here.
   if (has.has("describeChange")) p.describeChange = (change, o) => host.call("describeChange", [change], either(o?.signal, ctx.signal)) as never;

@@ -449,8 +449,9 @@ export function poolRecordProblems(set: RepoSet, rec: PoolRecord): string[] {
   if (set.kind === "repo") {
     if (manifestRepos.length !== 1 || manifestRepos[0] !== splitScheme(set.repo).path) p.push("manifest repo differs from the registration");
   } else if (set.kind === "list") {
-    const want = new Set(set.repos.map((e) => lower(splitScheme(e).path)));
-    const have = new Set([...lowerRepos, ...gone.map((g) => lower(g.repo))]);
+    // P5: byte for byte, as registered. A respelling (case included) is another key, so another draw order.
+    const want = new Set(set.repos.map((e) => splitScheme(e).path));
+    const have = new Set([...manifestRepos, ...gone.map((g) => g.repo)]);
     const missing = [...want].filter((r) => !have.has(r)).sort();
     const extra = [...have].filter((r) => !want.has(r)).sort();
     if (missing.length) p.push(`manifest repos differ from the registered list: ${missing.length} registered repo(s) missing ${eg(missing)}`);
@@ -487,8 +488,8 @@ export function poolRecordProblems(set: RepoSet, rec: PoolRecord): string[] {
       if (badCounts.length) p.push(`manifest listing's ${badCounts.join(", ")} count(s) do not match its repos`);
     }
   }
-  const listed = new Set(lowerRepos);
-  const stray = [...new Set(rec.changeRepos ?? [])].filter((r) => !listed.has(lower(r))).sort();
+  const listed = new Set(manifestRepos);
+  const stray = [...new Set(rec.changeRepos ?? [])].filter((r) => !listed.has(r)).sort();
   if (stray.length) p.push(`manifest has changes from ${stray.length} repo(s) it does not list ${eg(stray)}`);
   // P3: the push-log record names manifest repos, each once, sorted, with the head the manifest records for it.
   const ev = rec.headEvidence ?? [];
