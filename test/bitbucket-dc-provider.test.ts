@@ -78,6 +78,19 @@ describe("Bitbucket Data Center provider on a fake server built from the documen
     expect(r.limitations[0]).toMatch(/UNVERIFIED against a live server/);
   });
 
+  it("walks from request.head (FR7.2); user ids are Actor.id (FR7.3)", async () => {
+    const late = scmScenario({ latePush: true });
+    const p = new BitbucketDataCenterProvider({ base_url: DC_BASE, page_size: 3 }, { cwd: ".", env: {}, log: () => {}, fetch: fakeBitbucketDc(late, { limit: 3 }).fetch });
+    const now = await p.listChanges({ repo, window: late.window, kinds: ["direct_push"] });
+    expect(now.headSha).toBe(OID("LM"));
+    expect(now.changes.map((c) => c.id)).toContain(x.late.id);
+    const frozen = await p.listChanges({ repo, window: late.window, kinds: ["pull_request", "direct_push"], head: late.frozenHead });
+    expect(frozen.headSha).toBe(late.frozenHead);
+    expect(frozen.changes.map((c) => c.id).sort()).toEqual([...x.all].sort());
+    const rebase = frozen.changes.find((c) => c.id === x.ids.rebase)!;
+    expect([rebase.author, rebase.mergedBy, ...rebase.reviews.map((r) => r.author)].every((a) => a && /^\d+$/.test(a.id ?? ""))).toBe(true);
+  });
+
   it("requires base_url and is registered under its name and the bitbucket-server alias", async () => {
     expect(() => new BitbucketDataCenterProvider({} as never, { cwd: ".", env: {}, log: () => {}, fetch })).toThrow(/needs options.base_url/);
     expect((await loadProviderDefinition("bitbucket-data-center", ".")).name).toBe("bitbucket-data-center");

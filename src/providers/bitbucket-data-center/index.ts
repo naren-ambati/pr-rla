@@ -8,6 +8,7 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
+import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError } from "../http.js";
 import {
   buildReviews,
@@ -137,6 +138,9 @@ export class BitbucketDataCenterProvider implements ScmProvider {
       diagnostics.push({ label: "PR diffs truncated by the server (changedLines undercounted)", value: truncated });
     }
 
+    // The pinned head (U3): verify passes the frozen head; freeze walks from the branch's latest commit.
+    const head = (req.head ?? branch.latestCommit).toLowerCase();
+    let landedVia = new Map<string, string>();
     if (req.kinds.includes("direct_push")) {
       // Merge commits are claimed from the listing (or the MERGED activity); PR commit lists are read only while commits are unclaimed.
       const known = new Map<string, number>();
@@ -145,7 +149,7 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         if (sha && !known.has(sha.toLowerCase())) known.set(sha.toLowerCase(), p.id);
       }
       // Newest first in git's date order, from the pinned head, until a whole page is older than the window.
-      const history = await this.paged<DcCommit>(`${path}/commits?until=${branch.latestCommit}`, req.signal, (page) => page.some((c) => c.committerTimestamp >= opens));
+      const history = await this.paged<DcCommit>(`${path}/commits?until=${head}`, req.signal, (page) => page.some((c) => c.committerTimestamp >= opens));
       const seen = new Set<string>();
       const inWin = history.filter((c) => {
         if (seen.has(c.id) || c.committerTimestamp < opens || c.committerTimestamp >= closes) return false;
@@ -161,9 +165,10 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         readCommits: async (id) => (await this.paged<DcCommit>(`${path}/pull-requests/${id}/commits`, req.signal)).map((c) => ({ sha: c.id, key: rebaseKey(c) })),
         rebaseKey,
       });
+      landedVia = landedViaMerges(new Map(history.map((c) => [c.id, c.parents.map((p) => p.id)])), res.pushes.map((c) => c.id));
       for (const c of res.pushes) {
         const { data: diff } = await this.http.get<DcDiff>(`${path}/commits/${c.id}/diff?contextLines=0`, req.signal);
-        changes.push(normalizeDirectPush(req.repo, c, countDiff(diff).lines, web));
+        changes.push(normalizeDirectPush(req.repo, c, countDiff(diff).lines, web, landedVia.get(c.id)?.toLowerCase()));
       }
       diagnostics.push(
         { label: "default-branch commits in window", value: inWin.length },
@@ -172,7 +177,7 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
-    return { changes, defaultBranch: branch.displayId, limitations: BITBUCKET_DC_LIMITATIONS, diagnostics };
+    return { changes, defaultBranch: branch.displayId, limitations: landedVia.size ? [...BITBUCKET_DC_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_DC_LIMITATIONS, diagnostics, headSha: head };
   }
 }
 
@@ -181,5 +186,9 @@ export default defineProvider<BitbucketDataCenterOptions>({
   name: "bitbucket-data-center",
   description: "Bitbucket Data Center / Server REST 1.0 (unverified against a live server): merged PRs, activities, reviewers, diffs and default-branch commits",
   hosts: (options) => (options?.base_url ? [new URL(options.base_url).host] : []),
+  // Comments become one COMMENTED per non-author user, at their first comment.
+  reviewGranularity: "first-comment-per-user",
+  populationOptions: ["base_url"],
+  reportsLandedVia: true,
   create: (options, ctx) => new BitbucketDataCenterProvider(options, ctx),
 });

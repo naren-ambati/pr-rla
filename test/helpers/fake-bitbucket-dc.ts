@@ -20,7 +20,9 @@ export function fakeBitbucketDc(sc: ScmScenario, opts: { limit?: number } = {}) 
   const [key, slug] = ["ACME", "widgets"];
   const api = `/rest/api/1.0/projects/${key}/repos/${slug}`;
   const ms = (iso: string) => Date.parse(iso);
-  const user = (u: ScUser | null) => (u ? { name: u.login, slug: u.login, emailAddress: `${u.login}@example.com`, displayName: u.login.toUpperCase(), type: u.bot ? "SERVICE" : "NORMAL", active: true } : null);
+  // A stable numeric id per account, as Data Center keeps it across renames.
+  const idOf = (login: string) => 10 + [...login].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1_000_000, 7);
+  const user = (u: ScUser | null) => (u ? { id: idOf(u.login), name: u.login, slug: u.login, emailAddress: `${u.login}@example.com`, displayName: u.login.toUpperCase(), type: u.bot ? "SERVICE" : "NORMAL", active: true } : null);
   const landedAs = (p: ScPr) => p.mergeCommit ?? p.squashCommit ?? p.landed[p.landed.length - 1]!;
   const prCommits = (p: ScPr) => (p.strategy === "fast-forward" ? p.landed : p.strategy === "squash+merge" ? [p.squashCommit!] : p.listed);
   const finals = (p: ScPr) => {
