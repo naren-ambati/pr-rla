@@ -73,7 +73,7 @@ describe("FR9.6: the certificate wording", () => {
     expect(PRESENCE_LABEL).toBe("presence (user-presence flag verified; key hardware not attested)");
     expect(provenanceLabel("presence")).toBe(PRESENCE_LABEL);
     expect(provenanceLine([{ level: "account", count: 12 }, { level: "presence", count: 24 }])).toBe("VERDICT PROVENANCE: account (12) · presence (user-presence flag verified; key hardware not attested) (24)");
-    expect(rulesLine({ minProvenance: "presence", requireSigned: true })).toBe("registered minimum: presence (user-presence flag verified; key hardware not attested) · signed verdict commits required (require_signed)");
+    expect(rulesLine({ minProvenance: "presence", requireSigned: true })).toBe("registered minimum: presence (user-presence flag verified; key hardware not attested) · signed verdicts required (require_signed)");
     expect(verdictsSummary({ minProvenance: "presence", reviewers: null })).toBe("verdict provenance presence (user-presence flag verified; key hardware not attested)");
   });
 

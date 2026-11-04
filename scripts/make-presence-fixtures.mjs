@@ -1,9 +1,14 @@
-// Makes the U9 signed-verdict fixture with real OpenSSH tooling and software keys only (D7):
-// `ssh-keygen` keys, `git commit -S` in the SSH format, and for the FIDO types OpenSSH's own test
-// middleware, sk-dummy (regress/misc/sk-dummy), loaded through SSH_SK_PROVIDER as OpenSSH's
-// regression tests do. sk-dummy is a software-emulated authenticator: it signs with a key it keeps in
-// the key handle and sets whatever flags ssh-keygen asks for, so a key made with
-// `-O no-touch-required` signs with the user-presence (UP) flag clear. Its counter is a constant.
+// Makes the U9 signed-verdict fixture with real OpenSSH tooling and software keys only (D7): one
+// SSHSIG per verdict, made by `ssh-keygen -Y sign -n pr-rla-verdict@v1` exactly as a reviewer signs
+// by hand (README, "Signed verdicts"), and for the FIDO types through OpenSSH's own test middleware,
+// sk-dummy (regress/misc/sk-dummy), loaded through SSH_SK_PROVIDER as OpenSSH's regression tests do.
+// sk-dummy is a software-emulated authenticator: it signs with a key it keeps in the key handle and
+// sets whatever flags ssh-keygen asks for, so a key made with `-O no-touch-required` signs with the
+// user-presence (UP) flag clear. Its counter is a constant.
+//
+// The signed bytes and the verdict lines are written by the shell's printf with the README's own
+// format strings, not by pr-rla: the tests then check that pr-rla reads what the documented manual
+// path produces.
 //
 // Usage:
 //   SK_DUMMY=/path/to/sk-dummy.so node scripts/make-presence-fixtures.mjs [out.json]
@@ -15,13 +20,12 @@
 //   ./configure --with-ssl-dir="$(brew --prefix openssl@3)" --without-zlib
 //   make openbsd-compat/libopenbsd-compat.a regress/misc/sk-dummy/sk-dummy.so
 //
-// Everything happens in a temporary directory: keys, the repository and the allowed-signers file.
-// No key is written to ~/.ssh, git runs with no global or system configuration, and nothing is
-// pushed or sent anywhere. The fixture keeps public keys only. It is synthetic (made here, not read
-// from a public source). Each step's file content, tree and raw commit object are stored, so a test
-// rebuilds the same commits (same SHAs) with plain `git hash-object`, on any git version.
+// Everything happens in a temporary directory, deleted at the end: the keys and the allowed-signers
+// file. No key is written to ~/.ssh and nothing is sent anywhere. The fixture keeps public keys only. It is
+// synthetic (made here, not read from a public source).
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,8 +38,7 @@ if (!SK || !existsSync(SK)) {
 }
 const out = resolve(process.argv[2] ?? join(ROOT, "test/fixtures/presence/sk-dummy-verdicts.json"));
 const work = mkdtempSync(join(tmpdir(), "prrla-presence-"));
-const repo = join(work, "repo");
-const env = { ...process.env, SSH_SK_PROVIDER: resolve(SK), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", HOME: work };
+const env = { PATH: process.env.PATH, SSH_SK_PROVIDER: resolve(SK), HOME: work };
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { env, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
 
 // Reviewers and their keys. mallory is never registered (the unlisted signer).
@@ -56,10 +59,14 @@ for (const k of KEYS) {
   sh("ssh-keygen", ["-q", "-t", k.type, ...k.args, "-N", "", "-C", k.name, "-f", join(work, k.name)]);
   pub[k.name] = readFileSync(join(work, `${k.name}.pub`), "utf8").trim().split(" ").slice(0, 2).join(" ");
 }
-const registered = KEYS.filter((k) => k.name !== "mallory").map((k) => `${k.name} ${pub[k.name]}`);
+// The namespaces option admits only verdict signatures: through this file the same key vouches for no git commit.
+const registered = KEYS.filter((k) => k.name !== "mallory").map((k) => `${k.name} namespaces="pr-rla-verdict@v1" ${pub[k.name]}`);
 writeFileSync(join(work, "allowed_signers"), `${registered.join("\n")}\n`);
 
-// The verdicts: draw n names `reviewer` and its commit is signed with `signer`'s key (null: unsigned).
+const REGISTRATION = createHash("sha256").update("pr-rla synthetic registration for the U9 fixture").digest("hex");
+const OTHER_REGISTRATION = createHash("sha256").update("another audit's registration").digest("hex");
+const PROTOCOL = "ab".repeat(32);
+// draw n names `reviewer`, is signed with `signer`'s key (null: unsigned), for `registration`, in namespace `ns`.
 const STEPS = [
   { draw: 1, reviewer: "alice", signer: "alice", expect: { level: "account", why: "a software ed25519 key" } },
   { draw: 2, reviewer: "bob", signer: "bob", expect: { level: "presence", why: "an ed25519-sk key, UP set" } },
@@ -67,66 +74,48 @@ const STEPS = [
   { draw: 4, reviewer: "dave", signer: "dave", expect: { level: "account", why: "an ed25519-sk key made with no-touch-required: UP clear" } },
   { draw: 5, reviewer: "erin", signer: "erin", expect: { level: "account", why: "an ecdsa-sk key made with no-touch-required: UP clear" } },
   { draw: 6, reviewer: "mallory", signer: "mallory", expect: { level: "self-asserted", why: "signed by a key nobody registered" } },
-  { draw: 7, reviewer: "alice", signer: null, expect: { level: "self-asserted", why: "an unsigned commit" } },
+  { draw: 7, reviewer: "alice", signer: null, expect: { level: "self-asserted", why: "an unsigned verdict" } },
   { draw: 8, reviewer: "alice", signer: "bob", expect: { level: "self-asserted", why: "names alice but bob signed it" } },
   { draw: 9, reviewer: "frank", signer: "frank", expect: { level: "account", why: "a software ecdsa-sha2-nistp256 key" } },
   { draw: 10, reviewer: "grace", signer: "grace", expect: { level: "account", why: "a software RSA 3072 key (rsa-sha2-512)" } },
   { draw: 11, reviewer: "heidi", signer: "heidi", expect: { level: "account", why: "a software ecdsa-sha2-nistp384 key" } },
   { draw: 12, reviewer: "ivan", signer: "ivan", expect: { level: "account", why: "a software ecdsa-sha2-nistp521 key" } },
+  { draw: 13, reviewer: "bob", signer: "bob", registration: OTHER_REGISTRATION, expect: { level: "self-asserted", why: "bob's touch, but for another audit's registration" } },
+  { draw: 14, reviewer: "bob", signer: "bob", ns: "git", expect: { level: "self-asserted", why: "bob's touch, but in namespace git (a commit signature), not pr-rla-verdict@v1" } },
 ];
-const PROTOCOL = "ab".repeat(32);
-const FILE = "audit/w/verdicts.jsonl";
-const sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1))));
 
-mkdirSync(join(repo, "audit/w"), { recursive: true });
-sh("git", ["init", "-q", "-b", "main"], { cwd: repo });
+// The README's manual recipe, verbatim: the bytes, then the line.
+const PAYLOAD_FORMAT = "pr-rla-verdict/v1\\nregistrationSha256 %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n";
+const LINE_FORMAT = '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","registrationSha256":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","sshsig":"%s","verdict":"%s"}\\n';
+const UNSIGNED_FORMAT = '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","verdict":"%s"}\\n';
+
 const steps = [];
 STEPS.forEach((s, i) => {
   const at = `2026-10-21T0${Math.floor(i / 6) + 3}:${String((i % 6) * 10).padStart(2, "0")}:00Z`;
-  appendFileSync(join(repo, FILE), `${sorted({ changeId: `json:acme/widgets#${100 + s.draw}`, draw: s.draw, protocolSha256: PROTOCOL, recordedAt: at, reviewer: s.reviewer, schema: "pr-rla/verdict/v1", verdict: "pass" })}\n`);
-  sh("git", ["add", FILE], { cwd: repo });
-  const ident = ["-c", "user.name=pr-rla fixture", "-c", "user.email=user-0f1e2d3c@example.invalid"];
-  const sign = s.signer ? ["-c", "gpg.format=ssh", "-c", `user.signingkey=${join(work, s.signer)}`, "commit", "-S"] : ["-c", "commit.gpgsign=false", "commit"];
-  sh("git", [...ident, ...sign, "-q", "-m", `verdict: draw #${s.draw}`], { cwd: repo, env: { ...env, GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } });
-  const commit = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
-  const raw = sh("git", ["cat-file", "commit", commit], { cwd: repo });
-  // The oracle at recording time: git's own verify-commit (it runs ssh-keygen -Y find-principals and -Y verify),
-  // and ssh-keygen -vv -Y check-novalidate for the security-key flags and counter.
-  const verify = spawnSync("git", ["-c", `gpg.ssh.allowedSignersFile=${join(work, "allowed_signers")}`, "verify-commit", commit], { cwd: repo, env, encoding: "utf8" });
-  let skDetails = null;
+  const change = `json:acme/widgets#${100 + s.draw}`;
+  const reg = s.registration ?? REGISTRATION;
+  const file = join(work, `verdict-${s.draw}.txt`);
+  sh("sh", ["-c", `printf "$0" "$@" > "${file}"`, PAYLOAD_FORMAT, reg, PROTOCOL, String(s.draw), change, "pass", s.reviewer, at]);
+  const payload = readFileSync(file, "utf8");
+  let line;
+  let oracle = null;
   if (s.signer) {
-    const lines = raw.split("\n");
-    const head = lines.slice(0, lines.indexOf(""));
-    const sigLines = [];
-    const payload = [];
-    let inSig = false;
-    for (const l of head) {
-      if (l.startsWith("gpgsig ")) (inSig = true), sigLines.push(l.slice(7));
-      else if (inSig && l.startsWith(" ")) sigLines.push(l.slice(1));
-      else (inSig = false), payload.push(l);
-    }
-    writeFileSync(join(work, "payload"), `${payload.join("\n")}\n${lines.slice(lines.indexOf("")).join("\n")}`);
-    writeFileSync(join(work, "payload.sig"), `${sigLines.join("\n")}\n`);
-    const nv = spawnSync("ssh-keygen", ["-vv", "-Y", "check-novalidate", "-n", "git", "-s", join(work, "payload.sig")], { input: readFileSync(join(work, "payload")), env, encoding: "utf8" });
-    const m = /signature details: counter = (\d+), flags = 0x([0-9a-f]{2})/.exec(nv.stderr);
+    // The reviewer's own command; sk-dummy stands in for the authenticator (software, D7).
+    sh("ssh-keygen", ["-Y", "sign", "-n", s.ns ?? "pr-rla-verdict@v1", "-f", join(work, s.signer), file]);
+    const sig = sh("sh", ["-c", `sed '1d;$d' "${file}.sig" | tr -d '\\n'`]);
+    line = sh("sh", ["-c", `printf "$0" "$@"`, LINE_FORMAT, change, String(s.draw), PROTOCOL, at, reg, s.reviewer, sig, "pass"]);
+    // The oracle at recording time: ssh-keygen -Y verify against the registered allowed signers, as the
+    // reviewer named, and -vv -Y check-novalidate for the security-key flags and counter.
+    const v = spawnSync("ssh-keygen", ["-Y", "verify", "-f", join(work, "allowed_signers"), "-I", s.reviewer, "-n", "pr-rla-verdict@v1", "-s", `${file}.sig`], { input: readFileSync(file), env, encoding: "utf8" });
+    const nv = spawnSync("ssh-keygen", ["-vv", "-Y", "check-novalidate", "-n", s.ns ?? "pr-rla-verdict@v1", "-s", `${file}.sig`], { input: readFileSync(file), env, encoding: "utf8" });
     if (nv.status !== 0) throw new Error(`ssh-keygen check-novalidate refused draw ${s.draw}: ${nv.stdout}${nv.stderr}`);
-    skDetails = m ? { counter: Number(m[1]), flags: Number.parseInt(m[2], 16) } : null;
-  }
-  steps.push({
-    draw: s.draw,
-    reviewer: s.reviewer,
-    signer: s.signer,
-    expect: s.expect,
-    file: FILE,
-    content: readFileSync(join(repo, FILE), "utf8"),
-    tree: sh("git", ["rev-parse", "HEAD^{tree}"], { cwd: repo }).trim(),
-    commit,
-    raw,
-    oracle: {
-      gitVerifyCommit: { exit: verify.status, output: `${verify.stdout}${verify.stderr}`.trim().split("\n").filter((l) => /signature/i.test(l)).join("\n") },
-      ...(skDetails ? { sshKeygenSignatureDetails: skDetails } : {}),
-    },
-  });
+    const m = /signature details: counter = (\d+), flags = 0x([0-9a-f]{2})/.exec(nv.stderr);
+    oracle = {
+      verify: { exit: v.status, output: `${v.stdout}${v.stderr}`.trim().split("\n").filter((l) => /signature|principal/i.test(l)).join("\n") },
+      details: m ? { counter: Number(m[1]), flags: Number.parseInt(m[2], 16) } : null,
+    };
+  } else line = sh("sh", ["-c", `printf "$0" "$@"`, UNSIGNED_FORMAT, change, String(s.draw), PROTOCOL, at, s.reviewer, "pass"]);
+  steps.push({ draw: s.draw, reviewer: s.reviewer, signer: s.signer, ...(s.ns ? { namespace: s.ns } : {}), ...(s.registration ? { registrationSha256: s.registration } : {}), expect: s.expect, payload, line, oracle });
 });
 
 const version = (cmd, args) => {
@@ -136,18 +125,23 @@ const version = (cmd, args) => {
 const fixture = {
   source: "synthetic",
   made: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-  note: "Verdict commits signed with `git commit -S` (gpg.format=ssh) by ssh-keygen with software keys; the -sk keys live in OpenSSH's sk-dummy test middleware (a software-emulated authenticator), never a hardware key (D7). Public keys only. Made by scripts/make-presence-fixtures.mjs.",
+  note: "One SSHSIG per verdict (namespace pr-rla-verdict@v1), made by ssh-keygen -Y sign with software keys over bytes written by printf with the README's manual recipe; the -sk keys live in OpenSSH's sk-dummy test middleware (a software-emulated authenticator), never a hardware key (D7). Public keys only. Made by scripts/make-presence-fixtures.mjs.",
   tools: {
-    git: version("git", ["--version"]),
     sshKeygen: version("ssh", ["-V"]),
     skDummy: "OpenSSH 10.3p1 regress/misc/sk-dummy, built from https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.3p1.tar.gz (sha256 56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4) against Homebrew openssl@3",
+    platform: `${process.platform} ${process.arch}`,
   },
+  namespace: "pr-rla-verdict@v1",
+  registrationSha256: REGISTRATION,
+  protocolSha256: PROTOCOL,
   allowedSigners: registered,
   unlisted: { mallory: pub.mallory },
-  protocolSha256: PROTOCOL,
   steps,
 };
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, `${JSON.stringify(fixture, null, 1)}\n`);
-console.log(`wrote ${out}: ${steps.length} commits in ${work}`);
-for (const s of steps) console.log(`  draw #${s.draw} ${s.signer ?? "(unsigned)"} -> git verify-commit exit ${s.oracle.gitVerifyCommit.exit}${s.oracle.sshKeygenSignatureDetails ? ` · flags 0x${s.oracle.sshKeygenSignatureDetails.flags.toString(16).padStart(2, "0")} counter ${s.oracle.sshKeygenSignatureDetails.counter}` : ""} · ${s.oracle.gitVerifyCommit.output.split("\n")[0] ?? ""}`);
+// The private keys go with the temporary directory; only public keys are kept.
+rmSync(work, { recursive: true, force: true });
+console.log(`wrote ${out}: ${steps.length} verdicts (the temporary keys are deleted)`);
+for (const s of steps)
+  console.log(`  draw #${String(s.draw).padEnd(2)} ${(s.signer ?? "(unsigned)").padEnd(10)} -> ${s.oracle ? `ssh-keygen -Y verify -I ${s.reviewer}: exit ${s.oracle.verify.exit}${s.oracle.details ? ` · flags 0x${s.oracle.details.flags.toString(16).padStart(2, "0")} counter ${s.oracle.details.counter}` : ""} · ${s.oracle.verify.output.split("\n")[0] ?? ""}` : "no signature"}`);

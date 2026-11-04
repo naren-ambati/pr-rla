@@ -159,7 +159,11 @@ export interface RegistrationRecordV2 {
   registeredAt: string;
   timestamping: TimestampingParams;
   plugins: { provider: PluginIdentity; ledger: PluginIdentity };
-  verdicts: { minProvenance: ProvenanceLevel; reviewers: string[] | null; require_signed?: boolean };
+  /**
+   * `allowed_signers` (U9): the reviewers' SSH keys, OpenSSH allowed-signers lines; present only
+   * when keys are registered, so other registrations keep their shape. `require_signed` only when true.
+   */
+  verdicts: { minProvenance: ProvenanceLevel; reviewers: string[] | null; require_signed?: boolean; allowed_signers?: string[] };
   /** The pr-rla release that wrote the record. */
   prRlaVersion: string;
 }

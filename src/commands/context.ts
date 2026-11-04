@@ -37,6 +37,11 @@ export interface CommandContext {
   confirm?: (question: string) => Promise<boolean>;
   /** `--plugins builtin-only` (PR_RLA_PLUGINS=builtin-only in env does the same): refuse every external plugin. */
   plugins?: string;
+  /**
+   * Signs a verdict's bytes with the key `record --sign` names, returning the armored SSHSIG (U9).
+   * Default: `ssh-keygen -Y sign -n pr-rla-verdict@v1`. Injected only for a test's software-emulated authenticator.
+   */
+  signVerdict?: (payload: Uint8Array, keyPath: string) => Promise<string>;
 }
 
 export class CommandError extends Error {

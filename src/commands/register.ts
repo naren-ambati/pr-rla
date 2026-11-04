@@ -9,7 +9,7 @@ import { preflightExternalLedger } from "../plugins/open.js";
 import { builtinLedgerName, loadLedgerDefinition, pluginIdentity } from "../registry.js";
 import type { ProvenanceLevel } from "../sdk/ledger.js";
 import { maxProvenanceOf, SIGNATURE_LEDGERS } from "../ledger-traits.js";
-import { PRESENCE_LIMIT, presenceReachable, registeredVerdicts, verdictsSummary, type RegisteredVerdicts } from "../core/presence/index.js";
+import { PRESENCE_LIMIT, presenceReachable, registeredVerdicts, verdictRuleWarnings, verdictsSummary, type RegisteredVerdicts } from "../core/presence/index.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
@@ -58,18 +58,22 @@ export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, 
     if (x.problem) throw new CommandError(`ledger ${config.ledger.use}: ${x.problem}`);
     def = x;
   }
-  // U9: git-file reaches account and presence through signed verdict commits; SSH keys count only there.
+  // U9: git-file reaches account and presence through per-verdict signatures; SSH keys count only there.
   const builtin = !!builtinLedgerName(config.ledger.use);
+  const input = {
+    ledger: def.name,
+    verifiesSignatures: builtin && SIGNATURE_LEDGERS.has(def.name),
+    ledgerLevel: def.provenance ?? "self-asserted",
+    ledgerCeiling: maxProvenanceOf(builtin, def.name, def.provenance ?? "self-asserted"),
+    minProvenance: config.verdicts.minProvenance,
+    reviewers: config.verdicts.reviewers,
+    allowedSigners: config.verdicts.allowedSigners,
+    requireSigned: config.ledger.options.require_signed === true,
+  };
   try {
-    return registeredVerdicts({
-      ledger: def.name,
-      verifiesSignatures: builtin && SIGNATURE_LEDGERS.has(def.name),
-      ledgerLevel: def.provenance ?? "self-asserted",
-      ledgerCeiling: maxProvenanceOf(builtin, def.name, def.provenance ?? "self-asserted"),
-      minProvenance: config.verdicts.minProvenance,
-      reviewers: config.verdicts.reviewers,
-      requireSigned: config.ledger.options.require_signed === true,
-    });
+    const verdicts = registeredVerdicts(input);
+    for (const w of verdictRuleWarnings(input, verdicts)) ctx.out(`  warning: ${w}`);
+    return verdicts;
   } catch (e) {
     throw new CommandError((e as Error).message);
   }
@@ -114,7 +118,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · ${verdictsSummary(record.verdicts)}`);
-  if (presenceReachable(record.verdicts.reviewers)) ctx.out(`  ${PRESENCE_LIMIT}`);
+  if (presenceReachable(record.verdicts.allowed_signers)) ctx.out(`  ${PRESENCE_LIMIT}`);
   for (const id of [record.plugins.provider, record.plugins.ledger]) {
     if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);
     if (id.trust === "full") ctx.out(`  PLUGIN TRUST: full (${id.name}@${id.version ?? "unversioned"} runs with your environment and files)`);

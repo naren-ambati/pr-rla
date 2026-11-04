@@ -1,60 +1,96 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkCommitSignature, parseAllowedSigner, signersFor, splitCommitSignature, verifySshsig } from "../src/core/presence/index.js";
-import { makeTestKey, tamperArmor, type TestKey } from "./helpers/sshsig-signer.js";
-import { commitAll, rawCommit } from "./helpers/signed-commits.js";
+import { checkVerdictSignature, parseAllowedSigner, parseAllowedSigners, verdictPayloadText, verifySshsig, type AllowedSigner } from "../src/core/presence/index.js";
+import type { VerdictEvent } from "../src/sdk/ledger.js";
+import { armor, makeTestKey, tamperArmor, unarmor, type SignOptions, type TestKey } from "./helpers/sshsig-signer.js";
+import { NAMESPACE, signedLine, verdictBytes, type LineFields } from "./helpers/verdict-lines.js";
 
 /**
- * The oracle for FR9.2 (test-design.md §2, U9): every outcome of pr-rla's TypeScript SSHSIG
- * verifier is cross-checked against OpenSSH's `ssh-keygen -Y verify` (signature and allowed
- * signer) and `-Y check-novalidate` (signature only; with -vv it prints a security key's flags
- * and counter), and signed commits against `git verify-commit`. ssh-keygen verifies -sk signatures
- * purely in software, so no authenticator is needed. Skipped only where ssh-keygen is missing.
+ * The oracle for FR9.2 (test-design.md §2, U9; as changed after review): pr-rla's verdict on each
+ * per-verdict signature is cross-checked against OpenSSH's `ssh-keygen -Y verify -I <reviewer>`
+ * (signature, allowed signer and principal, matched exactly as pr-rla matches them) and
+ * `-Y check-novalidate` (signature only; with -vv it prints a security key's flags and counter).
+ * Signatures come from a software-emulated authenticator, from real `ssh-keygen -Y sign` with a
+ * software ed25519 key made here, and, recorded, from ssh-keygen with OpenSSH's sk-dummy (-sk keys,
+ * UP set and clear). Where pr-rla is deliberately stricter than ssh-keygen, the case says so.
  *
- * It also settles the design's open item "whether ssh-keygen -Y verify enforces the presence flag":
- * it does not. A signature with the user-presence flag clear verifies, and neither -Y verify nor
- * the allowed-signers format has an option that requires the flag (OpenSSH 10.3p1: sig_verify in
- * ssh-keygen.c only logs the flags at debug2). That is why pr-rla checks the flag itself.
+ * ssh-keygen must be installed: without it this file FAILs, unless PR_RLA_SKIP_ORACLE=1 says to skip
+ * the cross-check knowingly. It settled the design's open item: `ssh-keygen -Y verify` does not
+ * enforce the user-presence flag (OpenSSH 10.3p1: sig_verify only logs the flags at debug2), so
+ * pr-rla checks the flag itself.
  */
 
-const hasSshKeygen = spawnSync("ssh-keygen", ["-Y", "check-novalidate", "-n", "git", "-s", "/nonexistent"], { encoding: "utf8" }).error === undefined;
+const SKIP = process.env.PR_RLA_SKIP_ORACLE === "1";
+const hasSshKeygen = spawnSync("ssh-keygen", ["-Y", "check-novalidate", "-n", NAMESPACE, "-s", "/nonexistent"], { encoding: "utf8" }).error === undefined;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const enc = (s: string) => new TextEncoder().encode(s);
+const REG = createHash("sha256").update("oracle registration").digest("hex");
+const P = "ab".repeat(32);
+const fields = (reviewer: string, extra: Partial<LineFields> = {}): LineFields => ({ draw: 1, changeId: "json:acme/widgets#101", verdict: "pass", protocolSha256: P, reviewer, recordedAt: "2026-10-21T03:00:00Z", ...extra });
 
 interface Oracle {
-  /** `ssh-keygen -Y verify -f allowed -I principal -n git` exit status. */
+  /** `ssh-keygen -Y verify -f allowed -I principal -n pr-rla-verdict@v1` exit status. */
   verify: number | null;
   verifyOut: string;
-  /** `ssh-keygen -vv -Y check-novalidate -n git` exit status. */
+  /** `ssh-keygen -vv -Y check-novalidate -n pr-rla-verdict@v1` exit status. */
   novalidate: number | null;
   /** Security-key details ssh-keygen logged. */
   details: { counter: number; flags: number } | null;
 }
 
 let work: string;
-function oracle(sig: string, message: Uint8Array, allowed: string[], principal: string, namespace = "git"): Oracle {
+function oracle(sig: string, message: Uint8Array | string, allowed: string[], principal: string): Oracle {
   const d = mkdtempSync(join(work, "case-"));
   writeFileSync(join(d, "allowed_signers"), `${allowed.join("\n")}\n`);
-  writeFileSync(join(d, "msg.sig"), sig);
-  const v = spawnSync("ssh-keygen", ["-Y", "verify", "-f", join(d, "allowed_signers"), "-I", principal, "-n", namespace, "-s", join(d, "msg.sig")], { input: message, encoding: "utf8" });
-  const n = spawnSync("ssh-keygen", ["-vv", "-Y", "check-novalidate", "-n", namespace, "-s", join(d, "msg.sig")], { input: message, encoding: "utf8" });
+  writeFileSync(join(d, "verdict.sig"), sig);
+  const v = spawnSync("ssh-keygen", ["-Y", "verify", "-f", join(d, "allowed_signers"), "-I", principal, "-n", NAMESPACE, "-s", join(d, "verdict.sig")], { input: message, encoding: "utf8" });
+  const n = spawnSync("ssh-keygen", ["-vv", "-Y", "check-novalidate", "-n", NAMESPACE, "-s", join(d, "verdict.sig")], { input: message, encoding: "utf8" });
   const m = /signature details: counter = (\d+), flags = 0x([0-9a-f]{2})/.exec(n.stderr);
   return { verify: v.status, verifyOut: `${v.stdout}${v.stderr}`.trim(), novalidate: n.status, details: m ? { counter: Number(m[1]), flags: Number.parseInt(m[2]!, 16) } : null };
 }
 
-/** pr-rla's verdict on the same input: the signature, and whether a registered signer holds the key under that principal. */
-function prRla(sig: string, message: Uint8Array, allowed: string[], principal: string) {
-  const v = verifySshsig(sig, message, "git");
-  const holders = v.ok ? signersFor(v.key!, allowed.map(parseAllowedSigner)) : [];
-  return { valid: v.ok, accepted: v.ok && holders.some((h) => h.principals.includes(principal)), sk: v.sk ? { counter: v.sk.counter, flags: v.sk.flags } : null };
+/** pr-rla's verdict through the production check (checkVerdictSignature): valid as a signature, and counted for this reviewer. */
+function prRla(line: string, allowed: string[]) {
+  let signers: AllowedSigner[];
+  try {
+    signers = parseAllowedSigners(allowed);
+  } catch {
+    signers = allowed.flatMap((l) => {
+      try {
+        return [parseAllowedSigner(l)];
+      } catch {
+        return [];
+      }
+    });
+  }
+  const c = checkVerdictSignature(JSON.parse(line) as VerdictEvent, REG, signers);
+  return { valid: c.state === "signed" || c.state === "unlisted" || c.state === "mismatch", accepted: c.state === "signed", sk: c.sk ? { counter: c.sk.counter, flags: c.sk.flags } : null, state: c.state, detail: c.detail };
 }
 
-const message = enc("tree 7a0e4965abc2bbc40ed031432ba39c31b52b6d44\nauthor r <user-9a8b7c6d@example.invalid> 1792551600 +0000\n\nverdict: draw #1\n");
+interface Case {
+  /** The armored signature, the bytes ssh-keygen verifies it over, the line pr-rla reads, the allowed signers and the principal. */
+  sig: string;
+  bytes: string;
+  line: string;
+  allowed: string[];
+  principal: string;
+  expect: { valid: boolean; accepted: boolean; flags?: number; counter?: number };
+  /** Where pr-rla refuses what ssh-keygen accepts, and why. */
+  stricter?: string;
+}
+
 let k: Record<string, TestKey>;
+/** A case signed by the emulated authenticator over the verdict bytes, or over other bytes (`bytesFor`). */
+function signed(key: TestKey, reviewer: string, allowed: string[], expectation: Case["expect"], opts: SignOptions & { fields?: Partial<LineFields>; stricter?: string; bytesFor?: { registrationSha256?: string } } = {}): Case {
+  const f = fields(reviewer, opts.fields);
+  const line = signedLine(REG, f, key, opts);
+  const sig = armor(new Uint8Array(Buffer.from(JSON.parse(line).sshsig as string, "base64")));
+  return { sig, bytes: verdictBytes(REG, f), line, allowed, principal: reviewer, expect: expectation, ...(opts.stricter ? { stricter: opts.stricter } : {}) };
+}
 
 beforeAll(() => {
   work = mkdtempSync(join(tmpdir(), "prrla-oracle-"));
@@ -66,107 +102,158 @@ beforeAll(() => {
     p521: makeTestKey("ecdsa-sha2-nistp521"),
     ecSk: makeTestKey("sk-ecdsa-sha2-nistp256@openssh.com"),
     rsa: makeTestKey("ssh-rsa", { rsaBits: 3072 }),
+    rsa1024: makeTestKey("ssh-rsa", { rsaBits: 1024 }),
     other: makeTestKey("ssh-ed25519"),
   };
 });
 
-describe.skipIf(!hasSshKeygen)("oracle: ssh-keygen -Y verify and check-novalidate agree with pr-rla's verifier (FR9.2)", () => {
-  const cases: [string, () => { sig: string; allowed: string[]; principal: string; expect: { valid: boolean; accepted: boolean; flags?: number; counter?: number } }][] = [
-    ["ssh-ed25519", () => ({ sig: k.ed25519!.sign(message), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: true, accepted: true } })],
-    ["ecdsa-sha2-nistp256", () => ({ sig: k.p256!.sign(message), allowed: [k.p256!.allowedSigner("frank")], principal: "frank", expect: { valid: true, accepted: true } })],
-    ["ecdsa-sha2-nistp384", () => ({ sig: k.p384!.sign(message), allowed: [k.p384!.allowedSigner("heidi")], principal: "heidi", expect: { valid: true, accepted: true } })],
-    ["ecdsa-sha2-nistp521", () => ({ sig: k.p521!.sign(message), allowed: [k.p521!.allowedSigner("ivan")], principal: "ivan", expect: { valid: true, accepted: true } })],
-    ["ssh-rsa, rsa-sha2-512", () => ({ sig: k.rsa!.sign(message), allowed: [k.rsa!.allowedSigner("grace")], principal: "grace", expect: { valid: true, accepted: true } })],
-    ["ssh-rsa, rsa-sha2-256", () => ({ sig: k.rsa!.sign(message, { rsaAlgorithm: "rsa-sha2-256" }), allowed: [k.rsa!.allowedSigner("grace")], principal: "grace", expect: { valid: true, accepted: true } })],
-    ["sk-ssh-ed25519, UP set", () => ({ sig: k.edSk!.sign(message, { flags: 0x01, counter: 42 }), allowed: [k.edSk!.allowedSigner("bob")], principal: "bob", expect: { valid: true, accepted: true, flags: 0x01, counter: 42 } })],
-    ["sk-ecdsa-sha2-nistp256, UP set", () => ({ sig: k.ecSk!.sign(message, { flags: 0x01, counter: 7 }), allowed: [k.ecSk!.allowedSigner("carol")], principal: "carol", expect: { valid: true, accepted: true, flags: 0x01, counter: 7 } })],
-    ["sk-ssh-ed25519, UP clear", () => ({ sig: k.edSk!.sign(message, { flags: 0x00, counter: 43 }), allowed: [k.edSk!.allowedSigner("bob")], principal: "bob", expect: { valid: true, accepted: true, flags: 0x00, counter: 43 } })],
-    ["sk-ecdsa-sha2-nistp256, UP clear", () => ({ sig: k.ecSk!.sign(message, { flags: 0x00, counter: 8 }), allowed: [k.ecSk!.allowedSigner("carol")], principal: "carol", expect: { valid: true, accepted: true, flags: 0x00, counter: 8 } })],
-    ["sk-ssh-ed25519, UP and UV", () => ({ sig: k.edSk!.sign(message, { flags: 0x05, counter: 2 ** 31 }), allowed: [k.edSk!.allowedSigner("bob")], principal: "bob", expect: { valid: true, accepted: true, flags: 0x05, counter: 2 ** 31 } })],
-    ["sha256 message hash", () => ({ sig: k.ed25519!.sign(message, { hash: "sha256" }), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: true, accepted: true } })],
-    ["a valid signature by an unlisted key", () => ({ sig: k.other!.sign(message), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: true, accepted: false } })],
-    ["a registered key, but under another principal", () => ({ sig: k.edSk!.sign(message), allowed: [k.edSk!.allowedSigner("bob")], principal: "alice", expect: { valid: true, accepted: false, flags: 0x01, counter: 1 } })],
-    ["a flipped signature bit (ed25519)", () => ({ sig: tamperArmor(k.ed25519!.sign(message)), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: false, accepted: false } })],
-    ["a flipped signature bit (ecdsa P-384)", () => ({ sig: tamperArmor(k.p384!.sign(message)), allowed: [k.p384!.allowedSigner("heidi")], principal: "heidi", expect: { valid: false, accepted: false } })],
-    ["a flipped signature bit (rsa)", () => ({ sig: tamperArmor(k.rsa!.sign(message)), allowed: [k.rsa!.allowedSigner("grace")], principal: "grace", expect: { valid: false, accepted: false } })],
-    ["a flipped signature bit (sk-ecdsa)", () => ({ sig: tamperArmor(k.ecSk!.sign(message), 12), allowed: [k.ecSk!.allowedSigner("carol")], principal: "carol", expect: { valid: false, accepted: false } })],
-    ["UP set after signing (sk-ssh-ed25519)", () => ({ sig: tamperArmor(k.edSk!.sign(message, { flags: 0x00 }), 5), allowed: [k.edSk!.allowedSigner("bob")], principal: "bob", expect: { valid: false, accepted: false } })],
-    ["UP set after signing (sk-ecdsa)", () => ({ sig: tamperArmor(k.ecSk!.sign(message, { flags: 0x00 }), 5), allowed: [k.ecSk!.allowedSigner("carol")], principal: "carol", expect: { valid: false, accepted: false } })],
-    ["the counter changed after signing (sk-ssh-ed25519)", () => ({ sig: tamperArmor(k.edSk!.sign(message, { counter: 9 }), 1), allowed: [k.edSk!.allowedSigner("bob")], principal: "bob", expect: { valid: false, accepted: false } })],
-    ["namespace file, verified as git", () => ({ sig: k.ed25519!.sign(message, { namespace: "file" }), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: false, accepted: false } })],
-    ["SSHSIG version 2", () => ({ sig: k.ed25519!.sign(message, { version: 2 }), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: false, accepted: false } })],
-    ["a blob claiming another key", () => ({ sig: k.other!.sign(message, { claimKey: k.ed25519 }), allowed: [k.ed25519!.allowedSigner("alice")], principal: "alice", expect: { valid: false, accepted: false } })],
-    ["a legacy SHA-1 ssh-rsa signature", () => ({ sig: k.rsa!.sign(message, { rsaAlgorithm: "ssh-rsa" }), allowed: [k.rsa!.allowedSigner("grace")], principal: "grace", expect: { valid: false, accepted: false } })],
+if (!hasSshKeygen && !SKIP)
+  describe("oracle: ssh-keygen", () => {
+    it("is required: install OpenSSH's ssh-keygen, or set PR_RLA_SKIP_ORACLE=1 to skip the cross-check knowingly", () => {
+      expect.fail("ssh-keygen is not installed, so pr-rla's SSHSIG verifier was not cross-checked against OpenSSH");
+    });
+  });
+
+describe.skipIf(SKIP || !hasSshKeygen)("oracle: ssh-keygen -Y verify and check-novalidate against pr-rla's verdict check (FR9.2)", () => {
+  const as = (key: () => TestKey, principal: string, options?: string) => () => key().allowedSigner(principal, options);
+  const cases: [string, () => Case][] = [
+    ["ssh-ed25519", () => signed(k.ed25519!, "alice", [as(() => k.ed25519!, "alice")()], { valid: true, accepted: true })],
+    ["ssh-ed25519 with namespaces=\"pr-rla-verdict@v1\"", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice", `namespaces="${NAMESPACE}"`)], { valid: true, accepted: true })],
+    ["ecdsa-sha2-nistp256", () => signed(k.p256!, "frank", [k.p256!.allowedSigner("frank")], { valid: true, accepted: true })],
+    ["ecdsa-sha2-nistp384", () => signed(k.p384!, "heidi", [k.p384!.allowedSigner("heidi")], { valid: true, accepted: true })],
+    ["ecdsa-sha2-nistp521", () => signed(k.p521!, "ivan", [k.p521!.allowedSigner("ivan")], { valid: true, accepted: true })],
+    ["ssh-rsa 3072, rsa-sha2-512", () => signed(k.rsa!, "grace", [k.rsa!.allowedSigner("grace")], { valid: true, accepted: true })],
+    ["ssh-rsa 3072, rsa-sha2-256", () => signed(k.rsa!, "grace", [k.rsa!.allowedSigner("grace")], { valid: true, accepted: true }, { rsaAlgorithm: "rsa-sha2-256" })],
+    ["sk-ssh-ed25519, UP set", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: true, flags: 0x01, counter: 42 }, { flags: 0x01, counter: 42 })],
+    ["sk-ecdsa-sha2-nistp256, UP set", () => signed(k.ecSk!, "carol", [k.ecSk!.allowedSigner("carol")], { valid: true, accepted: true, flags: 0x01, counter: 7 }, { flags: 0x01, counter: 7 })],
+    ["sk-ssh-ed25519, UP clear", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: true, flags: 0x00, counter: 43 }, { flags: 0x00, counter: 43 })],
+    ["sk-ecdsa-sha2-nistp256, UP clear", () => signed(k.ecSk!, "carol", [k.ecSk!.allowedSigner("carol")], { valid: true, accepted: true, flags: 0x00, counter: 8 }, { flags: 0x00, counter: 8 })],
+    ["sk-ssh-ed25519, UP and UV", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: true, flags: 0x05, counter: 2 ** 31 }, { flags: 0x05, counter: 2 ** 31 })],
+    ["sha256 message hash", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: true, accepted: true }, { hash: "sha256" })],
+    ["a valid signature by an unlisted key", () => signed(k.other!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: true, accepted: false })],
+    ["a registered key, but under another principal", () => signed(k.edSk!, "alice", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: false, flags: 0x01, counter: 1 })],
+    ["finding 10: a principal that differs only in case (exact, as -I matches)", () => signed(k.edSk!, "Bob", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: false, flags: 0x01, counter: 1 })],
+    ["a flipped signature bit (ed25519)", () => ({ ...signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }), tamper: 10 }) as Case],
+    ["the verdict flipped after signing", () => {
+      const c = signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { fields: { verdict: "fail" } });
+      // The line now says pass: pr-rla checks the bytes of what the line says, and so does ssh-keygen here.
+      const line = JSON.stringify({ ...JSON.parse(c.line), verdict: "pass" });
+      return { ...c, line, bytes: verdictBytes(REG, fields("bob")) };
+    }],
+    ["signed for another registration", () => {
+      const other = createHash("sha256").update("another audit").digest("hex");
+      const c = signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { bytesFor: { registrationSha256: other } });
+      return c; // ssh-keygen verifies it over this audit's bytes, as pr-rla does
+    }],
+    ["namespace git (a commit signature), verified as pr-rla-verdict@v1", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { namespace: "git" })],
+    ["SSHSIG version 2", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { version: 2 })],
+    ["a blob claiming another key", () => signed(k.other!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { claimKey: k.ed25519! })],
+    ["a legacy SHA-1 ssh-rsa signature", () => signed(k.rsa!, "grace", [k.rsa!.allowedSigner("grace")], { valid: false, accepted: false }, { rsaAlgorithm: "ssh-rsa" })],
+    ["finding 6: reserved \"X\" in the blob, signed over \"X\"", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { reservedBlob: "X", reservedSigned: "X" })],
+    [
+      "finding 6: reserved \"X\" in the blob, signed over an empty one",
+      () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { reservedBlob: "X", reservedSigned: "", stricter: "ssh-keygen ignores the reserved field's content; pr-rla refuses a non-empty one, so no byte of a signature goes unchecked" }),
+    ],
+    ["finding 10: a curve/algorithm mismatch (P-256 key, nistp384 algorithm)", () => signed(k.p256!, "frank", [k.p256!.allowedSigner("frank")], { valid: false, accepted: false }, { algorithm: "ecdsa-sha2-nistp384" })],
+    [
+      "finding 10: RSA under 2048 bits (1024)",
+      () => signed(k.rsa1024!, "grace", [k.rsa1024!.allowedSigner("grace")], { valid: false, accepted: false }, { stricter: "OpenSSH accepts RSA keys of 1024 bits or more; pr-rla requires 2048" }),
+    ],
+    [
+      "finding 10: a webauthn-sk-ecdsa signature",
+      () => signed(k.ecSk!, "carol", [k.ecSk!.allowedSigner("carol")], { valid: false, accepted: false }, { webauthn: { origin: "https://example.org" }, stricter: "ssh-keygen verifies WebAuthn signatures; pr-rla refuses them (ssh-keygen never makes one, and their clientData is a second format to get right)" }),
+    ],
   ];
 
   it.each(cases)("%s", (_name, make) => {
-    const c = make();
-    const mine = prRla(c.sig, message, c.allowed, c.principal);
-    const theirs = oracle(c.sig, message, c.allowed, c.principal);
-    expect(mine.valid).toBe(c.expect.valid);
-    expect(mine.accepted).toBe(c.expect.accepted);
-    // ssh-keygen agrees: check-novalidate on the signature alone, -Y verify on signature plus allowed signer and principal.
-    expect(theirs.novalidate === 0, theirs.verifyOut).toBe(mine.valid);
-    expect(theirs.verify === 0, theirs.verifyOut).toBe(mine.accepted);
+    const c0 = make() as Case & { tamper?: number };
+    const c = c0.tamper ? { ...c0, sig: tamperArmor(c0.sig, c0.tamper), line: JSON.stringify({ ...JSON.parse(c0.line), sshsig: unarmor(tamperArmor(c0.sig, c0.tamper)) }) } : c0;
+    const mine = prRla(c.line, c.allowed);
+    const theirs = oracle(c.sig, c.bytes, c.allowed, c.principal);
+    expect(mine.valid, mine.detail).toBe(c.expect.valid);
+    expect(mine.accepted, mine.detail).toBe(c.expect.accepted);
+    if (c.stricter) {
+      // ssh-keygen accepts it; pr-rla refuses on purpose.
+      expect(theirs.verify, `${c.stricter}: ${theirs.verifyOut}`).toBe(0);
+      expect(theirs.novalidate).toBe(0);
+    } else {
+      // ssh-keygen agrees: check-novalidate on the signature alone, -Y verify with the allowed signers and the reviewer as principal.
+      expect(theirs.novalidate === 0, theirs.verifyOut).toBe(mine.valid);
+      expect(theirs.verify === 0, theirs.verifyOut).toBe(mine.accepted);
+    }
     if (c.expect.flags !== undefined) {
       expect(mine.sk).toEqual({ flags: c.expect.flags, counter: c.expect.counter });
       expect(theirs.details).toEqual(mine.sk);
     }
   });
 
-  it("FINDING: ssh-keygen -Y verify does not enforce the user-presence flag; pr-rla does (account, not presence)", () => {
-    const sig = k.edSk!.sign(message, { flags: 0x00, counter: 5 });
-    const theirs = oracle(sig, message, [k.edSk!.allowedSigner("bob")], "bob");
-    expect(theirs.verify).toBe(0);
-    expect(theirs.verifyOut).toMatch(/^Good "git" signature for bob with ED25519-SK key SHA256:/);
-    expect(theirs.details).toEqual({ counter: 5, flags: 0 });
-    expect(verifySshsig(sig, message, "git").sk).toMatchObject({ userPresent: false });
-  });
-
-  it("a namespaces option without git: ssh-keygen refuses the signature, and pr-rla refuses the entry at registration", () => {
-    const line = k.ed25519!.allowedSigner("alice", 'namespaces="file"');
-    expect(oracle(k.ed25519!.sign(message), message, [line], "alice").verify).not.toBe(0);
-    expect(() => parseAllowedSigner(line)).toThrow(/does not admit namespace "git"/);
-  });
-
-  it("git verify-commit agrees with pr-rla on commits signed through the software-emulated authenticator", () => {
-    const d = mkdtempSync(join(work, "repo-"));
-    spawnSync("git", ["init", "-q"], { cwd: d });
-    const allowed = [k.ed25519!.allowedSigner("alice"), k.edSk!.allowedSigner("bob")];
-    writeFileSync(join(d, "allowed_signers"), `${allowed.join("\n")}\n`);
-    const signers = allowed.map(parseAllowedSigner);
-    const outcomes: [string, string | null, boolean][] = [];
-    const make = (name: string, sign: ((p: string) => string) | null, expectGood: boolean) => {
-      writeFileSync(join(d, "f"), `${name}\n`);
-      outcomes.push([commitAll(d, name, sign), name, expectGood]);
+  it("finding 12: a small-order Ed25519 key makes one 'signature' valid for every message in ssh-keygen; pr-rla refuses the key", () => {
+    const identity = Buffer.alloc(32);
+    identity[0] = 1;
+    const str = (b: Uint8Array | string) => {
+      const body = Buffer.from(b);
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(body.length);
+      return Buffer.concat([len, body]);
     };
-    make("alice ed25519", (p) => k.ed25519!.sign(p), true);
-    make("bob sk UP set", (p) => k.edSk!.sign(p, { flags: 0x01 }), true);
-    make("bob sk UP clear", (p) => k.edSk!.sign(p, { flags: 0x00 }), true);
-    make("unlisted", (p) => k.other!.sign(p), false);
-    make("signed over other bytes", (p) => k.ed25519!.sign(`${p}x`), false);
-    make("unsigned", null, false);
-    for (const [sha, name, good] of outcomes) {
-      const git = spawnSync("git", ["-c", `gpg.ssh.allowedSignersFile=${join(d, "allowed_signers")}`, "verify-commit", sha], { cwd: d, encoding: "utf8" });
-      const mine = checkCommitSignature(sha, rawCommit(d, sha), signers);
-      expect(git.status === 0, `${name}: ${git.stderr}`).toBe(good);
-      expect(mine.state === "signed", name!).toBe(good);
-    }
+    const blob = Buffer.concat([str("ssh-ed25519"), str(identity)]);
+    const bytes = verdictBytes(REG, fields("mallory"));
+    const sshsig = Buffer.concat([Buffer.from("SSHSIG"), Buffer.from([0, 0, 0, 1]), str(blob), str(NAMESPACE), str(""), str("sha512"), str(Buffer.concat([str("ssh-ed25519"), str(Buffer.concat([identity, Buffer.alloc(32)]))]))]);
+    const allowed = [`mallory ssh-ed25519 ${blob.toString("base64")}`];
+    expect(oracle(armor(new Uint8Array(sshsig)), bytes, allowed, "mallory").verify).toBe(0);
+    expect(() => parseAllowedSigner(allowed[0]!)).toThrow(/is a point of small order/);
+    expect(prRla(JSON.stringify({ ...fields("mallory"), registrationSha256: REG, sshsig: sshsig.toString("base64") }), allowed).accepted).toBe(false);
   });
 
-  it("the recorded sk-dummy commits verify in ssh-keygen as they do in pr-rla, flags and counter included", () => {
-    const fx = JSON.parse(readFileSync(join(ROOT, "test/fixtures/presence/sk-dummy-verdicts.json"), "utf8")) as { allowedSigners: string[]; steps: { draw: number; signer: string | null; raw: string }[] };
+  it("FINDING: ssh-keygen -Y verify does not enforce the user-presence flag; pr-rla does (account, not presence)", () => {
+    const c = signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: true, accepted: true }, { flags: 0x00, counter: 5 });
+    const theirs = oracle(c.sig, c.bytes, c.allowed, "bob");
+    expect(theirs.verify).toBe(0);
+    expect(theirs.verifyOut).toMatch(/^Good "pr-rla-verdict@v1" signature for bob with ED25519-SK key SHA256:/);
+    expect(theirs.details).toEqual({ counter: 5, flags: 0 });
+    expect(verifySshsig(c.sig, new TextEncoder().encode(c.bytes), NAMESPACE).sk).toMatchObject({ userPresent: false });
+  });
+
+  it("a namespaces option without pr-rla-verdict@v1: ssh-keygen refuses the signature, and pr-rla refuses the entry at registration", () => {
+    const line = k.ed25519!.allowedSigner("alice", 'namespaces="git"');
+    const c = signed(k.ed25519!, "alice", [line], { valid: true, accepted: false });
+    expect(oracle(c.sig, c.bytes, [line], "alice").verify).not.toBe(0);
+    expect(() => parseAllowedSigner(line)).toThrow(/does not admit namespace "pr-rla-verdict@v1"/);
+  });
+
+  it("real ssh-keygen -Y sign, a software ed25519 key made here: the README's bytes, signed by hand, count as account", () => {
+    const d = mkdtempSync(join(work, "keygen-"));
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "dana", "-f", join(d, "dana")], { stdio: "ignore", env: { PATH: process.env.PATH, HOME: d } });
+    const pub = readFileSync(join(d, "dana.pub"), "utf8").trim().split(" ").slice(0, 2).join(" ");
+    const allowed = [`dana namespaces="${NAMESPACE}" ${pub}`];
+    const f = fields("dana");
+    writeFileSync(join(d, "verdict.txt"), verdictBytes(REG, f));
+    execFileSync("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", join(d, "dana"), join(d, "verdict.txt")], { stdio: "ignore", env: { PATH: process.env.PATH, HOME: d } });
+    const sig = readFileSync(join(d, "verdict.txt.sig"), "utf8");
+    const line = JSON.stringify({ ...f, registrationSha256: REG, schema: "pr-rla/verdict/v1", sshsig: unarmor(sig) });
+    const mine = prRla(line, allowed);
+    expect(mine).toMatchObject({ valid: true, accepted: true, sk: null });
+    expect(oracle(sig, verdictBytes(REG, f), allowed, "dana").verify).toBe(0);
+    expect(verdictPayloadText({ registrationSha256: REG, ...f })).toBe(readFileSync(join(d, "verdict.txt"), "utf8"));
+    // A flipped verdict under the same signature: both refuse.
+    expect(prRla(JSON.stringify({ ...JSON.parse(line), verdict: "fail" }), allowed).accepted).toBe(false);
+    expect(oracle(sig, verdictBytes(REG, { ...f, verdict: "fail" }), allowed, "dana").verify).not.toBe(0);
+  });
+
+  it("the recorded sk-dummy signatures (real ssh-keygen -Y sign, -sk keys with UP set and clear) verify in ssh-keygen as they do in pr-rla, flags and counter included", () => {
+    const fx = JSON.parse(readFileSync(join(ROOT, "test/fixtures/presence/sk-dummy-verdicts.json"), "utf8")) as { registrationSha256: string; allowedSigners: string[]; steps: { draw: number; reviewer: string; signer: string | null; namespace?: string; registrationSha256?: string; payload: string; line: string }[] };
+    const signers = parseAllowedSigners(fx.allowedSigners);
+    let sk = 0;
     for (const s of fx.steps.filter((x) => x.signer)) {
-      const { payload, signature } = splitCommitSignature(enc(s.raw));
-      const mine = prRla(signature!, payload, fx.allowedSigners, s.signer!);
-      const theirs = oracle(signature!, payload, fx.allowedSigners, s.signer!);
-      expect(theirs.novalidate === 0, `draw #${s.draw}`).toBe(mine.valid);
-      expect(theirs.verify === 0, `draw #${s.draw}: ${theirs.verifyOut}`).toBe(mine.accepted);
-      expect(theirs.details, `draw #${s.draw}`).toEqual(mine.sk);
+      const v = JSON.parse(s.line) as VerdictEvent;
+      const c = checkVerdictSignature(v, s.registrationSha256 ?? fx.registrationSha256, signers);
+      const theirs = oracle(armor(new Uint8Array(Buffer.from(v.sshsig!, "base64"))), s.payload, fx.allowedSigners, s.reviewer);
+      expect(theirs.verify === 0, `draw #${s.draw}: ${theirs.verifyOut}`).toBe(c.state === "signed");
+      if (c.sk) {
+        sk++;
+        expect(theirs.details, `draw #${s.draw}`).toEqual({ counter: c.sk.counter, flags: c.sk.flags });
+      }
     }
+    expect(sk).toBeGreaterThanOrEqual(5); // bob and carol with UP set, dave and erin with UP clear, and bob's foreign ones
   });
-});
-
-describe.skipIf(hasSshKeygen)("oracle unavailable", () => {
-  it("UNVERIFIED: ssh-keygen is not installed here, so the cross-check did not run", () => {});
 });

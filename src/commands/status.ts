@@ -3,9 +3,10 @@ import { buildPopulation } from "../core/population.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
-import { PRESENCE_LIMIT, capProvenance, provenanceLabel, verdictRuleFailures } from "../core/presence/index.js";
+import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
 import { ledgerTraits } from "../ledger-traits.js";
+import { builtinLedgerName } from "../registry.js";
 import { provenanceRank } from "../sdk/ledger.js";
 import { checkpointCommand } from "./checkpoint.js";
 import { windowDays } from "../core/window.js";
@@ -104,8 +105,11 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   }
   const draws = readDraws(paths);
   const ledger = await ledgerFor(ctx, config, paths);
-  // A ledger cannot count a verdict above what it can attest (U9: presence only from git-file's signature check).
-  const capped = capProvenance(await ledger.readVerdicts(), (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins)).maxProvenance, ledger.name);
+  // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the ledger's ceiling.
+  const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
+  const ceiling = (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins)).maxProvenance;
+  const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
+  const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
@@ -129,14 +133,14 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
     for (const r of report.relabels) ctx.out(`  relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
-    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${provenanceLabel(minProvenance)}${requireSigned ? " · signed verdict commits required (require_signed)" : ""}`);
+    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${provenanceLabel(minProvenance)}${requireSigned ? " · signed verdicts required (require_signed)" : ""}`);
     if (minProvenance === "presence" || report.provenance.some((p) => p.level === "presence")) ctx.out(`  ${PRESENCE_LIMIT}`);
-    for (const note of capped.notes) ctx.out(`  ${note}`);
+    for (const note of [...capped.notes, ...capped.warnings]) ctx.out(`  ${note}`);
     const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
     const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
-    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${minProvenance} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
+    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${provenanceLabel(minProvenance)} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
     const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length) : [];
-    if (unsigned.length) ctx.out(`  ${unsigned.length} counted verdict(s) are not in commits signed by the registered reviewer they name; verify check 7 will FAIL them under require_signed (draws ${unsigned.map((v) => `#${v.draw}`).join(", ")})`);
+    if (unsigned.length) ctx.out(`  ${unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${unsigned.map((v) => `#${v.draw}`).join(", ")})`);
     if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
       const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
       const cp = latestCheckpointAt(paths.windowDir);
