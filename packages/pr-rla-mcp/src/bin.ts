@@ -45,8 +45,16 @@ try {
   const args = parse(process.argv.slice(2));
   const mcp = createPrRlaMcp({ roots: args.roots, env: process.env, ...(args.plugins ? { plugins: args.plugins } : {}), ...(args.handoffMs !== undefined ? { limits: { handoffMs: args.handoffMs } } : {}) });
   serveStdio(mcp.factory, { onerror: (e) => process.stderr.write(`[pr-rla-mcp] ${e.message}\n`) });
-  // The client closed stdin: stop the jobs' requests, so the process can exit.
-  process.stdin.on("close", () => mcp.close());
+  // The client closed stdin: stop every running call (their requests, waits and plugin hosts end
+  // with their signals), then exit, so no job keeps the server's tokens alive. A call that has not
+  // ended within 5 s does not hold the process.
+  process.stdin.on("close", () => {
+    const stop = setTimeout(() => process.exit(0), 5000);
+    void mcp.close().then(() => {
+      clearTimeout(stop);
+      process.exit(0);
+    });
+  });
 } catch (e) {
   process.stderr.write(`pr-rla-mcp: ${(e as Error).message}\n`);
   process.exit(1);

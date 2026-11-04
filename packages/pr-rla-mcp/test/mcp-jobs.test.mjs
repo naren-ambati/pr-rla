@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { after, describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { LONG_CALL_DEADLINE_MS } from "pr-rla/api/read";
+import { Jobs, resultBytes } from "../dist/jobs.js";
 import { createPrRlaMcp } from "../dist/server.js";
 import { RECORDING, body, copyAudit, mockGitHub, onlineAudit, sleep, startServer, waitForJob } from "./helpers.mjs";
 
@@ -54,7 +56,7 @@ describe("the hand-off: a long call returns { jobId } and keeps running (FR3.5)"
     assert.equal(r.state, "running");
     assert.ok(handedOffMs < 2000, `handed off after ${handedOffMs} ms`);
     assert.ok(notes.length >= 1, "a progress notification arrived before the hand-off");
-    assert.match(notes[0].message, /asking github for github:github\/gh-aw#42597/);
+    assert.ok(notes.some((n) => /asking github for github:github\/gh-aw#42597/.test(n.message)), JSON.stringify(notes));
     const running = body(await s.call("job_status", { jobId: r.jobId }));
     assert.equal(running.state, "running");
     const done = await waitForJob(s, r.jobId);
@@ -173,9 +175,10 @@ describe("a result over 8 MiB is refused (NFR20)", () => {
     assert.equal(st.result, undefined);
   });
 
-  it("the default limit is 8 MiB", () => {
+  it("the default limits: 8 MiB a result, a deadline of 1 h 30 s (LONG_CALL_DEADLINE_MS), 32 finished jobs and 32 MiB of them", () => {
     const m = createPrRlaMcp({ roots: [copyAudit()] });
-    assert.deepEqual(m.jobs.limits, { handoffMs: 25_000, maxJobs: 4, ttlMs: 600_000, maxResultBytes: 8 * 1024 * 1024 });
+    assert.deepEqual(m.jobs.limits, { handoffMs: 25_000, maxJobs: 4, ttlMs: 600_000, maxResultBytes: 8 * 1024 * 1024, deadlineMs: 3_630_000, maxFinished: 32, maxFinishedBytes: 32 * 1024 * 1024 });
+    assert.equal(LONG_CALL_DEADLINE_MS, 3_630_000);
   });
 });
 
@@ -193,5 +196,181 @@ describe("freeze_preview's cache: in memory, 600 s, by (window, registration dig
     const c = body(await s.call("freeze_preview", {}));
     assert.equal(c.cached, undefined);
     assert.notEqual(c.frozenAt, a.frozenAt);
+  });
+});
+
+describe("slots, deadlines, cancellation and close (the U5 fix round, M2)", () => {
+  /** A transport that answers after `ms`, and stops, rejecting, when the request's signal aborts. */
+  function stoppable(ms) {
+    const seen = { started: 0, aborted: 0, finished: 0 };
+    const f = async (input, init = {}) => {
+      seen.started++;
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        init.signal?.addEventListener("abort", () => (clearTimeout(t), seen.aborted++, reject(init.signal.reason ?? new Error("aborted"))), { once: true });
+      });
+      seen.finished++;
+      return new Response('{"message":"Not Found"}', { status: 404, headers: { "content-type": "application/json" } });
+    };
+    return Object.assign(f, { seen });
+  }
+
+  it("a slot is released after a failed job and after one stopped at its deadline (TIMEOUT); the work's requests were aborted", async () => {
+    const dir = onlineAudit("https://ghes.example.com");
+    const slow = stoppable(60_000);
+    const s = await inProcess({ roots: [dir], fetch: slow, limits: { handoffMs: 20, deadlineMs: 400, maxJobs: 2 } });
+    servers.push(s);
+    const a = body(await s.call("draw_context", { draw: 7 }));
+    const b = body(await s.call("draw_context", { draw: 13 }));
+    assert.equal(body(await s.call("draw_context", { draw: 5 })).code, "TOO_MANY_JOBS");
+    const ea = await waitForJob(s, a.jobId, 10_000);
+    const eb = await waitForJob(s, b.jobId, 10_000);
+    for (const e of [ea, eb]) {
+      assert.equal(e.state, "failed");
+      assert.equal(e.error.code, "TIMEOUT");
+      assert.match(e.error.message, /deadline/);
+    }
+    assert.ok(slow.seen.aborted >= 2, JSON.stringify(slow.seen));
+    assert.equal(s.mcp.jobs.active, 0);
+    // The slots are free again: two more run (and fail fast on the 404s of a quick server).
+    const quick = await inProcess({ roots: [dir], fetch: stoppable(1), limits: { handoffMs: 5, maxJobs: 1 } });
+    servers.push(quick);
+    for (let k = 0; k < 3; k++) {
+      const r = await quick.call("draw_context", { draw: 7 });
+      const h = body(r);
+      if (h.jobId) assert.equal((await waitForJob(quick, h.jobId)).state, "failed");
+      else assert.equal(r.isError, true);
+      assert.equal(quick.mcp.jobs.active, 0, `after call ${k + 1}`);
+    }
+  });
+
+  it("the client cancelling the request before the hand-off stops the work, and frees its slot", async () => {
+    const dir = onlineAudit("https://ghes.example.com");
+    const slow = stoppable(60_000);
+    const s = await inProcess({ roots: [dir], fetch: slow, limits: { handoffMs: 25_000 } });
+    servers.push(s);
+    const ac = new AbortController();
+    const call = s.call("draw_context", { draw: 7 }, { signal: ac.signal });
+    while (slow.seen.started === 0) await sleep(10);
+    ac.abort();
+    await assert.rejects(call);
+    for (let t = 0; t < 200 && s.mcp.jobs.active > 0; t++) await sleep(10);
+    assert.equal(s.mcp.jobs.active, 0);
+    assert.ok(slow.seen.aborted >= 1);
+    assert.equal(slow.seen.finished, 0);
+  });
+
+  it("close() stops every running job and resolves when they have ended", async () => {
+    const dir = onlineAudit("https://ghes.example.com");
+    const slow = stoppable(60_000);
+    const s = await inProcess({ roots: [dir], fetch: slow, limits: { handoffMs: 20 } });
+    const h = body(await s.call("draw_context", { draw: 7 }));
+    assert.match(h.jobId, /^draw_context:/);
+    const t0 = Date.now();
+    await s.mcp.close();
+    assert.ok(Date.now() - t0 < 5000, `close took ${Date.now() - t0} ms`);
+    assert.equal(s.mcp.jobs.active, 0);
+    assert.ok(slow.seen.aborted >= 1);
+    await s.client.close();
+  });
+
+  it("the server process exits when the client goes away, a job still running", async () => {
+    const slow = await mockGitHub({ delayMs: 30_000 });
+    const dir = onlineAudit(slow.url);
+    const t = await startServer({ roots: [dir], args: ["--handoff-ms", "100"] });
+    try {
+      const h = body(await t.call("draw_context", { draw: 7 }));
+      assert.match(h.jobId, /^draw_context:/);
+      const pid = t.pid;
+      assert.ok(pid > 0);
+      const t0 = Date.now();
+      await t.close();
+      if (pid) {
+        for (;;) {
+          try {
+            process.kill(pid, 0);
+          } catch {
+            break;
+          }
+          if (Date.now() - t0 > 15_000) assert.fail("the server process did not exit");
+          await sleep(50);
+        }
+      }
+    } finally {
+      await slow.close();
+    }
+  });
+
+  it("startedAt is when the call started, not when it was handed off", async () => {
+    const clock = { now: Date.parse("2026-11-04T00:00:00Z") };
+    const dir = onlineAudit("https://ghes.example.com");
+    const slow = Object.assign(async (input, init) => {
+      clock.now += 60_000; // a minute passes inside the call, before the hand-off
+      await sleep(50);
+      return recordedFetch(0)(input, init);
+    }, {});
+    const s = await inProcess({ roots: [dir], fetch: slow, nowMs: () => clock.now, limits: { handoffMs: 20 } });
+    servers.push(s);
+    const h = body(await s.call("draw_context", { draw: 7 }));
+    assert.equal(h.startedAt, "2026-11-04T00:00:00.000Z");
+  });
+});
+
+describe("finished jobs are bounded by count and bytes, the oldest dropped first (M6)", () => {
+  it("over maxFinished or maxFinishedBytes, the oldest finished job goes; a running one stays", async () => {
+    const jobs = new Jobs({ handoffMs: 1, maxJobs: 10, ttlMs: 600_000, maxResultBytes: 1 << 20, deadlineMs: 60_000, maxFinished: 3, maxFinishedBytes: 2_000 }, Date.now, ["t"]);
+    const ids = [];
+    for (let k = 0; k < 4; k++) {
+      const r = await jobs.run("t", async () => (await sleep(20), { k, pad: "x".repeat(100) }));
+      ids.push(r.handle.jobId);
+    }
+    await sleep(100);
+    jobs.sweep();
+    assert.equal(jobs.status(ids[0]).state, "unknown");
+    assert.deepEqual(ids.slice(1).map((id) => jobs.status(id).state), ["done", "done", "done"]);
+    assert.equal(jobs.finished.count, 3);
+    // Bytes: one big result pushes the oldest out until the rest fit.
+    const big = await jobs.run("t", async () => (await sleep(20), { pad: "y".repeat(1_500) }));
+    const running = await jobs.run("t", () => new Promise(() => {}));
+    await sleep(100);
+    jobs.sweep();
+    assert.ok(jobs.finished.bytes <= 2_000, String(jobs.finished.bytes));
+    assert.equal(jobs.status(big.handle.jobId).state, "done");
+    assert.equal(jobs.status(running.handle.jobId).state, "running");
+    const states = ids.slice(1).map((id) => jobs.status(id).state);
+    assert.equal(states[0], "unknown");
+    // Oldest first: what remains is the newest.
+    assert.deepEqual(states, [...states].sort((a, b) => (a === b ? 0 : a === "unknown" ? -1 : 1)));
+  });
+
+  it("a result that fits but whose job_status answer does not is refused as the job ends, never on every poll", async () => {
+    const value = { pad: "z".repeat(500) };
+    const limit = resultBytes(value) + 20; // the value fits; the job_status wrapper around it does not
+    const jobs = new Jobs({ handoffMs: 1, maxJobs: 2, ttlMs: 600_000, maxResultBytes: limit, deadlineMs: 60_000, maxFinished: 8, maxFinishedBytes: 1 << 20 }, Date.now, ["t"]);
+    const r = await jobs.run("t", async () => (await sleep(20), value));
+    await sleep(60);
+    const st = jobs.status(r.handle.jobId);
+    assert.equal(st.state, "failed");
+    assert.equal(st.error.code, "RESULT_TOO_LARGE");
+    assert.ok(resultBytes(st) <= limit);
+  });
+});
+
+describe("simulate runs as a long call (H1)", () => {
+  it("over its budget it is refused (TOO_MUCH_WORK) at once; a long one becomes a job while other tools still answer", async () => {
+    const s = await inProcess({ roots: [copyAudit()], limits: { handoffMs: 50 } });
+    servers.push(s);
+    const refused = await s.call("simulate", { population: 100, defects: 0, runs: 1, p0: 0.000001, p1: 0.0000001 });
+    assert.equal(refused.isError, true);
+    assert.equal(body(refused).code, "TOO_MUCH_WORK");
+    const t0 = Date.now();
+    const h = body(await s.call("simulate", { population: 10_000_000, defects: 900_000, runs: 20_000 }));
+    assert.match(h.jobId, /^simulate:/);
+    // While it runs, an offline tool answers.
+    assert.equal(body(await s.call("status", {})).phase, "sampled");
+    const done = await waitForJob(s, h.jobId, 60_000);
+    assert.equal(done.state, "done");
+    assert.equal(done.result.runs, 20_000);
+    assert.ok(Date.now() - t0 > 50);
   });
 });

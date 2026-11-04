@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ToolError } from "./errors.js";
 
 /**
@@ -24,7 +24,8 @@ export class Roots {
   private inside(real: string): boolean {
     return this.list.some((r) => {
       const rel = relative(r, real);
-      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+      // A first segment of exactly ".." leaves the root; a directory named "..foo" does not.
+      return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
     });
   }
 
@@ -48,14 +49,15 @@ export class Roots {
     const abs = isAbsolute(dir) ? resolve(dir) : resolve(this.list[0]!, dir);
     // The real path decides: a symlink inside a root that points out of it is an escape.
     const real = this.real(abs);
-    if (!this.inside(real)) throw new ToolError("ROOT_ESCAPE", `${dir} resolves to ${real}, outside the roots this server may open (${this.list.join(", ")})`, "pass a dir inside a root, or start pr-rla-mcp with --root <dir>");
+    // The message names the argument as given, never where it resolves or what the roots are.
+    if (!this.inside(real)) throw new ToolError("ROOT_ESCAPE", `dir ${JSON.stringify(dir)} is outside the roots this server may open`, "pass a dir inside a root, or start pr-rla-mcp with --root <dir>");
     if (!existsSync(real) || !statSync(real).isDirectory()) throw new ToolError("NO_AUDIT", `${dir} is not a directory`, "pass the directory holding .pr-rla.yml");
     return real;
   }
 
-  /** For the audit API's `confine`: refuses a file outside the roots. */
+  /** For the audit API's `confine`: refuses a file outside the roots, naming only what it is. */
   readonly confine = (path: string, what: string): void => {
     const real = this.real(path);
-    if (!this.inside(real)) throw new ToolError("ROOT_ESCAPE", `${what} (${path}) resolves to ${real}, outside the roots this server may open`, "keep the audit's files inside a root, or start pr-rla-mcp with --root <dir>");
+    if (!this.inside(real)) throw new ToolError("ROOT_ESCAPE", `${what} resolves outside the roots this server may open`, "keep the audit's files inside a root, or start pr-rla-mcp with --root <dir>");
   };
 }
