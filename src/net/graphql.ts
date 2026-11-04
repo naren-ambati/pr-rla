@@ -76,6 +76,8 @@ export function graphqlDocuments(body: string): string[] | null {
   for (const item of items) {
     const q = item && typeof item === "object" ? (item as { query?: unknown }).query : undefined;
     if (typeof q !== "string") return null;
+    // A persisted or stored document (extensions.persistedQuery, documentId) may run instead of the visible one: not readable, so not a read.
+    if ("extensions" in (item as object) || "documentId" in (item as object)) return null;
     docs.push(q);
   }
   return docs.length ? docs : null;
@@ -91,7 +93,7 @@ export function isQueryOnly(body: string): boolean {
   });
 }
 
-/** True for a path whose last segment is `graphql` (`/graphql`, `/api/graphql`). */
+/** True for a path whose last segment is `graphql`, in any case (`/graphql`, `/api/GraphQL`): servers often route case-insensitively. */
 export function isGraphqlPath(pathname: string): boolean {
-  return /\/graphql\/?$/.test(pathname);
+  return /\/graphql\/?$/i.test(pathname);
 }

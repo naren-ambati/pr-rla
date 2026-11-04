@@ -212,14 +212,10 @@ function reading(method: string, url: URL, text: string | null): Reading {
   return { read: false, graphql: false, why: `${method} is not a read` };
 }
 
-/** The method a server may take from an override header or `_method` (finding 6), when it differs. */
-function overriddenMethod(method: string, headers: Headers, url: URL): string | null {
-  for (const h of METHOD_OVERRIDES) {
-    const v = headers.get(h);
-    if (v && v.trim().toUpperCase() !== method) return v.trim().toUpperCase();
-  }
-  const q = url.searchParams.get("_method");
-  return q && q.toUpperCase() !== method ? q.toUpperCase() : null;
+/** Every other method a server may take from an override header or `_method` (finding 6): a request must be allowed as each. */
+function overriddenMethods(method: string, headers: Headers, url: URL): string[] {
+  const named = [...METHOD_OVERRIDES.map((h) => headers.get(h)), ...url.searchParams.getAll("_method")];
+  return [...new Set(named.flatMap((v) => (v ? v.split(",") : [])).map((v) => v.trim().toUpperCase()).filter((v) => v && v !== method))];
 }
 
 /** `prefix` covers `target` on a `/` segment boundary (finding 9): `…/issue` covers `…/issue/A-1`, not `…/issueLink`. */
@@ -350,12 +346,11 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
-      // A method override must be allowed too: a server may run either method.
+      // A method override must be allowed too, every one of them: a server may run any of the methods.
       const r = reading(method, url, text);
       checkReadOnly(call, url, method, r);
-      const override = overriddenMethod(method, original, url);
-      const ro = override ? reading(override, url, text) : null;
-      if (override && ro) checkReadOnly(call, url, `${method} (as ${override})`, ro);
+      const overrides = overriddenMethods(method, original, url).map((m) => ({ m, r: reading(m, url, text) }));
+      for (const o of overrides) checkReadOnly(call, url, `${method} (as ${o.m})`, o.r);
       // After a redirect from https to http, no credential is swapped and no raw secret header is sent, to the end of the chain.
       const headers = swapCredentials(call, url, original, url.origin !== call.url.origin || downgraded, downgraded);
       const g: GovernedRequest = {
@@ -365,7 +360,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         authenticated: headers.has("authorization") || headers.has("private-token"),
         graphql: r.graphql,
         // As before for the budgets: OPTIONS spends no write budget.
-        write: (!r.read && method !== "OPTIONS") || (override !== null && ro !== null && !ro.read && override !== "OPTIONS"),
+        write: [{ m: method, r }, ...overrides].some((o) => !o.r.read && o.m !== "OPTIONS"),
       };
       const wait = governor.reserve(g);
       if (wait > 0) {

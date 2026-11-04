@@ -384,8 +384,8 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
           name: typeof err?.name === "string" ? err.name : "Error",
           message: scrub.text(typeof err?.message === "string" ? err.message : String(e)),
           ...(typeof err?.code === "string" ? { code: err.code } : {}),
-          ...(typeof err?.host === "string" ? { host: err.host } : {}),
-          ...(typeof err?.next === "string" ? { next: err.next } : {}),
+          ...(typeof err?.host === "string" ? { host: scrub.text(err.host) } : {}),
+          ...(typeof err?.next === "string" ? { next: scrub.text(err.next) } : {}),
         },
       });
     } finally {

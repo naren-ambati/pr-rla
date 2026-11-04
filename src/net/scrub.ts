@@ -8,14 +8,16 @@
  * `prrla-basic:<USER_ENV>:<TOKEN_ENV>` for a Basic pair):
  * - raw;
  * - percent-encoded (encodeURIComponent, upper- and lowercase hex) and form-encoded (URLSearchParams);
- * - base64 and base64url, padded or not.
+ * - base64 and base64url, padded or not;
+ * - each of these as a JSON string escapes it: `\"` and `\\`, PHP's `\/`, and the `\u00XX` forms
+ *   HTML-safe encoders (Gson, .NET) use for `= + < > & '`, so `JSON.parse` in the plugin cannot undo it.
  *
  * An identity (a credential declared `secret: false`, such as a Basic username or an account
  * e-mail) is not a secret: its value is left alone, so a participant list that names the user
  * still reads right. A Basic pair that contains it is still scrubbed, since it carries the token.
  *
  * Not covered, and stated in docs/security-model.md: a fragment of a secret, or one the server
- * transforms otherwise (hashed, reversed, split).
+ * transforms otherwise (hashed, reversed, split, or escaped in a way not listed here).
  */
 
 export interface SecretValue {
@@ -27,10 +29,19 @@ export interface SecretValue {
 
 const b64 = (s: string) => Buffer.from(s).toString("base64");
 
+/** A form as JSON encoders write it inside a string: standard escapes, PHP's `\/`, HTML-safe `\u00XX`. */
+function jsonEscaped(f: string): string[] {
+  const std = JSON.stringify(f).slice(1, -1);
+  const html = (t: string, upper: boolean) => t.replace(/[=+<>&']/g, (c) => `\\u00${c.charCodeAt(0).toString(16)[upper ? "toUpperCase" : "toLowerCase"]()}`);
+  const slash = (t: string) => t.replace(/\//g, "\\/");
+  return [std, slash(std), html(std, false), html(std, true), slash(html(std, false)), slash(html(std, true))];
+}
+
 /** The forms a server may echo `value` in, longest first. */
 export function secretForms(value: string): string[] {
   const pct = encodeURIComponent(value);
-  const forms = new Set([value, pct, pct.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()), new URLSearchParams({ x: value }).toString().slice(2), b64(value), b64(value).replace(/=+$/, ""), Buffer.from(value).toString("base64url")]);
+  const base = [value, pct, pct.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()), new URLSearchParams({ x: value }).toString().slice(2), b64(value), b64(value).replace(/=+$/, ""), Buffer.from(value).toString("base64url")];
+  const forms = new Set(base.flatMap((f) => [f, ...jsonEscaped(f)]));
   return [...forms].filter((f) => f.length > 0).sort((a, b) => b.length - a.length);
 }
 
@@ -43,7 +54,7 @@ export function scrubPairs(secrets: readonly SecretValue[]): [string, string][] 
     for (const b of set) {
       if (b.secret === false) continue;
       const pair = b64(`${a.value}:${b.value}`);
-      for (const f of [pair, pair.replace(/=+$/, "")]) pairs.set(f, `prrla-basic:${a.env}:${b.env}`);
+      for (const f of [pair, pair.replace(/=+$/, "")].flatMap((x) => [x, ...jsonEscaped(x)])) pairs.set(f, `prrla-basic:${a.env}:${b.env}`);
     }
   return [...pairs].sort((x, y) => y[0].length - x[0].length);
 }

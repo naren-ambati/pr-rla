@@ -123,6 +123,10 @@ describe("finding 6: a GraphQL document in the URL, and method overrides, are he
     await expect(provider("https://gitlab.com/api/graphql?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     await expect(provider(`https://gitlab.com/api/graphql?extensions=${encodeURIComponent('{"persistedQuery":{"sha256Hash":"ab"}}')}`)).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     await expect(provider("https://gitlab.com/api/graphql?query=not%20graphql%20%7D%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    // The path in any case, and a body that names a stored document, are held to the same rules (review of this round).
+    await expect(provider("https://gitlab.com/api/GraphQL?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    for (const extra of [{ extensions: { persistedQuery: { version: 1, sha256Hash: "ab" } } }, { documentId: "destroy-everything" }])
+      await expect(provider("https://gitlab.com/api/graphql", { method: "POST", body: JSON.stringify({ query: "query { viewer { login } }", ...extra }) })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     await provider("https://gitlab.com/api/graphql?query=%7B%20viewer%20%7B%20login%20%7D%20%7D&operationName=V");
     await provider("https://gitlab.com/api/v4/projects?query=mutation");
     expect(t.seen.map((x) => new URL(x.url).pathname)).toEqual(["/api/graphql", "/api/v4/projects"]);
@@ -133,6 +137,9 @@ describe("finding 6: a GraphQL document in the URL, and method overrides, are he
     for (const [h, v] of [["x-http-method-override", "DELETE"], ["x-http-method", "PUT"], ["x-method-override", "patch"]] as const)
       await expect(provider("https://gitlab.com/api/v4/projects/1", { headers: { [h]: v } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION", message: expect.stringMatching(/^read-only: GET \(as (DELETE|PUT|PATCH)\) gitlab\.com/) });
     await expect(provider("https://gitlab.com/api/v4/projects/1?_method=DELETE")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    // Every override counts, not only the first that differs (review of this round): a harmless one cannot hide another.
+    await expect(provider("https://gitlab.com/api/v4/projects/1", { headers: { "x-http-method-override": "HEAD", "x-http-method": "DELETE" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider("https://gitlab.com/api/v4/projects/1?_method=DELETE", { headers: { "x-http-method-override": "HEAD" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     await provider("https://gitlab.com/api/v4/projects/1", { headers: { "x-http-method-override": "GET" } });
     expect(t.seen).toHaveLength(1);
   });
@@ -683,6 +690,23 @@ describe("step 7: the recorder", () => {
     for (const form of [token, encodeURIComponent(token), Buffer.from(token).toString("base64"), Buffer.from(token).toString("base64url"), new URLSearchParams({ t: token }).toString().slice(2)]) expect(all, form).not.toContain(form);
     expect(exchanges[1]!.headers).toMatchObject({ "x-echo": "prrla-cred:JIRA_TOKEN", "x-echo-b64": "prrla-cred:JIRA_TOKEN" });
     expect(JSON.parse(exchanges[1]!.response)).toEqual({ raw: "prrla-cred:JIRA_TOKEN", pct: "prrla-cred:JIRA_TOKEN", form: "t=prrla-cred:JIRA_TOKEN", b64: "prrla-cred:JIRA_TOKEN", b64url: "prrla-cred:JIRA_TOKEN" });
+  });
+
+  it("scrubs a secret a JSON encoder escaped (PHP's \\/, Gson's and .NET's \\u00XX), so JSON.parse cannot recover it (review of this round)", async () => {
+    const { scrubPairs, scrubText } = await import("../src/net/scrub.js");
+    const token = "SECRET+TOKEN/123=";
+    const user = "me@example.com";
+    const pairs = scrubPairs([{ env: "T", value: token }, { env: "U", value: user, secret: false }]);
+    const basic = Buffer.from(`${user}:${token}`).toString("base64");
+    const bodies = [
+      JSON.stringify({ b64: Buffer.from(token).toString("base64"), raw: token, basic }).replace(/\//g, "\\/"),
+      JSON.stringify({ raw: token, basic }).replace(/[=+]/g, (c) => `\\u00${c.charCodeAt(0).toString(16)}`),
+      JSON.stringify({ raw: token }).replace(/[=+]/g, (c) => `\\u00${c.charCodeAt(0).toString(16).toUpperCase()}`).replace(/\//g, "\\/"),
+    ];
+    for (const body of bodies) {
+      const seen = JSON.parse(scrubText(pairs, body)) as Record<string, string>;
+      for (const [k, v] of Object.entries(seen)) expect(v, `${k} in ${body}`).toMatch(/^prrla-(cred:T|basic:U:T)$/);
+    }
   });
 
   it("is never installed in read-only mode", async () => {
