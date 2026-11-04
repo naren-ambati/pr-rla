@@ -14,8 +14,8 @@ import { ORG, type FakeOrg } from "./fake-org.js";
  */
 export const REPOS_RULE = `{ owner: ${ORG} }`;
 
-export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string; start?: string; window?: string; provider?: string } = {}) {
-  const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch });
+export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string; start?: string; window?: string; provider?: string; timestamping?: string; tsa?: Parameters<typeof setupAuditRepo>[0]["tsa"] } = {}) {
+  const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch, ...(o.tsa ? { tsa: o.tsa } : {}) });
   const clock = fakeClock(T(o.start ?? "2026-10-20T00:00:00Z"));
   const config = [
     `provider: ${o.provider ?? "github"}`,
@@ -23,7 +23,7 @@ export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string
     `window: ${o.window ?? "{ name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }"}`,
     "selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }",
     "audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }",
-    "timestamping: { authorities: [], min_tokens: 2 }",
+    `timestamping: ${o.timestamping ?? "{ authorities: [], min_tokens: 2 }"}`,
     ...(o.extra ? [o.extra] : []),
     "",
   ].join("\n");

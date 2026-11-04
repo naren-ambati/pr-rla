@@ -13,6 +13,8 @@ import { fakeClock } from "./helpers/fake-clock.js";
 import { fakeOrg, orgSpec, ORG, WINDOW, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 import { T } from "./helpers/audit-scenario.js";
+import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
+import { runVerify } from "../src/commands/verify.js";
 
 /**
  * U8, end to end on a SYNTHETIC 40-repo org (fixture kind: synthetic; test-design.md §U8): the pooled freeze
@@ -343,5 +345,55 @@ describe("FR5.5: freeze --dry-run --estimate", () => {
     expect(sample[0]).toBe(0);
     expect(sample.at(-1)).toBeGreaterThan(990);
     expect(sampleRepos(repos.slice(0, 40), 200)).toEqual(repos.slice(0, 40));
+  });
+});
+
+describe("timestamps on a pooled freeze that takes a long time (tokens bound the commitment, not the manifest's as-of time)", () => {
+  it("a freeze of ~40 minutes gets its tokens: the commitment is signed when the run finishes, 2 of 2 authorities agree, and verify accepts both times", async () => {
+    const tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+    try {
+      const org = org40();
+      const s = setupPoolAudit(org, { extra: SLOW, timestamping: "{ authorities: [test-a, test-b], min_tokens: 2 }", tsa: { ids: ["test-a", "test-b"], k: 2, server: tsa } });
+      // The authorities' genTime follows the test's clock; their answers come over real loopback HTTP, so wait for them in real time.
+      Object.defineProperty(tsa, "nowMs", { get: () => s.clock.now() });
+      const mixed = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).hostname === "api.github.com" ? org.fetch(input, init) : globalThis.fetch(input, init))) as typeof fetch;
+      const ctx = s.ctxFor(mixed);
+      const drive = async <T>(work: Promise<T>): Promise<T> => {
+        for (;;) {
+          try {
+            return await s.clock.run(work);
+          } catch (e) {
+            if (!/waiting on something other than the clock/.test((e as Error).message)) throw e;
+            await new Promise((r) => setTimeout(r, 5));
+          }
+        }
+      };
+      expect(await drive(registerCommand(ctx, {}))).toBe(0);
+      await s.advance(12 * 3600_000);
+      expect(await drive(freezeCommand(ctx, {}))).toBe(0);
+      const m = manifestOf(s);
+      const done = commitmentOf(s).record.frozenAt;
+      expect(Date.parse(done) - Date.parse(m.frozenAt)).toBeGreaterThan(10 * 60_000); // longer than the tokens' 10-minute tolerance
+      const signed = JSON.parse(readFileSync(join(s.dir, W, "manifest-commitment.json"), "utf8")) as { timestamps: { tsa: string; genTime: string }[] };
+      expect(signed.timestamps.map((t) => t.tsa).sort()).toEqual(["test-a", "test-b"]);
+      expect(signed.timestamps.every((t) => Math.abs(Date.parse(t.genTime) - Date.parse(done)) < 5000)).toBe(true);
+      expect(s.out.join("\n")).toMatch(/timestamps: 2 of 2 TSAs \(test-a, test-b\) · k = 2 · PROVEN/);
+      const report = await drive(runVerify(ctx, { offline: false }));
+      expect(report.timestampTamperProof).toBe(true);
+      expect(report.checks.find((c) => c.n === 2)!.status).toBe("PASS");
+      expect(report.checks.find((c) => c.n === 5)!.status).toBe("PASS");
+    } finally {
+      await tsa.stop();
+    }
+  });
+
+  it("a freeze that would finish after seed round R is refused and writes nothing (its checkpoints are kept)", async () => {
+    const org = org40();
+    const s = setupPoolAudit(org, { extra: "rate_limits: { api.github.com: { rest: 60/h, graphql: 60/h } }" });
+    expect(await s.clock.run(registerCommand(s.ctx, {}))).toBe(0);
+    await s.advance(23.9 * 3600_000); // 23:54: R publishes at 00:00 and this budget needs hours
+    await expect(s.clock.run(freezeCommand(s.ctx, {}))).rejects.toThrow(/the freeze finished 2026-10-2\dT.*, after seed round \d+ published \(2026-10-21T00:00:00Z\).*Its checkpoints are kept; register a new audit/);
+    expect(existsSync(join(s.dir, "audit/2026-q3.manifest.json"))).toBe(false);
+    expect(FreezeCheckpointStore.runs(s.dir, "2026-q3").length).toBe(1);
   });
 });
