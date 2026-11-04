@@ -62,7 +62,8 @@ export class LedgerHttp {
       ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
       destination: "scm",
       idempotent: !write,
-      retry: { acceptJson: () => null },
+      // Reads: a truncated body is retried. Writes are never retried after a response, and may answer 204 with no body.
+      retry: write ? {} : { acceptJson: () => null },
     };
     this.requests++;
     let res: Response;

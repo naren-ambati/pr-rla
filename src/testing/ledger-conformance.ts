@@ -291,7 +291,8 @@ async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture): Pro
     writes.push(h.writes());
   }
   if (!p.length) {
-    if (writes[0]! < f.draws.length) p.push(`run 1 made ${writes[0]} write(s) for ${f.draws.length} draws`);
+    const changes = new Set(f.draws.map((d) => d.changeId)).size; // a repeated draw reuses its change's issue
+    if (writes[0]! < changes) p.push(`run 1 made ${writes[0]} write(s) for ${changes} drawn change(s)`);
     if (writes[1]) p.push(`run 2 (index present) made ${writes[1]} write(s); it must make none`);
     if (writes[2]) p.push(`run 3 (index forgotten) made ${writes[2]} write(s); it must find the issues by their markers and make none`);
   }
