@@ -122,6 +122,12 @@ interface Ledger {
   /* phase-1 methods unchanged: publishDraws?, readVerdicts, verifyIntegrity? */
   readHistory?(): Promise<LedgerHistoryEvent[]>;   // canonical event list for checkpoints
 }
+interface LedgerIntegrityReport {
+  /* phase-1/3 fields unchanged: ok, findings, tamperTrail, warnings? */
+  location?: string;            // P4: the file's path from its git toplevel, as walked; only the built-in git-file's counts (check 7 compares it with the registration's ledgerPath)
+}
+// classifyVerdicts(verdicts, { protocolSha256, draws, reviewers?, ineligible? }): P4 adds `ineligible`, a further reason a
+// verdict cannot count (the core's signing rules); null when it can. The ledger kit passes none.
 interface LedgerDefinition {
   /* phase-1 fields unchanged */
   hosts?: (options: unknown) => string[];
@@ -136,13 +142,16 @@ interface LedgerDefinition {
 
 #### Per-verdict signatures (`pr-rla-verdict@v1`, U9)
 
-Added in the U9 fix round (2026-11-04). A git-file verdict's provenance comes only from its own signature; no line is credited to a git commit.
+Added in the U9 fix round (2026-11-04); the bytes are version 2 since the P4 round (same day). A git-file verdict's provenance comes only from its own signature; no line is credited to a git commit.
 
-**The signed bytes** are UTF-8 text, eight lines in this order, each ending in LF (0x0A), the last included, with one space between a name and its value:
+**The signed bytes** are UTF-8 text, eleven lines in this order, each ending in LF (0x0A), the last included, with one space between a name and its value:
 
 ```
-pr-rla-verdict/v1
+pr-rla-verdict/v2
 registrationSha256 <64 lowercase hex: the registration's sha256, as in registration.json>
+manifestSha256 <64 lowercase hex: the frozen manifest's sha256 (manifestSha256 in draws.json)>
+beaconRound <decimal, 1 or more, no leading zero: the drand round the draws come from (beacon.round in draws.json)>
+beaconRandomness <64 lowercase hex: that round's randomness (beacon.randomness in draws.json)>
 protocolSha256 <64 lowercase hex>
 draw <decimal, 1 or more, no leading zero>
 changeId <text>
@@ -150,6 +159,8 @@ verdict <pass | fail>
 reviewer <text: the allowed-signers principal>
 recordedAt <YYYY-MM-DDTHH:MM:SS[.1-9 digits]Z>
 ```
+
+Version 1 (`pr-rla-verdict/v1`) had eight lines: the same without `manifestSha256`, `beaconRound` and `beaconRandomness`. It bound only the registration, so a software key could sign every (draw, change) pair before the seed was drawn, with a `recordedAt` of its choosing, and a signature stayed valid for any manifest under the same registration (second-pass review finding 5). A signature over v1 bytes counts for nothing in any registration; check 7 names it as such. Nothing signed under v1 was released. The namespace stays `pr-rla-verdict@v1`: it names the purpose, and the first line names the format.
 
 `<text>` is non-empty, well-formed UTF-8 with no control character (U+0000–U+001F, U+007F), so no value can carry a line break and the form is unambiguous. Nothing is escaped, quoted or normalised; the bytes are the values as the line holds them. A verdict whose fields do not fit cannot be signed (`record --sign` refuses it) and its signature cannot count. `note` is not signed and never counts.
 
@@ -163,9 +174,13 @@ recordedAt <YYYY-MM-DDTHH:MM:SS[.1-9 digits]Z>
 {"changeId":"github:acme/widgets#104","draw":7,"protocolSha256":"…","recordedAt":"2026-10-21T03:00:00Z","registrationSha256":"…","reviewer":"alice","schema":"pr-rla/verdict/v1","sshsig":"U1NIU0lH…","verdict":"pass"}
 ```
 
-**Verification** (src/core/presence, pure) rebuilds the bytes from the line's fields and the registration being verified, and counts the signature only when its key is one of the registration's `verdicts.allowed_signers` (exactly, with a `namespaces=` option that admits `pr-rla-verdict@v1`) and the line's `reviewer` is that key's principal, exactly. Level: `presence` for a FIDO security key with the user-presence flag set, else `account`; any other line `self-asserted`. Signatures count only with the registered built-in `git-file` ledger, and only when the ledger verify loaded is the registered one (check 7 compares `name`, `source`, `integrity` and `optionsSha256`).
+**Verification** (src/core/presence, pure) rebuilds the bytes from the line's fields and the audit being verified: the registration's digest, and the manifest digest and beacon round and randomness verify has already checked (status and `record` read them from `manifest.json` and `draws.json`). It counts the signature only when its key is one of the registration's `verdicts.allowed_signers` (exactly, with a `namespaces=` option that admits `pr-rla-verdict@v1`) and the line's `reviewer` is that key's principal, exactly. Level: `presence (user-presence flag verified; key hardware not attested)` for a FIDO security key with the user-presence flag set, else `account`; any other line `self-asserted`. Signatures count only with the registered built-in `git-file` ledger, and only when the ledger verify loaded is the registered one (check 7 compares `name`, `source`, `integrity` and `optionsSha256`).
 
-**The git-file history** check walks every commit reachable from HEAD through the parents in its raw object, reading objects with `git cat-file --batch` and checking each hashes to its name; every version of the file must extend each parent's version. A shallow, grafted or partial repository is refused. git runs through `src/io/git-safe.ts` only.
+**Eligibility under signing rules** (P4). When the registration lists `allowed_signers` and sets `require_signed` or a `minProvenance` above `self-asserted`, a verdict whose signature state is anything but a valid signature by its reviewer's registered key (unsigned, unreadable, another registration, invalid, v1 bytes, an unlisted key, another principal) is ineligible: it is ignored with its reason (`ignored verdict on draw #N: …`), and the first eligible verdict per change counts. With any other ledger than the registered git-file, every verdict is ineligible under such a registration. `countedVerdicts(…).ineligible` is the one predicate; status, check 7 (through `computeStatus` and `classifyVerdicts`) and `record`'s existing-verdict check (`countingVerdictFor`) all use it.
+
+**The git-file history** check walks every commit reachable from HEAD through the parents in its raw object, reading objects with `git cat-file --batch` and checking each hashes to its name; every version of the file must extend each parent's version. A shallow, grafted or partial repository is refused. git runs through `src/io/git-safe.ts` only, by the absolute path PATH gives (`src/io/executables.ts`). The walk streams: per commit it keeps the tree id and the parents, per tree the one entry on the path, and only the file's distinct versions whole.
+
+**The git-file path** (P4). The path walked is the file's path from the repository's toplevel, lexical and normalised, as the configuration names it (`<audit_dir>/<window>/<file>`); it is reported as `LedgerIntegrityReport.location`. The integrity check FAILs (`ledger path: …`) when a directory on it is a symbolic link, is not a directory, or exists on disk only under another spelling than its name in its parent's listing (a case-folding or normalising filesystem), and when the ledger is not inside the repository git found for it. Check 7 FAILs when `location` is not the registration's `ledgerPath` (§5), or when the registration has one and the ledger is in no repository; a registration without `ledgerPath` gives a WARN. With HEAD present and the window's `registration.json` committed, a ledger file holding verdicts that was never committed at its path FAILs. `appendVerdict` refuses to write through a symbolic link or into a file of another spelling.
 
 **Failure behaviour:**
 - `readVerdicts` or `readHistory` throwing makes check 7 FAIL with the error. It never passes silently.
@@ -300,6 +315,7 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 | `registeredAt` | time | signed; the seed input |
 | `timestamping` | `{ authorities: string[], minTokens: number, toleranceSeconds: 600, defaultAccuracySeconds: 60, bundle: string }` | `minTokens` defaults to 2 |
 | `plugins` | `{ provider: PluginIdentity, ledger: PluginIdentity }` | |
+| `ledgerPath?` | string | The built-in git-file ledger only (P4): the ledger file's path from the audit repository's toplevel, lexical and normalised, `/`-separated (`audit/2026-q3/verdicts.jsonl`). Check 7 FAILs a ledger read anywhere else. Absent for other ledgers, for a git-file ledger registered outside a git repository (register warns), and in registrations made before the field (check 7 WARNs) |
 | `verdicts` | `{ minProvenance: ProvenanceLevel, reviewers: string[] \| null, require_signed?: boolean, allowed_signers?: string[] }` | `reviewers` are logins or account ids (who may count); `allowed_signers` (U9 fix round) are OpenSSH allowed-signers lines, sorted, present only when keys are registered; `require_signed` only when true, and only with the built-in git-file ledger |
 | `registeredRepos?` | `{ repo, repoId }[]` | A `rule` only (U8 fix round): the repos the rule matched at `register`, by id, sorted. Freeze includes each that still exists, whatever its attributes |
 

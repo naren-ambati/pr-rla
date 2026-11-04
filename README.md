@@ -156,7 +156,7 @@ verdicts:
     - 'alice namespaces="pr-rla-verdict@v1" sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29t…'
 ```
 
-Each verdict carries its own signature: an SSHSIG in namespace `pr-rla-verdict@v1` over a few lines of text that name the registration, the protocol, the draw, the change, the verdict, the reviewer and the time (the exact bytes are in [`contracts.md`](docs/design/phase-3-4/contracts.md), "Per-verdict signatures"). So one signature, which with a security key is one touch, is one verdict on one draw of one audit. A commit's signature counts for nothing.
+Each verdict carries its own signature: an SSHSIG in namespace `pr-rla-verdict@v1` over a few lines of text that name the registration, the frozen manifest, the seed (the beacon round and its randomness), the protocol, the draw, the change, the verdict, the reviewer and the time (the exact bytes, version `pr-rla-verdict/v2`, are in [`contracts.md`](docs/design/phase-3-4/contracts.md), "Per-verdict signatures"). So one signature, which with a security key is one touch, is one verdict on one draw of one frozen audit, and it cannot be made before the seed is public. A commit's signature counts for nothing. With keys registered and `require_signed` or a minimum above `self-asserted`, a line without a valid signature by its reviewer's registered key never counts: it is listed as an ignored verdict, and the reviewer's signed verdict for that change counts instead.
 
 The reviewer signs as they record: `pr-rla record 7 pass --sign ~/keys/verdicts_sk`. pr-rla writes the bytes to a temporary file, runs `ssh-keygen -Y sign -n pr-rla-verdict@v1 -f <key> <file>` (a security key asks for its touch), checks the signature as `verify` will, and appends the line; the reviewer is the key's registered principal. Then commit the ledger file as usual: git history is the tamper trail.
 
@@ -166,10 +166,13 @@ To sign without running pr-rla's process, a reviewer writes the bytes and the li
 W=audit/2026-q3; DRAW=7; VERDICT=pass; ME=alice; KEY=~/keys/verdicts_sk
 REG=$(jq -r .sha256 $W/registration.json)
 PROTO=$(jq -r .record.protocolSha256 $W/registration.json)
+MAN=$(jq -r .manifestSha256 $W/draws.json)
+ROUND=$(jq -r .beacon.round $W/draws.json)
+RAND=$(jq -r .beacon.randomness $W/draws.json)
 CHANGE=$(jq -r --argjson d $DRAW '.draws[] | select(.draw == $d) | .changeId' $W/draws.json)
 AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-printf 'pr-rla-verdict/v1\nregistrationSha256 %s\nprotocolSha256 %s\ndraw %s\nchangeId %s\nverdict %s\nreviewer %s\nrecordedAt %s\n' \
-  "$REG" "$PROTO" "$DRAW" "$CHANGE" "$VERDICT" "$ME" "$AT" > "verdict-$DRAW.txt"
+printf 'pr-rla-verdict/v2\nregistrationSha256 %s\nmanifestSha256 %s\nbeaconRound %s\nbeaconRandomness %s\nprotocolSha256 %s\ndraw %s\nchangeId %s\nverdict %s\nreviewer %s\nrecordedAt %s\n' \
+  "$REG" "$MAN" "$ROUND" "$RAND" "$PROTO" "$DRAW" "$CHANGE" "$VERDICT" "$ME" "$AT" > "verdict-$DRAW.txt"
 ssh-keygen -Y sign -n pr-rla-verdict@v1 -f "$KEY" "verdict-$DRAW.txt"      # writes verdict-$DRAW.txt.sig
 SIG=$(sed '1d;$d' "verdict-$DRAW.txt.sig" | tr -d '\n')
 printf '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","registrationSha256":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","sshsig":"%s","verdict":"%s"}\n' \
@@ -177,7 +180,7 @@ printf '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","regi
 # check it as pr-rla will: ssh-keygen -Y verify -f allowed_signers -I "$ME" -n pr-rla-verdict@v1 -s "verdict-$DRAW.txt.sig" < "verdict-$DRAW.txt"
 ```
 
-(A value holding `"` or `\` would need JSON escaping in the line; change ids and principals hold neither.) `verify` checks each line's SSHSIG in TypeScript, without ssh-keygen: the key must be registered, the line's `reviewer` must be that key's principal exactly, the signature must be for this registration, and for a security key (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`) the user-presence flag must be set for `presence`. Ed25519, ECDSA and RSA software keys give `account`. Check 7 FAILs a counted verdict below the registered minimum and, with `require_signed`, one without a valid signature by its reviewer's registered key; it also FAILs when the ledger it reads is not the registered one, and refuses a shallow, grafted or partial clone. Certificates print the level as `presence (user-presence flag verified; key hardware not attested)`: a software-emulated authenticator can set that flag too, and pr-rla does not check that a registered key is hardware-backed ([`docs/security-model.md`](docs/security-model.md), T16). Register a key you keep for verdicts, not your everyday signing key. Issue ledgers top out at `account`.
+(A value holding `"` or `\` would need JSON escaping in the line; change ids and principals hold neither.) `verify` checks each line's SSHSIG in TypeScript, without ssh-keygen: the key must be registered, the line's `reviewer` must be that key's principal exactly, the signature must be for this registration, manifest and seed (verify rebuilds the bytes from what it has verified, and refuses `pr-rla-verdict/v1` signatures, which named neither), and for a security key (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`) the user-presence flag must be set for `presence`. Ed25519, ECDSA and RSA software keys give `account`. Check 7 FAILs a counted verdict below the registered minimum; it also FAILs when the ledger it reads is not the registered one or not at the registered path (`ledgerPath`: a symbolic link or another spelling on the way FAILs too), and refuses a shallow, grafted or partial clone. `status` runs the same history walk, so it never prints CERTIFIED where verify would FAIL check 7. Certificates print the level as `presence (user-presence flag verified; key hardware not attested)`: a software-emulated authenticator can set that flag too, and pr-rla does not check that a registered key is hardware-backed ([`docs/security-model.md`](docs/security-model.md), T16). Register a key you keep for verdicts, not your everyday signing key. Issue ledgers top out at `account`.
 
 ### Adding a provider (Gerrit, Azure Repos, …)
 
@@ -210,5 +213,6 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 - **Timestamps** are tamper-evident only when k = 2 timestamp-authority operators agree; with fewer (or none configured) they are the signer's clock, and every output says so. Three of the eight bundled anchors (Microsoft's, pinned at its intermediate, SwissSign's and FreeTSA's) were taken from the authorities' own responses (trust on first use), and every output that counts one of them says `anchor pinned on first use … independent: false`: see BUILD-NOTES, bolt 1 and trusted-time fix round A.
 - **One registration per audit is a procedural control.** `verify` cannot prove that no other registration exists: hand your auditor the registration before the window opens.
 - **`presence` is not hardware-attested.** It means the verdict's own signature carries the user-presence flag from a registered security key. A software-emulated authenticator sets the same flag, pr-rla does not check that a key is hardware-backed, and the presence path has been tested with software keys only.
-- **A git-file audit verifies from a full clone.** A shallow, grafted or partial clone is refused (check 7 FAILs and says to clone in full), because a verdict removed before the cut could not be seen.
+- **A git-file audit verifies from a full clone, at its registered path.** A shallow, grafted or partial clone is refused (check 7 FAILs and says to clone in full), because a verdict removed before the cut could not be seen. The ledger must be read at the path the registration records, through real directories spelled exactly as registered.
+- **Windows is untested.** pr-rla runs `git` and `ssh-keygen` by the absolute path it finds on PATH, never one in the audit repository, but no part of pr-rla has been run on Windows.
 - **External plugins run isolated, not sandboxed.** On Node 22 and 24 an isolated plugin cannot read your tokens or files but can still open network connections and send out what it reads; Node 25 or later blocks that. The Node permission model is a seatbelt ([`docs/security-model.md`](docs/security-model.md)).
