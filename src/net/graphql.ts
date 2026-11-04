@@ -63,6 +63,8 @@ export function operationKinds(document: string): OperationKind[] {
   return kinds;
 }
 
+const READ_KEYS: ReadonlySet<string> = new Set(["query", "operationName", "variables"]);
+
 /** The documents in a GraphQL-over-HTTP body (`{ query }` or a batch of them), or null if it is not one. */
 export function graphqlDocuments(body: string): string[] | null {
   let parsed: unknown;
@@ -76,6 +78,9 @@ export function graphqlDocuments(body: string): string[] | null {
   for (const item of items) {
     const q = item && typeof item === "object" ? (item as { query?: unknown }).query : undefined;
     if (typeof q !== "string") return null;
+    // Only the GraphQL-over-HTTP keys a query needs. Any other (extensions.persistedQuery, documentId,
+    // a server's own id or queryId) may name a stored document that runs instead of the visible one.
+    if (Object.keys(item as object).some((k) => !READ_KEYS.has(k))) return null;
     docs.push(q);
   }
   return docs.length ? docs : null;
@@ -91,7 +96,7 @@ export function isQueryOnly(body: string): boolean {
   });
 }
 
-/** True for a path whose last segment is `graphql` (`/graphql`, `/api/graphql`). */
+/** True for a path whose last segment is `graphql`, in any case (`/graphql`, `/api/GraphQL`): servers often route case-insensitively. */
 export function isGraphqlPath(pathname: string): boolean {
-  return /\/graphql\/?$/.test(pathname);
+  return /\/graphql\/?$/i.test(pathname);
 }

@@ -3,15 +3,18 @@
  *
  * Started by ./host.ts as `node --permission --allow-fs-read=<plugin files> child.js <boot>`
  * with a scrubbed environment: `PR_RLA_HOST=1` plus one `prrla-cred:<ENV>` placeholder per
- * locked credential. No fs-write, child-process, worker, addon or WASI permission; on
+ * approved credential. No fs-write, child-process, worker, addon or WASI permission; on
  * Node 25 or later no network either. It imports the plugin, reports its definition, and
  * runs the methods the parent calls. Every fetch and every wait goes to the parent: fetches
  * through the fetch broker, waits on the command's clock.
+ *
+ * Messages travel as length-prefixed JSON frames on file descriptor 3 (`pr-rla/ipc/v2`).
  *
  * This file has no runtime import from pr-rla (only `node:` modules; the protocol import is
  * type-only), so it runs the same compiled from dist/ and type-stripped from src/.
  */
 import * as nodeModule from "node:module";
+import { Socket } from "node:net";
 import type { CallMessage, ChildBoot, ChildMessage, CreateResult, DescribeResult, FetchMessage, FetchResultMessage, ParentMessage, ReadyMessage } from "./protocol.js";
 
 type Fn = (...args: unknown[]) => unknown;
@@ -37,32 +40,71 @@ const METHODS: Record<ChildBoot["kind"], readonly string[]> = {
 
 const boot = JSON.parse(process.argv[2] ?? "{}") as ChildBoot;
 
+// --- frames on fd 3: a 4-byte big-endian length, then that many bytes of JSON -----------------
+
+const pipe = new Socket({ fd: 3, readable: true, writable: true });
+
 function send(m: ChildMessage): void {
-  process.send?.(m);
+  const body = Buffer.from(JSON.stringify(m));
+  const head = Buffer.alloc(4);
+  head.writeUInt32BE(body.length);
+  pipe.write(Buffer.concat([head, body]));
 }
 
-function fail(code: string, message: string, id: number | null = null): never {
+/** Reports a load failure and exits once the frame is flushed; the returned promise never settles. */
+async function fail(code: string, message: string, id: number | null = null): Promise<never> {
   send({ type: "error", id, code, message });
-  process.disconnect?.();
+  await new Promise<void>((r) => pipe.end(r));
   process.exit(1);
 }
 
-process.on("disconnect", () => process.exit(0));
+// Chunks are joined only once a whole frame is in, so a large frame costs one copy, not one per chunk.
+let chunks: Buffer[] = [];
+let have = 0;
+let need: number | null = null;
+const take = (n: number): Buffer => {
+  const all = chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks);
+  chunks = all.length > n ? [all.subarray(n)] : [];
+  have -= n;
+  return all.subarray(0, n);
+};
+pipe.on("data", (chunk: Buffer) => {
+  chunks.push(chunk);
+  have += chunk.length;
+  for (;;) {
+    if (need === null) {
+      if (have < 4) return;
+      need = take(4).readUInt32BE(0);
+      // The parent never sends more; if it did, stop rather than buffer it.
+      if (need > boot.maxMessageBytes) process.exit(1);
+    }
+    if (have < need) return;
+    const frame = take(need);
+    need = null;
+    receive(JSON.parse(frame.toString("utf8")) as ParentMessage);
+  }
+});
+// The parent closed the pipe (or exited): nothing more will come.
+pipe.on("end", () => process.exit(0));
+pipe.on("error", () => process.exit(0));
 
 // A plugin links against the host's own SDK, never a copy in its node_modules.
 const registerHooks = (nodeModule as { registerHooks?: (hooks: { resolve: (s: string, c: unknown, next: (s: string, c: unknown) => unknown) => unknown }) => unknown }).registerHooks;
-if (typeof registerHooks !== "function") fail("NODE_TOO_OLD", `the plugin host needs Node 22.15 or later (module.registerHooks); this is ${process.version}`);
-registerHooks({
-  resolve(specifier, context, next) {
-    const url = boot.sdk[specifier];
-    return url ? { url, shortCircuit: true } : next(specifier, context);
-  },
-});
+if (typeof registerHooks !== "function") await fail("NODE_TOO_OLD", `the plugin host needs Node 22.15 or later (module.registerHooks); this is ${process.version}`);
+else
+  registerHooks({
+    resolve(specifier, context, next) {
+      const url = boot.sdk[specifier];
+      return url ? { url, shortCircuit: true } : next(specifier, context);
+    },
+  });
 
 // --- fetch and sleep, both answered by the parent -------------------------------------------
 
 let nextFid = 1;
 const fetches = new Map<number, { resolve: (r: Response) => void; reject: (e: unknown) => void }>();
+/** The plugin's acceptJson rule for each fetch in flight that has one. */
+const acceptors = new Map<number, (body: unknown) => unknown>();
 let nextSid = 1;
 const sleeps = new Map<number, () => void>();
 
@@ -92,6 +134,7 @@ async function hostFetch(input: string | URL | Request, init: (RequestInit & Rec
   const msg: FetchMessage = { type: "fetch", fid: nextFid++, url, method: (req.method ?? "GET").toUpperCase(), headers: [...new Headers(req.headers)], ...(await encodeBody(req.body)) };
   if (typeof req.destination === "string") {
     const r = req.retry as false | { maxRetries?: unknown; maxBlindRateLimitRetries?: unknown; acceptJson?: unknown } | undefined;
+    if (r && typeof r.acceptJson === "function") acceptors.set(msg.fid, r.acceptJson as (body: unknown) => unknown);
     msg.broker = {
       destination: req.destination,
       ...(typeof req.idempotent === "boolean" ? { idempotent: req.idempotent } : {}),
@@ -111,6 +154,7 @@ async function hostFetch(input: string | URL | Request, init: (RequestInit & Rec
   return new Promise<Response>((resolve, reject) => {
     fetches.set(msg.fid, { resolve, reject });
     signal?.addEventListener("abort", () => {
+      acceptors.delete(msg.fid);
       if (fetches.delete(msg.fid)) reject(abortError());
     });
     send(msg);
@@ -119,6 +163,7 @@ async function hostFetch(input: string | URL | Request, init: (RequestInit & Rec
 
 function settleFetch(m: FetchResultMessage): void {
   const f = fetches.get(m.fid);
+  acceptors.delete(m.fid);
   if (!f) return;
   fetches.delete(m.fid);
   if (m.error) return f.reject(Object.assign(new Error(m.error.message), m.error));
@@ -216,8 +261,7 @@ async function run(m: CallMessage): Promise<void> {
   }
 }
 
-process.on("message", (raw: unknown) => {
-  const m = raw as ParentMessage;
+function receive(m: ParentMessage): void {
   if (m.type === "call") void run(m);
   else if (m.type === "cancel") running.get(m.id)?.abort();
   else if (m.type === "fetchResult") settleFetch(m);
@@ -229,18 +273,34 @@ process.on("message", (raw: unknown) => {
     indexOps.delete(m.xid);
     if (m.error) op?.reject(Object.assign(new Error(m.error.message), m.error));
     else op?.resolve(m.value ?? null);
+  } else if (m.type === "accept") {
+    // The plugin's own acceptJson rule, for a body the broker checks (finding 10).
+    const rule = acceptors.get(m.fid);
+    let answer: { problem: string | null } | { error: string };
+    try {
+      const problem = rule ? rule(JSON.parse(m.body)) : null;
+      answer = { problem: typeof problem === "string" ? problem : null };
+    } catch (e) {
+      answer = { error: (e as Error)?.message ?? String(e) };
+    }
+    send({ type: "acceptResult", aid: m.aid, ...answer });
   }
-});
+}
 
 // --- load -----------------------------------------------------------------------------------
 
-try {
-  const mod = (await import(boot.entry)) as Record<string, unknown>;
-  def = (mod.default ?? mod[boot.kind]) as Definition;
-} catch (e) {
-  fail("LOAD_FAILED", `cannot load the plugin: ${(e as Error).message}`);
+async function load(): Promise<Definition> {
+  let d: unknown;
+  try {
+    const mod = (await import(boot.entry)) as Record<string, unknown>;
+    d = mod.default ?? mod[boot.kind];
+  } catch (e) {
+    return fail("LOAD_FAILED", `cannot load the plugin: ${(e as Error).message}`);
+  }
+  if (!d || typeof d !== "object") return fail("LOAD_FAILED", `the module exports no ${boot.kind} definition (use define${boot.kind === "provider" ? "Provider" : "Ledger"}() as the default export)`);
+  return d as Definition;
 }
-if (!def || typeof def !== "object") fail("LOAD_FAILED", `the module exports no ${boot.kind} definition (use define${boot.kind === "provider" ? "Provider" : "Ledger"}() as the default export)`);
+def = await load();
 
 const ready: ReadyMessage = {
   type: "ready",

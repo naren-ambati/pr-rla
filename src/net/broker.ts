@@ -4,7 +4,10 @@ import {
   BrokerError,
   BrokerRetriesExhausted,
   BrokerTimeout,
+  CredentialHeaderNotAllowed,
   CredentialHostMismatch,
+  CredentialIdentityOnly,
+  CredentialNotApproved,
   DESTINATION_TIMEOUT_MS,
   HostNotAllowed,
   ReadOnlyViolation,
@@ -15,6 +18,7 @@ import {
   type Destination,
 } from "./contract.js";
 import { isGraphqlPath, isQueryOnly } from "./graphql.js";
+import { scrubPairs, scrubText, type SecretValue } from "./scrub.js";
 import { RateGovernor, type GovernedRequest } from "./governor.js";
 import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
 
@@ -25,8 +29,9 @@ import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
  * 1. host allowlist (each redirect hop re-checked; redirects are followed here, by hand);
  * 2. read-only guard (GET, HEAD, a GraphQL query; provider requests always; ledger
  *    writes only under their declared writePaths);
- * 3. credential swap (`prrla-cred:<ENV>`, `prrla-basic:<USER_ENV>:<TOKEN_ENV>`) for
- *    declared hosts only;
+ * 3. credential swap (`prrla-cred:<ENV>`, `prrla-basic:<USER_ENV>:<TOKEN_ENV>`) for the
+ *    granted https origins only (host and port exact), never after a redirect from https to http,
+ *    and only in `authorization` or a header the plugin declares for that credential;
  * 4. rate governor: one budget per host, shared by every caller (./governor.ts);
  * 5. timeout by destination (SCM 30 s, authority 15 s, drand 15 s, Rekor 30 s);
  * 6. retry: the only retrier for callers wired to it (the phase-2 policy, src/sdk/http.ts);
@@ -51,7 +56,20 @@ export function roleOf(pluginId: string): CallerRole {
 
 export interface Credential {
   value: string;
+  /**
+   * The https origins it may go to, as URL hosts (`host`, or `host:port` for another port): the
+   * scheme is always https, and the port must match exactly (finding 4).
+   */
   hosts: Set<string>;
+  /** Header names (lowercase), besides `authorization`, where its placeholder may be swapped (finding 5). */
+  headers?: Set<string>;
+  /** false: an identity (a Basic username): sent only as the user part of prrla-basic:, and not scrubbed (finding 8). */
+  secret?: boolean;
+  /**
+   * Locked but not approved by the person running the command (src/plugins/approvals.ts): never
+   * swapped; a placeholder for it is refused with CREDENTIAL_NOT_APPROVED, naming `approve`.
+   */
+  withheld?: { approve: string };
 }
 
 /** One recorded request and response, scrubbed (step 7). */
@@ -153,7 +171,9 @@ const realTimer = (fire: () => void, ms: number) => {
 
 const sha256 = (b: string | Uint8Array) => createHash("sha256").update(b).digest("hex");
 const scrubEmails = (s: string) => s.replace(EMAIL, (e) => `user-${sha256(e.toLowerCase()).slice(0, 8)}@example.invalid`);
-const scrubHeaders = (h: Headers): Record<string, string> => Object.fromEntries([...h].map(([k, v]) => [k, SECRET_HEADERS.has(k) ? "[scrubbed]" : scrubEmails(v)]));
+/** Secret values in every form (src/net/scrub.ts), then e-mail addresses. */
+const scrubAll = (pairs: readonly [string, string][], s: string) => scrubEmails(scrubText(pairs, s));
+const scrubHeaders = (pairs: readonly [string, string][], h: Headers): Record<string, string> => Object.fromEntries([...h].map(([k, v]) => [k, SECRET_HEADERS.has(k) ? "[scrubbed]" : scrubAll(pairs, v)]));
 
 function bodyBytes(body: Body | null | undefined): Uint8Array | string | null {
   if (body === null || body === undefined) return null;
@@ -170,6 +190,49 @@ function bodyText(body: Body | null | undefined): string | null {
 }
 
 const withUrl = (res: Response, url: string): Response => Object.defineProperty(res, "url", { value: url, enumerable: true });
+
+/** Whether a request reads, for the read-only guard (step 2) and the governor's cost. */
+interface Reading {
+  read: boolean;
+  graphql: boolean;
+  why: string;
+}
+
+/** The GraphQL-over-HTTP parameters a server may take from the URL (Rails merges them over the body). */
+const GRAPHQL_URL_PARAMS = ["query", "operationName", "extensions"] as const;
+/** Headers and the query parameter servers honour as the request's real method. */
+const METHOD_OVERRIDES = ["x-http-method-override", "x-http-method", "x-method-override"] as const;
+
+/**
+ * What a request with this method does (finding 6). GET and HEAD read, except on a GraphQL path
+ * whose URL carries a document: that is a read only when the document is a query (and carries no
+ * `extensions`, a persisted query pr-rla cannot see). A GraphQL POST reads when its body is a
+ * query and its URL carries none of query, operationName or extensions. Anything else writes.
+ */
+function reading(method: string, url: URL, text: string | null): Reading {
+  const graphql = isGraphqlPath(url.pathname);
+  const inUrl = graphql ? GRAPHQL_URL_PARAMS.filter((k) => url.searchParams.has(k)) : [];
+  if (method === "GET" || method === "HEAD") {
+    if (!inUrl.length) return { read: true, graphql: false, why: "" };
+    const q = url.searchParams.get("query");
+    const read = !url.searchParams.has("extensions") && q !== null && isQueryOnly(JSON.stringify({ query: q }));
+    return { read, graphql: true, why: "a GraphQL request whose URL carries a mutation, a subscription, a persisted query (extensions) or a document that is not a query" };
+  }
+  if (method === "POST" && graphql) {
+    if (inUrl.length) return { read: false, graphql: true, why: `a GraphQL POST with ${inUrl.join(", ")} in its URL (a server may run the URL's document instead of the body's)` };
+    return { read: text !== null && isQueryOnly(text), graphql: true, why: "a GraphQL mutation or subscription, or not a GraphQL query" };
+  }
+  return { read: false, graphql: false, why: `${method} is not a read` };
+}
+
+/** Every other method a server may take from an override header or `_method` (finding 6): a request must be allowed as each. */
+function overriddenMethods(method: string, headers: Headers, url: URL): string[] {
+  const named = [...METHOD_OVERRIDES.map((h) => headers.get(h)), ...url.searchParams.getAll("_method")];
+  return [...new Set(named.flatMap((v) => (v ? v.split(",") : [])).map((v) => v.trim().toUpperCase()).filter((v) => v && v !== method))];
+}
+
+/** `prefix` covers `target` on a `/` segment boundary (finding 9): `…/issue` covers `…/issue/A-1`, not `…/issueLink`. */
+const underPrefix = (target: string, prefix: string) => target === prefix || (target.startsWith(prefix) && (prefix.endsWith("/") || target[prefix.length] === "/"));
 
 function isBeforeSend(e: unknown): boolean {
   const code = (e as { cause?: { code?: unknown } })?.cause?.code ?? (e as { code?: unknown })?.code;
@@ -212,32 +275,37 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   }
 
   // Step 2.
-  function checkReadOnly(call: Call, url: URL, method: string, graphql: boolean, text: string | null): void {
-    if (method === "GET" || method === "HEAD" || (graphql && text !== null && isQueryOnly(text))) return;
-    const why = graphql ? "a GraphQL mutation or subscription, or not a GraphQL query" : `${method} is not a read`;
+  function checkReadOnly(call: Call, url: URL, method: string, r: Reading): void {
+    if (r.read) return;
     const role = roleOf(call.pluginId);
-    if (p.mode === "read-only") throw new ReadOnlyViolation(method, url.pathname, url.host, why);
-    if (role === "provider" || role === "plugin") throw new ReadOnlyViolation(method, url.pathname, url.host, `${why}; provider requests are always read-only`);
+    if (p.mode === "read-only") throw new ReadOnlyViolation(method, url.pathname, url.host, r.why);
+    if (role === "provider" || role === "plugin") throw new ReadOnlyViolation(method, url.pathname, url.host, `${r.why}; provider requests are always read-only`);
     if (role === "ledger") {
       const allowed = [...p.writePathsFor(call.pluginId)];
       const target = [`${url.host}${url.pathname}`, `${url.hostname}${url.pathname}`];
-      if (!allowed.some((prefix) => target.some((t) => t.startsWith(prefix)))) throw new WritePathNotAllowed(method, url.pathname, url.host, call.pluginId, allowed);
+      if (!allowed.some((prefix) => target.some((t) => underPrefix(t, prefix)))) throw new WritePathNotAllowed(method, url.pathname, url.host, call.pluginId, allowed);
     }
   }
 
-  // Step 3.
-  function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean): Headers {
+  // Step 3. `downgraded`: an earlier hop of this request redirected from https to http.
+  function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean, downgraded: boolean): Headers {
     const creds = p.credentialsFor(call.pluginId);
-    const secret = (env: string): string => {
+    const secret = (env: string, header: string, role: "user" | "token" = "token"): string => {
       const c = creds.get(env);
-      if (!c || !(c.hosts.has(url.host) || c.hosts.has(url.hostname))) throw new CredentialHostMismatch(env, url.host, c ? [...c.hosts] : []);
+      if (c?.withheld) throw new CredentialNotApproved(env, url.host, call.pluginId, c.withheld.approve);
+      if (header !== "authorization" && !c?.headers?.has(header)) throw new CredentialHeaderNotAllowed(env, header, url.host);
+      if (c?.secret === false && role !== "user") throw new CredentialIdentityOnly(env, url.host);
+      const allowed = c ? [...c.hosts] : [];
+      if (url.protocol !== "https:") throw new CredentialHostMismatch(env, url.host, allowed, { name: url.origin, overHttps: true });
+      if (downgraded) throw new CredentialHostMismatch(env, url.host, allowed, { name: `${url.origin} after a redirect from https to http`, overHttps: true });
+      if (!c || !c.hosts.has(url.host)) throw new CredentialHostMismatch(env, url.host, allowed);
       return c.value;
     };
     const out = new Headers();
     for (const [name, value] of original) {
       const basic = name === "authorization" ? BASIC.exec(value) : null;
-      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!)}:${secret(basic[2]!)}`).toString("base64")}`);
-      else if (PLACEHOLDER.test(value)) out.set(name, value.replace(PLACEHOLDERS, (_m, env: string) => secret(env)));
+      if (basic) out.set(name, `Basic ${Buffer.from(`${secret(basic[1]!, name, "user")}:${secret(basic[2]!, name)}`).toString("base64")}`);
+      else if (PLACEHOLDER.test(value)) out.set(name, value.replace(PLACEHOLDERS, (_m, env: string) => secret(env, name)));
       else if (crossOrigin && SECRET_HEADERS.has(name)) continue; // a raw secret never follows a redirect to another origin
       else out.append(name, value);
     }
@@ -262,20 +330,22 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     }
   }
 
-  // Step 7.
+  // Step 7. Every secret value the caller holds is scrubbed wherever it appears, in every form (finding 5).
   async function record(call: Call, url: URL, method: string, headers: Headers, body: Body | null, res: Response): Promise<void> {
     if (!p.recorder) return;
     const bytes = bodyBytes(body);
+    const secrets: SecretValue[] = [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
+    const pairs = scrubPairs(secrets);
     p.recorder({
       pluginId: call.pluginId,
       destination: call.destination,
       method,
-      url: scrubEmails(url.href),
-      requestHeaders: scrubHeaders(headers),
+      url: scrubAll(pairs, url.href),
+      requestHeaders: scrubHeaders(pairs, headers),
       bodySha256: bytes === null ? null : sha256(bytes),
       status: res.status,
-      headers: scrubHeaders(res.headers),
-      response: scrubEmails(await res.clone().text()),
+      headers: scrubHeaders(pairs, res.headers),
+      response: scrubAll(pairs, await res.clone().text()),
     });
   }
 
@@ -285,20 +355,26 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     let method = (call.req.method ?? "GET").toUpperCase();
     let body: Body | null = call.req.body ?? null;
     const original = new Headers(call.req.headers);
+    let downgraded = false;
     for (let hop = 0; ; hop++) {
       if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
-      const graphql = method === "POST" && isGraphqlPath(url.pathname);
-      checkReadOnly(call, url, method, graphql, text);
-      const headers = swapCredentials(call, url, original, url.origin !== call.url.origin);
+      // A method override must be allowed too, every one of them: a server may run any of the methods.
+      const r = reading(method, url, text);
+      checkReadOnly(call, url, method, r);
+      const overrides = overriddenMethods(method, original, url).map((m) => ({ m, r: reading(m, url, text) }));
+      for (const o of overrides) checkReadOnly(call, url, `${method} (as ${o.m})`, o.r);
+      // After a redirect from https to http, no credential is swapped and no raw secret header is sent, to the end of the chain.
+      const headers = swapCredentials(call, url, original, url.origin !== call.url.origin || downgraded, downgraded);
       const g: GovernedRequest = {
         host: url.hostname,
         path: url.pathname,
         method,
         authenticated: headers.has("authorization") || headers.has("private-token"),
-        graphql,
-        write: graphql ? !(text !== null && isQueryOnly(text)) : !["GET", "HEAD", "OPTIONS"].includes(method),
+        graphql: r.graphql,
+        // As before for the budgets: OPTIONS spends no write budget.
+        write: [{ m: method, r }, ...overrides].some((o) => !o.r.read && o.m !== "OPTIONS"),
       };
       const wait = governor.reserve(g);
       if (wait > 0) {
@@ -329,7 +405,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
           body = null;
           original.delete("content-type");
         }
-        url = new URL(location, url);
+        const next = new URL(location, url);
+        if (url.protocol === "https:" && next.protocol !== "https:") downgraded = true;
+        url = next;
         continue;
       }
       return withUrl(res, url.href);

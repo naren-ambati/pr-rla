@@ -49,15 +49,15 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   }
   // A ledger that lives in a tracker (it declares hosts) is not read offline: check 7 then SKIPs and says why.
   // An external ledger's hosts are its locked ones: it is not imported here.
-  const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins);
+  const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx));
   const skipLedger = !!opts.offline && lt.hosts.length > 0;
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
   const provider = opts.offline ? null : await providerFor(ctx, config);
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
-  const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
+  const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
   // U9: the ledger's, compared in check 7; its ceiling is the registered ledger's.
-  const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins) : null;
+  const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) : null;
   const report = await verifyAudit(
     { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
     {

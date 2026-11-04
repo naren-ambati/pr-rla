@@ -66,7 +66,7 @@ export async function runFreezeRepos(ctx: CommandContext, config: PrRlaConfig, a
               windowName: a.window.name,
               registrationSha256: a.reg!.sha256,
               prRlaVersion: PR_RLA_VERSION,
-              provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins),
+              provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx)),
               ...(a.resume !== undefined ? { resume: a.resume } : {}),
               // --force starts the run over, unless --resume names the (forced) run to continue.
               ...(a.force && a.resume === undefined ? { fresh: true } : {}),

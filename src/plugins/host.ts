@@ -1,7 +1,8 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import type { Socket } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEFAULT_MAX_RETRIES } from "../sdk/http.js";
+import { DEFAULT_MAX_RETRIES, MAX_WAIT_MS } from "../sdk/http.js";
 import { assertLedgerDefinition, LedgerApiVersionError, PROVENANCE_LEVELS, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerIndexStore, type ProvenanceLevel } from "../sdk/ledger.js";
 import {
   assertProviderDefinition,
@@ -14,11 +15,13 @@ import {
   type ReviewGranularity,
   type ScmProvider,
 } from "../sdk/provider.js";
+import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "../net/scrub.js";
 import { PluginError } from "./errors.js";
 import type { LockedCredential } from "./lock.js";
 import {
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
+  IPC_FD,
   IPC_PROTOCOL,
   MAX_MESSAGE_BYTES,
   type ChildBoot,
@@ -27,6 +30,7 @@ import {
   type DescribeResult,
   type FetchMessage,
   type ParentMessage,
+  type AcceptResultMessage,
   type PluginKind,
   type PluginMethod,
   type ReadyMessage,
@@ -63,7 +67,27 @@ export const SDK_MODULES: Readonly<Record<string, string>> = {
   "pr-rla/http": resolveSibling("../sdk/http"),
 };
 
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** A wait that ends early, and clears its timer, when `signal` aborts. */
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(done, ms);
+    function done() {
+      clearTimeout(t);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+const realSleep = abortableSleep;
+/** The longest wait a plugin's ctx.sleep is served for (the SDK's own cap on a single wait). */
+export const MAX_PLUGIN_SLEEP_MS = MAX_WAIT_MS;
+/**
+ * Fetches one child may have in flight. Each holds its request (up to a frame, 64 MiB) in the parent
+ * until it is answered, so this bounds what a child can make the parent hold; real plugins stay far below.
+ */
+export const MAX_PLUGIN_FETCHES = 64;
 const realTimer = (fire: () => void, ms: number) => {
   const t = setTimeout(fire, ms);
   return () => clearTimeout(t);
@@ -89,11 +113,14 @@ export interface HostOptions {
   env: Readonly<Record<string, string>>;
   /** How messages name the plugin: its `use`. */
   label: string;
-  /** Secrets the broker may swap in; stripped from every response before the child sees it. */
-  secrets?: readonly { env: string; value: string }[];
+  /** Secrets the broker may swap in; stripped from every response before the child sees it (identities, `secret: false`, are left alone). */
+  secrets?: readonly SecretValue[];
   execPath?: string;
+  /** Silence that stops the child while a call is in flight, counted from `ready` (default HEARTBEAT_TIMEOUT_MS). */
   heartbeatTimeoutMs?: number;
   heartbeatIntervalMs?: number;
+  /** How long the child may take to start and report `ready` (default HEARTBEAT_TIMEOUT_MS). */
+  loadTimeoutMs?: number;
   maxMessageBytes?: number;
   /** Arms the heartbeat watchdog (tests use a recording one). */
   setTimer?: (fire: () => void, ms: number) => () => void;
@@ -102,7 +129,8 @@ export interface HostOptions {
 /** Where the child's fetches, waits and log lines go: the plugin context's own. */
 export interface HostIo {
   fetch: typeof fetch;
-  sleep: (ms: number) => Promise<void>;
+  /** Waits on the command's clock; `signal` aborts when the wait is no longer served (the host closed, or no call is in flight). */
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   log: (line: string) => void;
   /** A ledger's local index (LedgerContext.index), kept by the parent. */
   index?: LedgerIndexStore;
@@ -120,6 +148,8 @@ export interface PluginHost {
   close(): void;
   /** The last lines the child wrote to stdout or stderr. */
   stderrTail(): string;
+  /** Heartbeats received, and the most bytes the frame reader ever held at once (diagnostics; tests read them). */
+  stats(): { heartbeats: number; maxBufferedBytes: number };
 }
 
 const live = new Set<PluginHost>();
@@ -131,33 +161,67 @@ export function closeAllPluginHosts(): void {
 
 type Refable = { ref?: () => void; unref?: () => void };
 
-/** Replaces each secret (and each Basic pair of them) with its placeholder, in bytes. */
-function scrubber(secrets: readonly { env: string; value: string }[]): (b: Buffer) => Buffer {
-  const pairs: [Buffer, Buffer][] = [];
-  for (const s of secrets) if (s.value) pairs.push([Buffer.from(s.value), Buffer.from(`prrla-cred:${s.env}`)]);
-  for (const a of secrets) for (const b of secrets) if (a.value && b.value) pairs.push([Buffer.from(Buffer.from(`${a.value}:${b.value}`).toString("base64")), Buffer.from(`prrla-basic:${a.env}:${b.env}`)]);
-  pairs.sort((x, y) => y[0].length - x[0].length);
-  return (buf) => {
-    let out = buf;
-    for (const [secret, placeholder] of pairs) {
-      let i = out.indexOf(secret);
-      if (i < 0) continue;
-      const parts: Buffer[] = [];
-      let from = 0;
-      while (i >= 0) {
-        parts.push(out.subarray(from, i), placeholder);
-        from = i + secret.length;
-        i = out.indexOf(secret, from);
-      }
-      parts.push(out.subarray(from));
-      out = Buffer.concat(parts);
-    }
-    return out;
-  };
+/** Replaces each secret, in every form a server may echo it in, with its placeholder (src/net/scrub.ts). */
+function scrubber(secrets: readonly SecretValue[]): { bytes: (b: Buffer) => Buffer; text: (s: string) => string } {
+  const pairs = scrubPairs(secrets);
+  return { bytes: (b) => scrubBytes(pairs, b), text: (t) => scrubText(pairs, t) };
 }
 
 function tooLarge(label: string, what: string, bytes: number, max: number): PluginError {
   return new PluginError(`plugin ${label}: ${what} is ${bytes} bytes, over the ${Math.round(max / 1024 / 1024)} MiB message limit; refused`, "MESSAGE_TOO_LARGE");
+}
+
+/** One frame: a 4-byte big-endian length, then the JSON (pr-rla/ipc/v2). */
+function frame(m: unknown): Buffer {
+  const body = Buffer.from(JSON.stringify(m));
+  const head = Buffer.alloc(4);
+  head.writeUInt32BE(body.length);
+  return Buffer.concat([head, body]);
+}
+
+/**
+ * Reads frames as they arrive, holding at most one frame's bytes: a length over `max` is refused
+ * from the 4-byte header, before any of its payload is buffered (finding 11).
+ */
+export function frameReader(max: number, onFrame: (json: Buffer) => void, onTooLarge: (bytes: number) => void): { push(chunk: Buffer): void; maxBuffered(): number } {
+  let chunks: Buffer[] = [];
+  let have = 0;
+  let need: number | null = null;
+  let high = 0;
+  let stopped = false;
+  const take = (n: number): Buffer => {
+    const all = chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks);
+    chunks = all.length > n ? [all.subarray(n)] : [];
+    have -= n;
+    return all.subarray(0, n);
+  };
+  return {
+    push(chunk) {
+      if (stopped) return;
+      chunks.push(chunk);
+      have += chunk.length;
+      high = Math.max(high, have);
+      for (;;) {
+        if (need === null) {
+          if (have < 4) return;
+          const n = take(4).readUInt32BE(0);
+          if (n > max) {
+            stopped = true;
+            chunks = [];
+            have = 0;
+            return onTooLarge(n);
+          }
+          need = n;
+        }
+        if (have < need) return;
+        const body = take(need);
+        need = null;
+        onFrame(body);
+        if (stopped) return;
+      }
+    },
+    maxBuffered: () => high,
+  };
 }
 
 /**
@@ -168,6 +232,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   const execPath = o.execPath ?? process.execPath;
   const major = nodeMajor(execPath);
   const timeoutMs = o.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+  const loadMs = o.loadTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
   const maxBytes = o.maxMessageBytes ?? MAX_MESSAGE_BYTES;
   const setTimer = o.setTimer ?? realTimer;
   const scrub = scrubber(o.secrets ?? []);
@@ -180,8 +245,11 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     entry: pathToFileURL(o.entry).href,
     sdk: Object.fromEntries(Object.entries(SDK_MODULES).map(([k, v]) => [k, pathToFileURL(v).href])),
     heartbeatMs: o.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+    maxMessageBytes: maxBytes,
   };
-  const child: ChildProcess = spawn(execPath, [...flags, CHILD_SCRIPT, JSON.stringify(boot)], { env: { ...o.env }, stdio: ["ignore", "pipe", "pipe", "ipc"], serialization: "json" });
+  // fd 3 is a pipe carrying length-prefixed frames (pr-rla/ipc/v2), not Node's IPC channel.
+  const child: ChildProcess = spawn(execPath, [...flags, CHILD_SCRIPT, JSON.stringify(boot)], { env: { ...o.env }, stdio: ["ignore", "pipe", "pipe", "pipe"] });
+  const pipe = child.stdio[IPC_FD] as Socket;
 
   let tail = "";
   const keep = (d: Buffer) => {
@@ -212,7 +280,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   });
   let loading = true;
 
-  const handles = [child, child.channel, child.stdout, child.stderr] as unknown as (Refable | null | undefined)[];
+  const handles = [child, pipe, child.stdout, child.stderr] as unknown as (Refable | null | undefined)[];
   const setRef = (on: boolean) => handles.forEach((h) => (on ? h?.ref?.() : h?.unref?.()));
 
   let disarm: (() => void) | null = null;
@@ -220,13 +288,30 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     disarm?.();
     disarm = null;
     if (dead || closed || (!loading && pending.size === 0)) return;
+    // Until `ready` the child is starting (a process, then the plugin's imports): that has its own limit.
+    // The heartbeat timeout counts from `ready`, while a call is in flight.
+    const starting = loading;
     disarm = setTimer(() => {
-      die(new PluginError(withTail(`plugin ${o.label} sent no heartbeat for ${Math.round(timeoutMs / 1000)} s and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
+      const secs = (ms: number) => (ms < 10_000 ? String(ms / 1000) : String(Math.round(ms / 1000)));
+      const why = starting ? `did not finish loading within ${secs(loadMs)} s` : `sent no heartbeat for ${secs(timeoutMs)} s`;
+      die(new PluginError(withTail(`plugin ${o.label} ${why} and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
       child.kill("SIGKILL");
-    }, timeoutMs);
+    }, starting ? loadMs : timeoutMs);
+  };
+  /** The plugin's waits being served; each ends early when its controller aborts. */
+  const sleeps = new Set<AbortController>();
+  /** The broker's questions to the plugin's acceptJson rule, by aid. */
+  const accepts = new Map<number, { resolve: (problem: string | null) => void; reject: (e: unknown) => void }>();
+  let nextAid = 1;
+  let heartbeats = 0;
+  const stopSleeps = () => {
+    for (const c of sleeps) c.abort();
+    sleeps.clear();
   };
   const busy = () => {
     setRef(loading || pending.size > 0 || fetches.size > 0);
+    // A wait is served only while a call is in flight (finding 13).
+    if (!loading && pending.size === 0) stopSleeps();
     arm();
   };
 
@@ -235,6 +320,9 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     dead = e;
     disarm?.();
     disarm = null;
+    stopSleeps();
+    for (const a of accepts.values()) a.reject(e);
+    accepts.clear();
     for (const f of fetches.values()) f.abort();
     fetches.clear();
     for (const p of pending.values()) p.reject(e);
@@ -244,13 +332,34 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   }
 
   function post(m: ParentMessage): void {
-    if (dead || closed || !child.connected) return;
-    const bytes = Buffer.byteLength(JSON.stringify(m));
-    if (bytes > maxBytes) throw tooLarge(o.label, `a ${m.type} message`, bytes, maxBytes);
-    child.send(m);
+    if (dead || closed || pipe.destroyed) return;
+    const f = frame(m);
+    if (f.length - 4 > maxBytes) throw tooLarge(o.label, `a ${m.type} message`, f.length - 4, maxBytes);
+    pipe.write(f);
+  }
+
+  /** Asks the plugin's own acceptJson rule about a body (finding 10); what the child sees is scrubbed, as every response is. */
+  function askAccept(fid: number, body: unknown): Promise<string | null> {
+    const aid = nextAid++;
+    return new Promise<string | null>((resolve, reject) => {
+      accepts.set(aid, { resolve, reject });
+      try {
+        post({ type: "accept", aid, fid, body: scrub.text(JSON.stringify(body ?? null)) });
+      } catch {
+        // Too large to ask about: too large to deliver too, so the fetch fails at its result instead.
+        accepts.delete(aid);
+        resolve(null);
+      }
+    });
   }
 
   async function serveFetch(m: FetchMessage): Promise<void> {
+    // Like a sleep, a fetch is served only while a call is in flight, and only so many at once.
+    const refusal = loading || pending.size === 0 ? "the plugin fetched outside a call; nothing was sent" : fetches.size >= MAX_PLUGIN_FETCHES ? `the plugin has ${MAX_PLUGIN_FETCHES} fetches in flight already; nothing was sent` : null;
+    if (refusal) {
+      post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: "PLUGIN_FETCH_REFUSED", message: refusal } });
+      return;
+    }
     const ctrl = new AbortController();
     fetches.set(m.fid, ctrl);
     busy();
@@ -265,13 +374,15 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         // An isolated plugin cannot raise the attempt limit past the broker's own (contracts.md §2: at most 7 attempts).
         const cap = (n: number) => Math.max(0, Math.min(DEFAULT_MAX_RETRIES, Math.floor(n)));
         if (r === false) init.retry = false;
-        else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.acceptJson ? { acceptJson: () => null } : {}) };
+        // The plugin's acceptJson rule runs in the child: the broker awaits its answer, as it would in process (finding 10).
+        else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.acceptJson ? { acceptJson: (body: unknown) => askAccept(m.fid, body) } : {}) };
       }
       const res = await io.fetch(m.url, init);
-      const body = scrub(Buffer.from(await res.arrayBuffer())).toString("base64");
-      const headers = [...res.headers].map(([k, v]) => [k, scrub(Buffer.from(v)).toString("utf8")] as [string, string]);
+      // Everything the child sees of the response is scrubbed: its body, headers, status text and final URL.
+      const body = scrub.bytes(Buffer.from(await res.arrayBuffer())).toString("base64");
+      const headers = [...res.headers].map(([k, v]) => [k, scrub.text(v)] as [string, string]);
       try {
-        post({ type: "fetchResult", fid: m.fid, status: res.status, statusText: res.statusText, headers, body, url: res.url });
+        post({ type: "fetchResult", fid: m.fid, status: res.status, statusText: scrub.text(res.statusText), headers, body, url: scrub.text(res.url) });
       } catch (e) {
         post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: (e as PluginError).code, message: (e as Error).message } });
       }
@@ -282,10 +393,10 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         fid: m.fid,
         error: {
           name: typeof err?.name === "string" ? err.name : "Error",
-          message: scrub(Buffer.from(typeof err?.message === "string" ? err.message : String(e))).toString("utf8"),
+          message: scrub.text(typeof err?.message === "string" ? err.message : String(e)),
           ...(typeof err?.code === "string" ? { code: err.code } : {}),
-          ...(typeof err?.host === "string" ? { host: err.host } : {}),
-          ...(typeof err?.next === "string" ? { next: err.next } : {}),
+          ...(typeof err?.host === "string" ? { host: scrub.text(err.host) } : {}),
+          ...(typeof err?.next === "string" ? { next: scrub.text(err.next) } : {}),
         },
       });
     } finally {
@@ -294,15 +405,31 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     }
   }
 
-  child.on("message", (raw: unknown) => {
-    const m = raw as ChildMessage;
-    if (dead || closed) return;
-    const bytes = Buffer.byteLength(JSON.stringify(raw));
-    if (bytes > maxBytes) {
-      die(tooLarge(o.label, `a ${String(m?.type)} message from it`, bytes, maxBytes));
+  const reader = frameReader(
+    maxBytes,
+    (json) => {
+      let m: unknown;
+      try {
+        m = JSON.parse(json.toString("utf8"));
+      } catch {
+        die(new PluginError(`plugin ${o.label} sent a message that is not JSON`, "PLUGIN_HOST_FAILED"));
+        child.kill("SIGKILL");
+        return;
+      }
+      receive(m as ChildMessage);
+    },
+    (bytes) => {
+      if (dead || closed) return;
+      die(tooLarge(o.label, "a message from it", bytes, maxBytes));
       child.kill("SIGKILL");
-      return;
-    }
+      pipe.destroy();
+    },
+  );
+  pipe.on("data", (chunk: Buffer) => reader.push(chunk));
+  pipe.on("error", () => {});
+
+  function receive(m: ChildMessage): void {
+    if (dead || closed) return;
     arm();
     switch (m?.type) {
       case "ready":
@@ -331,9 +458,26 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
       case "fetch":
         void serveFetch(m);
         return;
-      case "sleep":
-        void (io?.sleep ?? realSleep)(Math.max(0, Number(m.ms) || 0)).then(() => post({ type: "slept", sid: m.sid }));
+      case "sleep": {
+        // Only while a call is in flight, for at most MAX_PLUGIN_SLEEP_MS, and cancelled when the calls end or the host closes (finding 13).
+        if (loading || pending.size === 0) return;
+        const ctrl = new AbortController();
+        sleeps.add(ctrl);
+        void (io?.sleep ?? realSleep)(Math.min(MAX_PLUGIN_SLEEP_MS, Math.max(0, Number(m.ms) || 0)), ctrl.signal).then(() => {
+          sleeps.delete(ctrl);
+          if (!ctrl.signal.aborted) post({ type: "slept", sid: m.sid });
+        });
         return;
+      }
+      case "acceptResult": {
+        const a = accepts.get((m as AcceptResultMessage).aid);
+        accepts.delete((m as AcceptResultMessage).aid);
+        if (!a) return;
+        const r = m as AcceptResultMessage;
+        if (typeof r.error === "string") a.reject(new Error(r.error));
+        else a.resolve(typeof r.problem === "string" ? r.problem : null);
+        return;
+      }
       case "log":
         io?.log(String(m.line));
         return;
@@ -347,13 +491,15 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         return;
       }
       case "heartbeat":
+        heartbeats++;
         return;
       default:
         die(new PluginError(`plugin ${o.label} sent an unknown message (${JSON.stringify((m as { type?: unknown } | null)?.type)})`, "PLUGIN_HOST_FAILED"));
         child.kill("SIGKILL");
     }
-  });
-  child.on("exit", (code, signal) => {
+  }
+  // "close", not "exit": it comes after the child's pipes are drained, so a last error frame (a load failure) is read first.
+  child.on("close", (code, signal) => {
     if (!closed) die(new PluginError(withTail(`plugin ${o.label} exited (${signal ? `signal ${signal}` : `code ${code}`})`), "PLUGIN_HOST_FAILED", "check the plugin's output above"));
     live.delete(host);
   });
@@ -398,13 +544,18 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
       closed = true;
       disarm?.();
       live.delete(host);
+      stopSleeps();
       for (const f of fetches.values()) f.abort();
       const e = new PluginError(`plugin ${o.label}: its host was closed`, "PLUGIN_HOST_FAILED");
+      for (const a of accepts.values()) a.reject(e);
+      accepts.clear();
       for (const p of pending.values()) p.reject(e);
       pending.clear();
       child.kill();
+      pipe.destroy();
     },
     stderrTail,
+    stats: () => ({ heartbeats, maxBufferedBytes: reader.maxBuffered() }),
   };
   live.add(host);
   busy();
@@ -466,13 +617,15 @@ export async function describePlugin(host: PluginHost, options: unknown): Promis
  * `hostFromOption` goes to the host of that option's URL when the options set it, and only to an
  * `https:` URL's host (any other value grants it no host, so a token is never sent in clear text);
  * without the option it keeps its declared `hosts`. pr-rla computes this from the audit's own
- * options, not from the plugin's code, and the lock records the result.
+ * options, not from the plugin's code, and the lock records the result, with any extra header
+ * names the definition declares for it (lowercase) and whether it is an identity (`secret: false`).
  */
 export function credentialGrants(declared: readonly PluginCredential[], options: unknown): LockedCredential[] {
   const o = options && typeof options === "object" ? (options as Record<string, unknown>) : {};
   return declared.map((c) => {
     const key = c.hostFromOption;
-    if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort() };
+    const headers = { ...(c.headers?.length ? { headers: [...new Set(c.headers.map((h) => h.toLowerCase()))].sort() } : {}), ...(c.secret === false ? { secret: false as const } : {}) };
+    if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort(), ...headers };
     let host: string | null = null;
     try {
       const u = typeof o[key] === "string" ? new URL(o[key] as string) : null;
@@ -480,7 +633,7 @@ export function credentialGrants(declared: readonly PluginCredential[], options:
     } catch {
       host = null;
     }
-    return { env: c.env, hosts: host ? [host] : [], hostFromOption: key };
+    return { env: c.env, hosts: host ? [host] : [], hostFromOption: key, ...headers };
   });
 }
 
@@ -502,7 +655,7 @@ const withoutSignal = (req: ListChangesRequest): Omit<ListChangesRequest, "signa
 };
 
 /** A ScmProvider whose methods run in the host. The context's fetch, sleep and log serve the child. */
-export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number) => Promise<void>; log: (line: string) => void }): Promise<ScmProvider> {
+export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; log: (line: string) => void }): Promise<ScmProvider> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log });
   const c = await createInstance(host, options, { cwd: ctx.cwd });
   if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(c.apiVersion as number)) throw new ProviderApiVersionError(String(host.ready.name), c.apiVersion);
@@ -521,7 +674,7 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
 }
 
 /** A Ledger whose methods run in the host. */
-export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore }): Promise<Ledger> {
+export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore }): Promise<Ledger> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log, ...(ctx.index ? { index: ctx.index } : {}) });
   const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}) });
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(c.apiVersion as number)) throw new LedgerApiVersionError(String(host.ready.name), c.apiVersion);

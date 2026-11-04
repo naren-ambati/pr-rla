@@ -25,8 +25,9 @@ export interface RetryHints {
   /**
    * The 2xx body is JSON. A body that does not parse is retried as truncated; otherwise this
    * returns a reason to retry the parsed body (a transient GraphQL error), or null to accept it.
+   * It may answer asynchronously (the plugin host asks an isolated plugin's own rule over IPC).
    */
-  acceptJson?: (body: unknown) => string | null;
+  acceptJson?: (body: unknown) => string | null | Promise<string | null>;
 }
 
 /** Phase-2 default: 6 retries, so 7 attempts (contracts.md §2: SCM, drand and Rekor allow at most 7). */
@@ -138,7 +139,7 @@ export function backoffMs(attempt: number, random: number, capMs = MAX_BACKOFF_M
 /** Statuses whose response has no body by definition; `new Response()` refuses one for them. */
 const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304]);
 
-export async function checkJsonBody(res: Response, accept: (body: unknown) => string | null): Promise<{ response: Response; problem: string | null }> {
+export async function checkJsonBody(res: Response, accept: (body: unknown) => string | null | Promise<string | null>): Promise<{ response: Response; problem: string | null }> {
   // A 204 (Jira answers a PUT with one), 205 or 304 has no body to check: pass it on as it is.
   if (NULL_BODY_STATUSES.has(res.status)) return { response: new Response(null, { status: res.status, statusText: res.statusText, headers: res.headers }), problem: null };
   const text = await res.text();
@@ -149,7 +150,7 @@ export async function checkJsonBody(res: Response, accept: (body: unknown) => st
   } catch {
     return { response, problem: `truncated or non-JSON body (${text.length} bytes)` };
   }
-  return { response, problem: accept(body) };
+  return { response, problem: await accept(body) };
 }
 
 /** The error codes a broker gives up with, and what a client needs from them to word its own error. */
@@ -224,9 +225,8 @@ export interface HttpClientOptions {
   maxBlindRateLimitRetries?: number;
 }
 
+// No parameter properties in this module: an isolated plugin loads it type-stripped from src/ (finding 15; tsconfig.sdk.json).
 export class HttpError extends Error {
-  // Declared and assigned, not parameter properties: src/sdk is erasable TypeScript (tsconfig.sdk.json), because a
-  // plugin's `pr-rla/http` runs under Node's type stripping in the plugin host.
   readonly status: number;
   readonly url: string;
   constructor(message: string, status: number, url: string) {
@@ -254,9 +254,9 @@ export interface RequestOptions {
 export class HttpClient {
   requestCount = 0;
   private notBefore = 0;
+  private readonly o: HttpClientOptions;
   private readonly sleep: (ms: number) => Promise<void>;
   readonly baseUrl: string;
-  private readonly o: HttpClientOptions;
 
   constructor(o: HttpClientOptions) {
     this.o = o;

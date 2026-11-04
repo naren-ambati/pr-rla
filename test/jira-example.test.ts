@@ -7,7 +7,8 @@ import { createAuditContext, openLedger } from "../src/api/context.js";
 import { registerCommand } from "../src/commands/register.js";
 import { parseConfig } from "../src/config.js";
 import { CredentialHostMismatch } from "../src/net/contract.js";
-import { loadLedgerDefinition } from "../src/registry.js";
+// In process and unlocked, as a plugin's author tests it; the last two tests open it locked.
+import { unsafeLoadLedgerDefinition as loadLedgerDefinition } from "../src/registry.js";
 import type { DrawForLedger, LedgerDefinition, PublishContext } from "../src/sdk/ledger.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerUnderTest } from "../src/testing/index.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
@@ -44,7 +45,7 @@ describe("external Jira example ledger, loaded from .pr-rla.yml through the regi
 
   it("authenticates with prrla-basic: the broker builds Basic auth for the site only, and the ledger writes only under /rest/api/3/issue", async () => {
     const audit = auditDirWith(JIRA_FILES);
-    await lockPlugin(audit, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full" });
+    await lockPlugin(audit, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full", approve: true });
     const fake = await fakeJira();
     const dir = mkdtempSync(join(tmpdir(), "prrla-jira-"));
     const actx = createAuditContext({ mode: "read-write", fetch: fake.fetch, env: { JIRA_EMAIL: "me@acme.example", JIRA_TOKEN: "tok-123" } });
@@ -66,7 +67,7 @@ describe("external Jira example ledger, loaded from .pr-rla.yml through the regi
     const s = setupAuditRepo({ changes: makeChanges(160) });
     for (const [to, from] of Object.entries(JIRA_FILES)) cpSync(from, join(s.dir, to), { recursive: true });
     appendFileSync(join(s.dir, ".pr-rla.yml"), `ledger:\n  use: ./jira/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\nverdicts: { reviewers: ["557058:alice"] }\n`);
-    await lockPlugin(s.dir, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full" });
+    await lockPlugin(s.dir, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full", approve: true });
     s.clock.now = T("2026-06-20T00:00:00Z");
     expect(await registerCommand(s.ctx, { dryRun: true })).toBe(0);
     expect(s.out.join("\n")).toMatch(/ledger jira · verdict provenance account · reviewers 557058:alice/);

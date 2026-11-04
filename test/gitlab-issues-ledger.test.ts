@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAuditContext, openLedger } from "../src/api/context.js";
 import gitlabIssues from "../src/ledgers/gitlab-issues/index.js";
+import { approvalsFile, approveBuiltin } from "../src/plugins/approvals.js";
 import type { DrawForLedger, Ledger } from "../src/sdk/ledger.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerHarness } from "../src/testing/index.js";
 import { FakeGitLabIssues } from "./helpers/fake-issue-trackers.js";
@@ -159,6 +160,8 @@ describe("gitlab-issues details", () => {
     expect(gitlabIssues.writePaths!(cfg.ledger.options as never)).toEqual(["gitlab.example.com/api/v4/projects/acme%2Faudit/"]);
     const fake = new FakeGitLabIssues(BASE, "acme/audit");
     const dir = tmp();
+    // A token for a self-managed instance is not a default grant: approved here, as `pr-rla plugin approve gitlab-issues` would.
+    approveBuiltin(approvalsFile(), "GITLAB_TOKEN", BASE, "2026-11-04T00:00:00Z");
     const actx = createAuditContext({ mode: "read-write", fetch: fake.fetch, env: { GITLAB_TOKEN: "t" } });
     const l = await openLedger(actx, cfg.ledger, dir, dir);
     await l.publishDraws!(DRAWS, PUB);

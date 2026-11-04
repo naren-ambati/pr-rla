@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseConfig } from "../src/config.js";
-import { createProvider, loadProviderDefinition } from "../src/registry.js";
+// In process and unlocked, as a plugin's author tests it (a command opens it locked, through openProvider).
+import { unsafeCreateProvider as createProvider, unsafeLoadProviderDefinition as loadProviderDefinition } from "../src/registry.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
 import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { fakeGitea, GITEA_BASE } from "./helpers/fake-gitea.js";

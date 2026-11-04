@@ -14,8 +14,9 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
-    // Refuses every socket except loopback mocks, so the suite provably makes no network call.
-    setupFiles: ["test/setup/network-deny.ts"],
+    // Refuses every socket except loopback mocks, so the suite provably makes no network call; and gives
+    // every test file its own approvals file, so no test touches the real ~/.config/pr-rla.
+    setupFiles: ["test/setup/network-deny.ts", "test/setup/approvals.ts"],
     testTimeout: 60_000,
     // Hooks generate test keys and start mock servers: on a loaded machine they need what a test gets, not 10 s.
     hookTimeout: 60_000,

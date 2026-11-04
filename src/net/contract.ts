@@ -120,14 +120,61 @@ export class WritePathNotAllowed extends BrokerError {
   }
 }
 
-/** Step 3: a credential placeholder addressed to a host outside that credential's hosts. Nothing was sent. */
+/**
+ * Step 3: a credential placeholder addressed to an origin outside that credential's grant: another
+ * host or port, a scheme other than https, or any hop after a redirect from https to http. Nothing
+ * was sent. `target` names the refused destination when the host alone does not say why.
+ */
 export class CredentialHostMismatch extends BrokerError {
   constructor(
     readonly env: string,
     host: string,
     readonly allowed: readonly string[],
+    target: { name: string; overHttps: true } | null = null,
   ) {
-    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}, not ${host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
+    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}${target ? " over https" : ""}, not ${target?.name ?? host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, target ? `use the https URL of ${host}; a credential is never sent in clear text` : `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
     this.name = "CredentialHostMismatch";
+  }
+}
+
+/**
+ * Step 3: the credential is locked for this host, but the person running the command has not
+ * approved the grant on this machine (src/plugins/approvals.ts), so it is withheld. Nothing was sent.
+ */
+export class CredentialNotApproved extends BrokerError {
+  constructor(
+    readonly env: string,
+    host: string,
+    readonly pluginId: string,
+    readonly approve: string,
+  ) {
+    super(`credential ${env} is withheld from ${pluginId}: you have not approved sending it to ${host} on this machine; nothing was sent`, "CREDENTIAL_NOT_APPROVED", host, `review the plugin, then: ${approve}`);
+    this.name = "CredentialNotApproved";
+  }
+}
+
+/**
+ * Step 3: a credential placeholder in a header other than `authorization` and the header names the
+ * plugin declares for that credential (finding 5). Nothing was sent.
+ */
+export class CredentialHeaderNotAllowed extends BrokerError {
+  constructor(
+    readonly env: string,
+    readonly header: string,
+    host: string,
+  ) {
+    super(`credential ${env} may be sent only in authorization${header === "authorization" ? "" : ` or a header its plugin declares for it, not in ${header}`}; nothing was sent`, "CREDENTIAL_HEADER_NOT_ALLOWED", host, `send it in authorization, or declare ${header} in the credential's headers`);
+    this.name = "CredentialHeaderNotAllowed";
+  }
+}
+
+/** Step 3: a credential its plugin declares an identity (`secret: false`) used anywhere but as the user of prrla-basic: (finding 8). Nothing was sent. */
+export class CredentialIdentityOnly extends BrokerError {
+  constructor(
+    readonly env: string,
+    host: string,
+  ) {
+    super(`credential ${env} is declared an identity (secret: false), so it is sent only as the user part of prrla-basic:<USER_ENV>:<TOKEN_ENV>; nothing was sent`, "CREDENTIAL_IDENTITY_ONLY", host, `use it as prrla-basic:${env}:<TOKEN_ENV>, or declare it a secret`);
+    this.name = "CredentialIdentityOnly";
   }
 }

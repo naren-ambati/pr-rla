@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProgram } from "../src/cli.js";
@@ -262,8 +264,16 @@ describe("--plugins builtin-only and PR_RLA_PLUGINS=builtin-only (FR2.6)", () =>
     expect((await cli(builtin, ["--plugins", "builtin-only", "freeze", "--dry-run"])).code).toBe(0);
   });
 
-  it("any other value is refused, so a typo never lets external code in", () => {
+  it("any other value is refused, so a typo never lets external code in", async () => {
     expect(() => pluginPolicy("all", {})).toThrow(/--plugins "all": the only value is builtin-only/);
+    // An empty --plugins is a mistake, not "unset" (finding 15); an empty variable is unset, as shells set them.
+    expect(() => pluginPolicy("", {})).toThrow(/--plugins "": the only value is builtin-only/);
+    expect(pluginPolicy(undefined, { PR_RLA_PLUGINS: "" })).toBe("locked");
+    const s = withPlugin({ source: 'throw new Error("IMPORTED: external code ran");\n' });
+    const r = await cli(s, ["--plugins", "", "freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/--plugins "": the only value is builtin-only/);
+    expect(text(r)).not.toMatch(/IMPORTED/);
     expect(() => pluginPolicy(undefined, { PR_RLA_PLUGINS: "builtin_only" })).toThrow(/PR_RLA_PLUGINS "builtin_only"/);
     expect(pluginPolicy(undefined, {})).toBe("locked");
     expect(pluginPolicy(undefined, { PR_RLA_PLUGINS: "builtin-only" })).toBe("builtin-only");
@@ -293,7 +303,140 @@ describe("trust: full is an explicit opt-in, said on every command and repeated 
   });
 });
 
+describe("trust: full loads only the pr-rla running it (finding 14)", () => {
+  it("a copy of pr-rla in the plugin's node_modules, which the tree hash leaves out, is refused before the plugin is imported", async () => {
+    const marker = join(tmpdir(), `prrla-unhashed-${process.pid}-${Date.now()}.txt`);
+    const s = withPlugin({ source: `if (process.env.PR_RLA_HOST !== "1") await import("pr-rla");\n${PLUGIN_SOURCE}` });
+    const copy = join(s.dir, "plugins", "acme", "node_modules", "pr-rla");
+    mkdirSync(copy, { recursive: true });
+    writeFileSync(join(copy, "package.json"), JSON.stringify({ name: "pr-rla", version: "0.1.0", type: "module", exports: "./index.js" }));
+    writeFileSync(join(copy, "index.js"), `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "unhashed pr-rla ran in process");\n`);
+    expect((await cli(s, ["plugin", "add", USE, "--trust", "full", "--yes"])).code).toBe(0);
+    const before = readLock(s.dir).plugins[USE]!.treeSha256;
+    appendFileSync(join(copy, "index.js"), "// changed\n");
+    expect(treeSha256(resolvePlugin(USE, s.dir))).toBe(before);
+    const r = await cli(s, ["freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/plugin \.\/plugins\/acme\/index\.mjs would load pr-rla from .*plugins\/acme\/node_modules\/pr-rla, not the pr-rla running it \(.*\); that copy is not in its tree hash, so it is not run in this process/);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("trust: full loads only the pr-rla running it, self-reference included (review of this round)", () => {
+  it("an audit repo whose package.json is named pr-rla cannot stand in for it", async () => {
+    const marker = join(tmpdir(), `prrla-selfref-${process.pid}-${Date.now()}.txt`);
+    const s = withPlugin({ source: `if (process.env.PR_RLA_HOST !== "1") await import("pr-rla/x");\n${PLUGIN_SOURCE}` });
+    // A single-file plugin's package scope is the audit repo's: Node resolves pr-rla/x to ./evil.mjs there, before node_modules.
+    writeFileSync(join(s.dir, "package.json"), JSON.stringify({ name: "pr-rla", private: true, type: "module", exports: { "./x": "./evil.mjs" } }));
+    writeFileSync(join(s.dir, "evil.mjs"), `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "self-referenced pr-rla ran in process");\n`);
+    const single = "./plugins/acme/index.mjs";
+    rmSync(join(s.dir, "plugins", "acme", "package.json"));
+    expect((await cli(s, ["plugin", "add", single, "--trust", "full", "--yes"])).code).toBe(0);
+    const r = await cli(s, ["freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/would load pr-rla from .* \(package\.json named pr-rla, which the plugin's imports of pr-rla\/… resolve to\), not the pr-rla running it/);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("trust: full imports only what its tree hash covers (review of this round)", () => {
+  // Vitest resolves a test's imports itself, so the resolve hook is exercised in plain Node processes:
+  // the guard module type-stripped from src/, and the built CLI when dist/ is there.
+  const marker = () => join(tmpdir(), `prrla-undeclared-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+  const UNHASHED = (m: string) => `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(m)}, "unhashed code ran in process");\nexport default 1;\n`;
+  /** An audit dir with a package the plugin never declared in its node_modules, and the plugin. */
+  function auditWith(source: string, m: string): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "prrla-guard-")));
+    const pkg = join(dir, "node_modules", "left-pad-unhashed");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "left-pad-unhashed", version: "1.0.0", type: "module", exports: "./index.js" }));
+    writeFileSync(join(pkg, "index.js"), UNHASHED(m));
+    mkdirSync(join(dir, "plugins"));
+    writeFileSync(join(dir, "plugins", "p.mjs"), source);
+    writeFileSync(join(dir, "plugins", "helper.mjs"), UNHASHED(m));
+    return dir;
+  }
+  const run = (args: string[], env: Record<string, string> = {}) => spawnSync(process.execPath, args, { encoding: "utf8", env: { PATH: process.env.PATH ?? "", PR_RLA_APPROVALS_FILE: process.env.PR_RLA_APPROVALS_FILE!, ...env }, timeout: 60_000 });
+
+  it("the resolve hook refuses undeclared packages and unhashed files, allows node: built-ins and declared dependencies (Node's own resolution)", () => {
+    const m = marker();
+    const guard = pathToFileURL(join(ROOT, "src", "plugins", "inprocess-guard.ts")).href;
+    // Each case: a plugin's import line, whether it has a package root (with a declared and an undeclared package in its node_modules), and the outcome.
+    const cases: [string, boolean, string][] = [
+      ['import "left-pad-unhashed";', false, "TREE_ESCAPE"],
+      ['import "./helper.mjs";', false, "TREE_ESCAPE"],
+      ['import { readFileSync } from "node:fs"; void readFileSync;', false, "LOADED"],
+      // The review's repro: the tree hash skips <root>/node_modules, so an undeclared package there is unhashed.
+      ['import "nested-undeclared";', true, "TREE_ESCAPE"],
+      ['import "declared-dep";', true, "LOADED"],
+    ];
+    for (const [importLine, packaged, outcome] of cases) {
+      const dir = auditWith(`${importLine}\nexport default { ok: true };\n`, m);
+      const root = join(dir, "plugins");
+      const trees = [packaged ? root : join(root, "p.mjs")];
+      if (packaged) {
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "p", version: "1.0.0", type: "module", dependencies: { "declared-dep": "1.0.0" } }));
+        for (const [name, body] of [["nested-undeclared", UNHASHED(m)], ["declared-dep", "export default 2;\n"]] as const) {
+          const d = join(root, "node_modules", name);
+          mkdirSync(d, { recursive: true });
+          writeFileSync(join(d, "package.json"), JSON.stringify({ name, version: "1.0.0", type: "module", exports: "./index.js" }));
+          writeFileSync(join(d, "index.js"), body);
+        }
+        trees.push(join(root, "node_modules", "declared-dep"));
+      }
+      const script = join(dir, "load.mjs");
+      writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nguardInProcessImports("./plugins/p.mjs", ${JSON.stringify(trees)}, []);\ntry { await import(${JSON.stringify(pathToFileURL(join(root, "p.mjs")).href)}); console.log(JSON.stringify({ code: "LOADED" })); } catch (e) { console.log(JSON.stringify({ code: e.code, message: e.message })); }\n`);
+      const r = run(["--disable-warning=ExperimentalWarning", script]);
+      const got = JSON.parse(r.stdout.trim() || "{}") as { code?: string; message?: string };
+      expect(got.code, `${importLine} ${r.stderr}`).toBe(outcome);
+      if (outcome === "TREE_ESCAPE") expect(got.message).toMatch(/^plugin \.\/plugins\/p\.mjs imports ".*", which resolves to .*, outside the files its tree hash covers/);
+    }
+    expect(existsSync(m)).toBe(false);
+  });
+
+  it("a plugin guarded again replaces its guard (a long-lived process that re-locks it), never stacking under the old one", () => {
+    const m = marker();
+    const guard = pathToFileURL(join(ROOT, "src", "plugins", "inprocess-guard.ts")).href;
+    const dir = auditWith('import "./helper.mjs";\nexport default 1;\n', m);
+    writeFileSync(join(dir, "plugins", "helper.mjs"), "export default 2;\n");
+    const root = join(dir, "plugins");
+    const script = join(dir, "load.mjs");
+    // First guarded as the file alone (helper refused), then as the directory (helper hashed, allowed).
+    writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nconst p = ${JSON.stringify(pathToFileURL(join(root, "p.mjs")).href)};\nconst out = [];\nguardInProcessImports("p", [${JSON.stringify(root)}, ${JSON.stringify(join(root, "x"))}], []);\nguardInProcessImports("p", [${JSON.stringify(join(root, "p.mjs"))}], []);\ntry { await import(p + "?1"); out.push("LOADED"); } catch (e) { out.push(e.code); }\nguardInProcessImports("p", [${JSON.stringify(root)}], []);\ntry { await import(p + "?2"); out.push("LOADED"); } catch (e) { out.push(e.code); }\nconsole.log(JSON.stringify(out));\n`);
+    const r = run(["--disable-warning=ExperimentalWarning", script]);
+    expect(JSON.parse(r.stdout.trim() || "[]"), r.stderr).toEqual(["TREE_ESCAPE", "LOADED"]);
+  });
+
+  const DIST = join(ROOT, "dist", "plugins", "inprocess-guard.js");
+  it.skipIf(!existsSync(DIST))("the built CLI refuses a trust: full plugin's undeclared import before it runs (needs npm run build)", async () => {
+    const m = marker();
+    const dir = auditWith(`if (process.env.PR_RLA_HOST !== "1") await import("left-pad-unhashed");\nexport default { providerApiVersion: 1, name: "acme", create() { return { apiVersion: 1, name: "acme", async listChanges() { return { changes: [], defaultBranch: "main" }; } }; } };\n`, m);
+    const s = setupAuditRepo({ changes: [], provider: "{ use: ./plugins/p.mjs, options: {} }" });
+    cpSync(dir, s.dir, { recursive: true });
+    expect((await cli(s, ["plugin", "add", "./plugins/p.mjs", "--trust", "full", "--yes"])).code).toBe(0);
+    const r = run([join(ROOT, "dist", "cli.js"), "-C", s.dir, "freeze", "--dry-run"]);
+    expect(r.stderr).toMatch(/plugin \.\/plugins\/p\.mjs imports "left-pad-unhashed", which resolves to .*node_modules\/left-pad-unhashed\/index\.js, outside the files its tree hash covers/);
+    expect(r.status).toBe(1);
+    expect(existsSync(m)).toBe(false);
+  });
+
+  it.skipIf(!existsSync(DIST))("the running pr-rla counts only for its own code: a checkout's other files are refused (needs npm run build)", async () => {
+    // Running from a checkout, pr-rla's directory also holds tests, scripts and examples nobody hashed.
+    const other = pathToFileURL(join(ROOT, "test", "fixtures", "plugins", "hostile", "package.json")).href;
+    const dir = auditWith(`if (process.env.PR_RLA_HOST !== "1") await import(${JSON.stringify(other)}, { with: { type: "json" } });\nexport default { providerApiVersion: 1, name: "acme", create() { return { apiVersion: 1, name: "acme", async listChanges() { return { changes: [], defaultBranch: "main" }; } }; } };\n`, marker());
+    const s = setupAuditRepo({ changes: [], provider: "{ use: ./plugins/p.mjs, options: {} }" });
+    cpSync(dir, s.dir, { recursive: true });
+    expect((await cli(s, ["plugin", "add", "./plugins/p.mjs", "--trust", "full", "--yes"])).code).toBe(0);
+    const r = run([join(ROOT, "dist", "cli.js"), "-C", s.dir, "freeze", "--dry-run"]);
+    expect(r.stderr).toMatch(/plugin \.\/plugins\/p\.mjs imports ".*test\/fixtures\/plugins\/hostile\/package\.json", which resolves to .*, outside the files its tree hash covers/);
+    expect(r.status).toBe(1);
+  });
+});
+
 describe("verify compares the provider it loads with the registered one (functional-design.md §U2b item 5)", () => {
+  // KNOWN GAP, left as it is on purpose: finding 2 of the plugin and broker review. A provider whose
+  // integrity differs from the registered one should make check 5 FAIL (and freeze refuse it); this
+  // test pins today's WARN. The identity round, after the other branches merge, fixes it and this test.
   it("a plugin re-locked after registration rebuilds the population with a WARN naming the difference", async () => {
     const s = withPlugin();
     expect((await cli(s, ["plugin", "add", USE, "--yes"])).code).toBe(0);
@@ -350,6 +493,42 @@ describe("plugin check: a correctness gate, never a safety gate (FR2.7)", () => 
     expect(none.code).toBe(1);
     expect(text(none)).toMatch(/conformance {5}not run: no fixtures/);
     expect(none.out[none.out.length - 1]).toBe(CORRECTNESS_NOT_SAFETY);
+  });
+});
+
+describe("plugin check runs the ledger kit for a ledger (finding 15)", () => {
+  const JIRA = "./examples/ledgers/jira/index.mjs";
+  const ctxAtRoot: Partial<CommandContext> = { cwd: ROOT };
+
+  it("on the Jira example's recorded hibernate.atlassian.net changelogs, through the host; it used to exit 1 without running", async () => {
+    const s = setupAuditRepo({ changes: [] });
+    const r = await cli(s, ["plugin", "check", JIRA, "--kind", "ledger", "--offline"], ctxAtRoot);
+    expect(r.code, text(r)).toBe(0);
+    expect(r.out).toContain("  conformance     the ledger kit through the plugin host, on 2 recorded fixture(s)");
+    for (const c of ["api-version", "normalization", "first-label", "integrity", "transient-faults"]) expect(r.out).toContain(`    ok   hibernate-first-verdicts.json › ${c}`);
+    expect(r.out).toContain("    ok   hibernate-removal-HHH-14722.json › removal");
+    expect(r.out).toContain("  conformance     PASS");
+    expect(r.out[r.out.length - 1]).toBe(CORRECTNESS_NOT_SAFETY);
+  });
+
+  it("fails on a recording whose expectation the ledger does not meet, and runs nothing without fixtures", async () => {
+    const s = setupAuditRepo({ changes: [] });
+    const rec = JSON.parse(readFileSync(join(ROOT, "examples", "ledgers", "jira", "fixtures", "hibernate-removal-HHH-14722.json"), "utf8"));
+    rec.expected.counted["1"] = null;
+    const bad = join(s.dir, "wrong-counted.json");
+    writeFileSync(bad, JSON.stringify(rec));
+    const plugin = join(s.dir, "ledger");
+    cpSync(join(ROOT, "examples", "ledgers", "jira", "index.mjs"), join(plugin, "index.mjs"));
+    writeFileSync(join(plugin, "package.json"), JSON.stringify({ name: "jira-copy", version: "0.0.1", type: "module" }));
+    const r = await cli(s, ["plugin", "check", "./ledger/index.mjs", "--kind", "ledger", "--offline", "--fixture", "wrong-counted.json"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/FAIL wrong-counted\.json › first-label: draw #1: counted .*expected none/);
+    expect(r.out).toContain("  conformance     FAIL");
+    // Named in .pr-rla.yml, so it is asked with the audit's options, and it lists no fixtures.
+    appendFileSync(join(s.dir, ".pr-rla.yml"), "ledger:\n  use: ./ledger/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\n");
+    const none = await cli(s, ["plugin", "check", "./ledger/index.mjs", "--offline"]);
+    expect(none.code).toBe(1);
+    expect(text(none)).toMatch(/conformance {5}not run: no fixtures \(list recorded ledger fixtures/);
   });
 });
 

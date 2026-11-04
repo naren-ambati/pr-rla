@@ -1,5 +1,5 @@
 import { externalPluginInfo } from "./plugins/identity.js";
-import type { PluginPolicy } from "./plugins/lock.js";
+import type { PluginPolicy, PluginRules } from "./plugins/lock.js";
 import { BUILTIN_LEDGERS, builtinLedgerName, loadLedgerDefinition, type PluginSpec } from "./registry.js";
 import { provenanceRank, type ProvenanceLevel } from "./sdk/ledger.js";
 import type { PluginIdentity } from "./core/records.js";
@@ -32,10 +32,10 @@ export function maxProvenanceOf(builtin: boolean, name: string, level: Provenanc
 /**
  * Reads a ledger's traits. A built-in is read in process; an external ledger only after its lock
  * entry and files check out: its hosts are the locked ones, and an isolated ledger's provenance
- * comes through its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only`
+ * comes through its host's `describe` (pr-rla/ipc), never by importing it here. `builtin-only`
  * refuses an external ledger before anything is resolved.
  */
-export async function ledgerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy = "locked"): Promise<LedgerTraits> {
+export async function ledgerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<LedgerTraits> {
   if (!builtinLedgerName(spec.use)) {
     const { entry, provenance } = await externalPluginInfo(spec.use, "ledger", baseDir, policy, spec.options);
     return { name: entry.name, provenance: provenance ?? "self-asserted", hosts: [...entry.hosts], maxProvenance: maxProvenanceOf(false, entry.name, provenance ?? "self-asserted") };

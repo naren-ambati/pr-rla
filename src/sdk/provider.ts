@@ -350,7 +350,25 @@ export interface PluginCredential {
    * credential goes, and `pr-rla plugin add` records the host it computed in pr-rla.lock.json.
    */
   hostFromOption?: string;
+  /**
+   * Optional (same API version): header names, besides `authorization`, where pr-rla may swap this
+   * credential's placeholder, for a service that takes its token elsewhere (GitLab's
+   * `private-token`). A placeholder in any other header is refused unsent
+   * (CREDENTIAL_HEADER_NOT_ALLOWED). `pr-rla plugin add` records them.
+   */
+  headers?: string[];
+  /**
+   * Optional (same API version): `false` marks an identity, not a secret: a Basic username or an
+   * account e-mail. pr-rla then leaves its value alone in responses (a list of participants that
+   * names the user still reads right), and sends it only as the user part of
+   * `prrla-basic:<USER_ENV>:<TOKEN_ENV>`. Absent or `true`: a secret, scrubbed from every response
+   * in every form pr-rla knows (raw, percent-encoded, base64).
+   */
+  secret?: boolean;
 }
+
+/** A header name (RFC 9110 token). */
+export const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 export interface ProviderDefinition<Options = Record<string, unknown>> {
   readonly providerApiVersion: number;
@@ -439,6 +457,8 @@ export function pluginGrantProblems(def: { hosts?: unknown; credentials?: unknow
     const ok = Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c === "object" && typeof (c as PluginCredential).env === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test((c as PluginCredential).env) && Array.isArray((c as PluginCredential).hosts) && (c as PluginCredential).hosts.every((h) => typeof h === "string" && h.length > 0));
     if (!ok) return 'credentials must be a list of { env: "NAME", hosts: ["host", …] }';
     if (!(def.credentials as PluginCredential[]).every((c) => c.hostFromOption === undefined || (typeof c.hostFromOption === "string" && c.hostFromOption.length > 0))) return "a credential's hostFromOption must name an option (a string)";
+    if (!(def.credentials as PluginCredential[]).every((c) => c.headers === undefined || (Array.isArray(c.headers) && c.headers.every((h) => typeof h === "string" && HEADER_NAME.test(h))))) return "a credential's headers must be a list of header names";
+    if (!(def.credentials as PluginCredential[]).every((c) => c.secret === undefined || typeof c.secret === "boolean")) return "a credential's secret must be true or false";
   }
   return null;
 }

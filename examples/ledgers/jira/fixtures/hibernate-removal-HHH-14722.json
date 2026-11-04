@@ -94,5 +94,27 @@
 {"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/field","bodySha256":null,"status":200,"headers":{},"response":[{"id":"customfield_11702","name":"backportDecision","custom":true,"schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select","customId":11702}}]},
 {"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-14722?fields=project","bodySha256":null,"status":200,"headers":{},"response":{"id":"71204","key":"HHH-14722","fields":{"project":{"key":"HHH"}}}},
 {"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-14722/changelog?startAt=0&maxResults=100","bodySha256":null,"status":200,"headers":{},"response":{"startAt":0,"maxResults":100,"total":6,"isLast":true,"values":[{"id":"225072","created":"2021-07-09T05:48:04.864-0700","author":{"accountId":"557058:8ce9ebec-e8f7-4cb9-b414-ea2ae49591e3","accountType":"atlassian"},"items":[{"field":"summary","fieldtype":"jira","fieldId":"summary","from":null,"fromString":"InformationExtractorJdbcDatabaseMetaDataImpl#getCurrentSchema() method return currentCatalog if schema == null","to":null,"toString":"InformationExtractorJdbcDatabaseMetaDataImpl#getCurrentSchema() method returns currentCatalog if schema == null"}]},{"id":"225244","created":"2021-07-18T13:06:12.441-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"resolution","fieldtype":"jira","fieldId":"resolution","from":null,"fromString":null,"to":"1","toString":"Fixed"},{"field":"status","fieldtype":"jira","fieldId":"status","from":"1","fromString":"Open","to":"5","toString":"Resolved"}]},{"id":"225245","created":"2021-07-18T13:06:36.666-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"backportDecision","fieldtype":"custom","fieldId":"customfield_11702","from":null,"fromString":null,"to":"10202","toString":"Approved"}]},{"id":"225246","created":"2021-07-18T13:06:41.362-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":null,"fromString":null,"to":"[10200]","toString":"Backport?"}]},{"id":"225247","created":"2021-07-18T13:06:44.470-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"backportDecision","fieldtype":"custom","fieldId":"customfield_11702","from":"10202","fromString":"Approved","to":"10201","toString":"Undecided"}]},{"id":"225255","created":"2021-07-19T02:15:48.491-0700","author":{"accountId":"557058:8ce9ebec-e8f7-4cb9-b414-ea2ae49591e3","accountType":"atlassian"},"items":[{"field":"status","fieldtype":"jira","fieldId":"status","from":"5","fromString":"Resolved","to":"6","toString":"Closed"}]}]}}
- ]
+ ],
+ "expected": {
+  "draws": [
+   {
+    "draw": 1,
+    "changeId": "jira:hibernate#HHH-14722",
+    "url": "https://hibernate.atlassian.net/browse/HHH-14722",
+    "mergeSha": "0000000000000000000000000000000000000000",
+    "firstOccurrence": true
+   }
+  ],
+  "counted": {
+   "1": {
+    "verdict": "pass",
+    "reviewer": "557058:99e61e65-956b-4a21-b29c-06057642e9ea",
+    "recordedAt": "2021-07-18T20:06:36.666Z"
+   }
+  },
+  "integrity": "FAIL",
+  "messages": [
+   "the counted customfield_11702=Approved verdict was removed at 2021-07-18T20:06:44.470Z and nothing replaced it"
+  ]
+ }
 }

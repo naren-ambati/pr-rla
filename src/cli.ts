@@ -7,7 +7,7 @@ import { checkpointCommand } from "./commands/checkpoint.js";
 import { CommandError, nodeContext, type CommandContext } from "./commands/context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
-import { pluginAddCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
+import { pluginAddCommand, pluginApproveCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
 import { closeAllPluginHosts } from "./plugins/host.js";
 import { recordCommand } from "./commands/record.js";
 import { registerCommand } from "./commands/register.js";
@@ -17,7 +17,7 @@ import { statusCommand } from "./commands/status.js";
 import { verifyCommand } from "./commands/verify.js";
 import { PR_RLA_VERSION } from "./version.js";
 
-export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromFile?: string; plugins?: string }) => CommandContext, setExit: (code: number) => void): Command {
+export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromFile?: string; plugins?: string; acceptLockGrants?: boolean }) => CommandContext, setExit: (code: number) => void): Command {
   const program = new Command();
   program
     .name("pr-rla")
@@ -27,13 +27,15 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("-c, --config <path>", "config file (default <dir>/.pr-rla.yml)")
     .option("--from-file <changes.json>", "use the json-file provider with this export instead of the configured provider")
     .option("--plugins <builtin-only>", "builtin-only: refuse every external provider and ledger (as PR_RLA_PLUGINS=builtin-only does)")
+    .option("--accept-lock-grants", "take the credential grants and trust in this repo's pr-rla.lock.json and .pr-rla.yml without your approval, for this run only: only for a repo you control (as PR_RLA_ACCEPT_LOCK_GRANTS=1 does)")
     .showHelpAfterError();
 
   const collect = (v: string, prev: string[] = []) => [...prev, v];
   const run = (fn: (ctx: CommandContext) => Promise<number>) => async () => {
-    const g = program.opts<{ dir?: string; config?: string; fromFile?: string; plugins?: string }>();
+    const g = program.opts<{ dir?: string; config?: string; fromFile?: string; plugins?: string; acceptLockGrants?: boolean }>();
     const ctx = makeCtx(g);
     if (g.plugins !== undefined) ctx.plugins = g.plugins;
+    if (g.acceptLockGrants) ctx.acceptLockGrants = true;
     try {
       setExit(await fn(ctx));
     } catch (e) {
@@ -161,6 +163,15 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--yes", "trust what is printed without asking")
     .action(function (this: Command, use: string) {
       return run((ctx) => pluginLockCommand(ctx, use, this.opts()))();
+    });
+  plugin
+    .command("approve [use]")
+    .description("approve, on this machine, what a plugin someone else locked may send (its credentials and their origins) and its trust; or, with --env and --origin, a credential for built-in providers and ledgers")
+    .option("--env <name>", "with --origin: the environment variable built-ins may send")
+    .option("--origin <url>", "with --env: the https origin they may send it to, e.g. https://ghe.example.com")
+    .option("--yes", "approve what is printed without asking")
+    .action(function (this: Command, use: string | undefined) {
+      return run((ctx) => pluginApproveCommand(ctx, use, this.opts()))();
     });
   plugin
     .command("check <use>")

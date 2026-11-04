@@ -12,7 +12,7 @@ export async function recordCommand(ctx: CommandContext, drawArg: string, verdic
   if (!Number.isInteger(draw) || draw < 1) throw new CommandError(`draw must be a positive integer (got ${drawArg})`);
   if (verdictArg !== "pass" && verdictArg !== "fail") throw new CommandError('verdict must be "pass" or "fail"');
   // A ledger whose tracker records the acting account (issue ledgers) needs no --reviewer: the label event names who applied it.
-  const recordsActor = (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins)).provenance === "account";
+  const recordsActor = (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx))).provenance === "account";
   if (!opts.reviewer && !recordsActor && !opts.sign) throw new CommandError("--reviewer <id> is required");
   const reg = readRegistration(paths);
   // U9: --sign <key> signs this one verdict (ssh-keygen -Y sign); the reviewer is the key's registered principal.

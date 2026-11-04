@@ -3,7 +3,9 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../io/atomic.js";
+import type { LocalConsent } from "./approvals.js";
 import { PluginError } from "./errors.js";
+import { guardInProcessImports } from "./inprocess-guard.js";
 
 /**
  * `pr-rla.lock.json` (contracts.md §5; functional-design.md §U2b item 4; FR2.2, FR2.3).
@@ -25,9 +27,14 @@ export type PluginTrust = "isolated" | "full";
 
 export interface LockedCredential {
   env: string;
+  /** Hosts (`host` or `host:port`) of the https origins it may be sent to. */
   hosts: string[];
   /** The option whose URL gave `hosts` (the definition's `hostFromOption`), when it did. */
   hostFromOption?: string;
+  /** Header names, besides `authorization`, its placeholder may be swapped into (the definition's `headers`). */
+  headers?: string[];
+  /** `false`: an identity such as a Basic username (the definition's `secret: false`). */
+  secret?: false;
 }
 
 export interface LockEntry {
@@ -84,7 +91,8 @@ function entryProblem(e: unknown): string | null {
   if (typeof x.treeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(x.treeSha256)) return "treeSha256 must be 64 hex characters";
   if (x.trust !== "isolated" && x.trust !== "full") return 'trust must be "isolated" or "full"';
   if (!isStrings(x.hosts) || !isStrings(x.writePaths)) return "hosts and writePaths must be lists of strings";
-  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts) && (c.hostFromOption === undefined || typeof c.hostFromOption === "string"))) return "credentials must be a list of { env, hosts, hostFromOption? }";
+  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts) && (c.hostFromOption === undefined || typeof c.hostFromOption === "string") && (c.headers === undefined || isStrings(c.headers)) && (c.secret === undefined || c.secret === false)))
+    return "credentials must be a list of { env, hosts, hostFromOption?, headers?, secret? }";
   return null;
 }
 
@@ -124,7 +132,9 @@ function normalizedEntry(e: LockEntry): LockEntry {
     trust: e.trust,
     hosts: sorted(e.hosts),
     writePaths: sorted(e.writePaths),
-    credentials: [...e.credentials].map((c) => ({ env: c.env, hosts: sorted(c.hosts), ...(c.hostFromOption !== undefined ? { hostFromOption: c.hostFromOption } : {}) })).sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
+    credentials: [...e.credentials]
+      .map((c) => ({ env: c.env, hosts: sorted(c.hosts), ...(c.hostFromOption !== undefined ? { hostFromOption: c.hostFromOption } : {}), ...(c.headers?.length ? { headers: sorted(c.headers.map((h) => h.toLowerCase())) } : {}), ...(c.secret === false ? { secret: false as const } : {}) }))
+      .sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
   };
 }
 
@@ -196,7 +206,30 @@ export function auditRepoRoot(auditDir: string): string {
   }
 }
 
-/** Node's bare-specifier lookup: <dir>/node_modules/<name>, walking up. */
+/**
+ * An npm package name: `name` or `@scope/name`, URL-safe characters, not starting with `.` or `_`,
+ * at most 214 characters (uppercase allowed, as older packages have it). So no `..`, no `/` beyond
+ * the scope's, and nothing a path join could climb out of `node_modules` with.
+ */
+const NPM_NAME = /^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*\/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*$/;
+export const isNpmPackageName = (name: string): boolean => name.length > 0 && name.length <= 214 && NPM_NAME.test(name);
+
+/**
+ * Refuses a resolved package directory that cannot be what it claims (finding 3): it must not contain
+ * the audit directory, and a dependency must sit in a `node_modules` directory (as
+ * `node_modules/<name>` or `node_modules/@scope/<name>`, after symlinks). The plugin's own package
+ * may be a link to a local directory (`npm install ../plugin`), which npm records with no integrity
+ * and the tree hash pins. Checked before anything is hashed, granted or run.
+ */
+function checkPackageDir(use: string, what: string, name: string, dir: string, auditDir: string, linkable = false): void {
+  const parent = dirname(dir);
+  const holder = name.startsWith("@") ? dirname(parent) : parent;
+  if (!linkable && (basename(holder) !== "node_modules" || (name.startsWith("@") && !basename(parent).startsWith("@"))))
+    throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which is not in a node_modules directory; refusing it before anything is granted or run`, "TREE_ESCAPE", "install it with npm (npm ci --ignore-scripts); a linked or vendored copy outside node_modules is not a dependency pr-rla can pin");
+  if (isInside(auditDir, dir)) throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which contains the audit directory ${auditDir}; refusing it before anything is granted or run`, "TREE_ESCAPE", "remove that dependency from the plugin");
+}
+
+/** Node's bare-specifier lookup: <dir>/node_modules/<name>, walking up. `name` must be an npm package name. */
 function findPackage(name: string, fromDir: string): { dir: string; installedAt: string } | null {
   for (let d = fromDir; ; d = dirname(d)) {
     const candidate = join(d, "node_modules", name);
@@ -265,19 +298,22 @@ function dependencyNames(pkg: PackageJson): { name: string; required: boolean }[
   return [...names].filter((n) => n !== "pr-rla").sort().map((name) => ({ name, required: keys(pkg.dependencies).includes(name) && !keys(pkg.optionalDependencies).includes(name) }));
 }
 
-function resolveDependencies(use: string, root: string, pkg: PackageJson | null): ResolvedDependency[] {
+function resolveDependencies(use: string, root: string, pkg: PackageJson | null, auditDir: string): ResolvedDependency[] {
   if (!pkg) return [];
   const out = new Map<string, ResolvedDependency>();
   const queue: { from: string; pkg: PackageJson; who: string }[] = [{ from: root, pkg, who: use }];
   while (queue.length) {
     const { from, pkg: p, who } = queue.shift()!;
+    const whose = who === use ? "its package.json" : `the package.json of its dependency ${who}`;
     for (const { name, required } of dependencyNames(p)) {
+      if (!isNpmPackageName(name)) throw new PluginError(`plugin ${use}: ${whose} names the dependency ${JSON.stringify(name)}, which is not an npm package name; refusing it before anything is granted or run`, "PLUGIN_INVALID", "a dependency must be name or @scope/name, installed in node_modules");
       const found = findPackage(name, from);
       if (!found) {
         if (required) throw new PluginError(`plugin ${use}: dependency ${name} of ${who} is not installed`, "PLUGIN_UNRESOLVED", "install the plugin's dependencies (npm ci --ignore-scripts)");
         continue;
       }
       if (out.has(found.dir) || found.dir === root) continue;
+      checkPackageDir(use, who === use ? "its dependency" : `the dependency (of ${who})`, name, found.dir, auditDir);
       const dp = readPackageJson(found.dir) ?? {};
       out.set(found.dir, { name, version: str(dp.version), dir: found.dir, pkg: dp });
       queue.push({ from: found.dir, pkg: dp, who: name });
@@ -296,8 +332,10 @@ function resolveDependencies(use: string, root: string, pkg: PackageJson | null)
 export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
   const dir = realpathSync(auditDir);
   if (!isPathSpec(use)) {
+    if (!isNpmPackageName(use)) throw new PluginError(`plugin ${JSON.stringify(use)} is neither a path (./…, ../…, /…, file:) nor an npm package name`, "PLUGIN_INVALID", "use the package's name, or a path relative to the audit directory");
     const found = findPackage(use, dir);
     if (!found) throw new PluginError(`cannot find package ${use} from ${dir}`, "PLUGIN_UNRESOLVED", `install it in the audit repo (npm install --save-exact ${use} --ignore-scripts), or use it by path`);
+    checkPackageDir(use, "package", use, found.dir, dir, true);
     const pkg = readPackageJson(found.dir) ?? {};
     const npm = npmLockEntry(use, found.installedAt);
     return {
@@ -307,7 +345,7 @@ export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
       root: found.dir,
       rootIsFile: false,
       pkg,
-      deps: resolveDependencies(use, found.dir, pkg),
+      deps: resolveDependencies(use, found.dir, pkg, dir),
       version: str(pkg.version),
       resolved: npm?.resolved ?? null,
       npm,
@@ -328,7 +366,7 @@ export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
   }
   const rootIsFile = root === entry;
   const pkg = rootIsFile ? null : readPackageJson(root);
-  return { use, source: "path", entry, root, rootIsFile, pkg, deps: resolveDependencies(use, root, pkg), version: str(pkg?.version), resolved: `file:${toPosix(relative(dir, root)) || "."}`, npm: null };
+  return { use, source: "path", entry, root, rootIsFile, pkg, deps: resolveDependencies(use, root, pkg, dir), version: str(pkg?.version), resolved: `file:${toPosix(relative(dir, root)) || "."}`, npm: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +427,48 @@ export function readGrants(p: ResolvedPlugin): string[] {
   return [...(p.rootIsFile ? [p.root] : children(p.root)), ...p.deps.flatMap((d) => children(d.dir))];
 }
 
+/** The running pr-rla's package directory (a real path): two levels above this module, in src/ or dist/. */
+export const RUNNING_PR_RLA = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
+
+/**
+ * For a plugin that runs in this process (`trust: full`, finding 14): every `pr-rla` it can resolve,
+ * from its own directory or any dependency's, must be the pr-rla running it. The tree hash leaves
+ * `pr-rla` out (a plugin links against the host's SDK), so another copy in its node_modules would
+ * be code nobody hashed. Refused before anything is imported. An isolated plugin needs no check:
+ * its child maps the SDK to the host's modules and cannot read another copy.
+ */
+export function assertLinksRunningPrRla(p: ResolvedPlugin): void {
+  const refuse = (where: string) =>
+    new PluginError(`plugin ${p.use} would load pr-rla from ${where}, not the pr-rla running it (${RUNNING_PR_RLA}); that copy is not in its tree hash, so it is not run in this process`, "TREE_ESCAPE", `remove that pr-rla (the plugin links against the pr-rla that runs it), or run it isolated: pr-rla plugin lock ${p.use} --trust isolated`);
+  for (const dir of [p.rootIsFile ? dirname(p.root) : p.root, ...p.deps.map((d) => d.dir)]) {
+    const found = findPackage("pr-rla", dir);
+    if (found && found.dir !== RUNNING_PR_RLA) throw refuse(found.dir);
+    // Node resolves a package's own name before node_modules (self-reference): the nearest package.json counts too.
+    const scope = packageScope(dir);
+    if (scope && str(readPackageJson(scope)?.name) === "pr-rla" && realpathSync(scope) !== RUNNING_PR_RLA) throw refuse(`${scope} (package.json named pr-rla, which the plugin's imports of pr-rla/… resolve to)`);
+  }
+}
+
+/**
+ * Before a `trust: full` plugin is imported in this process: every pr-rla it can resolve must be the
+ * running one, and every import its modules make must resolve inside the files its tree hash covers,
+ * its dependencies' or the running pr-rla's (./inprocess-guard.ts), so an approval pins what runs.
+ */
+export function guardFullTrust(p: ResolvedPlugin): void {
+  assertLinksRunningPrRla(p);
+  // The running pr-rla counts for its own code and installed dependencies only, not for a checkout's other directories.
+  const own = ["dist", "src", "node_modules", "package.json"].map((x) => join(RUNNING_PR_RLA, x));
+  guardInProcessImports(p.use, [p.root, ...p.deps.map((d) => d.dir)], own);
+}
+
+/** The directory of the nearest package.json at or above `dir` (Node's package scope), or null. */
+function packageScope(dir: string): string | null {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, "package.json"))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
 /** Install scripts declared by the plugin or a dependency (npm runs them at install; pr-rla plugins need none). */
 export function installScripts(p: ResolvedPlugin): { pkg: string; scripts: string[] }[] {
   const out: { pkg: string; scripts: string[] }[] = [];
@@ -409,10 +489,25 @@ export function installScripts(p: ResolvedPlugin): { pkg: string; scripts: strin
 
 export type PluginPolicy = "locked" | "builtin-only";
 
-/** `--plugins builtin-only` or `PR_RLA_PLUGINS=builtin-only` (FR2.6). Any other value is refused, so a typo never allows external code. */
+/**
+ * What decides whether an external plugin may load and what it may send: the policy, and the local
+ * consent of the person running the command (./approvals.ts). An AuditContext is one. A bare policy
+ * carries no consent, so a `trust: full` plugin is refused with it and credentials are withheld.
+ */
+export interface PluginRules {
+  readonly plugins: PluginPolicy;
+  readonly consent?: LocalConsent;
+}
+
+export const policyOf = (r: PluginPolicy | PluginRules): PluginPolicy => (typeof r === "string" ? r : r.plugins);
+
+/**
+ * `--plugins builtin-only` or `PR_RLA_PLUGINS=builtin-only` (FR2.6). Any other value is refused, so a
+ * typo never allows external code; `--plugins ""` too (finding 15), while an empty PR_RLA_PLUGINS is unset.
+ */
 export function pluginPolicy(flag: string | undefined, env: Readonly<Record<string, string | undefined>>): PluginPolicy {
   for (const [what, v] of [["--plugins", flag], ["PR_RLA_PLUGINS", env.PR_RLA_PLUGINS]] as const) {
-    if (v === undefined || v === "") continue;
+    if (v === undefined || (v === "" && what === "PR_RLA_PLUGINS")) continue;
     if (v !== "builtin-only") throw new PluginError(`${what} ${JSON.stringify(v)}: the only value is builtin-only`, "PLUGIN_INVALID", `use ${what === "--plugins" ? "--plugins builtin-only" : "PR_RLA_PLUGINS=builtin-only"}, or leave it unset`);
     return "builtin-only";
   }
@@ -420,8 +515,8 @@ export function pluginPolicy(flag: string | undefined, env: Readonly<Record<stri
 }
 
 /** Refuses an external plugin under builtin-only, before anything resolves or imports it. */
-export function refuseIfBuiltinOnly(policy: PluginPolicy, kind: "provider" | "ledger", use: string): void {
-  if (policy === "builtin-only")
+export function refuseIfBuiltinOnly(policy: PluginPolicy | PluginRules, kind: "provider" | "ledger", use: string): void {
+  if (policyOf(policy) === "builtin-only")
     throw new PluginError(`${kind} ${use} is an external plugin, and --plugins builtin-only (or PR_RLA_PLUGINS=builtin-only) refuses all external code`, "BUILTIN_ONLY", `use a built-in ${kind}, or run without builtin-only`);
 }
 

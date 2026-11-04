@@ -7,6 +7,7 @@ import { isManifestV2, isRegistrationV2, type AnyCommitment, type AnyManifest, t
 import { writeFileAtomic } from "../io/atomic.js";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../api/context.js";
 import type { BrokerFetch } from "../net/contract.js";
+import { abortableSleep } from "../plugins/host.js";
 import { pluginPolicy } from "../plugins/lock.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
 export type { DrawsFile } from "../core/records.js";
@@ -28,7 +29,7 @@ export interface CommandContext {
   /** Overrides how beacons are obtained (tests, --beacon-file). Must return a VERIFIED beacon or throw. */
   beacon?: (round: number) => Promise<Beacon>;
   /** Waits; injected with nowMs so retry deadlines run on one clock (tests use a fake one). */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Request nonce per authority; injected only to replay recorded timestamp responses. */
   nonceFor?: (tsa: string) => Uint8Array;
   /** Extra timestamp-authority anchors trusted by whoever runs the command (tests; the CLI's --tsa-trust adds files). */
@@ -42,6 +43,8 @@ export interface CommandContext {
    * Default: `ssh-keygen -Y sign -n pr-rla-verdict@v1`. Injected only for a test's software-emulated authenticator.
    */
   signVerdict?: (payload: Uint8Array, keyPath: string) => Promise<string>;
+  /** `--accept-lock-grants` (PR_RLA_ACCEPT_LOCK_GRANTS=1 does the same): take the repo's grants and trust for this run (src/plugins/approvals.ts). */
+  acceptLockGrants?: boolean;
 }
 
 export class CommandError extends Error {
@@ -59,7 +62,7 @@ export function nodeContext(overrides: Partial<CommandContext> = {}): CommandCon
     fetch: globalThis.fetch,
     out: (l) => process.stdout.write(`${l}\n`),
     err: (l) => process.stderr.write(`${l}\n`),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep: abortableSleep,
     ...(process.stdin.isTTY
       ? {
           confirm: async (q: string) => {
@@ -77,7 +80,7 @@ export function nodeContext(overrides: Partial<CommandContext> = {}): CommandCon
 }
 
 const auditContexts = new WeakMap<CommandContext, AuditContext>();
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const realSleep = abortableSleep;
 
 /**
  * The command's AuditContext (src/api/context.ts), read-write, made once per CommandContext so
@@ -92,10 +95,11 @@ export function auditContextFor(ctx: CommandContext): AuditContext {
       mode: "read-write",
       env: ctx.env,
       nowMs: () => ctx.nowMs(),
-      sleep: (ms) => (ctx.sleep ?? realSleep)(ms),
+      sleep: (ms, signal) => (ctx.sleep ?? realSleep)(ms, signal),
       log: (l) => ctx.err(l),
       fetch: ((input, init) => ctx.fetch(input, init)) as typeof fetch,
       plugins: pluginPolicy(ctx.plugins, ctx.env),
+      ...(ctx.acceptLockGrants ? { acceptLockGrants: true } : {}),
     });
     auditContexts.set(ctx, a);
   }

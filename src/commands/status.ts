@@ -121,7 +121,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   const ledger = await ledgerFor(ctx, config, paths);
   // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the registered ledger's ceiling.
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-  const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins));
+  const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx)));
   const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
   const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
   const report = computeStatus({

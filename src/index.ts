@@ -68,5 +68,8 @@ export { freezeRepos, FreezeStopped, FreezeRepoFailed, ResumeRefused, isTransien
 export { FreezeCheckpointStore, freezeRunId, type FreezeRunInputs, type FreezeRunHeader } from "./api/freeze-store.js";
 export { estimateFreeze, estimateLines, type FreezeEstimate } from "./api/freeze-estimate.js";
 export { PR_RLA_VERSION } from "./version.js";
+// Built-ins only; an external plugin is opened with openProvider / openLedger (locked, consented, isolated).
 export { createProvider, createLedger, loadProviderDefinition, loadLedgerDefinition, BUILTIN_PROVIDERS, BUILTIN_LEDGERS } from "./registry.js";
+// UNLOCKED, for tests and plugin authors: these import any plugin in this process, with no lock, policy or isolation.
+export { unsafeCreateProvider, unsafeCreateLedger, unsafeLoadProviderDefinition, unsafeLoadLedgerDefinition } from "./registry.js";
 export { loadConfig, parseConfig } from "./config.js";

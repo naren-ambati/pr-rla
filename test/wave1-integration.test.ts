@@ -134,7 +134,7 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
 
   it("plugin add records the base_url host for GITEA_TOKEN, and the broker swaps the placeholder there", async () => {
     const dir = giteaAudit();
-    await lockPlugin(dir, USE, { options });
+    await lockPlugin(dir, USE, { options, approve: true });
     expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: ["forge.example.com"], hostFromOption: "base_url" }]);
     const gitea = recordingGitea();
     const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options }, dir);
@@ -165,11 +165,11 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
   it("an http:// base_url grants the token no host: the request carrying it is refused unsent", async () => {
     const dir = giteaAudit();
     const http = { ...options, base_url: "http://forge.example.com" };
-    await lockPlugin(dir, USE, { options: http });
+    await lockPlugin(dir, USE, { options: http, approve: true });
     expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: [], hostFromOption: "base_url" }]);
     const gitea = recordingGitea();
     const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options: http }, dir);
-    await expect(provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] })).rejects.toThrow(/credential GITEA_TOKEN may be sent only to no host, not forge\.example\.com; nothing was sent/);
+    await expect(provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] })).rejects.toThrow(/credential GITEA_TOKEN may be sent only to no host over https, not http:\/\/forge\.example\.com; nothing was sent/);
     expect(gitea.seen).toEqual([]);
   });
 
@@ -194,15 +194,47 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
   const fakeJira = async (): Promise<FakeJira> => new ((await import(pathToFileURL(join(EX, "test/fake-jira.mjs")).href)) as { FakeJira: new () => FakeJira }).FakeJira();
   const cases = async () => (await import(pathToFileURL(join(EX, "test/cases.mjs")).href)) as { jiraCases: (j: Pick<LedgerDefinition, "create">) => Promise<{ fixtures: LedgerFixture[]; factory: LedgerUnderTest }>; draw: (d: number, n: number) => DrawForLedger; PUB: PublishContext };
 
-  it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", async () => {
+  /**
+   * Fresh hosts started ahead of need, at most `width` starting at once. Every kit instance still gets
+   * its own child, never one another instance used: what changes is that its start-up (0.2 s to over
+   * 1 s on a loaded machine, and the kit makes about 67) overlaps the kit's work instead of adding to it.
+   */
+  function hostPool(start: () => Promise<PluginHost>, width: number) {
+    const queued: Promise<PluginHost>[] = [];
+    const started: Promise<PluginHost>[] = [];
+    const used: PluginHost[] = [];
+    const fill = () => {
+      while (queued.length < width) {
+        const h = start();
+        h.catch(() => {});
+        queued.push(h);
+        started.push(h);
+      }
+    };
+    return {
+      async take(): Promise<PluginHost> {
+        fill();
+        const h = await queued.shift()!;
+        fill();
+        used.push(h);
+        return h;
+      },
+      used: () => used.length,
+      async closeAll() {
+        for (const h of started) (await h.catch(() => null))?.close();
+      },
+    };
+  }
+
+  // Generous because its ~67 children compete for the machine with every other test file (measured 13 s to 42 s).
+  it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", { timeout: 240_000 }, async () => {
     const plugin = resolvePlugin("./examples/ledgers/jira/index.mjs", ROOT);
-    const hosts: PluginHost[] = [];
-    // A definition whose create() starts the ledger in a host child: the kit's fake Jira and its
-    // faults stay in this process, and the ledger's index is kept here (LedgerContext.index).
+    const pool = hostPool(() => startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "jira" }), 3);
+    // A definition whose create() starts the ledger in a host child of its own: the kit's fake Jira and
+    // its faults stay in this process, and the ledger's index is kept here (LedgerContext.index).
     const isolated: Pick<LedgerDefinition, "create"> = {
       async create(options: unknown, ctx: LedgerContext) {
-        const host = await startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "jira" });
-        hosts.push(host);
+        const host = await pool.take();
         return hostedLedger(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}), index: ledgerIndexStore({ mode: "read-write" }, ctx.windowDir) });
       },
     };
@@ -213,21 +245,21 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
       expect(fixtures.filter((f) => f.source === "recorded")).toHaveLength(2);
       const ran = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
       for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults", "transient-write-faults"]) expect(ran.has(c), c).toBe(true);
-      expect(hosts.length).toBeGreaterThan(fixtures.length);
+      expect(pool.used()).toBeGreaterThan(fixtures.length);
     } finally {
-      hosts.forEach((h) => h.close());
+      await pool.closeAll();
     }
-  }, 240_000); // one plugin-host child per kit instance: a loaded machine needs more than the default 60 s (U8 fix round)
+  });
 
   it("isolated, the Jira ledger gets placeholders, the broker builds Basic auth for the base_url host only, and pr-rla writes its index", async () => {
     const audit = jiraAudit();
-    await lockPlugin(audit, JIRA_USE, { kind: "ledger", options: JIRA_OPTIONS });
+    await lockPlugin(audit, JIRA_USE, { kind: "ledger", options: JIRA_OPTIONS, approve: true });
     expect(readLock(audit).plugins[JIRA_USE]).toMatchObject({
       trust: "isolated",
       hosts: ["acme.atlassian.net"],
       writePaths: ["acme.atlassian.net/rest/api/3/issue"],
       credentials: [
-        { env: "JIRA_EMAIL", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
+        { env: "JIRA_EMAIL", hosts: ["acme.atlassian.net"], hostFromOption: "base_url", secret: false },
         { env: "JIRA_TOKEN", hosts: ["acme.atlassian.net"], hostFromOption: "base_url" },
       ],
     });

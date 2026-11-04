@@ -101,6 +101,71 @@ describe("FR10.3: the read-only guard", () => {
   });
 });
 
+describe("finding 6: a GraphQL document in the URL, and method overrides, are held to the read-only guard", () => {
+  const setup = (mode: "read-write" | "read-only" = "read-write") => {
+    const t = transport();
+    const b = createBroker({ mode, writePathsFor: (id) => (id === "ledger:tracker" ? new Set(["tracker.example/api/"]) : new Set()) }, { fetch: t.f });
+    return { t, provider: b.bind("provider:evil"), ledger: b.bind("ledger:tracker") };
+  };
+  const QUERY = gql("query { currentUser { id } }");
+
+  it("refuses a GraphQL POST carrying query, operationName or extensions in its URL, whatever its body says, and sends nothing", async () => {
+    const { t, provider } = setup();
+    for (const q of ["query=mutation%7BdestroyX%7D", "operationName=Destroy", "extensions=%7B%7D"])
+      await expect(provider(`https://gitlab.com/api/graphql?${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: QUERY })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION", message: expect.stringMatching(/a GraphQL POST with (query|operationName|extensions) in its URL/) });
+    // The same body without them is a read.
+    await provider("https://gitlab.com/api/graphql", { method: "POST", body: QUERY });
+    expect(t.seen.map((x) => x.url)).toEqual(["https://gitlab.com/api/graphql"]);
+  });
+
+  it("a GraphQL GET is a read only when its URL's document is a query (it used to pass a mutation as a GET)", async () => {
+    const { t, provider } = setup();
+    await expect(provider("https://gitlab.com/api/graphql?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider(`https://gitlab.com/api/graphql?extensions=${encodeURIComponent('{"persistedQuery":{"sha256Hash":"ab"}}')}`)).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider("https://gitlab.com/api/graphql?query=not%20graphql%20%7D%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    // The path in any case, and a body that names a stored document, are held to the same rules (review of this round).
+    await expect(provider("https://gitlab.com/api/GraphQL?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    for (const extra of [{ extensions: { persistedQuery: { version: 1, sha256Hash: "ab" } } }, { documentId: "destroy-everything" }, { id: "stored-1" }, { queryId: "q" }])
+      await expect(provider("https://gitlab.com/api/graphql", { method: "POST", body: JSON.stringify({ query: "query { viewer { login } }", ...extra }) })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await provider("https://gitlab.com/api/graphql?query=%7B%20viewer%20%7B%20login%20%7D%20%7D&operationName=V");
+    await provider("https://gitlab.com/api/v4/projects?query=mutation");
+    expect(t.seen.map((x) => new URL(x.url).pathname)).toEqual(["/api/graphql", "/api/v4/projects"]);
+  });
+
+  it("refuses X-HTTP-Method-Override, X-HTTP-Method, X-Method-Override and _method that turn a read into a write", async () => {
+    const { t, provider } = setup();
+    for (const [h, v] of [["x-http-method-override", "DELETE"], ["x-http-method", "PUT"], ["x-method-override", "patch"]] as const)
+      await expect(provider("https://gitlab.com/api/v4/projects/1", { headers: { [h]: v } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION", message: expect.stringMatching(/^read-only: GET \(as (DELETE|PUT|PATCH)\) gitlab\.com/) });
+    await expect(provider("https://gitlab.com/api/v4/projects/1?_method=DELETE")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    // Every override counts, not only the first that differs (review of this round): a harmless one cannot hide another.
+    await expect(provider("https://gitlab.com/api/v4/projects/1", { headers: { "x-http-method-override": "HEAD", "x-http-method": "DELETE" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider("https://gitlab.com/api/v4/projects/1?_method=DELETE", { headers: { "x-http-method-override": "HEAD" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await provider("https://gitlab.com/api/v4/projects/1", { headers: { "x-http-method-override": "GET" } });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it("a ledger's override must fall under its write paths too, and in read-only mode it is refused outright", async () => {
+    const { t, ledger } = setup();
+    await expect(ledger("https://tracker.example/admin/purge", { headers: { "x-http-method-override": "DELETE" } })).rejects.toMatchObject({ code: "WRITE_PATH_NOT_ALLOWED" });
+    await ledger("https://tracker.example/api/issues/1", { headers: { "x-http-method-override": "DELETE" } });
+    expect(t.seen.map((x) => x.url)).toEqual(["https://tracker.example/api/issues/1"]);
+    const ro = setup("read-only");
+    await expect(ro.ledger("https://tracker.example/api/issues/1", { headers: { "x-http-method-override": "DELETE" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    expect(ro.t.seen).toEqual([]);
+  });
+});
+
+describe("finding 9: a write path matches on / segment boundaries", () => {
+  it("…/rest/api/3/issue covers /issue and /issue/AUD-1, not /issueLink or /issuetype (they used to pass)", async () => {
+    const t = transport(() => ok({}, {}, 201));
+    const ledger = createBroker({ writePathsFor: () => new Set(["corp.atlassian.net/rest/api/3/issue"]) }, { fetch: t.f }).bind("ledger:jira");
+    for (const path of ["/rest/api/3/issueLink", "/rest/api/3/issuetype", "/rest/api/3/issue-archive"]) await expect(ledger(`https://corp.atlassian.net${path}`, { method: "POST", body: "{}" }), path).rejects.toMatchObject({ code: "WRITE_PATH_NOT_ALLOWED" });
+    await ledger("https://corp.atlassian.net/rest/api/3/issue", { method: "POST", body: "{}" });
+    await ledger("https://corp.atlassian.net/rest/api/3/issue/AUD-1", { method: "PUT", body: "{}" });
+    expect(t.seen.map((x) => new URL(x.url).pathname)).toEqual(["/rest/api/3/issue", "/rest/api/3/issue/AUD-1"]);
+  });
+});
+
 describe("ledger writes only under declared writePaths", () => {
   const t = transport(() => ok({}, {}, 201));
   const b = createBroker({ writePathsFor: (id) => (id === "ledger:github-issues" ? new Set(["api.github.com/repos/acme/audit/"]) : new Set()) }, { fetch: t.f });
@@ -173,6 +238,97 @@ describe("FR10.5: credentials are swapped in only for declared hosts", () => {
       ["https://acme.atlassian.net/hop", "Bearer raw-token", "glpat"],
       ["https://elsewhere.example/landed", null, null],
     ]);
+  });
+});
+
+describe("finding 4: a credential goes only to its exact https origin, never in clear text", () => {
+  const creds = new Map([
+    ["JIRA_TOKEN", { value: "tok-123", hosts: new Set(["acme.atlassian.net"]) }],
+    ["JIRA_EMAIL", { value: "me@acme.example", hosts: new Set(["acme.atlassian.net"]) }],
+    ["FORGE_TOKEN", { value: "forge-456", hosts: new Set(["forge.example.com:8443"]) }],
+  ]);
+  const setup = (respond?: (u: URL) => Response) => {
+    const t = transport(respond);
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    return { t, f: b.bind("ledger:jira"), raw: b.bind("provider:github") };
+  };
+  const bearer = { headers: { authorization: "Bearer prrla-cred:JIRA_TOKEN" } };
+
+  it("refuses http: for the granted host, and sends nothing (it used to send Basic auth in clear text)", async () => {
+    const { t, f } = setup();
+    await expect(f("http://acme.atlassian.net/rest/api/3/myself", { headers: { authorization: "prrla-basic:JIRA_EMAIL:JIRA_TOKEN" } })).rejects.toThrow("credential JIRA_EMAIL may be sent only to acme.atlassian.net over https, not http://acme.atlassian.net; nothing was sent");
+    await expect(f("http://acme.atlassian.net/x", bearer)).rejects.toMatchObject({ code: "CREDENTIAL_HOST_MISMATCH", next: "use the https URL of acme.atlassian.net; a credential is never sent in clear text" });
+    expect(t.seen).toEqual([]);
+  });
+
+  it("refuses another port of the granted host; a grant with a port matches only that port; the default port is the same origin", async () => {
+    const { t, f } = setup();
+    await expect(f("https://acme.atlassian.net:8443/x", bearer)).rejects.toThrow("credential JIRA_TOKEN may be sent only to acme.atlassian.net, not acme.atlassian.net:8443; nothing was sent");
+    await expect(f("https://forge.example.com/x", { headers: { authorization: "token prrla-cred:FORGE_TOKEN" } })).rejects.toThrow(/may be sent only to forge\.example\.com:8443, not forge\.example\.com;/);
+    await f("https://forge.example.com:8443/x", { headers: { authorization: "token prrla-cred:FORGE_TOKEN" } });
+    await f("https://ACME.atlassian.net:443/x", bearer);
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([
+      ["https://forge.example.com:8443/x", "token forge-456"],
+      ["https://acme.atlassian.net/x", "Bearer tok-123"],
+    ]);
+  });
+
+  it("never swaps on a hop after a redirect from https to http, even back on https; a raw secret header is dropped from then on too", async () => {
+    const hops = (u: URL) => (u.pathname === "/down" ? raw("", 302, { location: "http://acme.atlassian.net/landing" }) : u.pathname === "/landing" && u.protocol === "http:" ? raw("", 302, { location: "https://acme.atlassian.net/back" }) : ok());
+    const { t, f, raw: builtin } = setup(hops);
+    await expect(f("https://acme.atlassian.net/down", bearer)).rejects.toThrow("credential JIRA_TOKEN may be sent only to acme.atlassian.net over https, not http://acme.atlassian.net; nothing was sent");
+    // Before the fix the http hop carried "Bearer tok-123".
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([["https://acme.atlassian.net/down", "Bearer tok-123"]]);
+    t.seen.length = 0;
+    await builtin("https://acme.atlassian.net/down", { headers: { authorization: "Bearer raw-token" } });
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([
+      ["https://acme.atlassian.net/down", "Bearer raw-token"],
+      ["http://acme.atlassian.net/landing", null],
+      ["https://acme.atlassian.net/back", null],
+    ]);
+  });
+
+  it("a hostFromOption grant takes its port from the URL, and only an https URL grants anything", async () => {
+    const { credentialGrants } = await import("../src/plugins/host.js");
+    const declared = [{ env: "T", hosts: ["codeberg.org"], hostFromOption: "base_url" }];
+    expect(credentialGrants(declared, { base_url: "https://forge.example.com:8443/" })).toEqual([{ env: "T", hosts: ["forge.example.com:8443"], hostFromOption: "base_url" }]);
+    expect(credentialGrants(declared, { base_url: "https://forge.example.com:443" })).toEqual([{ env: "T", hosts: ["forge.example.com"], hostFromOption: "base_url" }]);
+    expect(credentialGrants(declared, { base_url: "http://forge.example.com" })).toEqual([{ env: "T", hosts: [], hostFromOption: "base_url" }]);
+  });
+});
+
+describe("finding 5: a placeholder is swapped only in authorization and the headers its plugin declares", () => {
+  const creds = new Map([
+    ["JIRA_TOKEN", { value: "SECRET-TOKEN-123", hosts: new Set(["corp.atlassian.net"]) }],
+    ["GITLAB_TOKEN", { value: "glpat-456", hosts: new Set(["gitlab.example.com"]), headers: new Set(["private-token"]) }],
+  ]);
+
+  it("refuses a placeholder in any other header, unsent (it used to be swapped into X-Echo and recorded)", async () => {
+    const t = transport();
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    const e = await b.bind("ledger:jira")("https://corp.atlassian.net/x", { headers: { "x-echo": "prrla-cred:JIRA_TOKEN" } }).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: "CREDENTIAL_HEADER_NOT_ALLOWED", message: "credential JIRA_TOKEN may be sent only in authorization or a header its plugin declares for it, not in x-echo; nothing was sent" });
+    await expect(b.bind("ledger:jira")("https://corp.atlassian.net/x", { headers: { cookie: "s=prrla-cred:JIRA_TOKEN" } })).rejects.toMatchObject({ code: "CREDENTIAL_HEADER_NOT_ALLOWED" });
+    expect(t.seen).toEqual([]);
+  });
+
+  it("swaps it in a header the credential declares, and still in authorization", async () => {
+    const t = transport();
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    await b.bind("provider:gitlab-plugin")("https://gitlab.example.com/api/v4/user", { headers: { "private-token": "prrla-cred:GITLAB_TOKEN" } });
+    await b.bind("provider:gitlab-plugin")("https://gitlab.example.com/api/v4/user", { headers: { authorization: "Bearer prrla-cred:GITLAB_TOKEN" } });
+    expect(t.seen.map((x) => [x.headers.get("private-token"), x.headers.get("authorization")])).toEqual([["glpat-456", null], [null, "Bearer glpat-456"]]);
+  });
+
+  it("the declaration is optional, validated, recorded lowercase in the grant, and shown to the approver", async () => {
+    const { assertProviderDefinition } = await import("../src/sdk/provider.js");
+    const { credentialGrants } = await import("../src/plugins/host.js");
+    const def = { providerApiVersion: 1, name: "x", create: () => ({}) };
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], headers: ["Private-Token"] }] }, "x")).not.toThrow();
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], headers: ["bad header"] }] }, "x")).toThrow(/headers must be a list of header names/);
+    expect(credentialGrants([{ env: "T", hosts: ["a.example"], headers: ["Private-Token", "private-token"] }], {})).toEqual([{ env: "T", hosts: ["a.example"], headers: ["private-token"] }]);
+    const { grantText, grantsOf } = await import("../src/plugins/approvals.js");
+    expect(grantsOf([{ env: "T", hosts: ["a.example"], headers: ["private-token"] }]).map(grantText)).toEqual(["T -> https://a.example (also in header private-token)"]);
   });
 });
 
@@ -516,6 +672,41 @@ describe("step 7: the recorder", () => {
     expect(e.response).toMatch(/"email":"user-[0-9a-f]{8}@example\.invalid"/);
     expect(e).toMatchObject({ pluginId: "provider:test", destination: "scm", method: "POST", status: 200 });
     expect(e.bodySha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("scrubs a secret the caller holds wherever it appears: raw, percent-encoded, base64, in headers, the body and a redirect's URL (finding 5)", async () => {
+    const token = "SECRET+TOKEN/123=";
+    const exchanges: RecordedExchange[] = [];
+    const t = transport((u, init) => {
+      const got = new Headers(init.headers).get("authorization")!.replace(/^Bearer /, "");
+      if (u.pathname === "/hop") return raw("", 302, { location: `/landing?t=${encodeURIComponent(got)}` });
+      return ok({ raw: got, pct: encodeURIComponent(got), form: new URLSearchParams({ t: got }).toString(), b64: Buffer.from(got).toString("base64"), b64url: Buffer.from(got).toString("base64url") }, { "x-echo": got, "x-echo-b64": Buffer.from(got).toString("base64") });
+    });
+    const creds = new Map([["JIRA_TOKEN", { value: token, hosts: new Set(["corp.atlassian.net"]) }]]);
+    const b = createBroker({ recorder: (e) => exchanges.push(e), credentialsFor: () => creds }, { fetch: t.f });
+    await b.bind("ledger:jira")("https://corp.atlassian.net/hop", { headers: { authorization: "Bearer prrla-cred:JIRA_TOKEN" } });
+    expect(exchanges.map((e) => e.url)).toEqual(["https://corp.atlassian.net/hop", "https://corp.atlassian.net/landing?t=prrla-cred:JIRA_TOKEN"]);
+    const all = JSON.stringify(exchanges);
+    for (const form of [token, encodeURIComponent(token), Buffer.from(token).toString("base64"), Buffer.from(token).toString("base64url"), new URLSearchParams({ t: token }).toString().slice(2)]) expect(all, form).not.toContain(form);
+    expect(exchanges[1]!.headers).toMatchObject({ "x-echo": "prrla-cred:JIRA_TOKEN", "x-echo-b64": "prrla-cred:JIRA_TOKEN" });
+    expect(JSON.parse(exchanges[1]!.response)).toEqual({ raw: "prrla-cred:JIRA_TOKEN", pct: "prrla-cred:JIRA_TOKEN", form: "t=prrla-cred:JIRA_TOKEN", b64: "prrla-cred:JIRA_TOKEN", b64url: "prrla-cred:JIRA_TOKEN" });
+  });
+
+  it("scrubs a secret a JSON encoder escaped (PHP's \\/, Gson's and .NET's \\u00XX), so JSON.parse cannot recover it (review of this round)", async () => {
+    const { scrubPairs, scrubText } = await import("../src/net/scrub.js");
+    const token = "SECRET+TOKEN/123=";
+    const user = "me@example.com";
+    const pairs = scrubPairs([{ env: "T", value: token }, { env: "U", value: user, secret: false }]);
+    const basic = Buffer.from(`${user}:${token}`).toString("base64");
+    const bodies = [
+      JSON.stringify({ b64: Buffer.from(token).toString("base64"), raw: token, basic }).replace(/\//g, "\\/"),
+      JSON.stringify({ raw: token, basic }).replace(/[=+]/g, (c) => `\\u00${c.charCodeAt(0).toString(16)}`),
+      JSON.stringify({ raw: token }).replace(/[=+]/g, (c) => `\\u00${c.charCodeAt(0).toString(16).toUpperCase()}`).replace(/\//g, "\\/"),
+    ];
+    for (const body of bodies) {
+      const seen = JSON.parse(scrubText(pairs, body)) as Record<string, string>;
+      for (const [k, v] of Object.entries(seen)) expect(v, `${k} in ${body}`).toMatch(/^prrla-(cred:T|basic:U:T)$/);
+    }
   });
 
   it("is never installed in read-only mode", async () => {

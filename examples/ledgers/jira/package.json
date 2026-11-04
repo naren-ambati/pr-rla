@@ -9,8 +9,15 @@
     ".": "./index.mjs"
   },
   "files": [
-    "index.mjs"
+    "index.mjs",
+    "fixtures"
   ],
+  "pr-rla": {
+    "conformance": [
+      "fixtures/hibernate-first-verdicts.json",
+      "fixtures/hibernate-removal-HHH-14722.json"
+    ]
+  },
   "keywords": [
     "pr-rla",
     "pr-rla-ledger"
