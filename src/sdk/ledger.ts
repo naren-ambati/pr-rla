@@ -121,6 +121,11 @@ export interface LedgerIntegrityReport {
   tamperTrail: boolean;
   /** Optional (phase 3): findings that make check 7 WARN (a relabel, a removal later replaced). */
   warnings?: string[];
+  /**
+   * Optional (P4): the ledger file's path from its git repository's toplevel, as the check walked
+   * it. Only the built-in git-file's counts: check 7 compares it with the registration's `ledgerPath`.
+   */
+  location?: string;
 }
 
 export interface LedgerContext {
@@ -339,7 +344,16 @@ export interface VerdictClassification {
  * change, or by an ineligible account is ignored with a reason; of the rest, the FIRST per change counts,
  * in the order the ledger returned them (a ledger returns them in recorded order: time, then event id).
  */
-export function classifyVerdicts(verdicts: readonly VerdictEvent[], ctx: { protocolSha256: string; draws: readonly { draw: number; changeId: string }[]; reviewers?: readonly string[] | null }): VerdictClassification {
+export function classifyVerdicts(
+  verdicts: readonly VerdictEvent[],
+  ctx: {
+    protocolSha256: string;
+    draws: readonly { draw: number; changeId: string }[];
+    reviewers?: readonly string[] | null;
+    /** Optional (P4): a further reason a verdict is ineligible (the core's signing rules); null when it is eligible. */
+    ineligible?: (event: VerdictEvent) => string | null;
+  },
+): VerdictClassification {
   const drawByNumber = new Map(ctx.draws.map((d) => [d.draw, d]));
   const drawnIds = new Set(ctx.draws.map((d) => d.changeId));
   const first = new Map<string, VerdictEvent>();
@@ -359,7 +373,7 @@ export function classifyVerdicts(verdicts: readonly VerdictEvent[], ctx: { proto
       ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
       continue;
     }
-    const ineligible = verdictIneligibility(ev, ctx.reviewers);
+    const ineligible = verdictIneligibility(ev, ctx.reviewers) ?? ctx.ineligible?.(ev) ?? null;
     if (ineligible) {
       ignored.push({ event: ev, reason: ineligible });
       continue;

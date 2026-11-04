@@ -1,6 +1,7 @@
 import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
+import { ledgerPathFindings } from "./ledger-path.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -38,7 +39,7 @@ import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
 import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
-import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
+import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
 
 /**
  * INCOMPLETE (U8): no FAIL, but part of what the check covers could not be checked (a repo that could not be rebuilt,
@@ -493,7 +494,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     }
     // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
     const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
-    const counted = read ? countedVerdicts(read, { registration: reg, verifiesSignatures, ...(deps.provenanceCeiling ? { ceiling: deps.provenanceCeiling } : {}), ledger: ledger.name }) : null;
+    // P4: each verdict signature must be made for this audit as verified above: the registration, the manifest (check 2) and the seed (check 4).
+    const binding = auditBinding(reg.sha256, m.sha256, { round: derived.round, randomness: beacon!.randomness });
+    const counted = read ? countedVerdicts(read, { registration: reg, binding, verifiesSignatures, ...(deps.provenanceCeiling ? { ceiling: deps.provenanceCeiling } : {}), ledger: ledger.name }) : null;
     const verdicts = counted?.verdicts ?? null;
     if (counted) {
       c7.details.push(...counted.notes, ...counted.findings, ...counted.warnings);
@@ -509,6 +512,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         protocolSha256: reg.record.protocolSha256,
         params: reg.record.parameters,
         reviewers: regVerdicts?.reviewers ?? null,
+        ineligible: counted!.ineligible,
       });
       const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
       const firstFor = new Map(status.firstVerdicts.map((v) => [v.changeId, v]));
@@ -538,6 +542,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         c7.details.push(...integ.findings, ...(integ.warnings ?? []));
         if (!integ.ok) c7.status = "FAIL";
         else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
+        // P4: the git-file ledger walked must be at the path the registration records.
+        if (ledger.name === "git-file") addAnchor(c7, ledgerPathFindings(reg, integ.location));
       }
     } else {
       c7.details.push(`ledger ${ledger.name} has no integrity check`);

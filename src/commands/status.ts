@@ -69,6 +69,8 @@ export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): 
   const refused = r.phase === "sampled" && r.verdictsRead && !!r.refusal;
   if (r.phase !== "unregistered" && !refused && r.timestampAnchors.length) ctx.out(`  timestamp anchors: ${r.timestampAnchors.join(" · ")}`);
   if (r.phase !== "sampled" || !r.verdictsRead || r.refusal) return;
+  for (const f of r.ledgerIntegrity?.fails ?? []) ctx.out(`  ledger integrity FAILs: ${f}`);
+  for (const w of r.ledgerIntegrity?.warnings ?? []) ctx.out(`  WARN ${w}`);
   if (r.blockingDraw) ctx.out(`  blocking draw: #${r.blockingDraw.draw} ${r.blockingDraw.changeId} ${r.blockingDraw.url}`);
   ctx.out(`  distinct changes reviewed: ${r.distinctReviewed} · draws counted: ${r.sequence.draws}${r.beyondStop ? ` · ${r.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
   for (const i of r.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);

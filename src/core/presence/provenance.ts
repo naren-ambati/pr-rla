@@ -1,7 +1,8 @@
 import { PROVENANCE_LEVELS, provenanceRank, type ProvenanceLevel, type VerdictEvent } from "../../sdk/ledger.js";
 import { isRegistrationV2, type AnyRegistration, type PluginIdentity, type SignedRecord } from "../records.js";
 import { allowedSignersOf, type AllowedSigner } from "./allowed-signers.js";
-import { VERDICT_SIGNATURE_SOURCE, attestVerdicts, withoutSignatureFields } from "./verifier.js";
+import { VERDICT_SIGNATURE_SOURCE, attestVerdicts, withoutSignatureFields, type VerdictSignatureCheck } from "./verifier.js";
+import type { VerdictBinding } from "./verdict-payload.js";
 
 /**
  * How provenance levels are printed and enforced (FR3.8, FR9.1, FR9.4, FR9.6). Pure.
@@ -71,9 +72,27 @@ export function registeredSigners(reg: SignedRecord<AnyRegistration>): AllowedSi
   return isRegistrationV2(reg) ? allowedSignersOf(reg.record.verdicts.allowed_signers) : [];
 }
 
+/**
+ * True when the registration counts only verdicts its reviewers signed with their registered keys
+ * (P4, second-pass review finding 2): keys are registered, and `require_signed` or a minimum above
+ * `self-asserted` is set. Then a line without a valid registered signature is ineligible: it is
+ * ignored with its reason, as a bot's label is, and the first eligible signed verdict counts.
+ */
+export function signaturesRequired(reg: SignedRecord<AnyRegistration>): boolean {
+  if (!isRegistrationV2(reg)) return false;
+  const v = reg.record.verdicts;
+  return registeredSigners(reg).length > 0 && (v.require_signed === true || provenanceRank(v.minProvenance) > provenanceRank("self-asserted"));
+}
+
 export interface CountingInput {
   /** The registration the verdicts are counted for: its digest and allowed signers. */
   registration: SignedRecord<AnyRegistration>;
+  /**
+   * The audit each verdict signature must be made for (the registration, the frozen manifest and
+   * the seed, P4): what verify has already checked, or what status and record read from the audit's
+   * files. Without it no signature can be checked, and none counts.
+   */
+  binding: VerdictBinding | null;
   /** The ledger read is the registered built-in git-file one: only then do verdict signatures count. */
   verifiesSignatures: boolean;
   /** The most the registered ledger's verdicts can count as. */
@@ -88,22 +107,61 @@ export interface CountedVerdicts {
   notes: string[];
   findings: string[];
   warnings: string[];
+  /**
+   * Why a verdict (one of `verdicts`) cannot count under the registration's signing rules, or null
+   * (P4). Status, check 7 and `record` pass it to `computeStatus` / `classifyVerdicts`, so the same
+   * lines are ignored everywhere.
+   */
+  ineligible: (v: VerdictEvent) => string | null;
 }
+
+const RULE = "the registration counts only verdicts signed with their reviewer's registered key";
+const withoutClaim = ({ provenance: _claimed, ...v }: VerdictEvent): VerdictEvent => v;
+
+/** The audit a verdict signature is checked for, from the registration's digest, the manifest's and the beacon (verify passes what it has verified; status and record what the audit's files say). */
+export const auditBinding = (registrationSha256: string, manifestSha256: string, beacon: { round: number; randomness: string }): VerdictBinding => ({
+  registrationSha256,
+  manifestSha256,
+  beaconRound: beacon.round,
+  beaconRandomness: beacon.randomness,
+});
 
 /**
  * The verdicts as status and check 7 count them. With the registered git-file ledger, each verdict's
- * provenance is what its own signature gives it (attestVerdicts), checked against the registration's
- * digest and allowed signers; any other ledger's verdicts keep the provenance the ledger reports,
- * and any signature fields they carry are ignored. Either way, nothing counts above the ceiling.
+ * provenance is what its own signature gives it (attestVerdicts), checked against the audit it must
+ * be signed for and the allowed signers; any other ledger's verdicts keep the provenance the ledger
+ * reports, and any signature fields they carry are ignored. Either way, nothing counts above the
+ * ceiling. Under a registration that requires signatures, every line without a valid registered
+ * signature is ineligible (`ineligible`).
  */
 export function countedVerdicts(read: readonly VerdictEvent[], input: CountingInput): CountedVerdicts {
+  const required = signaturesRequired(input.registration);
   let events: VerdictEvent[];
+  let checks: (VerdictSignatureCheck | null)[] = [];
   let findings: string[] = [];
   let warnings: string[] = [];
-  if (input.verifiesSignatures) {
-    const a = attestVerdicts(read, input.registration.sha256, registeredSigners(input.registration));
-    ({ events, findings, warnings } = a);
-  } else events = read.map(withoutSignatureFields);
+  if (input.verifiesSignatures && input.binding) {
+    ({ events, checks, findings, warnings } = attestVerdicts(read, input.binding, registeredSigners(input.registration), { quiet: required }));
+  } else events = read.map((v) => withoutSignatureFields(input.verifiesSignatures ? withoutClaim(v) : v));
   const capped = capProvenance(events, input.ceiling, input.ledger);
-  return { verdicts: capped.verdicts, notes: capped.notes, findings, warnings };
+  const reasons = new Map<VerdictEvent, string>();
+  if (required)
+    capped.verdicts.forEach((v, i) => {
+      const check = checks[i];
+      if (!input.verifiesSignatures) reasons.set(v, `the ledger read is not the registered built-in git-file, so no verdict signature counts, and ${RULE}`);
+      else if (!check) reasons.set(v, `its signature could not be checked for this audit, and ${RULE}`);
+      else if (check.state !== "signed") reasons.set(v, `${check.detail}, and ${RULE}`);
+    });
+  return { verdicts: capped.verdicts, notes: capped.notes, findings, warnings, ineligible: (v) => reasons.get(v) ?? null };
+}
+
+/**
+ * The verdict that already counts for a change, as status and check 7 would count it (`record`'s
+ * check before it appends another, P4): same protocol, an eligible reviewer, and, under a
+ * registration that requires signatures, a valid registered signature. An unsigned line an assistant
+ * appended first no longer stands in the way of the reviewer's signed one.
+ */
+export function countingVerdictFor(read: readonly VerdictEvent[], changeId: string, input: CountingInput & { protocolSha256: string; eligible: (v: VerdictEvent) => boolean }): VerdictEvent | undefined {
+  const c = countedVerdicts(read, input);
+  return c.verdicts.find((v) => v.changeId === changeId && v.protocolSha256 === input.protocolSha256 && input.eligible(v) && !c.ineligible(v));
 }

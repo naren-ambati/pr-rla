@@ -70,15 +70,17 @@ export async function draws(ctx: ApiContext, opts: DrawsOptions = {}): Promise<D
   }
   const manifest = readManifest(paths);
   const ledger = await ledgerFor(ctx, config, paths);
+  const counted = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: file.beacon });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
     draws: file.draws,
     drawsIssued: file.issued,
-    verdicts: (await countedLedgerVerdicts(ctx, config, reg, ledger)).verdicts,
+    verdicts: counted.verdicts,
     protocolSha256: reg.record.protocolSha256,
     params: reg.record.parameters,
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
+    ineligible: counted.ineligible,
   });
   const first = new Map(report.firstVerdicts.map((v) => [v.changeId, v]));
   return {

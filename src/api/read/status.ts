@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { buildPopulation } from "../../core/population.js";
 import { perRepoRows, type RepoRow } from "../../core/pooled-report.js";
-import { PRESENCE_LIMIT, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
+import { PRESENCE_LIMIT, auditBinding, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
+import { certificateWithheld, gitFileLedgerGate } from "../../core/ledger-path.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
 import { describeRepoSet } from "../../core/repo-set.js";
 import { unixToIso } from "../../core/seed.js";
@@ -73,6 +74,10 @@ export type StatusResult =
       verdictNotes: string[];
       /** A pooled audit's per-repo counts (U8): descriptive; the risk limit applies to the pool. */
       perRepo?: RepoRow[];
+      /** The built-in git-file ledger's integrity walk and path rule, as check 7 runs them (P4); null for other ledgers. */
+      ledgerIntegrity: { ok: boolean; findings: string[]; fails: string[]; warnings: string[] } | null;
+      /** Why CERTIFIED is withheld although the sequence certifies: what check 7 would FAIL (P4). Empty otherwise. */
+      certificateWithheld: string[];
       /** The certificate line (or the refusal), as the CLI prints it first. */
       line: string;
     } & TimeStanding &
@@ -109,15 +114,18 @@ export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: 
 
 /**
  * The ledger's verdicts as they count (U9): signatures attested against the registration's allowed
- * signers only in the registered built-in git-file ledger, every level capped at the registered
- * ledger's ceiling, and no signature fields in what comes back. Status, the draws and the draw
- * context read verdicts through this, as verify's check 7 does.
+ * signers only in the registered built-in git-file ledger, over the v2 bytes that also name the
+ * manifest and the seed (P4: `binding`, from manifest.json and draws.json; verify takes it from what
+ * it verified), every level capped at the registered ledger's ceiling, and no signature fields in
+ * what comes back. `ineligible` says which lines cannot count under the signing rules. Status, the
+ * draws and the draw context read verdicts through this, as verify's check 7 does.
  */
-export async function countedLedgerVerdicts(ctx: ApiContext, config: PrRlaConfig, reg: SignedRecord<AnyRegistration>, ledger: { name: string; readVerdicts(): Promise<VerdictEvent[]> }): Promise<CountedVerdicts> {
+export async function countedLedgerVerdicts(ctx: ApiContext, config: PrRlaConfig, reg: SignedRecord<AnyRegistration>, ledger: { name: string; readVerdicts(): Promise<VerdictEvent[]> }, at: { manifestSha256: string; beacon: { round: number; randomness: string } }): Promise<CountedVerdicts> {
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
   const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx)));
   const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
-  return countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
+  const binding = auditBinding(reg.sha256, at.manifestSha256, at.beacon);
+  return countedVerdicts(await ledger.readVerdicts(), { registration: reg, binding, verifiesSignatures, ceiling, ledger: ledger.name });
 }
 
 /**
@@ -133,12 +141,14 @@ export function stratumChoices(sel: Partial<Pick<Selector, "kinds" | "bots" | "d
 }
 
 /** The certificate line every status and verify prints. */
-export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector> }): string {
+export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector>; withheld?: readonly string[] }): string {
   const s = r.sequence;
   const stratum = `${info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : ""}${stratumChoices(info.selector)}`;
   const head = `prefix ${r.labelledPrefix}/${r.drawsIssued} · fails ${s.fails} · claim D (detected-defect rate ≤ ${pct(info.p0)}, protocol ${info.protocol.slice(0, 4)}…${stratum}) · LLR ${s.llr.toFixed(3)} / target ${s.target.toFixed(3)}`;
   let verdict: string;
-  if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
+  // P4: never CERTIFIED where verify would FAIL check 7.
+  if (s.state === "CERTIFIED" && info.withheld?.length) verdict = `NOT CERTIFIED: verify check 7 would FAIL (${info.withheld.join("; ")}); run "pr-rla verify"`;
+  else if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
   else if (s.state === "ESCALATE") verdict = `ESCALATE: review all ${fmt(r.N)} or narrow the claim`;
   else verdict = `NOT CERTIFIED · ${s.morePassesNeeded} more passing draws needed (${s.draws + (s.morePassesNeeded ?? 0)} total)`;
   return `${head} · ${verdict} · ${info.mode}`;
@@ -211,7 +221,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   }
   const ledger = await ledgerFor(ctx, config, paths);
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${ledger.name}` });
-  const capped = await countedLedgerVerdicts(ctx, config, reg, ledger);
+  const capped = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
@@ -221,6 +231,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     protocolSha256: reg.record.protocolSha256,
     params: reg.record.parameters,
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
+    ineligible: capped.ineligible,
   });
   const minProvenance: ProvenanceLevel = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
   const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
@@ -229,6 +240,10 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length).map((v) => v.draw) : [];
   const verdictNotes = [...(minProvenance === "presence" || report.provenance.some((p) => p.level === "presence") ? [PRESENCE_LIMIT] : []), ...capped.notes, ...capped.warnings];
   const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
+  // P4: status runs check 7's git-file integrity walk and path rule (local), and withholds CERTIFIED where check 7 would FAIL.
+  const gate = builtinLedgerName(config.ledger.use) === "git-file" ? await gitFileLedgerGate(ledger, reg) : null;
+  const withheld = report.sequence.state === "CERTIFIED" ? certificateWithheld({ gate, below: belowMinimum.length, unsigned: unsigned.length }) : [];
+  const ledgerIntegrity = gate ? { ok: !gate.fails.length, findings: gate.integrity?.findings ?? [], fails: gate.fails, warnings: gate.warns } : null;
   let checkpointAdvised = false;
   if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
     const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
@@ -237,6 +252,6 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   }
   const line =
     report.refusal ??
-    statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }) + timestampNote;
-  return { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...report, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), line };
+    statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector, withheld }) + timestampNote;
+  return { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...report, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld, line };
 }

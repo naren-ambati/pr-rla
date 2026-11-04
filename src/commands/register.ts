@@ -49,6 +49,7 @@ export function printRegistrationRest(ctx: Pick<CommandContext, "out">, p: Regis
   if (p.landedViaWarning) ctx.out(`  warning: ${p.landedViaWarning}`);
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${p.protocolFile})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · ${verdictsSummary(record.verdicts)}`);
+  if (p.ledgerPath) ctx.out("why" in p.ledgerPath ? `  warning: ${p.ledgerPath.why}` : `  ledger path ${p.ledgerPath.path} (signed in: verify reads the ledger only there)`);
   if (presenceReachable(record.verdicts.allowed_signers)) ctx.out(`  ${PRESENCE_LIMIT}`);
   for (const id of [record.plugins.provider, record.plugins.ledger]) {
     if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fixturePath } from "./helpers/fixtures.js";
 import { treeHash } from "./helpers/tree-hash.js";
@@ -42,7 +42,9 @@ describe("pr-rla/api/read at run time: what it loads, writes and starts", () => 
     expect(t.writes).toEqual([]);
     // The only processes: git, reading the git-file ledger's history, with the read-only environment.
     for (const s of t.spawns) {
-      expect(s.file).toBe("git");
+      // git by its absolute path from PATH, never a bare name the audit repository could supply (P4's src/io/executables.ts).
+      expect(isAbsolute(s.file), s.file).toBe(true);
+      expect(basename(s.file)).toBe("git");
       // The union of U5's and U9's guards (src/io/git-safe.ts, joined at the wave-2 integration); U9's history walk reads raw objects.
       expect(s.args.slice(0, 9)).toEqual(["--no-replace-objects", "-c", "core.commitGraph=false", "-c", "core.fsmonitor=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
       expect(["rev-parse", "rev-list", "config", "cat-file"]).toContain(s.args[9]);

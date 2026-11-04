@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHECKPOINTS_FILE, HISTORY_DIR, unionCheckpointLines } from "../core/checkpoint.js";
 import { gitWriteEnv } from "./git-safe.js";
+import { gitExecutable } from "./executables.js";
 
 /**
  * The checkpoint git transport (contracts.md §6; FR4.4): how a checkpoint appended in one
@@ -31,7 +32,8 @@ export type GitRunner = (args: string[], env?: Record<string, string>) => Promis
 export function nodeGit(cwd: string, timeoutMs = GIT_TIMEOUT_MS): GitRunner {
   return (args, env = {}) =>
     new Promise((resolve) => {
-      execFile("git", args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...gitWriteEnv(), ...env } }, (error, stdout, stderr) => {
+      // git by absolute path (P4): never a git the audit repository supplies; in git-safe's write-side environment.
+      execFile(gitExecutable(), args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...gitWriteEnv(), ...env } }, (error, stdout, stderr) => {
         const e = error as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null;
         if (e?.killed) return resolve({ code: -1, stdout, stderr: `git ${args[0]} timed out after ${timeoutMs / 1000} s` });
         resolve({ code: e ? (typeof e.code === "number" ? e.code : 1) : 0, stdout, stderr });

@@ -299,6 +299,12 @@ Several open review points from the approved stages are resolved here: requireme
 
 The levels, the wording (FR9.6), T16 and the known limits are unchanged. BUILD-NOTES ("U9 fix round") records this as a deviation from the approved design, with the review's reasoning.
 
+**Changed after the second review (2026-11-04, the P4 round).** A second review of the fix round found the walked ledger path unbound and the verdict bytes unbound to the seed:
+- **The ledger's path is registered.** `register` signs in `ledgerPath`, the git-file ledger's path from the repository's toplevel, lexical and normalised. The integrity check walks that lexical path and FAILs on a symbolic link or another spelling on the way (case-folding filesystems); check 7 FAILs a ledger read anywhere else, and a never-committed ledger beside a committed registration. Status runs the same walk, so it never prints CERTIFIED where check 7 would FAIL.
+- **The verdict bytes are version 2.** `pr-rla-verdict/v2` adds the frozen manifest's digest and the seed (the beacon round and its randomness), so a signature cannot be made before the seed is public, nor reused under another manifest. v1 signatures are refused.
+- **Eligibility under signing.** With keys and `require_signed` or a minimum above `self-asserted`, a line without a valid registered signature is ignored with its reason and the first eligible signed verdict counts, in status, check 7 and `record` alike. So an unsigned line appended first can no longer poison the reviewer's signed verdict; FR9.1's "an unsigned verdict fails" is met as "an unsigned verdict never counts".
+- **The walk streams**, and git and ssh-keygen run by absolute path from PATH. BUILD-NOTES ("P4 git-file ledger path and verdict binding") has the measurements and the reasoning.
+
 ## U10 · Docs and release engineering
 
 **Kept from `05` §U10:** the doc set; the FR-D2 convention and `scripts/check-docs.mjs`; the release checklist steps; no licence file (`"license": "UNLICENSED"`, `"private": true`).

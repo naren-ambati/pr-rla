@@ -331,12 +331,15 @@ describe("per-verdict signatures through pr-rla/api/read: status and the draw co
     commitAll(s.dir, "an unsigned verdict", null);
   }, 120_000);
 
-  it("status counts each signed verdict at the level its signature proves, flags the unsigned one, and carries no signature field", async () => {
+  it("status counts each signed verdict at the level its signature proves, ignores the unsigned one with its reason, and carries no signature field", async () => {
     const r = await read.status({ dir: s.dir }, readOpts());
     expect(r).toMatchObject({ phase: "sampled", verdictsRead: true, minProvenance: "account" });
     if (r.phase !== "sampled" || !r.verdictsRead) throw new Error("not sampled");
-    expect(Object.fromEntries(r.provenance.map((p) => [p.level, p.count]))).toEqual({ presence: 1, account: 1, "self-asserted": 1 });
-    expect(r.belowMinimum).toHaveLength(1);
+    // Keys are registered and the minimum is above self-asserted, so carol's unsigned line is
+    // ineligible (fix/p4-ledger-path): ignored with its reason, not counted below the minimum.
+    expect(Object.fromEntries(r.provenance.map((p) => [p.level, p.count]))).toEqual({ presence: 1, account: 1 });
+    expect(r.belowMinimum).toEqual([]);
+    expect(r.ignored.filter((i) => i.event.reviewer === "carol")).toEqual([{ event: expect.objectContaining({ reviewer: "carol", verdict: "pass" }), reason: "carries no signature, and the registration counts only verdicts signed with their reviewer's registered key" }]);
     expect(r.verdictNotes).toContain(PRESENCE_LIMIT); // the T16 limit, wherever presence is counted
     expect(JSON.stringify(r)).not.toMatch(/sshsig|registrationSha256":"[0-9a-f]{64}","reviewer/);
   });
@@ -378,4 +381,52 @@ describe("read-only mode honours this machine's approvals (bolt/u5-audit-api-mcp
     expect([...new Set(seen.map((x) => new URL(x.url).host))]).toEqual(["ghe.example.com"]);
     expect(JSON.stringify(approved)).not.toContain("ghe_OPERATOR_SECRET");
   });
+});
+
+describe("check 7's git-file gate through pr-rla/api/read: status withholds CERTIFIED where verify FAILs (bolt/u5-audit-api-mcp × fix/p4-ledger-path)", () => {
+  it("a committed ledger line removed later: the sequence certifies, but read.status says NOT CERTIFIED with the reason and read.verify FAILs check 7 (exit 1)", async () => {
+    const s = setupAuditRepo({ changes: makeChanges(200) });
+    appendFileSync(join(s.dir, ".pr-rla.yml"), "ledger: git-file\n");
+    s.git("commit", "-qam", "a git-file ledger");
+    s.clock.now = T("2026-10-20T00:00:00Z");
+    expect(await registerCommand(s.ctx, {})).toBe(0);
+    s.clock.now = T("2026-10-20T12:00:00Z");
+    expect(await freezeCommand(s.ctx, {})).toBe(0);
+    s.clock.now = T("2026-10-21T01:00:00Z");
+    expect(await sampleCommand(s.ctx, {})).toBe(0);
+    s.git("add", "-A");
+    s.git("commit", "-qm", "registration, manifest, draws");
+    const W = "audit/2026-q3";
+    const ledger = join(s.dir, W, "verdicts.jsonl");
+    const protocolSha256 = readJ<{ record: { protocolSha256: string } }>(s, `${W}/registration.json`).record.protocolSha256;
+    const line = (d: { draw: number; changeId: string }) => `${JSON.stringify({ schema: "pr-rla/verdict/v1", draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z" })}\n`;
+    const first = readJ<DrawsFile>(s, `${W}/draws.json`).draws.slice(0, 36).filter((d) => d.firstOccurrence);
+    for (const d of first) appendFileSync(ledger, line(d));
+    commitAll(s.dir, "bob's verdicts", null);
+    s.clock.now = T("2026-10-21T04:00:00Z");
+    const opts = { nowMs: () => s.clock.now, fetch: s.fetch, env: s.ctx.env };
+
+    const honest = await read.status({ dir: s.dir }, opts);
+    if (honest.phase !== "sampled" || !honest.verdictsRead) throw new Error("not sampled");
+    expect(honest.sequence.state).toBe("CERTIFIED");
+    expect(honest).toMatchObject({ certificateWithheld: [], ledgerIntegrity: { ok: true, fails: [] } });
+    expect(honest.line).not.toMatch(/NOT CERTIFIED/);
+
+    // A second line is appended and committed, then taken out again: the committed history is rewritten.
+    appendFileSync(ledger, line(first[0]!));
+    commitAll(s.dir, "a second pass for the first draw", null);
+    writeFileSync(ledger, first.map(line).join(""));
+    const rewrite = commitAll(s.dir, "the line taken out again", null);
+
+    const r = await read.status({ dir: s.dir }, opts);
+    if (r.phase !== "sampled" || !r.verdictsRead) throw new Error("not sampled");
+    expect(r.sequence.state).toBe("CERTIFIED"); // the counting alone would certify
+    expect(r.certificateWithheld).toEqual(["the ledger's integrity check FAILs"]);
+    expect(r.ledgerIntegrity).toMatchObject({ ok: false, fails: [`${W}/verdicts.jsonl was rewritten (not appended) in commit ${rewrite.slice(0, 10)}`] });
+    expect(r.line).toMatch(/NOT CERTIFIED: verify check 7 would FAIL \(the ledger's integrity check FAILs\); run "pr-rla verify"/);
+
+    const v = await read.verify({ dir: s.dir, offline: true }, opts);
+    expect(v).toMatchObject({ ok: false, verdict: "FAILED", exitCode: 1 });
+    expect(v.checks.find((c) => c.n === 7)).toMatchObject({ status: "FAIL" });
+  }, 120_000);
 });

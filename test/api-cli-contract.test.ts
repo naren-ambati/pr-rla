@@ -148,9 +148,16 @@ describe("the writers keep master's exit codes (the review's differential flows,
       [["status", "--checkpoint"], 1],
       [["checkpoint"], 1],
       [["checkpoint", "--push"], 1],
-      [["verify", "--offline"], 0],
+      // A git-file ledger never committed beside a committed registration has no tamper trail at
+      // its path: verify check 7 FAILs until the ledger file is committed (fix/p4-ledger-path).
+      [["verify", "--offline"], 1],
     ];
     for (const [argv, code] of steps) expect(await cli(ctxIn(dir), ...argv), argv.join(" ")).toBe(code);
+    // The honest next step "record" prints ("commit the ledger file now"); then verify passes.
+    const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", ...a], { cwd: dir, stdio: "ignore" });
+    git("add", "audit/2026-q3/verdicts.jsonl");
+    git("commit", "-qm", "verdicts");
+    expect(await cli(ctxIn(dir), "verify", "--offline"), "verify --offline after committing the ledger").toBe(0);
   });
 
   it("init, status, verify, freeze --dry-run, register --dry-run, plugin and simulate on an empty directory (flow 3)", async () => {

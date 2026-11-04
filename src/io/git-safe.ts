@@ -2,6 +2,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { existsSync, readdirSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { gitCeilingDirectories } from "./confine.js";
+import { gitExecutable } from "./executables.js";
 
 /**
  * The one way pr-rla's read paths run git (U9, after review, joined at the wave-2 integration with
@@ -20,7 +21,9 @@ import { gitCeilingDirectories } from "./confine.js";
  * - `GIT_TERMINAL_PROMPT=0`: never ask for a password;
  * - `--no-replace-objects`, `-c core.commitGraph=false`, `-c core.fsmonitor=false`: no replace refs,
  *   no commit-graph parents, no fsmonitor hook;
- * - `--no-textconv` for the commands that would apply a textconv driver (diff, log, show, blame, grep).
+ * - `--no-textconv` for the commands that would apply a textconv driver (diff, log, show, blame, grep);
+ * - git itself by absolute path from PATH (src/io/executables.ts, P4), never looked up through the
+ *   audit repository it runs in.
  *
  * A `.git` file pointing outside the roots of a confined call is refused before git runs, by the
  * caller that discovers the repository (the git-file ledger's `confineGitDir`).
@@ -72,14 +75,14 @@ export function gitSafeArgs(args: readonly string[]): string[] {
 
 /** Runs git synchronously under the guards; throws as execFileSync does. */
 export function gitSafe(args: readonly string[], o: GitSafeOptions): Buffer {
-  return execFileSync("git", gitSafeArgs(args), { cwd: o.cwd, env: gitSafeEnv(o.root ?? o.cwd), stdio: ["pipe", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024, ...(o.input !== undefined ? { input: o.input } : {}) });
+  return execFileSync(gitExecutable(), gitSafeArgs(args), { cwd: o.cwd, env: gitSafeEnv(o.root ?? o.cwd), stdio: ["pipe", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024, ...(o.input !== undefined ? { input: o.input } : {}) });
 }
 
 export const gitSafeText = (args: readonly string[], o: GitSafeOptions): string => gitSafe(args, o).toString("utf8");
 
 /** Spawns git under the guards (for streaming, e.g. `cat-file --batch`). */
 export function gitSafeSpawn(args: readonly string[], o: Omit<GitSafeOptions, "input">): ChildProcessWithoutNullStreams {
-  return spawn("git", gitSafeArgs(args), { cwd: o.cwd, env: gitSafeEnv(o.root ?? o.cwd), stdio: ["pipe", "pipe", "pipe"] });
+  return spawn(gitExecutable(), gitSafeArgs(args), { cwd: o.cwd, env: gitSafeEnv(o.root ?? o.cwd), stdio: ["pipe", "pipe", "pipe"] });
 }
 
 /** The command a verifier runs instead of verifying a cut or partial history. */

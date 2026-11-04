@@ -7,7 +7,7 @@ import { isRegistrationV2, type DrawsFile } from "../../core/records.js";
 import { computeStatus } from "../../core/status.js";
 import type { PrRlaConfig, WindowPaths } from "../../config.js";
 import { readTextConfined } from "../../io/confine.js";
-import { gitFilePath } from "../../ledgers/git-file.js";
+import { gitFileLedgerFile } from "../../ledgers/git-file.js";
 import { ledgerTraits, type LedgerTraits } from "../../ledger-traits.js";
 import { NoRecordedDescription } from "../../providers/json-file.js";
 import type { VerdictEvent } from "../../sdk/ledger.js";
@@ -43,7 +43,7 @@ export function issuedDraws(paths: WindowPaths, window: string): DrawsFile {
  */
 export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerTraits, draw: number, changeId: string): { text: string; target: RecordTarget | null } {
   if (lt.name === "git-file") {
-    const file = relative(config.dir, gitFilePath(paths.windowDir, config.ledger.options as { file?: string }));
+    const file = relative(config.dir, gitFileLedgerFile(paths.windowDir, config.ledger.options as { file?: string }));
     return { text: `pr-rla record ${draw} pass|fail --reviewer <you> --note "<one line>", then commit ${file}`, target: null };
   }
   if (lt.provenance === "account") {
@@ -95,15 +95,17 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${lt.name}` });
   try {
     const ledger = await ledgerFor(ctx, config, paths);
+    const counted = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
     const report = computeStatus({
       N: manifest.N,
       minPopulation: reg.record.parameters.minPopulation,
       draws: draws.draws,
       drawsIssued: draws.issued,
-      verdicts: (await countedLedgerVerdicts(ctx, config, reg, ledger)).verdicts,
+      verdicts: counted.verdicts,
       protocolSha256: reg.record.protocolSha256,
       params: reg.record.parameters,
       reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
+      ineligible: counted.ineligible,
     });
     verdict = report.firstVerdicts.find((v) => v.changeId === change.id) ?? null;
     blocksPrefix = report.blockingDraw?.draw === n;

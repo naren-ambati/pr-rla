@@ -14,6 +14,7 @@ import { runVerify } from "../src/commands/verify.js";
 import { parsePublicKeyBlob, parsePublicKeyText, verifySshsig } from "../src/core/presence/index.js";
 import type { DrawsFile } from "../src/core/records.js";
 import { createLedger } from "../src/registry.js";
+import { gitSafeText } from "../src/io/git-safe.js";
 import { verdictIneligibility } from "../src/sdk/ledger.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { lockPlugin } from "./helpers/plugin-lock.js";
@@ -21,7 +22,7 @@ import { commitAll } from "./helpers/signed-commits.js";
 import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 import { signedVerdictsYaml } from "./helpers/u9-config.js";
-import { signedLine } from "./helpers/verdict-lines.js";
+import { bindingOf, signedLine } from "./helpers/verdict-lines.js";
 
 /**
  * The independent review of bolt 10 (U9) at 0cf8af1, finding by finding: each reproduction the
@@ -55,7 +56,7 @@ const bobCommit = (p: string) => bob.sign(p, { flags: 0x01, counter: ++counter }
 function line(s: Scenario, d: { draw: number; changeId: string }, verdict: "pass" | "fail", o: { key?: TestKey; reviewer?: string; forRegistration?: string } = {}): string {
   const f = { draw: d.draw, changeId: d.changeId, verdict, protocolSha256: reg(s).record.protocolSha256, reviewer: o.reviewer ?? "bob", recordedAt: "2026-10-21T03:00:00Z" };
   if (!o.key) return `${JSON.stringify({ schema: "pr-rla/verdict/v1", ...f })}\n`;
-  return signedLine(reg(s).sha256, f, o.key, { flags: 0x01, counter: ++counter, ...(o.forRegistration ? { bytesFor: { registrationSha256: o.forRegistration } } : {}) });
+  return signedLine(bindingOf(join(s.dir, W)), f, o.key, { flags: 0x01, counter: ++counter, ...(o.forRegistration ? { bytesFor: { registrationSha256: o.forRegistration } } : {}) });
 }
 /** An honest reviewer: each verdict signed, each commit signed. `verdictFor` picks pass or fail per draw. */
 function honestReview(s: Scenario, verdictFor: (draw: number) => "pass" | "fail" = () => "pass") {
@@ -75,6 +76,12 @@ function shallowCopy(s: Scenario): Scenario {
   return v;
 }
 const noPresence = (r: Awaited<ReturnType<typeof runVerify>>) => !r.status?.provenance.some((p) => p.level === "presence");
+/**
+ * Since P4 a line without a valid registered signature is ineligible under this audit's rules
+ * (presence, require_signed): the forged lines are ignored, so they certify nothing, and check 7
+ * WARNs them as ignored instead of counting and FAILing them.
+ */
+const forgeriesIgnored = (r: Awaited<ReturnType<typeof runVerify>>) => r.status!.provenance.length === 0 && r.status!.sequence.state !== "CERTIFIED" && c7(r).status !== "PASS" && c7(r).details.some((d) => /^ignored verdict on draw #\d+: /.test(d));
 
 beforeAll(async () => {
   bob = makeTestKey("sk-ssh-ed25519@openssh.com");
@@ -113,10 +120,10 @@ describe("finding 1 (CRITICAL): one signed commit no longer vouches for every li
     return s;
   }
 
-  it("attack A: the full clone FAILs check 7, and so does a depth-1 clone (it is refused), with nothing counted at presence", async () => {
+  it("attack A: in the full clone the forged lines count for nothing (ignored since P4), and a depth-1 clone FAILs (it is refused), with nothing counted at presence", async () => {
     const s = attackA();
     const full = await runVerify(s.ctx, {});
-    expect(c7(full).status).toBe("FAIL");
+    expect(forgeriesIgnored(full)).toBe(true);
     const shallow = await runVerify(shallowCopy(s).ctx, {});
     expect(c7(shallow).status).toBe("FAIL");
     expect(shallow.ok).toBe(false);
@@ -137,7 +144,8 @@ describe("finding 1 (CRITICAL): one signed commit no longer vouches for every li
   it("exp7: a shallow clone whose tip is bob's signed README commit (it never touches the ledger) counts nothing above self-asserted", async () => {
     const r = await runVerify(shallowCopy(attackA(true)).ctx, {});
     expect(c7(r).status).toBe("FAIL");
-    expect(r.status!.provenance.map((p) => p.level)).toEqual(["self-asserted"]);
+    // Since P4 the unsigned lines are not even counted as self-asserted: they are ignored.
+    expect(r.status!.provenance.map((p) => p.level)).toEqual([]);
   });
 });
 
@@ -179,8 +187,9 @@ describe("finding 2 (HIGH): a rename hidden behind a merge cannot drop a signed 
         commitAll(s.dir, `verdict ${d.draw}`, i === ds.length - 1 ? bobCommit : null);
       });
       const r = await runVerify(s.ctx, {});
-      expect(c7(r).status, attr).toBe("FAIL");
-      expect(r.status!.provenance.find((p) => p.level === "presence")?.count ?? 0, attr).toBeLessThanOrEqual(1);
+      expect(forgeriesIgnored(r), attr).toBe(true);
+      // P4 (second-pass review): exactly none, not "at most one".
+      expect(r.status!.provenance.find((p) => p.level === "presence")?.count ?? 0, attr).toBe(0);
     }
   });
 });
@@ -254,7 +263,7 @@ describe("findings 4 and 8 (MEDIUM, LOW): one touch signs one verdict, for one d
     for (const d of firstDraws(s)) appendFileSync(join(s.dir, REL), line(s, d, "pass"));
     commitAll(s.dir, "verdicts", bobCommit); // one touch
     const r = await runVerify(s.ctx, {});
-    expect(c7(r).status).toBe("FAIL");
+    expect(forgeriesIgnored(r)).toBe(true);
     expect(noPresence(r)).toBe(true);
   });
 
@@ -266,7 +275,7 @@ describe("findings 4 and 8 (MEDIUM, LOW): one touch signs one verdict, for one d
       commitAll(s.dir, `verdict ${d.draw}`, bobCommit);
     }
     const r = await runVerify(s.ctx, {});
-    expect(c7(r).status).toBe("FAIL");
+    expect(forgeriesIgnored(r)).toBe(true);
     expect(noPresence(r)).toBe(true);
   });
 });
@@ -288,9 +297,9 @@ describe("finding 5 (LOW-MEDIUM): the verifier's git configuration and environme
     s.git("config", "diff.x.textconv", `sh ${join(s.dir, "tc.sh")}`);
     const r = await runVerify(s.ctx, {});
     expect(c7(r).status).toBe("FAIL");
-    const flipped = r.status!.firstVerdicts.find((v) => v.draw === d!.draw)!;
-    expect(flipped.verdict).toBe("pass");
-    expect(flipped.provenance?.level ?? "self-asserted").toBe("self-asserted");
+    // The flipped line's signature no longer verifies: it is ignored (P4), so nothing is credited to alice's signed FAIL.
+    expect(r.status!.firstVerdicts.some((v) => v.draw === d!.draw)).toBe(false);
+    expect(r.status!.ignored.find((i) => i.event.draw === d!.draw)?.reason).toMatch(/has a signature that does not verify for this audit/);
   });
 
   /** A ledger whose FAIL was removed by a commit that a lie would hide. */
@@ -330,6 +339,9 @@ describe("finding 5 (LOW-MEDIUM): the verifier's git configuration and environme
     const r = await integrity(dir);
     expect(r.ok).toBe(false);
     expect(r.findings).toContain(`audit/w/verdicts.jsonl was rewritten (not appended) in commit ${removed.slice(0, 10)}`);
+    // P4: plain git believes the graph, git under the guard does not; without the guard's `-c core.commitGraph=false` this fails.
+    expect(execFileSync("git", ["log", "--format=%P", "-1", tip], { cwd: dir, encoding: "utf8" }).trim()).toBe(skip);
+    expect(gitSafeText(["log", "--format=%P", "-1", tip], { cwd: dir }).trim()).toBe(removed);
   });
 
   describe("an inherited GIT_DIR, GIT_OBJECT_DIRECTORY or GIT_GRAFT_FILE", () => {

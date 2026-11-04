@@ -9,6 +9,7 @@ import type { PrRlaConfig, WindowPaths } from "../../config.js";
 import { preflightExternalLedger } from "../../plugins/open.js";
 import { providerTraits } from "../../provider-traits.js";
 import { builtinLedgerName, loadLedgerDefinition, pluginIdentity } from "../../registry.js";
+import { gitFileRegisteredPath } from "../../ledgers/git-file.js";
 import type { ProvenanceLevel } from "../../sdk/ledger.js";
 import { maxProvenanceOf, SIGNATURE_LEDGERS } from "../../ledger-traits.js";
 import { registeredVerdicts, verdictRuleWarnings, type RegisteredVerdicts } from "../../core/presence/index.js";
@@ -70,6 +71,8 @@ export interface RegistrationPlan {
   verdictWarnings: string[];
   /** A pooled registration (U8): the repo set, how many repos it resolves to now, and whether they are signed in by id. */
   pool: { describe: string; count: number; registeredById: boolean } | null;
+  /** The built-in git-file ledger's path from the toplevel, signed in (P4), or why there is none; null for other ledgers. */
+  ledgerPath: { path: string } | { path: null; why: string } | null;
 }
 
 /** What `register` wrote. */
@@ -131,6 +134,14 @@ export async function preflightLedger(ctx: ApiContext, config: PrRlaConfig, path
   }
 }
 
+function registeredLedgerPath(windowDir: string, options: Record<string, unknown>): ReturnType<typeof gitFileRegisteredPath> {
+  try {
+    return gitFileRegisteredPath(windowDir, options);
+  } catch (e) {
+    throw new AuditError((e as Error).message);
+  }
+}
+
 /**
  * A pooled registration (a repo list or a rule) is checked before it is signed (FR5.1, FR5.6): one provider per
  * pool, a provider that can list repos for a rule, and a rule that matches something now (a dry resolve, reads
@@ -161,6 +172,8 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
   const timestamping = timestampingFor(config, bundle);
   const api: RekorApi = rekorApi(opts.rekorApi);
   const { verdicts, warnings: verdictWarnings } = await preflightLedger(ctx, config, paths);
+  // P4: the built-in git-file ledger's path from the repository's toplevel is signed in; verify reads it only there.
+  const ledgerPath = builtinLedgerName(config.ledger.use) === "git-file" ? registeredLedgerPath(paths.windowDir, config.ledger.options) : null;
   const pool = await preflightRepoSet(ctx, config);
   const record: RegistrationRecordV2 = {
     schema: "pr-rla/registration/v2",
@@ -174,6 +187,7 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     registeredAt: isoNow(ctx),
     timestamping,
     plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx)), ledger: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) },
+    ...(ledgerPath?.path ? { ledgerPath: ledgerPath.path } : {}),
     // FR3.8: `account` by default with an issue ledger, `self-asserted` with git-file.
     verdicts,
     prRlaVersion: PR_RLA_VERSION,
@@ -203,6 +217,7 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     landedViaWarning: null,
     verdictWarnings,
     pool: pool ? { describe: describeRepoSet(config.repoSet), count: pool.count, registeredById: !!pool.registered } : null,
+    ledgerPath,
   };
   hooks.onHeader?.(plan);
   if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {

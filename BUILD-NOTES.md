@@ -2541,6 +2541,131 @@ Tests: at `cf3a779` 547 at the root (546 passed, 1 skipped) and 42 in the packag
 - **U8:** `src/providers/github/http.ts` (`rest(url, signal)`; aborts pass through), `src/sdk/provider.ts` (`DescribeChangeOptions`, `ChangeAttributes`), `src/api/read/freeze-preview.ts` (the cache key).
 - New shared helpers: `src/net/abort.ts`, `src/io/confine.ts`, `src/core/text.ts`, `src/providers/paging.ts`, `src/providers/attributes.ts`, `src/api/read/errors.ts`.
 
+## P4 git-file ledger path and verdict binding (2026-11-04)
+
+A second adversarial review of U9's fix round (at `5fe1072`) found the walked ledger path unbound to the registration, unsigned lines that could poison a reviewer's signed verdict, a walk whose memory grew with the repository, verdict bytes that did not bind the seed, bare-name spawns, and a wording check that missed 9 of 12 direct claims. This round fixes each, on branch `fix/p4-ledger-path`, off `integrate/wave2` at `66e3f54` (U8, U9, the ledger and trusted-time rounds; U5 and plugins-broker were not yet merged).
+
+### Each finding, its outcome, commit and test
+
+| # | Finding (severity) | Outcome | Commit | Tests |
+|---|---|---|---|---|
+| 1 | The walked ledger path is not bound to the registered location (HIGH): E1, a window moved behind a symlink, and E1b, the audit copied to another `audit_dir`, each dropped bob's signed FAIL with 7/7 PASS, CERTIFIED | fixed: `register` signs `ledgerPath` (lexical, normalised, from the toplevel); the integrity check walks that lexical path and FAILs on a symbolic link, a non-directory or another spelling on the way; check 7 FAILs when the walked path is not the registered one; a registration without the field WARNs | `c86577c` | `p4-review-regressions.test.ts › E1`, `› E1b`, `› E1c, held before`; `git-file-history.test.ts › P4 … the ledger is walked at its lexical path` (8) |
+| 2 | Unsigned lines appended first poison the reviewer's signed verdict (MEDIUM): E3 | fixed: under keys plus `require_signed` or a minimum above `self-asserted`, a line without a valid registered signature is ineligible and ignored with its reason; the first eligible signed verdict counts; one predicate for status, check 7 and `record` | `9ad336b` | `› E3`; `presence-verifier.test.ts › P4 finding 2 …`; `presence-fixtures.test.ts › FR9.5 (4)`; `e2e-presence.test.ts › FR9.1`, `› FR9.3` |
+| 3 | On a case-insensitive filesystem the walk can see no history (MEDIUM-LOW): E2 | fixed: each component of the lexical path must be in its parent's directory listing under exactly its name; a never-committed ledger beside a committed registration FAILs; `record` refuses to write into another spelling | `c86577c` | `› E2` (runs where the temp directory folds case: macOS here); `› a ledger with lines that was never committed …`; `git-file-history.test.ts › E2 …`, `› a ledger with verdicts never committed …` |
+| 4 | The walk's memory grows with history (LOW) | fixed: the walk streams (measurements below) | `c86577c` | `git-file-history.test.ts › P4 … the walk streams` (4,000 commits of 61 KB trees under 120 MB; the old walk peaked at 277 MB on it); the reviewer's walk cases (`zz-walk`) give identical results before and after |
+| 5 | The signed bytes bind the registration but not the seed or the manifest (LOW) | fixed: bytes `pr-rla-verdict/v2` add `manifestSha256`, `beaconRound` and `beaconRandomness`; verify rebuilds them from what checks 2, 4 and 6 verified; v1 signatures are refused everywhere | `9ad336b` | `› signatures over the v1 bytes …`; `presence-verifier.test.ts › P4 finding 5 …`; `presence-oracle.test.ts › P4: …` (3); `presence-fixtures.test.ts › P4: bob's touch for another manifest …` (fixture draws #15, #16) |
+| 6 | Bare-name spawns of git and ssh-keygen (LOW, Windows) | fixed: both resolved once from PATH's absolute entries and spawned by that path, the checkpoint transport's git too; Windows documented as untested | `ad5c465` | `› a git committed in the audit repository …`, `› ssh-keygen is not looked up through a relative PATH entry`; `git-file-history.test.ts › P4 (finding 6) …` |
+| 7 | Wording (LOW): the security model's "unambiguous" touch request, a bare `presence` in git-file's description; the deny-list missed 9 of 12 claims | fixed: both sentences rewritten; the check is now an allow-list over the docs, the sources' prose, the scripts and the printed and `--json` output, with a vetted list | `acb29eb` (docs), `8352d66` | `presence-wording.test.ts` (12, five new: the 12 probes, limit wording, source prose, the whole tree, the vetted list); `e2e-presence.test.ts › finding 9` |
+| — | Tests: the commit-graph tests passed with the guard removed | fixed: they now also run the guarded git call that a commit-graph would steer, and assert on it | `c86577c`, `9ad336b` | `git-file-history.test.ts › a lying commit-graph …`, `u9-review-regressions.test.ts › a lying commit-graph …`: with `-c core.commitGraph=false` removed from `git-safe.ts` both FAIL (checked), with it both PASS |
+| — | Tests: no symlinked-directory or `audit_dir` test; exp2(a) asserted presence ≤ 1 | fixed: E1/E1b and the unit tests above; exp2(a) asserts exactly 0 | `c86577c`, `9ad336b`, `ff67bac` | as above; `u9-review-regressions.test.ts › exp2(a)` |
+| INFO | Status printed CERTIFIED where verify FAILed check 7 (attack B, E3) | fixed: status runs the same git-file walk and path rule, and prints `NOT CERTIFIED: verify check 7 would FAIL (…)` where the sequence certifies but check 7 would FAIL (integrity, path, a counted verdict below the minimum or unsigned under `require_signed`); `--json` adds `ledgerIntegrity` and `certificateWithheld` | `c86577c` | `› attack B …: status prints NOT CERTIFIED and the integrity FAIL` (text and `--json`), `› E1`, `› E1b`, `› E2` |
+
+The six commits: `ad5c465` (programs by absolute path), `c86577c` (the ledger path, the streaming walk, status's walk), `9ad336b` (eligibility, v2 bytes, the fixture), `acb29eb` (docs), `8352d66` (the wording allow-list), `ff67bac` (the reproductions). Each was checked in a scratch clone of the branch (typecheck, then the whole suite, 1 skipped each time): `c86577c` 995 passed, `9ad336b` 1001, `acb29eb` 1001, `8352d66` 1006, `ff67bac` 1016 (the totals below).
+
+### Before and after
+
+The reviewer's reproductions, as `test/p4-review-regressions.test.ts` (made through the public commands and a fresh `git clone`), run against `66e3f54` with only a shim helper (`bindingOf` returning the registration's digest, since v1 bytes are all that tree knows): **9 failed, 1 passed** (E1c, held before), each on the attack's own outcome:
+- E1 and E1b: `expected 'PASS' to be 'FAIL'` (check 7 of the fresh clone);
+- E2: `record` wrote into `Verdicts.jsonl` (`promise resolved "+0" instead of rejecting`);
+- the never-committed ledger: `expected 'WARN' to be 'FAIL'`;
+- E3: `record --sign` refused, "already has a pass verdict (draw #1) … --force appends anyway";
+- attack B: status printed `prefix 36/36 · fails 0 … CERTIFIED (risk 5%)` while check 7 FAILed;
+- the v1 signatures: counted, at the registered minimum, and certified;
+- the trapped `git` in the audit repository and the trapped `ssh-keygen` on a relative PATH entry both ran.
+
+After the round: **10 passed**. The reviewer's `zz-wording` probes: all 12 are caught by the allow-list (the deny-list alone still lets 8 through). The reviewer's `zz-compare` (a360348's keyless audits verified by the old and the new code) differs only by the anchor lines of trusted time, U9's refusals (shallow clone, two-sided merge), and the new WARN that such registrations do not record the ledger's path.
+
+### The walk's cost, measured on the reviewer's repositories
+
+macOS (Darwin 25.6.0, arm64, 10 cores), Node 22.23.2, git 2.55.0, load average 6–26; peak RSS from `process.resourceUsage().maxRSS`, the process's own baseline 54 MB included:
+
+| Repository | Before (`66e3f54`) | After |
+|---|---|---|
+| `big/r`: 200,000 commits, a 1.8 KB root tree | 15.8 s, 921 MB | 2.7–3.2 s, 249–274 MB (four runs) |
+| `big/r2`: 30,000 commits, a 65 KB root tree | 9.8 s, 2,043 MB | 1.9–2.1 s, 141–144 MB |
+
+**The target, and why:** under 300 MB peak for 200,000 commits, the coordinator's example, met with a margin of 26 MB at worst. A 200,000-commit history is a large monorepo's, and 300 MB fits a default CI runner several times over. The walk now costs about 1.1 KB per commit (an id, a tree id, the parents and their index entries), independent of commit messages, signatures and tree sizes; only the ledger file's distinct versions are kept whole. A history of 1.3 million commits (the Linux kernel's size) would need about 1.5 GB, unmeasured: stated as a limit.
+
+How: one `git cat-file --batch` per pass fed straight from `git rev-list` (a hint only), each object parsed as it streams and hash-checked; a body that fits in the chunk is read in place, one that spans chunks is gathered into one reused buffer; ids are read from the bytes, so no kept id holds a commit's text alive; per commit an index, a tree id and the parents' indices; per tree only the entry the path needs, entries interned.
+
+### Decisions and deviations
+
+1. **`ledgerPath` is a top-level field of the registration,** not inside `plugins.ledger` (the identity P1 enforces) or `verdicts`: it is where the built-in git-file's file is, signed in once at register. Absent for other ledgers and for a git-file ledger registered outside a git repository (register warns).
+2. **The path is computed lexically from the first ancestor that is git's toplevel on disk.** Symbolic links above the toplevel (macOS's `/var`) are the machine's and allowed; below it every component must be a real directory (or the file) listed under exactly its name. A window directory linked into another repository is "not inside the repository git found", a FAIL, and nothing is walked.
+3. **The integrity check reports a path problem and still walks** the configured path's history, so E1 also shows `… was deleted in commit … (audit/2026-q3 is a symbolic link there, not a directory)`.
+4. **`LedgerIntegrityReport.location`** (optional SDK field) carries the walked path to check 7; only the built-in git-file's counts. `classifyVerdicts` gains an optional `ineligible` hook (the ledger kit passes none).
+5. **The version line is `pr-rla-verdict/v2`** (the brief wrote `pr-rla-verdict@v2`): v1's first line is `pr-rla-verdict/v1` and `@` is the namespace's form. The namespace stays `pr-rla-verdict@v1`: it names the purpose, the first line names the format, and every registered `namespaces=` option keeps admitting it.
+6. **v1 signatures are refused for every registration** (the brief's choice between "refused under v2" and "kept for v1"): no registration is v1-only in the sense that matters, nothing signed under v1 was released, and keeping v1 would keep pre-signing open. Check 7 names the reason.
+7. **Status and record take the binding from `manifest.json` and `draws.json`;** verify takes it from the manifest and beacon it verified. A tampered `draws.json` only makes status's signatures fail to verify; verify is the authority.
+8. **FR9.1 and FR9.3 are met as "never counts"**, not "counted and FAILed". Under the signing rules an unsigned, foreign or invalid line is ignored with its reason and its draw blocks the prefix; check 7 WARNs it as ignored. FAILing it would make one appended line block the audit forever, which is finding 2. `verdictRuleFailures`' `require_signed` branch stays as defence in depth; with the predicate it no longer fires for a counted verdict.
+9. **With keys required, a ledger other than the registered git-file makes every verdict ineligible** (its signature fields are never checked).
+10. **Status withholds CERTIFIED** where the sequence certifies but check 7 would FAIL; it does not change the exit code (P2 owns the exit model) or `sequence.state` in `--json`, and adds `certificateWithheld` and `ledgerIntegrity`.
+11. **The allow-list.** A sentence "mentions" when it names presence, the UP flag, hardware, a security key or a YubiKey, or a touch in a sentence about keys or people ("touches no file" is not a mention). Source prose is comments and string or template literals, read by a small tokenizer; code, identifiers and regular expressions are skipped, so U5's refactor moves code without touching the list. The vetted list matches after normalising whitespace, change ids, fingerprints, long hex and numbers; a stale entry fails nothing. The deny-list still runs over whole texts, with the printed label read as bare `presence`.
+12. **The checkpoint transport** (`src/io/git-transport.ts`) also runs git by absolute path, though the review named only `git-safe.ts` and `ssh-sign.ts`.
+13. **U8's anchor test** (`single-repo-anchor.test.ts`) compares a branch audit with master's build byte for byte. A branch registration now carries `ledgerPath`, so the dump re-signs it without the field (same key) and the comparison sets aside register's path line, its first line's hash and status's resulting WARN, each asserted first.
+14. **Two tests read counts instead of writing them in** (`git-file-unchanged.test.ts`, E3): the registration's bytes, and so the draws, changed with the new field.
+
+### Found on the way, not fixed
+
+- **A Git for Windows checkout (`core.autocrlf=true`) FAILs check 7** with "`verdicts.jsonl` in the working tree rewrites its committed history": the working tree holds CRLF, the blobs LF (shown on macOS with `git -c core.autocrlf=true clone`; it was so before U9 too). Verify in a checkout with `core.autocrlf=false`. Left alone with the rest of Windows, which is untested.
+
+### Release notes
+
+1. **Registrations of the built-in git-file ledger carry `ledgerPath`.** A ledger read anywhere else (another `audit_dir`, through a symbolic link, under another spelling) FAILs check 7; a registration without the field WARNs (test fixtures only).
+2. **Verdict signatures are over `pr-rla-verdict/v2`** (manifest and seed included). Lines signed over v1 count for nothing: sign them again (`pr-rla record --sign`, or the README's recipe).
+3. **Under keys and `require_signed` or a minimum above `self-asserted`, unsigned or foreign lines are ignored,** not FAILed; `record --sign` records over them without `--force`.
+4. **Status may print `NOT CERTIFIED: verify check 7 would FAIL (…)`** where it used to print CERTIFIED.
+5. **A git-file ledger with verdicts never committed at its path, beside a committed registration, FAILs check 7.**
+6. **git and ssh-keygen must be on an absolute PATH entry**; a relative entry is skipped.
+
+### Live and local work (dated)
+
+- 2026-11-04T06:49:18Z: the sk-dummy fixture remade with `scripts/make-presence-fixtures.mjs` (the README's v2 recipe, printf and `ssh-keygen -Y sign`), with the round-1 sk-dummy build (`scratchpad/u9/openssh-10.3p1/regress/misc/sk-dummy/sk-dummy.so`) and macOS's OpenSSH_10.3p1 (LibreSSL 3.3.6): 16 verdicts, ten software keys in a temporary directory deleted afterwards, `"source": "synthetic"`. ssh-keygen's own `-Y verify` gives Good for #15 and #16 over the bytes each was made over; pr-rla refuses both for this audit.
+- The reviewer's `big/` repositories were only read (`rev-list` and `cat-file`, with `GIT_OPTIONAL_LOCKS=0`).
+- Nothing left the machine: no network call, no key in `~/.ssh`, no hardware key, nothing pushed.
+
+### Tests
+
+- Before (`66e3f54`): 985 passed, 1 skipped (986).
+- After: 1016 passed, 1 skipped (1017): `p4-review-regressions` 10 (new), `git-file-history` 32 (was 22), `presence-wording` 12 (7), `presence-verifier` 43 (41), `presence-oracle` 36 (33), `presence-fixtures` 14 (13); `e2e-presence`, `u9-review-regressions`, `git-file-unchanged` and `single-repo-anchor` keep their counts, with assertions changed as above.
+
+### Verified (command → output)
+
+Three runs in a row, each a fresh `git clone` of the branch at `532e2bc` (the last commit before this one, which changes only this section) into the scratch directory, Node 22.23.2, other agents' suites running beside them:
+
+```
+run 1 (2026-11-04T07:41Z, load 71)  run 2 (07:44Z, load 16)  run 3 (07:47Z, load 22)
+npm ci              → exit 0, found 0 vulnerabilities, all three
+npm run build       → exit 0, all three
+npm run typecheck   → exit 0 (both tsconfigs), all three
+npm test            → Tests 1016 passed | 1 skipped (1017), all three
+gitea ci, test      → found 0 vulnerabilities · # pass 1 · # fail 0, all three
+jira ci, test       → found 0 vulnerabilities · # pass 1 · # fail 0, all three
+npm test (again)    → Tests 1016 passed | 1 skipped (1017), all three
+node scripts/demo-{presence,broker,ledgers,plugin-host,sdk-carry-overs}.mjs → exit 0, all three
+npm ls --prod --depth=0 → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+No LICENSE file; `"private": true, "license": "UNLICENSED"`; no dependency added.
+
+### Unverified
+
+- Windows, entirely: the absolute-path resolution (`.exe`, `.com`), the cwd lookup it closes, and the CRLF checkout above.
+- Case-insensitive filesystems other than macOS's APFS (NTFS, case-insensitive ext4), and Unicode normalisation (an NFD name for an NFC one) on any filesystem: the listing comparison covers them by construction, untested.
+- Histories beyond 200,000 commits; the walk's memory on Linux.
+- Hardware FIDO keys (D7), as before; T16 is unchanged.
+- The logic through U5's API layer, which is not on this branch.
+
+### Shared files touched (for the integration)
+
+- **Command files (thin): `src/commands/register.ts`** (the `ledgerPath` field and its output line, through `gitFileRegisteredPath`), **`src/commands/status.ts`** (`auditBinding`, `ineligible`, `gitFileLedgerGate`, `certificateWithheld`, the `withheld` parameter of `statusLine`, two `--json` fields), **`src/commands/record.ts`** (`countingVerdictFor` and the binding passed to `--sign`). Not touched: `src/cli.ts`, `package.json`, `package-lock.json`, `src/api/`.
+- **`src/core/verify.ts`:** check 7 only: the binding, `ineligible`, and the path rule after the integrity check.
+- **`src/core/records.ts`:** one optional field, `ledgerPath`, after `plugins` (P2 owns the file). **`src/core/status.ts`:** `computeStatus`'s `ineligible` input. **`src/sdk/ledger.ts`:** `LedgerIntegrityReport.location` and `classifyVerdicts`' `ineligible`.
+- New: `src/core/ledger-path.ts`, `src/io/executables.ts`, `test/fixtures/wording/vetted.json`, `test/p4-review-regressions.test.ts`.
+- **U5 must:** have its status API call `gitFileLedgerGate` and `certificateWithheld` (and print the withheld line), pass `binding` and `ineligible` as `src/commands/status.ts` does, use `countingVerdictFor` in its record API, record `ledgerPath` in its register API, and spawn git only through `git-safe.ts` (or `gitExecutable()`). Any new printed or documented sentence about presence, a touch, hardware or a security key needs the limit wording or an entry in the vetted list.
+- **P1 (identity everywhere)** meets this round in check 7 (the identity compare stays as it was here, the path rule runs after the integrity check) and in status and record.
+- **A trial merge with `integrate/wave2` at `d59b719`** (plugins-broker merged) conflicts in `README.md` (two limitation bullets) and `src/commands/register.ts` (the `plugins` line, whose `auditContextFor(ctx)` argument changed there, beside the new `ledgerPath` line); both keep both sides. Resolved so in a scratch clone, the merged tree typechecks and its suite passes: 74 files, 1086 passed, 2 skipped (1088), 2026-11-04T07:31Z.
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
@@ -2715,10 +2840,35 @@ The last wave-2 branch, merged after plugins-broker on the coordinator's instruc
 
 - **`test/wave2-integration.test.ts`**, through `pr-rla/api/read`:
   - per-verdict signatures in status: presence 1, account 1, self-asserted 1; the unsigned one below the registered minimum; the T16 note; no signature field;
-  - the draw context: presence and account; the reviewer in the fence; no SSHSIG blob;
+  - the draw context: presence (user-presence flag verified; key hardware not attested) and account; the reviewer in the fence; no SSHSIG blob;
   - read-only mode on a GitHub Enterprise Server audit: anonymous until `GH_ENTERPRISE_TOKEN` is approved for its origin, then the token reaches `ghe.example.com` only and never the result.
 - **`packages/pr-rla-mcp/test/mcp-wave2.test.mjs`**, through the MCP tools of an in-process server:
   - on a pooled audit (an isolated plugin's org; the token cannot be shown to see every private repo), the `verify` tool returns `verdict: "INCOMPLETE"`, `exitCode: 6`, `ok: false`, and check 5 says why, while the CLI's verify exits 6;
   - `draw_context` serves a pooled draw (a repo-qualified change, the provider's description in the fence), and the draws span the pool's repos.
 - **The isolated-plugin approval test above** (`test/api-read-fix.test.ts`) is the third "approvals in read-only mode" case.
 - **Status has no INCOMPLETE:** it never rebuilds the population, so U8's verdict cannot arise there. The time round B item (#6, "unify verdict") is where status's own exit model is settled.
+- **Verified from three fresh clones of `integrate/wave2` at `0fa9ad8`** (2026-11-04, 07:55Z–08:08Z, Node v22.23.2, load average 17–33; `scratchpad/wave2/verify-run.sh`), each run the same: `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 83 files, **1218 passed (1218)** · `packages/pr-rla-mcp` `npm ci` 0 vulnerabilities, `npm test` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0 (the five under `scripts/` and the MCP package's `demo-draw-context`).
+
+### Merge 7: `fix/p4-ledger-path` (577fe00)
+
+Merged after U5 on the coordinator's instruction. P4 was cut from `integrate/wave2` at `66e3f54` (U8 merged, before plugins-broker and U5), so its command-file edits (its "Shared files touched") were written against the command files U5 has since thinned. They are ported into `src/api`; the command files keep U5's form plus P4's output lines.
+
+- **Conflicts, each resolved by keeping both sides:**
+  - `src/io/git-safe.ts`: the joined guard (merge 6) plus P4's `gitExecutable()`: `gitSafe` and `gitSafeSpawn` run git by the absolute path found on PATH's absolute entries.
+  - `src/io/git-transport.ts`: the checkpoint push runs `gitExecutable()` in `gitWriteEnv()` (merge 6's environment, P4's executable).
+  - `src/ledgers/git-file.ts`: P4's `gitFileLocation` (the registered path, walked through real directories spelled as registered), with U5's `confineGitDir` before discovery and U5's confined reads. U5's `gitFilePath` is gone for P4's `gitFileLedgerFile`; `src/api/session.ts` and `src/api/read/draw-context.ts` use it.
+  - `src/commands/{record,register,status}.ts`: U5's formatters. P4's logic is in the API (below); the command files print P4's lines.
+  - `README.md`: P4's two limitation bullets (registered path; Windows untested) and the "Verifying someone else's audit" bullet from merges 5 and 6.
+  - `BUILD-NOTES.md`: P4's section before this one.
+- **Ported into `src/api`:**
+  - **status** (`src/api/read/status.ts`): `gitFileLedgerGate` (check 7's history walk and path rule, local) and `certificateWithheld`; `binding` (`auditBinding` of the registration, manifest and beacon) and `ineligible` passed to the counting and to `computeStatus`, through `countedLedgerVerdicts`, so the draws and the draw context count the same lines. The line says `NOT CERTIFIED: verify check 7 would FAIL (…); run "pr-rla verify"` where the sequence certifies but check 7 would FAIL; `--json` gains `ledgerIntegrity` and `certificateWithheld`; the CLI prints `ledger integrity FAILs:` and `WARN` lines.
+  - **record** (`src/api/write/record.ts`): `countingVerdictFor` (only a counting verdict blocks a new one, so `record --sign` records over an assistant's unsigned lines without `--force`), and `--sign` signs the v2 bytes (`pr-rla-verdict/v2`: the registration, manifest and seed). A symbolic link or another spelling on the ledger's path is refused through `gitFileLedgerFile`.
+  - **register** (`src/api/write/register.ts`): the top-level `ledgerPath` field (`registeredLedgerPath`), in the plan and the record; the CLI prints it.
+  - **git** runs only through `src/io/git-safe.ts`, with P4's `src/io/executables.ts`.
+- **The wording allow-list** (P4's `test/fixtures/wording/vetted.json`) over the merged tree flagged seven sentences from merges 3–6. Three were reworded to carry the limit or to stop naming a touch (README: the change "edits" a `.gitattributes`; `docs/security-model.md`'s read-only paragraph: `presence (U9: the user-presence flag verified; key hardware not attested)`; merge 6's note above). Four are U5's history sentences (its section names U9 by its title); they are added to the vetted list under `history`, as P4's own history sentences are.
+- **Tests that met P4's stricter rules (kept stricter, none weakened):**
+  - `api-cli-contract.test.ts` flow 2: U5's flow recorded a verdict in a git-file ledger and verified without committing the ledger file. Under P4 a ledger never committed beside a committed registration FAILs check 7 (`p4-review-regressions`, finding 1). The flow now asserts that exit 1, then commits the ledger as `record` says to, and asserts verify's exit 0.
+  - `api-read-runtime.test.ts`: the read API spawns git by an absolute path whose basename is `git`, not the bare name.
+  - `wave2-integration.test.ts` (per-verdict signatures): with keys registered and `min_provenance: account`, carol's unsigned line is ineligible under P4: status ignores it with its reason (`carries no signature, and the registration counts only verdicts signed with their reviewer's registered key`) instead of counting it below the minimum. Provenance: `presence (user-presence flag verified; key hardware not attested)` 1, account 1; `belowMinimum` is empty.
+- **Integration test** (U5 × P4, `test/wave2-integration.test.ts`): through `pr-rla/api/read`, an honest git-file review certifies with `certificateWithheld: []` and `ledgerIntegrity.ok`; a committed line taken out again (the history rewritten) leaves the sequence certifying, but `read.status` returns `certificateWithheld: ["the ledger's integrity check FAILs"]`, the integrity FAIL naming the commit, and the `NOT CERTIFIED: verify check 7 would FAIL` line, while `read.verify` returns FAILED, `exitCode: 1`, check 7 FAIL. The MCP `status` tool serves the same object (its schema is open).
+- **Verified** (in this worktree, 2026-11-04, load average 2–20): build 0 · typecheck 0 (both tsconfigs) · `npm test` 84 files, **1251 passed (1251)** · `packages/pr-rla-mcp` `npm test` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0. The three fresh-clone runs follow P3's merge.

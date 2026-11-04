@@ -27,6 +27,9 @@ export {
   checkVerdictSignature,
   attestVerdicts,
   countedVerdicts,
+  countingVerdictFor,
+  signaturesRequired,
+  auditBinding,
   provenanceLabel,
   verdictRuleFailures,
   VERDICT_NAMESPACE,
@@ -37,6 +40,7 @@ export {
   type SshPublicKey,
   type AllowedSigner,
   type VerdictPayloadFields,
+  type VerdictBinding,
   type VerdictSignatureCheck,
   type VerdictRules,
 } from "./core/presence/index.js";

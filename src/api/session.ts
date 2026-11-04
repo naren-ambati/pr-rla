@@ -5,7 +5,7 @@ import { sha256Hex } from "../core/canonical.js";
 import { isManifestV2, isRegistrationV2, type AnyCommitment, type AnyManifest, type AnyRegistration, type DrawsFile, type SignedRecord } from "../core/records.js";
 import { CONFIG_FILE, parseConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
 import { readTextConfined, readConfined } from "../io/confine.js";
-import { gitFilePath } from "../ledgers/git-file.js";
+import { gitFileLedgerFile } from "../ledgers/git-file.js";
 import { signalledFetch, sleepFor } from "../net/abort.js";
 import type { BrokerFetch } from "../net/contract.js";
 import { pluginPolicy } from "../plugins/lock.js";
@@ -137,7 +137,7 @@ function confineConfig(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths)
   const path = config.provider.options.path;
   if ((config.provider.use === "json-file" || config.provider.use === "json") && typeof path === "string") c(isAbsolute(path) ? path : resolve(config.dir, path), "the json-file provider's path");
   // The path the git-file ledger opens (its own computation); every read is confined again when it opens it.
-  if (config.ledger.use === "git-file") c(gitFilePath(paths.windowDir, config.ledger.options as { file?: string }), "the ledger's file");
+  if (config.ledger.use === "git-file") c(gitFileLedgerFile(paths.windowDir, config.ledger.options as { file?: string }), "the ledger's file");
   if (config.transparencyLog.publicKeyFile) c(resolve(config.dir, config.transparencyLog.publicKeyFile), "transparency_log.public_key_file");
 }
 
