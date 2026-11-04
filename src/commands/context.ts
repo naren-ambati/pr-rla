@@ -7,6 +7,7 @@ import type { AnyCommitment, AnyManifest, AnyRegistration, DrawsFile, SignedReco
 import { writeFileAtomic } from "../io/atomic.js";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../api/context.js";
 import type { BrokerFetch } from "../net/contract.js";
+import { pluginPolicy } from "../plugins/lock.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
 export type { DrawsFile } from "../core/records.js";
 import { CONFIG_FILE, loadConfig, windowPaths, type PrRlaConfig, type WindowPaths } from "../config.js";
@@ -34,6 +35,8 @@ export interface CommandContext {
   tsaTrust?: TrustBundleExtra[];
   /** Asks the human a yes/no question; absent when there is no terminal. */
   confirm?: (question: string) => Promise<boolean>;
+  /** `--plugins builtin-only` (PR_RLA_PLUGINS=builtin-only in env does the same): refuse every external plugin. */
+  plugins?: string;
 }
 
 export class CommandError extends Error {
@@ -87,6 +90,7 @@ export function auditContextFor(ctx: CommandContext): AuditContext {
       sleep: (ms) => (ctx.sleep ?? realSleep)(ms),
       log: (l) => ctx.err(l),
       fetch: ((input, init) => ctx.fetch(input, init)) as typeof fetch,
+      plugins: pluginPolicy(ctx.plugins, ctx.env),
     });
     auditContexts.set(ctx, a);
   }

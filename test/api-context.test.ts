@@ -14,6 +14,7 @@ import { recordedBeacon } from "./helpers/fixtures.js";
 import { generatedGitLabScenario } from "./helpers/gitlab-population.js";
 import { MockRekor } from "./helpers/mock-rekor.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
+import { auditDirWith, lockPlugin } from "./helpers/plugin-lock.js";
 
 /** The src/api foundation (U2a): an AuditContext in read-only or read-write mode, with one broker. */
 
@@ -64,7 +65,10 @@ describe("AuditContext modes", () => {
     expect(ghe.rules.find((r) => r.id === "rest")).toMatchObject({ count: 5000, source: "configured in .pr-rla.yml" });
     await openProvider(ctx, { use: "bitbucket-data-center", options: { base_url: "https://bitbucket.example.com:7990" } }, ROOT);
     expect(budgetFor(ctx.broker.policy.budgets, "bitbucket.example.com")?.rules.map((r) => [r.id, r.count, r.perMs, r.burst])).toEqual([["api", 5, 1000, 60]]);
-    const template = await openProvider(ctx, { use: "./examples/provider-template.mjs", options: { changes: [] } }, ROOT);
+    // An external plugin must be locked (U2b): the template is opened from an audit directory that locks it.
+    const audit = auditDirWith({ "provider-template.mjs": join(ROOT, "examples", "provider-template.mjs") });
+    await lockPlugin(audit, "./provider-template.mjs");
+    const template = await openProvider(ctx, { use: "./provider-template.mjs", options: { changes: [] } }, audit);
     expect(template.name).toBeTruthy();
     expect([...ctx.broker.policy.budgets.keys()].sort()).toEqual(["*.atlassian.net", "api.bitbucket.org", "api.github.com", "bitbucket.example.com", "freetsa.org", "ghe.example.com", "gitlab.com", "timestamp.sectigo.com"]);
   });

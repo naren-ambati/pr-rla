@@ -1,8 +1,11 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../beacon/drand.js";
+import { isRegistrationV2, type PluginIdentity } from "../core/records.js";
 import { verifyAudit, type VerifyReport } from "../core/verify.js";
+import { pluginIdentity } from "../registry.js";
 import { statusLine } from "./status.js";
 import {
+  auditContextFor,
   configFor,
   getBeacon,
   trustFor,
@@ -40,7 +43,7 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   } catch {
     currentProtocol = null;
   }
-  return verifyAudit(
+  const report = await verifyAudit(
     { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol },
     {
       provider: opts.offline ? null : await providerFor(ctx, config),
@@ -63,6 +66,22 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
       trustBundle: trustFor(ctx, opts.tsaTrust),
     },
   );
+  if (!opts.offline && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins));
+  return report;
+}
+
+/**
+ * Check 5 rebuilt the population with the provider verify loaded; say so when that is not the
+ * registered external plugin (another release, other files or options, another trust).
+ */
+function noteProviderIdentity(report: VerifyReport, registered: PluginIdentity, loaded: PluginIdentity): void {
+  if (registered.source === "builtin" && loaded.source === "builtin") return;
+  const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
+  const diffs = (["name", "source", "version", "integrity", "optionsSha256", "trust"] as const).filter((k) => registered[k] !== loaded[k]).map((k) => `${k} ${show(registered[k])} → ${show(loaded[k])}`);
+  const c5 = report.checks.find((c) => c.n === 5);
+  if (!diffs.length || !c5) return;
+  c5.details.push(`WARN the provider verify loaded is not the registered one (${diffs.join("; ")}): the population was rebuilt with it`);
+  if (c5.status === "PASS") c5.status = "WARN";
 }
 
 export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): Promise<number> {
@@ -77,6 +96,9 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
     for (const d of c.details) ctx.out(`        ${d}`);
   }
   ctx.out(report.checks.map((c) => (c.n === 1 ? c.summary : `${c.summary} ${mark(c.status)}`)).join(" · "));
+  const registered = readRegistration(configFor(ctx).paths);
+  if (isRegistrationV2(registered))
+    for (const id of [registered.record.plugins.provider, registered.record.plugins.ledger]) if (id.trust === "full") ctx.out(`PLUGIN TRUST: full (${id.name}@${id.version ?? "unversioned"} runs with your environment and files)`);
   if (report.versions.registered) ctx.out(`registered with pr-rla ${report.versions.registered}${report.versions.frozen ? ` · frozen with pr-rla ${report.versions.frozen}` : ""} · verified with pr-rla ${PR_RLA_VERSION}`);
   const ts = report.timestamps;
   if (ts.registration) {

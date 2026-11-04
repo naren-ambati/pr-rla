@@ -20,6 +20,8 @@ import {
 } from "./sdk/provider.js";
 import { sha256Hex, canonicalJson } from "./core/canonical.js";
 import type { PluginIdentity } from "./core/records.js";
+import { externalPluginInfo } from "./plugins/identity.js";
+import type { PluginPolicy } from "./plugins/lock.js";
 import { PR_RLA_VERSION } from "./version.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
@@ -50,6 +52,17 @@ const PROVIDER_ALIASES: Record<string, string> = { json: "json-file", bitbucket:
 export const BUILTIN_LEDGERS: Readonly<Record<string, LedgerDefinition<never>>> = {
   "git-file": gitFile as LedgerDefinition<never>,
 };
+
+/** The built-in provider `use` names (aliases resolved), or null for an external plugin. Imports nothing. */
+export function builtinProviderName(use: string): string | null {
+  const name = PROVIDER_ALIASES[use] ?? use;
+  return Object.hasOwn(BUILTIN_PROVIDERS, name) ? name : null;
+}
+
+/** The built-in ledger `use` names, or null for an external plugin. */
+export function builtinLedgerName(use: string): string | null {
+  return Object.hasOwn(BUILTIN_LEDGERS, use) ? use : null;
+}
 
 export function normalizePluginSpec(raw: unknown, what: string, fallback: string): PluginSpec {
   if (raw === undefined || raw === null) return { use: fallback, options: {} };
@@ -145,11 +158,24 @@ function packageVersion(use: string, baseDir: string): string | null {
 
 /**
  * What a registration or manifest records about a provider or ledger (contracts.md §5).
- * Built-ins carry the pr-rla version. External plugins run in-process until the
- * isolated host exists (bolt 4), so their trust is "full" and their integrity is
- * null until a lock entry exists.
+ * Built-ins carry the pr-rla version. An external plugin's identity comes from its
+ * pr-rla.lock.json entry after its files are re-hashed (FR2.1): `integrity` is the locked
+ * treeSha256 and `trust` the locked trust. An unlocked or changed plugin is refused, and
+ * `builtin-only` refuses every external one (src/plugins/identity.ts).
  */
-export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string): Promise<PluginIdentity> {
+export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string, policy: PluginPolicy = "locked"): Promise<PluginIdentity> {
+  if (!(kind === "provider" ? builtinProviderName(spec.use) : builtinLedgerName(spec.use))) {
+    const { entry, populationOptions } = await externalPluginInfo(spec.use, kind, baseDir, policy);
+    return {
+      name: entry.name,
+      source: entry.source,
+      version: entry.version,
+      integrity: entry.treeSha256,
+      optionsSha256: optionsDigest(spec.options),
+      populationOptionsSha256: optionsDigest(spec.options, populationOptions),
+      trust: entry.trust,
+    };
+  }
   const builtinName = kind === "provider" ? (BUILTIN_PROVIDERS[PROVIDER_ALIASES[spec.use] ?? spec.use] ? PROVIDER_ALIASES[spec.use] ?? spec.use : null) : BUILTIN_LEDGERS[spec.use] ? spec.use : null;
   const def = kind === "provider" ? await loadProviderDefinition(spec.use, baseDir) : await loadLedgerDefinition(spec.use, baseDir);
   const populationOptions = (def as { populationOptions?: unknown }).populationOptions;

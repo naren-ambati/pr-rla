@@ -1,7 +1,9 @@
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
-import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
+import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
+import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
+import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
 import type { Ledger } from "../sdk/ledger.js";
 import type { PluginCredential, ScmProvider } from "../sdk/provider.js";
 
@@ -43,6 +45,8 @@ export interface AuditContext {
   readonly log: (line: string) => void;
   /** Every outbound HTTP request of this context goes through this one broker, so all callers share its budgets. */
   readonly broker: Broker;
+  /** `builtin-only` refuses every external plugin before it is imported (U2b, FR2.6). */
+  readonly plugins: PluginPolicy;
   /** A plain fetch for a built-in component (`pr-rla/drand`, `pr-rla/rekor`) on its destination. */
   componentFetch(componentId: `pr-rla/${string}`, destination: Destination): typeof fetch;
   /** Records what a plugin may reach, send and write, and gives its hosts their default budget. */
@@ -67,7 +71,12 @@ export interface AuditContextOptions {
   rateLimits?: RateLimitOverrides;
   /** Records every exchange, scrubbed (fixture recording). Refused in read-only mode. */
   recorder?: (exchange: RecordedExchange) => void;
+  /** Default: `builtin-only` when PR_RLA_PLUGINS=builtin-only is in `env`, else external plugins load if locked. */
+  plugins?: PluginPolicy;
 }
+
+/** An isolated plugin that declares no hosts may contact none (an empty set would mean "any" to the broker). */
+const NO_HOSTS: ReadonlySet<string> = new Set(["(no hosts declared)"]);
 
 /** An API refusal, in the CLI error form (contracts.md §7) and the MCP error codes (§4). */
 export class AuditApiError extends Error {
@@ -113,7 +122,10 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
   const broker = createBroker(
     {
       mode: o.mode,
-      hostsFor: (id) => (grants.get(id)?.trust === "isolated" ? grants.get(id)!.hosts : new Set()),
+      hostsFor: (id) => {
+        const g = grants.get(id);
+        return g?.trust === "isolated" ? (g.hosts.size ? g.hosts : (NO_HOSTS as Set<string>)) : new Set();
+      },
       writePathsFor: (id) => grants.get(id)?.writePaths ?? new Set(),
       credentialsFor: (id) => grants.get(id)?.credentials ?? new Map(),
       budgets,
@@ -137,6 +149,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     sleep,
     log,
     broker,
+    plugins: o.plugins ?? pluginPolicy(undefined, env),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
@@ -170,6 +183,7 @@ export function requireReadWrite(ctx: AuditContext, operation: string): void {
 
 /** Opens the configured provider with its fetch bound to the broker as `provider:<name>`. */
 export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {
+  if (!builtinProviderName(spec.use)) return openExternalProvider(ctx, spec, cwd);
   const def = await loadProviderDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_PROVIDERS).includes(def as never);
   const id = `provider:${def.name}`;
@@ -190,11 +204,7 @@ const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const
  * ledger comes back with its read methods only; a write method refuses with READ_ONLY_VIOLATION.
  */
 export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string): Promise<Ledger> {
-  const def = await loadLedgerDefinition(spec.use, cwd);
-  const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
-  const id = `ledger:${def.name}`;
-  ctx.grant(id, { trust: builtin ? "builtin" : "full", hosts: def.hosts?.(spec.options as never) ?? [], writePaths: def.writePaths?.(spec.options as never) ?? [], credentials: def.credentials ?? [] });
-  const ledger = await createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id) });
+  const ledger = builtinLedgerName(spec.use) ? await openBuiltinLedger(ctx, spec, cwd, windowDir) : await openExternalLedger(ctx, spec, cwd, windowDir);
   if (ctx.mode === "read-write") return ledger;
   const refuse = (m: string) => async () => {
     throw new AuditApiError(`ledger ${ledger.name}: ${m} writes, and this audit context is read-only`, "READ_ONLY_VIOLATION", "record verdicts and publish draws from the CLI or the tracker's web UI");
@@ -206,4 +216,12 @@ export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   }
   if (ledger.publishDraws) view.publishDraws = refuse("publishDraws");
   return view;
+}
+
+async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string): Promise<Ledger> {
+  const def = await loadLedgerDefinition(spec.use, cwd);
+  const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
+  const id = `ledger:${def.name}`;
+  ctx.grant(id, { trust: builtin ? "builtin" : "full", hosts: def.hosts?.(spec.options as never) ?? [], writePaths: def.writePaths?.(spec.options as never) ?? [], credentials: def.credentials ?? [] });
+  return createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id) });
 }
