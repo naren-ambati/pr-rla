@@ -1553,7 +1553,7 @@ An independent review of bolt 10 at `0cf8af1` (verdict: FIX FIRST) found a criti
 | 12 | Hardening (INFO) | fixed: RSA e = 1 or even, small-order Ed25519, a non-`ssh:` application refused; `register` warns when keys enforce nothing; SHA-1 collision exposure documented | `356adf2`, `4fef1aa`, `06fee84` | `presence-verifier.test.ts › finding 12` (3); `› exp6 (finding 12)`, `› finding 12: …` (2) |
 | — | Partial clone fetches lazily (from the U5 review, via the coordinator) | fixed: refused (promisor remote or packs, `extensions.partialClone`); `GIT_NO_LAZY_FETCH=1`; a missing object is "missing", never "deleted" | `9ba0e90` | `git-file-history.test.ts › a partial clone is refused, and nothing is fetched` (2); `› a partial clone (--filter=blob:none) …` |
 
-Other commits: `8c1166f` (a plugin-host test's timing, below), `06fee84` (docs), and this section.
+Other commits: `8c1166f` and `063f34a` (two tests' timing under load), `aa0ed5c` (the ledger demo), `06fee84` (docs), and this section.
 
 ### Before and after
 
@@ -1589,7 +1589,9 @@ The reviewer's own reproductions, re-run against `0cf8af1` at the start of the r
 9. **`CommandContext.signVerdict`**, an optional hook like `ctx.beacon`, lets the end-to-end tests sign through the software-emulated authenticator; the default is ssh-keygen.
 10. **`rev-list` is used as a hint only.** The walk reads what it names, then follows raw parent links from HEAD and reads whatever the hint missed; a commit the hint names but HEAD does not reach is ignored.
 11. **`test/plugin-host.test.ts`** (U2b's): "a slow call that keeps sending heartbeats is not stopped" failed in 2 of 4 full runs under the parallel load on this machine (load average near 48, other agents' suites running) and in 0 of 5 alone: its 500 ms watchdog window also covers the child's start. Widened to 2 s with a 4 s call (`8c1166f`); the property tested is unchanged.
-12. **Declined:** FIDO attestation (T16; unchanged, not built); detecting a history rewritten wholesale (a limit: nothing in one clone can show it; stated in the security model); SHA-1 collision detection (a limit, stated).
+12. **`scripts/demo-ledgers.mjs`** (U4's bolt 3 demo) registered a git-file audit and then pointed its configuration at github-issues before verifying recorded tracker data: the very swap check 7 now FAILs (finding 3), so both its verifies FAILed on identity. Each fixture now gets its own audit registered with the github-issues ledger it is verified with (`aa0ed5c`); its output is as bolt 3 recorded it, with the registered minimum now `account`.
+13. **`test/wave1-integration.test.ts`** (the integration's): "the Jira example passes the ledger conformance kit with every instance in its own plugin host" starts one plugin-host child per kit instance; at load average 55 it took 54 s alone and passed the 60 s default in one full run of four. Its timeout is now 180 s (`063f34a`).
+14. **Declined:** FIDO attestation (T16; unchanged, not built); detecting a history rewritten wholesale (a limit: nothing in one clone can show it; stated in the security model); SHA-1 collision detection (a limit, stated).
 
 ### Live and local work (dated)
 
@@ -1606,7 +1608,13 @@ The reviewer's own reproductions, re-run against `0cf8af1` at the start of the r
 
 ### Verified (command → output)
 
-Recorded below in the next commit, from fresh clones of the branch.
+Each run: `git clone` of the branch into the scratch directory, then `npm ci`, `npm run build`, `npm run typecheck`, `npm test`, both examples' `ci` and `test`, `npm test` again with the examples installed, the five demos and `npm ls --prod --depth=0`, on Node 22.23.2, with other agents' suites running on the machine (load average 21 to 55).
+
+First, at `4907ae6`:
+- run 1 (2026-11-04T04:54Z): every step exit 0; `npm test` twice `Test Files 50 passed (50) · Tests 630 passed | 1 skipped (631)`; gitea and jira examples `# pass 1 · # fail 0`; `found 0 vulnerabilities`; dependencies asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1.
+- run 2 (04:57Z): the same, except the second `npm test`: `1 failed | 629 passed`, the Jira plugin-host test timing out at 60 s (fixed in `063f34a`); and `demo-ledgers.mjs` printed check 7's identity FAIL for its ledger swap (fixed in `aa0ed5c`).
+
+The final runs are recorded in the next commit.
 
 ### Unverified
 
@@ -1625,5 +1633,5 @@ Recorded below in the next commit, from fresh clones of the branch.
 - **New shared git helper: `src/io/git-safe.ts`** (`gitSafe`, `gitSafeText`, `gitSafeSpawn`, `gitSafeEnv`, `gitSafeArgs`, `historyRefusal`, `FULL_CLONE`). U5's equivalent guard should merge into it; every read-path git call should go through it.
 - **New:** `src/core/presence/verdict-payload.ts`, `src/io/ssh-sign.ts`, `src/ledgers/git-history.ts`; `src/core/presence/commit.ts` removed; `src/core/presence/verifier.ts` rewritten.
 - `src/sdk/ledger.ts` (`VerdictEvent.registrationSha256`, `.sshsig`; source `verdict-signature`; `verdictIneligibility` back to master's), `src/config.ts` (`verdicts.allowed_signers`), `src/core/records.ts`, `src/ledger-traits.ts` (`registeredCeiling`), `src/index.ts`.
-- Tests: `test/plugin-host.test.ts` (one test's timing).
+- Tests and scripts: `test/plugin-host.test.ts` and `test/wave1-integration.test.ts` (one test's timing each), `scripts/demo-ledgers.mjs` (its audits register the ledger they verify with).
 - **U5 must:** have its status and verify APIs call `countedVerdicts(read, { registration, verifiesSignatures, ceiling, ledger })` with `registeredCeiling`, and pass `ledgerIdentity` to `verifyAudit`; carry `record --sign`; strip `sshsig` and `registrationSha256` before showing a verdict (`withoutSignatureFields`); run any git through `git-safe.ts`.
