@@ -225,13 +225,15 @@ export interface HttpClientOptions {
 }
 
 export class HttpError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly url: string,
-  ) {
+  // Declared and assigned, not parameter properties: src/sdk is erasable TypeScript (tsconfig.sdk.json), because a
+  // plugin's `pr-rla/http` runs under Node's type stripping in the plugin host.
+  readonly status: number;
+  readonly url: string;
+  constructor(message: string, status: number, url: string) {
     super(message);
     this.name = "HttpError";
+    this.status = status;
+    this.url = url;
   }
 }
 
@@ -254,8 +256,10 @@ export class HttpClient {
   private notBefore = 0;
   private readonly sleep: (ms: number) => Promise<void>;
   readonly baseUrl: string;
+  private readonly o: HttpClientOptions;
 
-  constructor(private readonly o: HttpClientOptions) {
+  constructor(o: HttpClientOptions) {
+    this.o = o;
     this.baseUrl = o.baseUrl.replace(/\/+$/, "");
     this.sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   }

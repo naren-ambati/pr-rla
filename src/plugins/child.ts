@@ -31,7 +31,7 @@ interface Definition {
 }
 
 const METHODS: Record<ChildBoot["kind"], readonly string[]> = {
-  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests"],
+  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath"],
   ledger: ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"],
 };
 
@@ -203,13 +203,13 @@ async function run(m: CallMessage): Promise<void> {
       if (!METHODS[boot.kind].includes(m.method) || typeof fn !== "function") throw new Error(`the plugin has no ${m.method}()`);
       const args = [...m.args];
       // A request object carries the call's abort signal (the parent's `cancel`).
-      if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
+      if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests" || m.method === "firstParentPath") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
       value = await (fn as Fn).apply(instance, args);
     }
     send({ type: "result", id: m.id, value: value === undefined ? null : value });
   } catch (e) {
-    const err = e as { name?: unknown; code?: unknown; message?: unknown };
-    send({ type: "error", id: m.id, code: typeof err?.code === "string" ? err.code : "PLUGIN_ERROR", message: typeof err?.message === "string" ? err.message : String(e), ...(typeof err?.name === "string" ? { name: err.name } : {}) });
+    const err = e as { name?: unknown; code?: unknown; message?: unknown; status?: unknown; rateLimited?: unknown };
+    send({ type: "error", id: m.id, code: typeof err?.code === "string" ? err.code : "PLUGIN_ERROR", message: typeof err?.message === "string" ? err.message : String(e), ...(typeof err?.name === "string" ? { name: err.name } : {}), ...(typeof err?.status === "number" ? { status: err.status } : {}), ...(err?.rateLimited === true ? { rateLimited: true } : {}) });
   } finally {
     running.delete(m.id);
     track();

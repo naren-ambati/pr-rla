@@ -21,7 +21,7 @@ export type PluginKind = "provider" | "ledger";
  * `writePaths(options)` without creating an instance; `create` makes the instance; the rest
  * are the SDK's instance methods.
  */
-export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests"] as const;
+export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath"] as const;
 export const LEDGER_METHODS = ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const;
 export type PluginMethod = "describe" | "create" | (typeof PROVIDER_METHODS)[number] | (typeof LEDGER_METHODS)[number];
 
@@ -98,6 +98,9 @@ export interface ErrorMessage {
   code: string;
   message: string;
   name?: string;
+  /** Optional (U8 fix round): the error's HTTP status and rate-limit flag, which the core reads to tell gone from transient. */
+  status?: number;
+  rateLimited?: boolean;
 }
 
 /** child -> parent: the plugin called ctx.fetch (or fetch). A string body travels as text, others as base64. */
