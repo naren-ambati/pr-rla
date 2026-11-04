@@ -290,6 +290,15 @@ Several open review points from the approved stages are resolved here: requireme
   - Proving it would need FIDO key attestation at registration (`ssh-keygen -O write-attestation`), verified against authenticator vendor roots.
   - That is not built in this round. The security model says `presence` relies on the reviewer registering a hardware-backed key.
 
+**Changed after review (2026-11-04).** An independent review of the first build found that the mechanism kept from the draft defeats the goal it serves. A verdict's provenance was the signature of the git commit that added its line, so one signing touch covered every line an assistant had appended; rebase, cherry-pick and amend re-signed other people's lines; and attribution through `git blame` could be steered by shallow clones, grafts, hidden renames, textconv and commit-graph files (two end-to-end forgeries verified 7/7 at `presence`). The mechanism is replaced:
+- **One signature per verdict.** Each line carries an SSHSIG in its own namespace, `pr-rla-verdict@v1`, made by `ssh-keygen -Y sign` over a canonical, versioned text of the verdict that names the registration's digest, the protocol, the draw, the change, the verdict, the reviewer and the time (contracts.md §1, "Per-verdict signatures"). One touch signs exactly one verdict, for one draw of one registration. Commit signatures give no provenance; no line is credited to a commit; blame is gone.
+- **`pr-rla record <draw> pass|fail --sign <key>`** builds the bytes, runs ssh-keygen, checks the signature as verify will, and writes the line. A reviewer can do the same by hand (README).
+- **`verdicts.allowed_signers`** holds the keys, apart from `verdicts.reviewers` (which takes plain names again). Principals equal ignoring case, and one key under several principals, are refused; `namespaces=` must admit `pr-rla-verdict@v1`. `require_signed` means every counted verdict carries a valid signature by its reviewer's registered key, and needs the built-in git-file ledger.
+- **The append-only walk** reads hash-checked raw objects, takes parents from each raw commit, and requires every version of the file to extend each parent's; a shallow, grafted or partial clone is refused. git runs through one guard (`src/io/git-safe.ts`).
+- **Check 7 FAILs when the loaded ledger is not the registered one** (name, source, integrity, `optionsSha256`), for every ledger, and takes the provenance ceiling from the registered identity.
+
+The levels, the wording (FR9.6), T16 and the known limits are unchanged. BUILD-NOTES ("U9 fix round") records this as a deviation from the approved design, with the review's reasoning.
+
 ## U10 · Docs and release engineering
 
 **Kept from `05` §U10:** the doc set; the FR-D2 convention and `scripts/check-docs.mjs`; the release checklist steps; no licence file (`"license": "UNLICENSED"`, `"private": true`).
