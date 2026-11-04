@@ -48,8 +48,19 @@ function npmSignatures(plugin: ResolvedPlugin, offline: boolean | undefined): st
   return `${r.status === 0 ? "ok" : "FAILED"}: ${summary.join("; ") || "no output"}`;
 }
 
+/**
+ * Where `plugin check` has got to, for a caller that prints as it goes (the CLI): what the plugin
+ * is and its lock (before `npm audit signatures`, which can take two minutes), the signatures, and
+ * the start of the conformance kit (before it runs, so a kit that fails still leaves the report so far).
+ */
+export interface PluginCheckHooks {
+  onInspected?: (r: Omit<PluginCheckResult, "npmSignatures" | "conformance" | "ok">) => void;
+  onSignatures?: (line: string) => void;
+  onConformanceStart?: (fixtures: number) => void;
+}
+
 /** `plugin check`: lock status, npm signatures, hosts and credentials, and the conformance kit through the plugin host. */
-export async function checkPlugin(ctx: ApiContext, use: string, opts: PluginCheckOptions = {}): Promise<PluginCheckResult> {
+export async function checkPlugin(ctx: ApiContext, use: string, opts: PluginCheckOptions = {}, hooks: PluginCheckHooks = {}): Promise<PluginCheckResult> {
   const config = configIn(ctx);
   const c = configuredPlugin(config, use);
   const kind: PluginKind = c?.kind ?? (opts.kind === "ledger" ? "ledger" : "provider");
@@ -69,7 +80,7 @@ export async function checkPlugin(ctx: ApiContext, use: string, opts: PluginChec
     lock = code === "NOT_LOCKED" ? `not locked: run "pr-rla plugin add ${use}" to trust it` : code === "LOCK_MISMATCH" ? `CHANGED since it was locked: ${(e as Error).message}` : `cannot check: ${(e as Error).message}`;
   }
   const x = await inspect(kind, use, plugin, c?.options ?? {});
-  const base = {
+  const inspected = {
     use,
     kind,
     name: x.name,
@@ -77,17 +88,21 @@ export async function checkPlugin(ctx: ApiContext, use: string, opts: PluginChec
     source: plugin.source,
     lock,
     lockTrust,
-    npmSignatures: npmSignatures(plugin, opts.offline),
     hosts: x.hosts,
     withoutOptions: !c,
     credentials: x.credentials,
     installScriptWarnings: installScriptWarnings(plugin),
   };
+  hooks.onInspected?.(inspected);
+  const signatures = npmSignatures(plugin, opts.offline);
+  hooks.onSignatures?.(signatures);
+  const base = { ...inspected, npmSignatures: signatures };
   // The ledger kit's fixtures are built by code (fake trackers, published issues), not recorded data a check can replay.
   if (kind === "ledger") return { ...base, conformance: { run: false, reason: "plugin check replays recorded provider fixtures only; run your ledger's own runLedgerConformance test" }, ok: false };
   const declared = plugin.pkg?.["pr-rla"] && typeof plugin.pkg["pr-rla"] === "object" ? (plugin.pkg["pr-rla"] as { conformance?: unknown }).conformance : undefined;
   const files = [...(Array.isArray(declared) ? declared.filter((f): f is string => typeof f === "string").map((f) => resolve(plugin.rootIsFile ? dirname(plugin.root) : plugin.root, f)) : []), ...(opts.fixture ?? []).map((f) => resolve(ctx.cwd, f))];
   if (!files.length) return { ...base, conformance: { run: false, reason: 'no fixtures (list recorded fixtures in the plugin\'s package.json as "pr-rla": { "conformance": [...] }, or pass --fixture <file>)' }, ok: false };
+  hooks.onConformanceStart?.(files.length);
   const report = await hostedProviderConformance(plugin, use, files.map((f) => ({ name: fixtureName(f), rec: readRecordedFixture(f) })));
   return { ...base, conformance: { run: true, fixtures: files.length, report }, ok: report.ok };
 }

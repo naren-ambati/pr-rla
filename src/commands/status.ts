@@ -1,6 +1,8 @@
+import { AuditError } from "../api/errors.js";
 import { status, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
+import { checkpoint } from "../api/write/checkpoint.js";
 import { provenanceLine } from "../core/status.js";
-import { checkpointCommand } from "./checkpoint.js";
+import { checkpointCommand, checkpointExitCode } from "./checkpoint.js";
 import type { CommandContext } from "./context.js";
 
 // The status logic moved to the audit API in U5 (src/api/read/status.ts); re-exported for callers.
@@ -14,10 +16,31 @@ export interface StatusOptions {
 }
 
 export async function statusCommand(ctx: CommandContext, opts: StatusOptions): Promise<number> {
+  if (opts.json && opts.checkpoint) return statusJsonWithCheckpoint(ctx, opts);
   const code = await statusOnly(ctx, opts);
   if (!opts.checkpoint) return code;
   const cp = await checkpointCommand(ctx, {});
   return code !== 0 ? code : cp;
+}
+
+/**
+ * `status --json --checkpoint`: one JSON document on stdout, always (contracts.md §7): the status
+ * result with the checkpoint's result as `checkpoint`, or `checkpoint: { error }` when it failed.
+ * The exit code is status's, else the checkpoint's; a failed checkpoint's own (as without --json).
+ */
+async function statusJsonWithCheckpoint(ctx: CommandContext, opts: StatusOptions): Promise<number> {
+  const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
+  const code = statusExitCode(r);
+  try {
+    const cp = await checkpoint(ctx, {});
+    ctx.out(JSON.stringify({ ...r, checkpoint: cp }, null, 2));
+    return code !== 0 ? code : checkpointExitCode(cp);
+  } catch (e) {
+    const { code: c, host, next } = e as { code?: unknown; host?: unknown; next?: unknown };
+    ctx.out(JSON.stringify({ ...r, checkpoint: { error: { code: typeof c === "string" ? c : "FAILED", message: (e as Error).message, ...(typeof host === "string" ? { host } : {}), ...(typeof next === "string" && next ? { next } : {}) } } }, null, 2));
+    // As without --json, a failed checkpoint decides the exit code.
+    return e instanceof AuditError ? e.exitCode : 1;
+  }
 }
 
 /** The exit code of a status result (contracts.md §7): 1 not registered, 2 ESCALATE, 3 below the minimum population. */

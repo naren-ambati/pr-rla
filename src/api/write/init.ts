@@ -2,9 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_FILE, CONFIG_TEMPLATE, PROTOCOL_TEMPLATE } from "../../config.js";
 import { writeFileAtomic } from "../../io/atomic.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, type ApiContext } from "../session.js";
+import { requireWritable, type ApiContext } from "../session.js";
 
 export interface InitOptions {
   repo?: string;
@@ -14,7 +13,7 @@ export interface InitOptions {
 
 /** `init` (write side): writes .pr-rla.yml, review-protocol.md, audit/ and the .gitignore line for the signing key, each atomically (NFR15). */
 export async function initAudit(ctx: ApiContext, opts: InitOptions = {}): Promise<{ config: string; protocol: string; auditDir: string }> {
-  requireReadWrite(auditContextFor(ctx), "init");
+  requireWritable(ctx, "init");
   const cfg = join(ctx.cwd, CONFIG_FILE);
   if (existsSync(cfg) && !opts.force) throw new AuditError(`${CONFIG_FILE} already exists (use --force to overwrite)`);
   writeFileAtomic(cfg, CONFIG_TEMPLATE(opts.repo ?? "owner/repo", opts.provider ?? "github"));

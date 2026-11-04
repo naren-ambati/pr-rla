@@ -50,13 +50,14 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     else printPopulation(ctx, preview, true);
     if (opts.out && listing) {
       writeJson(resolve(ctx.cwd, opts.out), { repo: preview.repo, window: preview.window, frozenAt: preview.frozenAt, selector: preview.selector, headSha: preview.headSha, funnel: preview.funnel, nativeCounts: preview.nativeCounts, diagnostics: preview.diagnostics, limitations: preview.limitations, listed: listing.listed, selected: listing.selected });
-      ctx.out(`wrote the dry-run population to ${opts.out}`);
+      // With --json, stdout carries the one JSON document; the note goes to stderr.
+      (opts.json ? ctx.err : ctx.out)(`wrote the dry-run population to ${opts.out}`);
     }
     return 0;
   }
   const r = await freeze(ctx, opts, {
     ...(opts.json ? {} : { onPopulation: (p: FreezePreview) => printPopulation(ctx, p, false) }),
-    confirmRekorV2: () => confirmRekorV2(ctx, opts.yes),
+    confirmRekorV2: () => confirmRekorV2(ctx, opts.yes, !!opts.json),
   });
   if (opts.json) {
     ctx.out(JSON.stringify(r, null, 2));

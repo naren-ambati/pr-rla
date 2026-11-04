@@ -1,9 +1,8 @@
 import { isRegistrationV2 } from "../../core/records.js";
 import { ledgerTraits } from "../../ledger-traits.js";
 import { verdictIneligibility, type Verdict } from "../../sdk/ledger.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, isoNow, ledgerFor, readDraws, readRegistration, type ApiContext } from "../session.js";
+import { auditContextFor, configFor, isoNow, ledgerFor, readDraws, readRegistration, requireWritable, type ApiContext } from "../session.js";
 
 export interface RecordInput {
   /** The draw number (1-based), as typed. */
@@ -31,7 +30,7 @@ export interface RecordResult {
  * command: CLI only, refused in a read-only context, and never an MCP tool (FR3.3).
  */
 export async function record(ctx: ApiContext, input: RecordInput): Promise<RecordResult> {
-  requireReadWrite(auditContextFor(ctx), "record");
+  requireWritable(ctx, "record");
   const { config, paths } = configFor(ctx);
   const draw = Number(input.draw);
   if (!Number.isInteger(draw) || draw < 1) throw new AuditError(`draw must be a positive integer (got ${String(input.draw)})`);

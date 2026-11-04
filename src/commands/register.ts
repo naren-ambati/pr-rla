@@ -26,11 +26,22 @@ const RETRO = " (registered after the window opened: a demonstration, not eviden
 
 /** The registration's summary lines, printed before any authority is asked. */
 export function printRegistrationPlan(ctx: Pick<CommandContext, "out">, p: RegistrationPlan): void {
+  printRegistrationHeader(ctx, p);
+  printRegistrationRest(ctx, p);
+}
+
+/** The first three lines: the digest, the claim and the selector. */
+export function printRegistrationHeader(ctx: Pick<CommandContext, "out">, p: RegistrationPlan): void {
   const record = p.signed.record;
   const params = record.parameters;
   ctx.out(`${p.dryRun ? "[dry run] " : ""}registration ${p.signed.sha256.slice(0, 12)}… · ${record.repos.kind === "repo" ? record.repos.repo : JSON.stringify(record.repos)} · window ${record.window.name} (${record.window.start}..${record.window.end})`);
   ctx.out(`  claim D: detected-defect rate <= ${pct(params.p0)} (p1 ${pct(params.p1)}, risk ${pct(params.alpha)}) · certify after ${p.stoppingTable.join(" / ")} draws with 0/1/2 fails · cap ${p.cap}`);
   ctx.out(`  selector ${JSON.stringify(record.selector)}`);
+}
+
+/** The rest of the summary, from the landedVia warning on. */
+export function printRegistrationRest(ctx: Pick<CommandContext, "out">, p: RegistrationPlan): void {
+  const record = p.signed.record;
   if (p.landedViaWarning) ctx.out(`  warning: ${p.landedViaWarning}`);
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${p.protocolFile})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}${record.verdicts.reviewers ? ` · reviewers ${record.verdicts.reviewers.join(", ")}` : ""}`);
@@ -47,7 +58,7 @@ export function printRegistrationPlan(ctx: Pick<CommandContext, "out">, p: Regis
 
 export async function registerCommand(ctx: CommandContext, opts: RegisterOptions): Promise<number> {
   const { yes, ...rest } = opts;
-  const r = await register(ctx, rest satisfies ApiRegisterOptions, { onPlanned: (p) => printRegistrationPlan(ctx, p), confirmRekorV2: () => confirmRekorV2(ctx, yes) });
+  const r = await register(ctx, rest satisfies ApiRegisterOptions, { onHeader: (p) => printRegistrationHeader(ctx, p), onPlanned: (p) => printRegistrationRest(ctx, p), confirmRekorV2: () => confirmRekorV2(ctx, yes) });
   return r.dryRun ? 0 : printRegistered(ctx, r);
 }
 

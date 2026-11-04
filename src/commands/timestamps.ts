@@ -7,6 +7,11 @@ import type { CommandContext } from "./context.js";
 export { MAX_CLOCK_SKEW_SECONDS, assessRecord, timestampingFor } from "../api/timestamps.js";
 export { obtainTimestamps } from "../api/write/timestamps.js";
 
+/** The exit code reportTimestamps returns, without printing (for --json): 5 when configured authorities fell short. */
+export function timestampsExitCode(summary: TimeEvidenceSummary): number {
+  return !summary.configured.length || summary.proven ? EXIT.OK : EXIT.TIMESTAMPS_SHORT;
+}
+
 /**
  * Prints the outcome table of functional-design.md §U1 item 3 and returns the exit code:
  * PROVEN → 0; 1..k-1 or 0 of k accepted → 5 with the re-run command; none configured → 0 with the warning.

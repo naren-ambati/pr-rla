@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { AuditError } from "../api/errors.js";
+import { escapeControls } from "../core/text.js";
 import type { ApiContext } from "../api/session.js";
 export type { DrawsFile } from "../core/records.js";
 
@@ -19,14 +20,22 @@ export class CommandError extends AuditError {
   }
 }
 
+/**
+ * Every line the CLI prints, stdout and stderr, has its control characters escaped (src/core/text.ts;
+ * U5 fix round, M4): an ESC or CR sequence in a patch, a title, a ledger's note or a server's error
+ * cannot move the cursor, rewrite earlier lines or reorder text in the person's terminal. The same
+ * `\uXXXX` form is a valid escape inside a JSON string, so `--json` output stays exact JSON.
+ */
+export const terminalLine = (l: string): string => escapeControls(l);
+
 export function nodeContext(overrides: Partial<CommandContext> = {}): CommandContext {
   return {
     cwd: process.cwd(),
     env: process.env,
     nowMs: () => Date.now(),
     fetch: globalThis.fetch,
-    out: (l) => process.stdout.write(`${l}\n`),
-    err: (l) => process.stderr.write(`${l}\n`),
+    out: (l) => process.stdout.write(`${terminalLine(l)}\n`),
+    err: (l) => process.stderr.write(`${terminalLine(l)}\n`),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     ...(process.stdin.isTTY
       ? {

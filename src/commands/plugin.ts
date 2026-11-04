@@ -1,4 +1,4 @@
-import { checkPlugin, type PluginCheckOptions } from "../api/plugin-check.js";
+import { checkPlugin, type PluginCheckOptions, type PluginCheckHooks } from "../api/plugin-check.js";
 import { commitPluginLock, preparePluginAdd, preparePluginLock, type PluginLockPlan } from "../api/write/plugin.js";
 import { CORRECTNESS_NOT_SAFETY } from "../plugins/check.js";
 import { NETWORK_DENIED_FROM_NODE } from "../plugins/host.js";
@@ -90,16 +90,25 @@ export async function pluginLockCommand(ctx: CommandContext, use: string, opts: 
 }
 
 export async function pluginCheckCommand(ctx: CommandContext, use: string, opts: PluginCheckOptions): Promise<number> {
-  const r = await checkPlugin(ctx, use, opts);
-  ctx.out(`plugin check ${use}: ${r.kind} ${r.name}${r.version ? `@${r.version}` : ""} (${r.source})`);
-  ctx.out(`  lock            ${r.lock}`);
-  ctx.out(`  npm signatures  ${r.npmSignatures}`);
-  ctx.out(`  hosts           ${r.hosts.join(", ") || "none"}${r.withoutOptions ? " (with no options: not named in .pr-rla.yml)" : ""}`);
-  ctx.out(`  credentials     ${r.credentials.length ? r.credentials.map(credentialText).join("; ") : "none"}`);
-  for (const w of r.installScriptWarnings) ctx.err(w);
+  // Printed as the check goes, as before U5: a kit that fails still leaves the report so far.
+  let inspected: Parameters<NonNullable<PluginCheckHooks["onInspected"]>>[0] | null = null;
+  const r = await checkPlugin(ctx, use, opts, {
+    onInspected: (x) => {
+      inspected = x;
+      ctx.out(`plugin check ${use}: ${x.kind} ${x.name}${x.version ? `@${x.version}` : ""} (${x.source})`);
+      ctx.out(`  lock            ${x.lock}`);
+    },
+    onSignatures: (line) => {
+      const x = inspected!;
+      ctx.out(`  npm signatures  ${line}`);
+      ctx.out(`  hosts           ${x.hosts.join(", ") || "none"}${x.withoutOptions ? " (with no options: not named in .pr-rla.yml)" : ""}`);
+      ctx.out(`  credentials     ${x.credentials.length ? x.credentials.map(credentialText).join("; ") : "none"}`);
+      for (const w of x.installScriptWarnings) ctx.err(w);
+    },
+    onConformanceStart: (n) => ctx.out(`  conformance     the provider kit through the plugin host, on ${n} recorded fixture(s)`),
+  });
   if (!r.conformance.run) ctx.out(`  conformance     not run: ${r.conformance.reason}`);
   else {
-    ctx.out(`  conformance     the provider kit through the plugin host, on ${r.conformance.fixtures} recorded fixture(s)`);
     for (const l of formatConformanceReport(r.conformance.report).split("\n")) ctx.out(`    ${l}`);
     ctx.out(`  conformance     ${r.ok ? "PASS" : "FAIL"}`);
   }

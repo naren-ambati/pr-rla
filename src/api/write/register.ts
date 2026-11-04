@@ -12,9 +12,8 @@ import { provenanceRank, type ProvenanceLevel } from "../../sdk/ledger.js";
 import type { AuthorityOutcome } from "../../timestamp/client.js";
 import type { TimeEvidenceSummary } from "../../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../../version.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, isoNow, protocolSha256, trustFor, type ApiContext } from "../session.js";
+import { auditContextFor, configFor, isoNow, protocolSha256, trustFor, requireWritable, type ApiContext } from "../session.js";
 import { assessRecord, timestampingFor } from "../timestamps.js";
 import { writeJson } from "./files.js";
 import { obtainTimestamps } from "./timestamps.js";
@@ -35,7 +34,13 @@ export interface RegisterOptions {
 }
 
 export interface RegisterHooks {
-  /** The signed registration, before any authority is asked or anything is written (the CLI prints it here). */
+  /**
+   * The signed registration's first facts (its digest, the claim, the selector), before the
+   * provider's traits are read: the CLI prints its first lines here, so they come out, as they always
+   * have, even when reading the traits fails. `landedViaWarning` is still null here.
+   */
+  onHeader?: (plan: RegistrationPlan) => void;
+  /** The signed registration, before any authority is asked or anything is written (the CLI prints the rest of it here). */
   onPlanned?: (plan: RegistrationPlan) => void;
   /** Called before a `--submit --rekor-api v2` run contacts anything; it throws to refuse. */
   confirmRekorV2?: () => Promise<void>;
@@ -112,7 +117,7 @@ export async function preflightLedger(ctx: ApiContext, config: PrRlaConfig, path
  * with a throwaway key and writes nothing. CLI only; refused in a read-only context.
  */
 export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hooks: RegisterHooks = {}): Promise<RegisterResult> {
-  requireReadWrite(auditContextFor(ctx), "register");
+  requireWritable(ctx, "register");
   const { config, paths } = configFor(ctx);
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = timestampingFor(config, bundle);
@@ -144,11 +149,6 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
   const key = opts.dryRun ? ephemeralKey() : loadOrCreateKey(resolve(config.dir, opts.key ?? config.signingKey));
   let signed: SignedRecord<RegistrationRecordV2> = signRecord(record, key);
   const r = derivedRoundFor(signed);
-  let landedViaWarning: string | null = null;
-  if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {
-    const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx).plugins);
-    if (!traits.reportsLandedVia) landedViaWarning = `provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`;
-  }
   const claimed: AuditMode = Date.parse(record.registeredAt) < Date.parse(record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
   const plan: RegistrationPlan = {
     dryRun: !!opts.dryRun,
@@ -160,8 +160,13 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     stoppingTable: stoppingTable(config.parameters).map((x) => x.draws),
     cap: effectiveCap(config.parameters),
     claimed,
-    landedViaWarning,
+    landedViaWarning: null,
   };
+  hooks.onHeader?.(plan);
+  if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {
+    const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx).plugins);
+    if (!traits.reportsLandedVia) plan.landedViaWarning = `provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`;
+  }
   hooks.onPlanned?.(plan);
   if (opts.dryRun) return { ...plan, path: null, mode: claimed, evidence: null, outcomes: [], log: null, submitError: null };
 
@@ -179,5 +184,5 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
   }
   const evidence = await assessRecord(ctx, config, signed, record.registeredAt, timestamping, bundle);
   const mode: AuditMode = evidence.proven ? (evidence.ukMs! < Date.parse(record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE") : claimed;
-  return { ...written, signed, mode, evidence, log: signed.log, submitError: null };
+  return { ...written, signed, mode, evidence, log: signed.log ?? null, submitError: null };
 }

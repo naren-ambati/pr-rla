@@ -14,7 +14,7 @@ import { requireReadWrite, type AuditContext } from "../context.js";
 import { AuditError } from "../errors.js";
 import { checkpointsPath, historyDirPath } from "../read/checkpoints.js";
 import { ledgerStatus } from "../read/status.js";
-import { auditContextFor, configFor, isoNow, ledgerFor, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { auditContextFor, configFor, isoNow, ledgerFor, readRegistration, trustFor, requireWritable, type ApiContext } from "../session.js";
 import { assessRecord, timestampingFor } from "../timestamps.js";
 import { obtainTimestamps } from "./timestamps.js";
 
@@ -64,6 +64,9 @@ export interface CheckpointOptions {
   git?: GitRunner;
 }
 
+/** The two files a checkpoint wrote, and what they hold: reported as soon as they are written (before the timestamps are assessed). */
+export type CheckpointWritten = Omit<CheckpointAppended, "evidence" | "outcomes">;
+
 /** The appended checkpoint, before any push. */
 export interface CheckpointAppended {
   takenAt: string;
@@ -90,9 +93,9 @@ export interface CheckpointResult extends CheckpointAppended {
  * registered authorities, and appends it with its event list to the audit repo. With --push it
  * commits and pushes through the git transport. CLI only; refused in a read-only context.
  */
-export async function checkpoint(ctx: ApiContext, opts: CheckpointOptions = {}, hooks: { onAppended?: (c: CheckpointAppended) => void } = {}): Promise<CheckpointResult> {
+export async function checkpoint(ctx: ApiContext, opts: CheckpointOptions = {}, hooks: { onWritten?: (c: CheckpointWritten) => void; onAppended?: (c: CheckpointAppended) => void } = {}): Promise<CheckpointResult> {
   const { config, paths } = configFor(ctx);
-  requireReadWrite(auditContextFor(ctx), "checkpoint");
+  requireWritable(ctx, "checkpoint");
   const reg = readRegistration(paths);
   const git = opts.git ?? nodeGit(config.dir);
   let pre: Awaited<ReturnType<typeof checkPreconditions>> | null = null;
@@ -112,8 +115,7 @@ export async function checkpoint(ctx: ApiContext, opts: CheckpointOptions = {}, 
   const line: LedgerCheckpointLine = { ...record, timestamps: got.timestamps };
   const files = appendCheckpoint(auditContextFor(ctx), paths.windowDir, line, events);
   const rel = (p: string) => relative(config.dir, p) || p;
-  const evidence = await assessRecord(ctx, config, { record, timestamps: got.timestamps } as SignedRecord<unknown>, takenAt, timestamping, bundle);
-  const appended: CheckpointAppended = {
+  const written: CheckpointWritten = {
     takenAt,
     ledger: ledger.name,
     count: record.count,
@@ -121,10 +123,12 @@ export async function checkpoint(ctx: ApiContext, opts: CheckpointOptions = {}, 
     eventsSha256: record.eventsSha256,
     linesFile: rel(files.linesFile),
     historyFile: rel(files.historyFile),
-    evidence,
-    outcomes: got.outcomes,
     commitMessage: `pr-rla checkpoint ${config.window.name} ${takenAt}`,
   };
+  // The files are written: say so before anything else can fail.
+  hooks.onWritten?.(written);
+  const evidence = await assessRecord(ctx, config, { record, timestamps: got.timestamps } as SignedRecord<unknown>, takenAt, timestamping, bundle);
+  const appended: CheckpointAppended = { ...written, evidence, outcomes: got.outcomes };
   hooks.onAppended?.(appended);
   if (!opts.push || !pre?.ok) return { ...appended, push: null };
   // Conflict paths are relative to the repo's top level, so the transport runs there.

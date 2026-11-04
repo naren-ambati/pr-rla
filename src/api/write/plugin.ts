@@ -4,9 +4,8 @@ import { CONFIG_FILE, loadConfig, type PrRlaConfig } from "../../config.js";
 import { inspectPlugin as inspect, lockEntryFor as entryFor } from "../../plugins/entry.js";
 import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, writeLock, type LockEntry, type LockFile, type PluginTrust, type ResolvedPlugin } from "../../plugins/lock.js";
 import { builtinLedgerName, builtinProviderName } from "../../registry.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, type ApiContext } from "../session.js";
+import { auditContextFor, requireWritable, type ApiContext } from "../session.js";
 
 /**
  * `plugin add` and `plugin lock` (functional-design.md §U2b; FR2.2, FR2.3), the only writers of
@@ -75,7 +74,7 @@ export interface PluginLockPlan {
 }
 
 export async function preparePluginAdd(ctx: ApiContext, use: string, opts: { trust?: string } = {}): Promise<PluginLockPlan> {
-  requireReadWrite(auditContextFor(ctx), "plugin add");
+  requireWritable(ctx, "plugin add");
   const { config, kind, options } = requireConfigured(ctx, use, "plugin add");
   const lock = readLock(config.dir);
   if (Object.hasOwn(lock.plugins, use)) throw new AuditError(`${use} is already in ${lockPath(config.dir)}; to trust a reviewed change, run "pr-rla plugin lock ${use}"`);
@@ -86,7 +85,7 @@ export async function preparePluginAdd(ctx: ApiContext, use: string, opts: { tru
 }
 
 export async function preparePluginLock(ctx: ApiContext, use: string, opts: { trust?: string } = {}): Promise<PluginLockPlan> {
-  requireReadWrite(auditContextFor(ctx), "plugin lock");
+  requireWritable(ctx, "plugin lock");
   const { config, kind, options } = requireConfigured(ctx, use, "plugin lock");
   const lock = readLock(config.dir);
   const old = Object.hasOwn(lock.plugins, use) ? lock.plugins[use] : undefined;
@@ -100,6 +99,6 @@ export async function preparePluginLock(ctx: ApiContext, use: string, opts: { tr
 
 /** Writes the reviewed entry into pr-rla.lock.json. */
 export function commitPluginLock(ctx: ApiContext, plan: PluginLockPlan): void {
-  requireReadWrite(auditContextFor(ctx), plan.previous ? "plugin lock" : "plugin add");
+  requireWritable(ctx, plan.previous ? "plugin lock" : "plugin add");
   writeLock(plan.auditDir, { ...plan.lock, plugins: { ...plan.lock.plugins, [plan.use]: plan.entry } });
 }

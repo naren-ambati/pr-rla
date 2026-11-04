@@ -3,9 +3,8 @@ import { RoundNotYetPublished } from "../../beacon/drand.js";
 import { derivedRoundFor, manifestRepo, manifestSha256, type DrawsFile } from "../../core/records.js";
 import { computeDraws, QUICKNET, unixToIso } from "../../core/seed.js";
 import { effectiveCap, zeroFailureStop } from "../../core/sprt.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, getBeacon, ledgerFor, readCommitment, readDraws, readManifest, readRegistration, type ApiContext } from "../session.js";
+import { configFor, getBeacon, ledgerFor, readCommitment, readDraws, readManifest, readRegistration, requireWritable, type ApiContext } from "../session.js";
 import { writeJson } from "./files.js";
 
 export interface SampleOptions {
@@ -41,7 +40,7 @@ export type SampleResult =
  * drawn change). CLI only; refused in a read-only context. Issuing draws is never an MCP tool.
  */
 export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise<SampleResult> {
-  requireReadWrite(auditContextFor(ctx), "sample");
+  requireWritable(ctx, "sample");
   const { config, paths } = configFor(ctx);
   const reg = readRegistration(paths);
   const manifest = readManifest(paths);

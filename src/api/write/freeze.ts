@@ -20,10 +20,9 @@ import { PROVIDER_API_VERSION } from "../../sdk/provider.js";
 import type { AuthorityOutcome } from "../../timestamp/client.js";
 import type { TimeEvidenceSummary } from "../../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../../version.js";
-import { requireReadWrite } from "../context.js";
 import { AuditError } from "../errors.js";
 import { planFreeze, type FreezePreview } from "../read/freeze-preview.js";
-import { auditContextFor, trustFor, type ApiContext } from "../session.js";
+import { auditContextFor, trustFor, requireWritable, type ApiContext } from "../session.js";
 import { assessRecord } from "../timestamps.js";
 import { writeJson } from "./files.js";
 import { obtainTimestamps } from "./timestamps.js";
@@ -71,7 +70,7 @@ export interface FreezeResult extends Omit<FreezePreview, "dryRun"> {
  * commitment, time-stamps it and writes both. CLI only; refused in a read-only context.
  */
 export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: FreezeHooks = {}): Promise<FreezeResult> {
-  requireReadWrite(auditContextFor(ctx), "freeze");
+  requireWritable(ctx, "freeze");
   // Set by the refusals that run before listing (as freeze always ran them).
   const submit: { url: string | null; api: RekorApi } = { url: null, api: "v1" };
   const plan = await planFreeze(ctx, {
@@ -131,7 +130,7 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
     if (url) signed = await submitSigned(ctx, signed, url);
     writeJson(paths.manifest, manifest);
     writeJson(paths.commitment, signed);
-    return { ...base, schema: "pr-rla/manifest/v1", manifestSha256: manifest.sha256, log: signed.log, submitError: null, evidence: null, outcomes: [] };
+    return { ...base, schema: "pr-rla/manifest/v1", manifestSha256: manifest.sha256, log: signed.log ?? null, submitError: null, evidence: null, outcomes: [] };
   }
 
   const v2reg = reg as SignedRecord<RegistrationRecordV2>;
@@ -185,5 +184,5 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
     }
   }
   const evidence = await assessRecord(ctx, config, signed, frozenAt, ts, bundle);
-  return { ...result, log: signed.log, submitError: null, evidence };
+  return { ...result, log: signed.log ?? null, submitError: null, evidence };
 }
