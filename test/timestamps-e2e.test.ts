@@ -12,7 +12,7 @@ import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
-import type { DrawsFile, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
+import type { CommitmentRecordV2, DrawsFile, LoggedEntry, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
 import { roundPublishTime } from "../src/core/seed.js";
 import { loadConfig } from "../src/config.js";
 import { isoMs, readToken } from "../src/timestamp/verify.js";
@@ -24,6 +24,7 @@ const W = "audit/2026-q3";
 let tsa: MockTsaServer;
 let foreign: TestAuthority;
 let expired: TestAuthority;
+let unregistered: TestAuthority;
 
 const readJ = <T>(s: Scenario, p: string) => JSON.parse(readFileSync(join(s.dir, p), "utf8")) as T;
 const writeJ = (s: Scenario, p: string, v: unknown) => writeFileSync(join(s.dir, p), `${JSON.stringify(v, null, 2)}\n`);
@@ -39,8 +40,13 @@ const reset = () => {
 
 beforeAll(async () => {
   foreign = await makeTestAuthority({ id: "test-b" }); // same id, a root nobody trusts
-  expired = await makeTestAuthority({ id: "test-exp", signerValidFrom: "2025-01-01T00:00:00Z", signerValidTo: "2026-01-01T00:00:00Z" });
-  tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" }), await makeTestAuthority({ id: "test-c", alg: "RSA-PSS", operator: "Test operator test-a" }), expired]).start();
+  const testB = await makeTestAuthority({ id: "test-b", alg: "RSA" });
+  // test-b's own root, with a signer certificate that expired before the audit: tamper fixture 4 needs a registered
+  // authority's token (a token from an authority the registration does not name is ignored, not failed).
+  expired = await makeTestAuthority({ id: "test-b", under: testB, signerValidFrom: "2025-01-01T00:00:00Z", signerValidTo: "2026-01-01T00:00:00Z" });
+  // test-d: a trusted authority of its own operator that the scenarios' registrations do not name (review finding 5).
+  unregistered = await makeTestAuthority({ id: "test-d", operator: "Operator D" });
+  tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), testB, await makeTestAuthority({ id: "test-c", alg: "RSA-PSS", operator: "Test operator test-a" }), unregistered]).start();
 });
 afterAll(async () => tsa.stop());
 
@@ -270,10 +276,10 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     const r = await tamper(async (reg) => {
       const digest = sha256Hex(canonicalJson(reg.record));
       const der = tokenOf(await mintResponse(expired, { digestHex: digest, nonceHex: "1112131415161718", genTime: new Date(reg.record.registeredAt) }));
-      reg.timestamps!.push(evidenceFrom(expired, der, "1112131415161718"));
+      reg.timestamps![1] = evidenceFrom(expired, der, "1112131415161718");
     });
     expect(r.checks[0]!.status).toBe("FAIL");
-    expect(r.checks[0]!.details.join("\n")).toMatch(/token from test-exp: rule 6: test-exp test TSA is not valid at genTime 2026-10-20T00:00:00Z \(valid 2025-01-01T00:00:00Z\.\.2026-01-01T00:00:00Z\)/);
+    expect(r.checks[0]!.details.join("\n")).toMatch(/token from test-b: rule 6: test-b test TSA is not valid at genTime 2026-10-20T00:00:00Z \(valid 2025-01-01T00:00:00Z\.\.2026-01-01T00:00:00Z\)/);
   });
 
   it("(5) a token 10 min 61 s from the signed time with no stated accuracy: check 1 FAIL (rule 7)", async () => {
@@ -302,6 +308,49 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     s.out.length = 0;
     await statusCommand(s.ctx, {});
     expect(s.out[0]).toMatch(/CERTIFIED \(risk 5%\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
+  });
+
+  // A log entry 5 min after the signed time: if it were the time, R would move from 33,245,812 to 33,245,912.
+  const lateLog: LoggedEntry = { logUrl: "http://127.0.0.1:9", uuid: "u", logIndex: 0, integratedTime: T("2026-10-20T00:05:00Z") / 1000, logID: "l", body: "", verification: { signedEntryTimestamp: "" } };
+
+  it("review finding 4: the `timestamps` field dropped from the registration's envelope FAILs check 1 and does not move R to the log's time", async () => {
+    const s = cloneScenario(honest);
+    const reg = readJ<SignedRecord<RegistrationRecordV2>>(s, regPath);
+    delete (reg as { timestamps?: unknown }).timestamps;
+    reg.log = lateLog;
+    writeJ(s, regPath, reg);
+    const r = await runVerify(s.ctx, { offline: true });
+    expect(r.derivedRound).toBe(33245812);
+    expect(r.checks[0]!.status).toBe("FAIL");
+    expect(r.checks[0]!.details).toContain("FAIL registration: a schema-v2 record has no timestamps field (writers always store one); its time evidence was removed");
+    expect(r.checks[2]!.status).toBe("PASS"); // the commitment still names the honest R
+  });
+
+  it("review finding 4: the same for the commitment: check 2 FAILs", async () => {
+    const s = cloneScenario(honest);
+    const p = `${W}/manifest-commitment.json`;
+    const cm = readJ<SignedRecord<CommitmentRecordV2>>(s, p);
+    delete (cm as { timestamps?: unknown }).timestamps;
+    cm.log = lateLog;
+    writeJ(s, p, cm);
+    const c2 = (await runVerify(s.ctx, { offline: true })).checks[1]!;
+    expect(c2.status).toBe("FAIL");
+    expect(c2.details).toContain("a schema-v2 commitment has no timestamps field (writers always store one); its time evidence was removed");
+  });
+
+  it("review finding 5: a token from an authority the registration does not name is ignored (not registered) and does not count toward k", async () => {
+    const s = cloneScenario(honest);
+    const reg = readJ<SignedRecord<RegistrationRecordV2>>(s, regPath);
+    reg.timestamps = reg.timestamps!.slice(0, 1); // test-a only: 1 of 2
+    const der = tokenOf(await mintResponse(unregistered, { digestHex: sha256Hex(canonicalJson(reg.record)), nonceHex: "3132333435363738", genTime: new Date(reg.record.registeredAt) }));
+    reg.timestamps.push(evidenceFrom(unregistered, der, "3132333435363738"));
+    writeJ(s, regPath, reg);
+    const r = await runVerify(s.ctx, {});
+    expect(r.timestamps.registration!.proven).toBe(false);
+    expect(r.timestamps.registration!.operators.map((o) => o.via)).toEqual(["test-a"]);
+    expect(r.checks[0]!.status).toBe("WARN");
+    expect(r.checks[0]!.details).toContain("registration token from test-d ignored (not registered: the registration names test-a, test-b)");
+    expect(r.checks[0]!.details.join("\n")).toMatch(/registration timestamps: 1 of 2 TSAs \(test-a\) · k = 2 · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\) · ignored \(not registered\): test-d/);
   });
 });
 

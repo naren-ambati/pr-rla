@@ -110,10 +110,12 @@ describe("an honest retrospective audit, end to end (json-file provider, mock ti
 
   it("verify: all seven checks pass, timestamps are tamper-evident", async () => {
     const s = cloneScenario(honest);
-    const report = await runVerify(s.ctx, {});
+    // The verifier passes the log's key (--log-key); the audit repo only names the log's URL.
+    const report = await runVerify(s.ctx, { logKey: s.logKeyFile! });
     expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:PASS", "2:PASS", "3:PASS", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
     expect(report.timestampTamperProof).toBe(true);
-    expect(await verifyCommand(s.ctx, {})).toBe(0);
+    expect(report.checks[0]!.details.join("\n")).toMatch(/registration logged at .* \(SET and inclusion proof verified under the verifier's --log-key\)/);
+    expect(await verifyCommand(s.ctx, { logKey: s.logKeyFile! })).toBe(0);
     const text = s.out.join("\n");
     expect(text).toMatch(/registration after window close → RETROSPECTIVE \(a demonstration\) · manifest logged .* before R ✓ · R = 33,245,812: first round ≥ 24 h after registration ✓ · BLS ✓ · population 400\/400 match ✓ · 36\/36 draws reproduce ✓ · labels/);
     expect(text).toMatch(/VERIFIED$/);
@@ -182,7 +184,7 @@ describe("tamper fixtures: verify must FAIL", () => {
     const reg = readJ<SignedRecord<unknown> & { log: { integratedTime: number } }>(s, `${W}/registration.json`);
     reg.log.integratedTime -= 30 * 86400; // pretend it was registered before the window
     writeJ(s, `${W}/registration.json`, reg);
-    const report = await runVerify(s.ctx, {});
+    const report = await runVerify(s.ctx, { logKey: s.logKeyFile! });
     expect(report.checks[0]!.status).toBe("FAIL");
     expect(report.checks[0]!.details.join(" ")).toMatch(/signedEntryTimestamp does not verify/);
   });

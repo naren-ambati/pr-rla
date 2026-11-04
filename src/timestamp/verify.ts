@@ -10,6 +10,12 @@ import type { TrustBundle } from "./bundle.js";
  * the signature over the DER signed attributes (rule 1 and the signature part
  * of rule 3, as the design allows). pr-rla enforces rules 2, 4, 5, 6 and 7
  * itself on the parsed structures, because the library does not check them.
+ *
+ * One certificate for every rule: pr-rla itself finds the single certificate in
+ * the token that the signer identifier names (RFC 5652 §5.3, either form) and
+ * judges the signature key, ESSCertID, EKU and chain on that one certificate.
+ * A token naming two candidates, carrying two certificates with the signer's
+ * issuer and serial, or verified by pkijs under any other key, is refused.
  */
 
 pkijs.setEngine("node", new pkijs.CryptoEngine({ name: "node", crypto: webcrypto as unknown as ConstructorParameters<typeof pkijs.CryptoEngine>[0]["crypto"] }));
@@ -22,6 +28,10 @@ export const OID = {
   signingCertificate: "1.2.840.113549.1.9.16.2.12",
   signingCertificateV2: "1.2.840.113549.1.9.16.2.47",
   extKeyUsage: "2.5.29.37",
+  anyExtendedKeyUsage: "2.5.29.37.0",
+  subjectKeyIdentifier: "2.5.29.14",
+  keyUsage: "2.5.29.15",
+  basicConstraints: "2.5.29.19",
   timeStamping: "1.3.6.1.5.5.7.3.8",
   sha1: "1.3.14.3.2.26",
   sha256: "2.16.840.1.101.3.4.2.1",
@@ -72,6 +82,20 @@ export interface TokenCheck {
   signatureAlgorithm: string | null;
   /** Subjects from the signer up to the anchor that was reached. */
   chain: string[];
+  /** The pinned anchor the chain reached, and how the bundle came to trust it (NFR4). */
+  anchor: AnchorInfo | null;
+}
+
+export interface AnchorInfo {
+  subject: string;
+  /** SHA-256 of the anchor certificate, hex. */
+  sha256: string;
+  /** A self-signed root, or a CA certificate pinned below its root (Microsoft's: its token omits the root). */
+  kind: "root" | "intermediate";
+  /** The bundle's `independent`: true if confirmed from a source other than the authority's own response; null if a trust file does not say. */
+  independent: boolean | null;
+  /** The TSA issuing CA that issued the signer, when the bundle pins this authority's issuing CAs. */
+  issuingCA: string | null;
 }
 
 export interface TokenCheckInput {
@@ -159,6 +183,123 @@ function verifiesUnder(cert: X509Certificate, issuer: X509Certificate): boolean 
   }
 }
 
+const sha256Of = (x: X509Certificate) => createHash("sha256").update(x.raw).digest("hex");
+
+/** One entry of the token's `certificates` field: its original DER, and the certificate (null if it is not an X.509 certificate). */
+interface TokenCert {
+  der: Uint8Array;
+  cert: pkijs.Certificate | null;
+}
+
+function tokenCertificates(signedDataSchema: asn1js.AsnType): TokenCert[] {
+  return rawCertificates(signedDataSchema).map((der) => {
+    try {
+      return { der, cert: pkijs.Certificate.fromBER(asBuffer(der)) };
+    } catch {
+      return { der, cert: null };
+    }
+  });
+}
+
+/** A certificate's subjectPublicKeyInfo exactly as encoded, for a byte comparison of keys. */
+function spkiBytes(der: Uint8Array): Buffer {
+  const tbs = (parseBer(der, "certificate") as asn1js.Sequence).valueBlock.value[0] as asn1js.Sequence;
+  const fields = tbs.valueBlock.value;
+  const versioned = fields[0]?.idBlock.tagClass === 3 && fields[0].idBlock.tagNumber === 0;
+  return Buffer.from(fields[versioned ? 6 : 5]!.valueBeforeDecodeView);
+}
+
+/** An extension's value, decoded from its DER (null if absent or not DER). */
+function extensionOf(c: pkijs.Certificate, oid: string): { critical: boolean; value: asn1js.AsnType | null } | null {
+  const e = c.extensions?.find((x) => x.extnID === oid);
+  if (!e) return null;
+  const r = asn1js.fromBER(asBuffer(new Uint8Array(e.extnValue.valueBlock.valueHexView)));
+  return { critical: e.critical, value: r.offset === -1 ? null : r.result };
+}
+
+const sameIssuerSerial = (a: pkijs.Certificate, b: pkijs.Certificate) => a.issuer.isEqual(b.issuer) && a.serialNumber.isEqual(b.serialNumber);
+
+/** True if a SubjectKeyIdentifier sid names this certificate: by its SKI extension, or by the SHA-1 of its key (as pkijs resolves it). */
+function keyIdNames(c: pkijs.Certificate, keyId: Buffer): boolean {
+  const ski = extensionOf(c, OID.subjectKeyIdentifier)?.value;
+  if (ski instanceof asn1js.OctetString && Buffer.from(ski.valueBlock.valueHexView).equals(keyId)) return true;
+  return createHash("sha1").update(c.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView).digest().equals(keyId);
+}
+
+/**
+ * The index of the one certificate in the token the signer identifier names (RFC 5652 §5.3), or the
+ * reasons there is none: no certificate matches, several do, or several carry the signer's issuer and serial.
+ */
+function resolveSigner(si: pkijs.SignerInfo, certs: readonly TokenCert[]): { index: number | null; problems: string[] } {
+  const all = certs.flatMap((c, i) => (c.cert ? [{ i, cert: c.cert }] : []));
+  let form: string;
+  let matches: number[];
+  if (si.sid instanceof pkijs.IssuerAndSerialNumber) {
+    const sid = si.sid;
+    form = `issuer and serial number ${intHex(sid.serialNumber)}`;
+    matches = all.filter((c) => c.cert.issuer.isEqual(sid.issuer) && c.cert.serialNumber.isEqual(sid.serialNumber)).map((c) => c.i);
+  } else {
+    // [0] SubjectKeyIdentifier: an IMPLICIT OCTET STRING (pkijs also reads a constructed [0]).
+    const sid = si.sid as asn1js.BaseBlock & { valueBlock: { valueHexView?: Uint8Array; value?: asn1js.BaseBlock[] } };
+    const inner = sid.idBlock.isConstructed ? (sid.valueBlock.value?.[0] as (asn1js.BaseBlock & { valueBlock: { valueHexView?: Uint8Array } }) | undefined) : sid;
+    const keyId = Buffer.from(inner?.valueBlock.valueHexView ?? new Uint8Array());
+    form = `subject key identifier ${keyId.toString("hex")}`;
+    matches = keyId.length ? all.filter((c) => keyIdNames(c.cert, keyId)).map((c) => c.i) : [];
+  }
+  if (!matches.length) return { index: null, problems: [`rule 4: no certificate in the token matches the signer identifier (${form})`] };
+  if (matches.length > 1) return { index: null, problems: [`rule 4: ${matches.length} certificates in the token match the signer identifier (${form}); exactly one may`] };
+  const signer = certs[matches[0]!]!.cert!;
+  const twins = all.filter((c) => sameIssuerSerial(c.cert, signer)).length;
+  if (twins > 1) return { index: null, problems: [`rule 4: ${twins} certificates in the token carry the signer's issuer and serial number ${intHex(signer.serialNumber)}; exactly one may`] };
+  return { index: matches[0]!, problems: [] };
+}
+
+/** basicConstraints of a certificate: present, critical, cA and the path length (null: unbounded). */
+function basicConstraintsOf(c: pkijs.Certificate): { present: boolean; critical: boolean; ca: boolean; pathLen: number | null } {
+  const e = extensionOf(c, OID.basicConstraints);
+  const parts = e?.value instanceof asn1js.Sequence ? e.value.valueBlock.value : [];
+  const ca = parts[0] instanceof asn1js.Boolean ? parts[0].getValue() : false;
+  const len = parts.find((x) => x instanceof asn1js.Integer) as asn1js.Integer | undefined;
+  return { present: !!e, critical: !!e?.critical, ca, pathLen: len ? Number(len.toBigInt()) : null };
+}
+
+/** keyUsage with keyCertSign (bit 5). */
+function mayCertify(c: pkijs.Certificate): boolean {
+  const ku = extensionOf(c, OID.keyUsage)?.value;
+  if (!(ku instanceof asn1js.BitString)) return false;
+  const bits = ku.valueBlock.valueHexView;
+  return bits.length > 0 && (bits[0]! & 0x04) !== 0;
+}
+
+/** The EKU purposes (null: no EKU extension). */
+function ekuOf(c: pkijs.Certificate): string[] | null {
+  const e = c.extensions?.find((x) => x.extnID === OID.extKeyUsage);
+  return e ? ((e.parsedValue as pkijs.ExtKeyUsage | undefined)?.keyPurposes ?? []) : null;
+}
+
+/**
+ * Constraints on the certificates above the signer (rule 6): every intermediate is a CA with critical
+ * basicConstraints, may sign certificates (keyUsage keyCertSign), allows the intermediates below it, and,
+ * if it restricts its extended key usage, allows timestamping. The anchor's own path length is honoured.
+ */
+function pathProblems(path: readonly X509Certificate[], tsa: string): string[] {
+  const out: string[] = [];
+  for (let i = 1; i < path.length; i++) {
+    const x = path[i]!;
+    const c = pkijs.Certificate.fromBER(asBuffer(new Uint8Array(x.raw)));
+    const isAnchor = i === path.length - 1;
+    const bc = basicConstraintsOf(c);
+    const below = i - 1;
+    if (bc.pathLen !== null && below > bc.pathLen) out.push(`rule 6: ${subjectOf(x)} allows ${bc.pathLen} intermediate CA(s) below it, but the chain to ${tsa}'s signer has ${below}`);
+    if (isAnchor) continue;
+    if (!bc.present || !bc.critical || !bc.ca) out.push(`rule 6: ${subjectOf(x)} is not marked as a CA (basicConstraints must be present, critical and cA)`);
+    if (!mayCertify(c)) out.push(`rule 6: ${subjectOf(x)} may not sign certificates (its keyUsage lacks keyCertSign)`);
+    const eku = ekuOf(c);
+    if (eku && !eku.includes(OID.timeStamping) && !eku.includes(OID.anyExtendedKeyUsage)) out.push(`rule 6: ${subjectOf(x)} restricts its extended key usage to ${eku.join(", ") || "nothing"}, which excludes timeStamping`);
+  }
+  return out;
+}
+
 /** Reads the facts of a token without judging them (rule 1 failures throw). */
 export function readToken(tokenDer: Uint8Array): { facts: TokenFacts; signedData: pkijs.SignedData; signedDataSchema: asn1js.AsnType } {
   const ci = new pkijs.ContentInfo({ schema: parseBer(tokenDer, "token") });
@@ -203,6 +344,7 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
     upperBoundMs: null,
     signatureAlgorithm: null,
     chain: [],
+    anchor: null,
   };
   const p = out.problems;
 
@@ -236,11 +378,23 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
   if (facts.nonce === null) p.push("rule 2: token carries no nonce");
   else if (facts.nonce !== normHex(ev.nonce)) p.push(`rule 2: token nonce ${facts.nonce} is not the request nonce ${normHex(ev.nonce)}`);
 
-  // Rule 3: messageDigest over the TSTInfo, and the signature over the DER signedAttrs. No SHA-1 signature.
-  const si = signedData.signerInfos[0];
-  let signer: pkijs.Certificate | null = null;
-  if (signedData.signerInfos.length !== 1 || !si) p.push(`rule 3: token has ${signedData.signerInfos.length} signers, expected 1`);
+  // The signer certificate: the one certificate in the token the signer identifier names. Rules 3–6 all judge it.
+  const certs = tokenCertificates(parsed.signedDataSchema);
+  certs.forEach((c, i) => {
+    if (!c.cert) p.push(`rule 4: entry ${i + 1} of the token's certificates is not an X.509 certificate`);
+  });
+  const si = signedData.signerInfos.length === 1 ? signedData.signerInfos[0] : undefined;
+  let signerIndex: number | null = null;
+  if (!si) p.push(`rule 3: token has ${signedData.signerInfos.length} signers, expected 1`);
   else {
+    const r = resolveSigner(si, certs);
+    signerIndex = r.index;
+    p.push(...r.problems);
+  }
+  const signer = signerIndex !== null ? { der: certs[signerIndex]!.der, cert: certs[signerIndex]!.cert! } : null;
+
+  // Rule 3: messageDigest over the TSTInfo, and the signature over the DER signedAttrs, under the signer certificate's key. No SHA-1 signature.
+  if (si) {
     const sigAlg = si.signatureAlgorithm.algorithmId;
     let hashAlg = si.digestAlgorithm.algorithmId;
     if (sigAlg === OID.rsaPss) {
@@ -257,28 +411,37 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
       if (!(ct instanceof asn1js.ObjectIdentifier) || ct.getValue() !== OID.tstInfo) p.push("rule 3: content-type attribute is not TSTInfo");
     }
     if (imprintOk) {
+      let used: pkijs.Certificate | null = null;
       try {
         const r = await signedData.verify({ signer: 0, data: asBuffer(input.data), checkChain: false, extendedMode: true });
-        signer = r.signerCertificate ?? null;
+        used = r.signerCertificate ?? null;
         if (r.signatureVerified !== true) p.push("rule 3: signature over the signed attributes does not verify");
       } catch (e) {
         const err = e as pkijs.SignedDataVerifyError;
-        signer = err.signerCertificate ?? null;
+        used = err.signerCertificate ?? null;
         p.push(`rule 3: ${err.message}`);
       }
+      // pkijs picks its own certificate for the signature: it must be the signer certificate, and its key byte-equal.
+      if (used && signer) {
+        const at = signedData.certificates?.indexOf(used) ?? -1;
+        const usedDer = at >= 0 ? certs[at]?.der : undefined;
+        if (at !== signerIndex) p.push(`rule 3: the signature was checked with certificate ${at + 1} of the token, not the signer certificate (${signerIndex! + 1})`);
+        let sameKey = false;
+        try {
+          sameKey = !!usedDer && spkiBytes(usedDer).equals(spkiBytes(signer.der));
+        } catch {
+          sameKey = false;
+        }
+        if (!sameKey) p.push("rule 3: the key that verified the signature is not the signer certificate's key");
+      }
     } else p.push("rule 3: signature not checked (the token is not over this record)");
-    const key = signer ? new X509Certificate(Buffer.from(signer.toSchema().toBER(false))).publicKey.asymmetricKeyDetails : undefined;
+    const key = signer ? new X509Certificate(Buffer.from(signer.der)).publicKey.asymmetricKeyDetails : undefined;
     const keyDesc = key?.namedCurve ? ({ prime256v1: "P-256", secp384r1: "P-384", secp521r1: "P-521" } as Record<string, string>)[key.namedCurve] ?? key.namedCurve : key?.modulusLength ? `${key.modulusLength}` : "";
     out.signatureAlgorithm = `${SIGNATURE_NAMES[sigAlg] ?? sigAlg}${keyDesc ? ` ${keyDesc}` : ""} / ${(HASH_NAMES[hashAlg] ?? hashAlg).toUpperCase().replace("SHA", "SHA-")}`;
   }
 
-  // Find the signer's original DER among the token's certificates.
-  const raws = rawCertificates(parsed.signedDataSchema);
-  const rawSigner = signer ? raws.find((r) => { const c = pkijs.Certificate.fromBER(asBuffer(r)); return c.serialNumber.isEqual(signer!.serialNumber) && c.issuer.isEqual(signer!.issuer); }) : undefined;
-  if (signer && !rawSigner) p.push("rule 4: signer certificate not found among the token's certificates");
-
-  // Rule 4: ESSCertIDv2 (or v1 as an identifier) matches the signer certificate.
-  if (si && rawSigner) {
+  // Rule 4: ESSCertIDv2 (or v1 as an identifier) names the signer certificate.
+  if (si && signer) {
     const v2 = attribute(si, OID.signingCertificateV2);
     const v1 = attribute(si, OID.signingCertificate);
     if (!v2 && !v1) p.push("rule 4: no ESSCertID (signing-certificate attribute)");
@@ -290,8 +453,8 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
         const alg = first ? HASH_NAMES[first.hashAlgorithm] : undefined;
         if (!first || !alg) p.push(`rule 4: ESSCertID${isV2 ? "v2" : ""} uses an unknown hash`);
         else {
-          if (createHash(alg).update(rawSigner).digest("hex") !== first.certHash) p.push(`rule 4: ESSCertID${isV2 ? "v2" : ""} does not match the signer certificate`);
-          if (first.serial !== null && first.serial !== intHex(signer!.serialNumber)) p.push(`rule 4: ESSCertID${isV2 ? "v2" : ""} names serial ${first.serial}, not the signer's`);
+          if (createHash(alg).update(signer.der).digest("hex") !== first.certHash) p.push(`rule 4: ESSCertID${isV2 ? "v2" : ""} does not match the signer certificate`);
+          if (first.serial !== null && first.serial !== intHex(signer.cert.serialNumber)) p.push(`rule 4: ESSCertID${isV2 ? "v2" : ""} names serial ${first.serial}, not the signer's`);
         }
       } catch (e) {
         p.push(`rule 4: ${(e as Error).message}`);
@@ -301,7 +464,7 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
 
   // Rule 5: EKU is exactly id-kp-timeStamping, and critical.
   if (signer) {
-    const eku = signer.extensions?.find((e) => e.extnID === OID.extKeyUsage);
+    const eku = signer.cert.extensions?.find((e) => e.extnID === OID.extKeyUsage);
     const purposes = (eku?.parsedValue as pkijs.ExtKeyUsage | undefined)?.keyPurposes ?? [];
     if (!eku) p.push("rule 5: signer certificate has no extended key usage");
     else {
@@ -310,12 +473,13 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
     }
   }
 
-  // Rule 6: the chain reaches an anchor pinned for this authority; every certificate on it is valid at genTime.
+  // Rule 6: the chain reaches an anchor pinned for this authority, through CA certificates allowed to issue it
+  // (and the TSA issuing CA, where one is pinned); every certificate on it is valid at genTime.
   if (!authority) p.push(`rule 6: authority "${ev.tsa}" is not in the trust bundle${bundle.version ? ` ${bundle.version}` : ""} (a verifier who trusts it can pass --tsa-trust <file>)`);
-  else if (rawSigner) {
+  else if (signer) {
     const anchors = authority.anchors.map((a) => new X509Certificate(a.pem));
-    const pool = [...raws.map((r) => new X509Certificate(Buffer.from(r))), ...authority.intermediates.map((c) => new X509Certificate(c.pem))];
-    const path: X509Certificate[] = [new X509Certificate(Buffer.from(rawSigner))];
+    const pool = [...certs.flatMap((c) => (c.cert ? [new X509Certificate(Buffer.from(c.der))] : [])), ...authority.intermediates.map((c) => new X509Certificate(c.pem))];
+    const path: X509Certificate[] = [new X509Certificate(Buffer.from(signer.der))];
     let reached: X509Certificate | null = null;
     for (let depth = 0; depth < 8 && !reached; depth++) {
       const cur = path[path.length - 1]!;
@@ -343,6 +507,20 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
         if (facts.genTimeMs < t.notBefore || facts.genTimeMs > t.notAfter) p.push(`rule 6: ${subjectOf(x)} is not valid at genTime ${isoMs(facts.genTimeMs)} (valid ${isoMs(t.notBefore)}..${isoMs(t.notAfter)})`);
         if (x !== reached && SHA1_SIGNATURES.has(c.signatureAlgorithm.algorithmId)) p.push(`rule 6: ${subjectOf(x)} is signed with SHA-1`);
       }
+      p.push(...pathProblems(path, ev.tsa));
+      const issuing = authority.issuingCAs ?? [];
+      const issuer = path[1];
+      if (issuing.length && !(issuer && issuing.some((i) => i.sha256 === sha256Of(issuer))))
+        p.push(`rule 6: the signer was issued by ${issuer ? subjectOf(issuer) : "nothing"}, not by a TSA issuing CA pinned for ${ev.tsa} (${issuing.map((i) => i.subject.replace(/.*CN=/, "")).join(", ")})`);
+      const sha = sha256Of(reached);
+      let selfSigned = false;
+      try {
+        selfSigned = reached.checkIssued(reached) && reached.verify(reached.publicKey);
+      } catch {
+        selfSigned = false;
+      }
+      const pinnedAs = authority.anchors.find((a) => a.sha256 === sha);
+      out.anchor = { subject: subjectOf(reached), sha256: sha, kind: selfSigned ? "root" : "intermediate", independent: pinnedAs?.independent ?? null, issuingCA: issuing.length && issuer ? subjectOf(issuer) : null };
     }
   }
   out.genuine = p.length === 0;
@@ -357,7 +535,7 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
   return out;
 }
 
-/** Time evidence from a Rekor v1 entry whose SET verified: one more bound, from operator Sigstore. */
+/** Time evidence from a Rekor v1 entry whose SET verified under a trusted log key: one more bound, from operator Sigstore. */
 export interface LogTimeEvidence {
   operator: string;
   integratedTime: number;
@@ -376,13 +554,17 @@ export interface TimeEvidenceSummary {
   checks: TokenCheck[];
   /** Accepted evidence, one bound per operator, ascending. */
   operators: OperatorBound[];
+  /** Accepted tokens from registered authorities: the ones that count (their anchors are printed, NFR4). */
+  counted: TokenCheck[];
+  /** Tokens from authorities the registration does not name: never counted, never a FAIL (review finding 5). */
+  ignored: TokenCheck[];
   /** Configured authorities whose token was accepted, in configured order. */
   acceptedAuthorities: string[];
   logCounted: boolean;
   proven: boolean;
   /** U_k: the k-th smallest bound across distinct operators (ms), when proven. */
   ukMs: number | null;
-  /** Tokens failing any of rules 1–7 (a verify FAIL). */
+  /** Tokens from registered authorities failing any of rules 1–7 (a verify FAIL). */
   failed: TokenCheck[];
   logProblem: string | null;
 }
@@ -397,16 +579,21 @@ export interface AssessInput {
   log?: LogTimeEvidence | null;
 }
 
-/** Rule-checks every token and counts accepted evidence by operator (k-of-n). */
+/**
+ * Rule-checks every token and counts accepted evidence by operator (k-of-n). Only tokens from the
+ * authorities the registration names (`timestamping.authorities`) count toward k; the others are ignored.
+ */
 export async function assessTimestamps(input: AssessInput): Promise<TimeEvidenceSummary> {
   const checks: TokenCheck[] = [];
   for (const evidence of input.timestamps) checks.push(await checkToken({ evidence, data: input.data, digestHex: input.digestHex, signedTimeIso: input.signedTimeIso, toleranceSeconds: input.timestamping.toleranceSeconds, defaultAccuracySeconds: input.timestamping.defaultAccuracySeconds, bundle: input.bundle }));
+  const registered = (c: TokenCheck) => input.timestamping.authorities.includes(c.tsa);
+  const counted = checks.filter((c) => registered(c) && c.accepted && c.operator !== null && c.upperBoundMs !== null);
   const byOperator = new Map<string, OperatorBound>();
   const add = (operator: string, upperBoundMs: number, via: string) => {
     const cur = byOperator.get(operator);
     if (!cur || upperBoundMs < cur.upperBoundMs) byOperator.set(operator, { operator, upperBoundMs, via });
   };
-  for (const c of checks) if (c.accepted && c.operator && c.upperBoundMs !== null) add(c.operator, c.upperBoundMs, c.tsa);
+  for (const c of counted) add(c.operator!, c.upperBoundMs!, c.tsa);
   let logCounted = false;
   let logProblem: string | null = null;
   if (input.log) {
@@ -426,11 +613,13 @@ export async function assessTimestamps(input: AssessInput): Promise<TimeEvidence
     k,
     checks,
     operators,
-    acceptedAuthorities: configured.filter((id) => checks.some((c) => c.tsa === id && c.accepted)),
+    counted,
+    ignored: checks.filter((c) => !registered(c)),
+    acceptedAuthorities: configured.filter((id) => counted.some((c) => c.tsa === id)),
     logCounted,
     proven,
     ukMs: proven ? operators[k - 1]!.upperBoundMs : null,
-    failed: checks.filter((c) => !c.accepted),
+    failed: checks.filter((c) => registered(c) && !c.accepted),
     logProblem,
   };
 }
@@ -440,12 +629,32 @@ export function notTamperProof(s: TimeEvidenceSummary): string {
   return s.configured.length ? `TIMESTAMP NOT TAMPER-PROOF (${s.operators.length} of ${s.k})` : "TIMESTAMP NOT TAMPER-PROOF";
 }
 
-/** e.g. `timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN`. */
+/** e.g. `timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN`, plus `· ignored (not registered): freetsa` when a token's authority is not registered. */
 export function timestampsLine(s: TimeEvidenceSummary): string {
-  if (!s.configured.length) return `timestamps: no authority configured${s.logCounted ? " (transparency log only)" : ""} · TIMESTAMP NOT TAMPER-PROOF`;
+  const ignored = s.ignored.length ? ` · ignored (not registered): ${[...new Set(s.ignored.map((c) => c.tsa))].join(", ")}` : "";
+  if (!s.configured.length) return `timestamps: no authority configured${s.logCounted ? " (transparency log only)" : ""} · TIMESTAMP NOT TAMPER-PROOF${ignored}`;
   const ids = s.acceptedAuthorities.length ? ` (${s.acceptedAuthorities.join(", ")})` : "";
   const log = s.logCounted ? " + transparency log" : "";
-  return `timestamps: ${s.acceptedAuthorities.length} of ${s.configured.length} TSAs${ids}${log} · k = ${s.k} · ${s.proven ? "PROVEN" : notTamperProof(s)}`;
+  return `timestamps: ${s.acceptedAuthorities.length} of ${s.configured.length} TSAs${ids}${log} · k = ${s.k} · ${s.proven ? "PROVEN" : notTamperProof(s)}${ignored}`;
+}
+
+/**
+ * NFR4: how far a counted authority's anchor can be trusted, e.g.
+ * `microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)`.
+ */
+export function anchorLine(c: TokenCheck): string {
+  const a = c.anchor;
+  if (!a) return `${c.tsa}: no anchor reached`;
+  const how = a.independent === true ? "anchor confirmed independently" : a.independent === false ? "anchor pinned on first use" : "anchor from a trust file";
+  return `${c.tsa}: ${how} (${a.kind} ${a.subject}, independent: ${a.independent ?? "not stated"})${a.issuingCA ? ` · TSA issuing CA pinned (${a.issuingCA})` : ""}`;
+}
+
+/** One `anchorLine` per counted authority, in registered order. */
+export function anchorLines(s: TimeEvidenceSummary): string[] {
+  return s.configured.flatMap((id) => {
+    const c = s.counted.find((x) => x.tsa === id);
+    return c ? [anchorLine(c)] : [];
+  });
 }
 
 /** Median genTime of tokens that are genuine (rules 1–6), for the clock-skew refusal (FR1.8). */

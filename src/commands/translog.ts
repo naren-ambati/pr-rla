@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { SignedRecord } from "../core/records.js";
 import { RekorClient, buildHashedRekord, verifyLoggedEntry } from "../translog/rekor.js";
 import { REKOR_V2_WARNING, RekorV2Client, buildHashedRekordV002, verifyRekorV2Entry } from "../translog/rekor-v2.js";
+import { trustedLogKey } from "../translog/keys.js";
 import type { PrRlaConfig } from "../config.js";
 import { CommandError, auditContextFor, brokerFor, type CommandContext } from "./context.js";
 
@@ -50,10 +51,11 @@ export async function submitSigned<T>(ctx: CommandContext, signed: SignedRecord<
   return { ...signed, log: entry };
 }
 
-/** The log key verify trusts: --log-key, transparency_log.public_key_file, or (online) the log's own /publicKey. */
-export async function logPublicKey(ctx: CommandContext, config: PrRlaConfig, logUrl: string, flag: string | undefined, offline: boolean): Promise<string | null> {
-  const file = flag ? resolve(ctx.cwd, flag) : config.transparencyLog.publicKeyFile ? resolve(config.dir, config.transparencyLog.publicKeyFile) : null;
-  if (file) return readFileSync(file, "utf8");
-  if (offline) return null;
-  return new RekorClient(logUrl, auditContextFor(ctx).componentFetch("pr-rla/rekor", "rekor")).publicKey();
+/**
+ * The log key verify trusts (review finding 3): the verifier's --log-key, else a key pinned in the package
+ * (src/translog/keys.ts). Never the audit repo's transparency_log.public_key_file, a file in the audit repo,
+ * or the /publicKey of the URL a record names. `_config` and `_offline` are kept for the callers' signature.
+ */
+export async function logPublicKey(ctx: CommandContext, _config: PrRlaConfig, logUrl: string, flag: string | undefined, _offline: boolean): Promise<string | null> {
+  return trustedLogKey(logUrl, flag ? readFileSync(resolve(ctx.cwd, flag), "utf8") : null);
 }

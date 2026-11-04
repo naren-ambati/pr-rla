@@ -31,6 +31,12 @@ export interface BundleAuthority {
   anchors: BundleCert[];
   /** CA certificates between the signer and an anchor, current and historical. */
   intermediates: BundleCert[];
+  /**
+   * The operator's TSA issuing CAs, current and historical. When the anchor is a general-purpose root
+   * (DigiCert Trusted Root G4, GlobalSign Root R6, SwissSign's and GitHub's roots), only a signer issued
+   * directly by one of these counts as this operator: a timestamping leaf under any other CA of that root does not.
+   */
+  issuingCAs?: { subject: string; sha256: string; source: string }[];
 }
 
 export interface TrustBundle {
@@ -51,7 +57,7 @@ export const DEFAULT_ACCURACY_SECONDS = 60;
 
 /** Extra anchors (and authorities) from a file, as `verify --tsa-trust` takes them: the same shape, any subset. */
 export interface TrustBundleExtra {
-  authorities: Record<string, Partial<BundleAuthority> & { anchors?: BundleCert[]; intermediates?: BundleCert[] }>;
+  authorities: Record<string, Partial<BundleAuthority> & { anchors?: BundleCert[]; intermediates?: BundleCert[]; issuingCAs?: BundleAuthority["issuingCAs"] }>;
 }
 
 export function readTrustExtra(path: string): TrustBundleExtra {
@@ -70,11 +76,11 @@ export function mergeTrust(base: TrustBundle, extras: readonly TrustBundleExtra[
   for (const extra of extras) {
     for (const [id, a] of Object.entries(extra.authorities)) {
       const cur = out.authorities[id];
-      const union = (x: BundleCert[] = [], y: BundleCert[] = []) => [...x, ...y.filter((c) => !x.some((d) => d.sha256 === c.sha256))];
-      if (cur) out.authorities[id] = { ...cur, anchors: union(cur.anchors, a.anchors), intermediates: union(cur.intermediates, a.intermediates) };
+      const union = <C extends { sha256: string }>(x: C[] = [], y: C[] = []) => [...x, ...y.filter((c) => !x.some((d) => d.sha256 === c.sha256))];
+      if (cur) out.authorities[id] = { ...cur, anchors: union(cur.anchors, a.anchors), intermediates: union(cur.intermediates, a.intermediates), ...(cur.issuingCAs || a.issuingCAs ? { issuingCAs: union(cur.issuingCAs, a.issuingCAs) } : {}) };
       else {
         if (!a.operator || !a.url) throw new Error(`trust file: new authority "${id}" needs an operator and a url`);
-        out.authorities[id] = { operator: a.operator, url: a.url, defaultEnabled: false, notes: a.notes ?? "added by a trust file", anchors: a.anchors ?? [], intermediates: a.intermediates ?? [] };
+        out.authorities[id] = { operator: a.operator, url: a.url, defaultEnabled: false, notes: a.notes ?? "added by a trust file", anchors: a.anchors ?? [], intermediates: a.intermediates ?? [], ...(a.issuingCAs ? { issuingCAs: a.issuingCAs } : {}) };
       }
     }
   }

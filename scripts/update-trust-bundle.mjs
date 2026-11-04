@@ -17,6 +17,10 @@
 //   tofu    no local source exists: the anchor is taken from the authority's own response
 //           (trust on first use) and marked `independent: false` for review before a release.
 //
+// `issuing` names the operator's TSA issuing CA(s), pinned as `issuingCAs` where the anchor is a
+// general-purpose root (DigiCert G4, GlobalSign R6, SwissSign's and GitHub's roots): only a signer
+// issued directly by one of them counts as that operator. They come from the same token chain or TUF file.
+//
 // Anchors and intermediates are only ever added: with --write, certificates already in the bundle are kept.
 import { X509Certificate, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -45,6 +49,7 @@ const ANCHOR_PLAN = {
     url: "http://timestamp.digicert.com",
     defaultEnabled: true,
     anchor: { system: "DigiCert Trusted Root G4" },
+    issuing: ["DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1"],
     notes: "RSA-4096, SHA-256. HTTP is acceptable: only a hash is sent and the response is verified by signature. States no accuracy (60 s default). ESSCertID v1 and v2. Rotates signer certificates at least every 15 months; intermediates are kept as historical.",
   },
   globalsign: {
@@ -52,6 +57,7 @@ const ANCHOR_PLAN = {
     url: "http://timestamp.globalsign.com/tsa/r45standard",
     defaultEnabled: true,
     anchor: { system: "GlobalSign Root CA - R6" },
+    issuing: ["GlobalSign Offline R45 Timestamping CA 2025"],
     notes: "RSA-3072 key, SHA-384 signatures; accuracy 1 s. Chain: R45 timestamping CA, Timestamping Root R45 cross-signed by Root R6.",
   },
   microsoft: {
@@ -66,6 +72,7 @@ const ANCHOR_PLAN = {
     url: "https://timestamp.githubapp.com/api/v1/timestamp",
     defaultEnabled: false,
     anchor: { tuf: "timestamp.githubapp.com" },
+    issuing: ["TSA intermediate"],
     notes: "ECDSA P-384, SHA-384; accuracy 1 s. Tokens carry only the leaf; the chain is pinned from GitHub's TUF trusted_root.json. Off by default.",
   },
   swisssign: {
@@ -73,6 +80,7 @@ const ANCHOR_PLAN = {
     url: "https://tsa.swisssign.net",
     defaultEnabled: false,
     anchor: { tofu: "SwissSign Signature Services Root 2020 - 2" },
+    issuing: ["SwissSign Qualified TSA ICA 2021 - 1"],
     notes: "RSA-3072, SHA-256; accuracy 500 ms. Rejects SHA-384 requests (SHA-256 is used). Root not in a local store: pinned on first use. Off by default.",
   },
   sectigo: {
@@ -190,6 +198,12 @@ for (const [id, plan] of Object.entries(ANCHOR_PLAN)) {
     return entry(a.x, [...new Set(sources)].join("; "), a.independent);
   });
   const freshInter = dedupe(intermediates).map((i) => entry(i.x, i.source));
+  const freshIssuing = (plan.issuing ?? []).map((name) => {
+    const found = pool.find(({ x }) => x.ca && cn(x) === name);
+    if (!found) throw new Error(`${id}: the token chain and TUF files carry no CA certificate named ${name}`);
+    const { subject, sha256: sha } = entry(found.x, found.source);
+    return { subject, sha256: sha, source: found.source };
+  });
   bundle.authorities[id] = {
     operator: plan.operator,
     url: plan.url,
@@ -197,12 +211,14 @@ for (const [id, plan] of Object.entries(ANCHOR_PLAN)) {
     notes: plan.notes,
     anchors: write ? merge(freshAnchors, prev?.anchors) : freshAnchors,
     intermediates: write ? merge(freshInter, prev?.intermediates) : freshInter,
+    ...(freshIssuing.length || prev?.issuingCAs ? { issuingCAs: write ? merge(freshIssuing, prev?.issuingCAs) : freshIssuing } : {}),
   };
   const before = new Set([...(prev?.anchors ?? []), ...(prev?.intermediates ?? [])].map((c) => c.sha256));
   const after = [...bundle.authorities[id].anchors, ...bundle.authorities[id].intermediates];
   const added = after.filter((c) => !before.has(c.sha256));
   console.log(`${id}: ${bundle.authorities[id].anchors.length} anchor(s), ${bundle.authorities[id].intermediates.length} intermediate(s)${added.length ? `; new: ${added.map((c) => `${c.subject.replace(/.*CN=/, "")} ${c.sha256.slice(0, 16)}…`).join(", ")}` : "; no change"}`);
   for (const a of bundle.authorities[id].anchors) console.log(`   anchor ${a.subject.replace(/.*CN=/, "")} ${a.sha256.slice(0, 16)}… ${a.independent ? "independent" : "TOFU"} · ${a.source}`);
+  for (const i of bundle.authorities[id].issuingCAs ?? []) console.log(`   TSA issuing CA ${i.subject.replace(/.*CN=/, "")} ${i.sha256.slice(0, 16)}… · ${i.source}`);
 }
 if (write) {
   writeFileSync(BUNDLE, `${JSON.stringify(bundle, null, 1)}\n`);

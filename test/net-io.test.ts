@@ -20,8 +20,12 @@ describe("the network-deny harness (NFR11)", () => {
 
   it("no source file names a default Rekor log", () => {
     const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
-    const hits = walk(join(__dirname, "..", "src")).filter((f) => /rekor\.sigstore\.dev/.test(readFileSync(f, "utf8")));
+    // src/translog/keys.ts pins Sigstore's log keys for verification only (review finding 3); nothing submits there by default.
+    const keys = join(__dirname, "..", "src", "translog", "keys.ts");
+    const hits = walk(join(__dirname, "..", "src")).filter((f) => f !== keys && /rekor\.sigstore\.dev/.test(readFileSync(f, "utf8")));
     expect(hits).toEqual([]);
+    const importers = walk(join(__dirname, "..", "src")).filter((f) => /from "(\.\.?\/)+(translog\/)?keys\.js"/.test(readFileSync(f, "utf8"))).map((f) => f.split("/src/")[1]);
+    expect(importers.sort()).toEqual(["commands/translog.ts", "core/verify.ts"]); // read side only: logPublicKey and verify's key-source note
   });
 });
 

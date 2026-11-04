@@ -1430,3 +1430,144 @@ npm --prefix examples/ledgers/jira test    → # pass 1 · # fail 0
 ```
 
 Each of the three runs printed the same lines. `node scripts/demo-ledgers.mjs`, `demo-sdk-carry-overs.mjs`, `demo-plugin-host.mjs` and `demo-broker.mjs` exit 0; the ledger demo's second part now shows the recorded relabel VERIFIED with check 7 WARN (the foreignIssues flag and the missing checkpoint) and the deleted issue FAILED, as before. `npm test` makes no network call. Not verified: see "Deviations and declined items" (the GitHub GraphQL queries and the Jira `editmeta` route were not run live).
+
+## Trusted-time fix round A (2026-11-04)
+
+Branch `fix/trusted-time`, off master `4b72ecb`. It fixes findings 1, 3, 4, 5 and 8 of the independent review of master `4b72ecb` (trusted time, seed, sampling, SPRT, verify checks 1–4 and 6), plus the related test gaps. Findings 2 (draw derivation), 6 (verify's verdict and exit), 7 (the population minimum) and 9 (small verify items) are the next round; `src/core/seed.ts`, the draw derivation and verify's verdict and exit logic are untouched.
+
+### Findings fixed
+
+| # | Commit | What was wrong | What changed | Regression tests |
+|---|---|---|---|---|
+| 1 (critical) | `0f7049c` | pkijs chose the signature certificate by the `sid` (a SubjectKeyIdentifier could name an attacker's twin certificate) while ESSCertID and the chain were judged on the first certificate with the signer's issuer and serial (the real one, copied from any public token). Anyone could forge a token from any of the eight authorities | pr-rla resolves the signer itself (RFC 5652 §5.3, either `sid` form) and refuses a token when no certificate or more than one matches the `sid`, when two certificates carry the signer's issuer and serial, or when pkijs checked the signature with another certificate or a key that is not byte-equal. ESSCertID, the EKU check and the chain use that one certificate | `timestamp-signer-identity.test.ts` (45), `timestamp-openssl-differential.test.ts` (5) |
+| 4 | `21b5f40` | `effectiveTime` asked whether the unsigned envelope had `timestamps`: dropping it from a v2 record handed the time, and R, to the log's integratedTime | keyed on `record.schema`: a v2 registration or commitment always uses its signed time. A v2 envelope without `timestamps` FAILs check 1 (registration) or check 2 (commitment) | `timestamp-verify.test.ts › FR1.4` (rewritten so it can fail), `timestamps-e2e.test.ts › review finding 4` (2) |
+| 5 | `abe689a` | any accepted token counted toward k, also from an authority the registration does not name | only `timestamping.authorities` count; others print `ignored (not registered)` and are never a FAIL | `timestamp-verify.test.ts › review finding 5`, `timestamps-e2e.test.ts › review finding 5` |
+| 3 | `cdeba43` | verify took the log key from the audit repo's `transparency_log.public_key_file`, or fetched it from the URL in the unsigned envelope, and counted the entry as operator Sigstore: a self-run log was a second operator, and a v1 record's whole time evidence | log keys come only from `src/translog/keys.ts` (Sigstore's production Rekor v1 and v2 logs) or `verify --log-key`; an entry under any other key is unverified, gives no time evidence and is no operator. `status` uses the same keys. The e2e scenario keeps the mock log's key outside the audit repo; the v1 fixture's verifier copy is `test/fixtures/log-keys/` | `translog-keys.test.ts` (7), `v1-compat.test.ts` (the 7/7 test now passes `--log-key`; a new test shows `time unproven` without it; status), `e2e.test.ts`, `rekor-v2.test.ts`, `net-io.test.ts` |
+| 8 | `07ce083` | DigiCert and GlobalSign pinned at general-purpose roots; intermediates' basicConstraints, path length, keyUsage and EKU unchecked; nothing printed Microsoft's TOFU anchor (NFR4) | intermediates must be CAs (critical `cA`, `keyCertSign`, path length honoured, an EKU that allows timestamping); the anchor's own path length is honoured. The bundle pins the TSA issuing CA under each general-purpose root (DigiCert, GlobalSign, SwissSign, GitHub) and only a signer issued directly by it counts. `register`/`freeze`, `verify` and `status` print each counted authority's anchor kind and independence | `timestamp-trust-bundle.test.ts` (21) |
+
+The anchor lines, as `register` prints them for the four defaults (replayed from the 2026-11-03 recording):
+
+```
+  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN
+    sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true)
+    digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1)
+    globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025)
+    microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)
+```
+
+`verify` prints the same lines in the details of checks 1 and 2 (`registration microsoft: anchor pinned on first use …`), and `status` prints one `  timestamp anchors: …` line under its status line.
+
+### Before and after
+
+- **This round's tests on the old code.** Copied into a scratch clone at `4b72ecb`, nine test files: 65 of the 170 tests in the eight that load fail, every in-scope regression among them (the passing ones are guards, such as "a consistent SubjectKeyIdentifier `sid` is accepted"). The ninth, `translog-keys.test.ts`, cannot load there (`src/translog/keys.ts` is new); its five behavioural tests, run without the key-module import, all fail on `4b72ecb` (`logPublicKey` returned the audit repo's key; the self-run log made k = 2 PROVEN; status said tamper-proof; an entry claiming Sigstore's URL PASSed under the audit repo's key).
+- **The review's own reproductions** (`rvtime-forge`, `-e2e`, `-log`, `-dropts`, `-unlisted`: 22 assertions, each asserting the vulnerable behaviour): 22 of 22 pass on `4b72ecb`, 0 of 22 on this branch. The forged audit now ends `FAILED: check 1 (registration), check 2 (manifest before seed)`, exit 1, instead of `CERTIFIED (risk 5%) · PROSPECTIVE … VERIFIED`, exit 0.
+- **All eight recorded tokens still verify**, with the same chains, and `openssl ts -verify` still accepts all eight.
+
+### The negative differential against `openssl ts -verify`
+
+OpenSSL 3.6.4, local, offline. The corpus is ten signer-identity mutations of each authority's recorded token (80 tokens):
+
+- four attacker-signed forgeries with a twin of the real signer certificate: the review's attack (SubjectKeyIdentifier `sid`); a twin named by issuer and serial placed first, with ESSCertID naming the real certificate or the twin; and the twin placed last;
+- six edits of the real token's unsigned certificate set: a twin inserted before the signer, a twin appended after it, the signer carried twice, removed, replaced by another authority's signer, and replaced by its twin.
+
+OpenSSL rejects 64: the SKI forgery as undecodable (`PKCS7_ISSUER_AND_SERIAL`), the others on the signature, the certificate verify or `signer certificate not found`. It accepts 16: the appended twin and the duplicate signer. **pr-rla rejects all 80**, so every token OpenSSL rejects, pr-rla rejects too. The one recorded divergence: OpenSSL cannot decode a SubjectKeyIdentifier `sid` at all, and pr-rla accepts a consistent one (RFC 5652 allows it). None of the eight authorities uses that form; all identify the signer by issuer and serial.
+
+### NFR7: what this does to v1 audits
+
+A v1 record's only time evidence is its Rekor v1 entry. It is evidence only if the entry verifies under a key the verifier trusts: one pinned in the package (Sigstore's production Rekor) or passed with `--log-key`.
+
+- **No v1 audit has ever been logged to a real log** (BUILD-NOTES, phase 1), so every existing v1 audit was logged to a mock or self-run log. Each one now:
+  - verifies 7/7 PASS only when the verifier passes that log's key with `--log-key`;
+  - without it, verifies with checks 1 and 2 WARN, `registration after window close → RETROSPECTIVE (a demonstration) (time unproven: no transparency-log entry verified under a trusted key)`, `manifest logged (unverified) …` and `TIMESTAMP NOT TAMPER-PROOF`;
+  - shows `· TIMESTAMP NOT TAMPER-PROOF` in `status`, which takes no `--log-key`.
+- R is still derived from the logged integratedTime, as the v1 contract says, so every verifier computes the same R; the output says it rests on an unproven time.
+- Verify still prints VERIFIED and exits 0 in that case. Whether an unproven record may certify is finding 6, the next round.
+- The v1 fixture keeps its `rekor.pub` and `public_key_file` (a phase-2 audit repo looked like that, and verify must ignore them). `v1-compat.test.ts` verifies it 7/7 with the verifier's copy in `test/fixtures/log-keys/`, and shows the unproven output without it. NFR7 ("v1 records verify 7/7 after this round") therefore holds with the log's key passed as `--log-key`.
+
+### Still trust on first use (for the founder's release checklist)
+
+| Authority | Default | Anchor | Why it is TOFU |
+|---|---|---|---|
+| Microsoft | **on** | the intermediate Microsoft Public RSA Timestamping CA 2020 | its tokens omit the root (Microsoft Identity Verification Root Certificate Authority 2020), and no local store has it |
+| SwissSign | off | SwissSign Signature Services Root 2020 - 2 | not in a local root store |
+| FreeTSA | off | its root (www.freetsa.org) | not in a local root store |
+
+Each must be confirmed from a second source before release (`scripts/update-trust-bundle.mjs --anchors <file>#<label>`). Until then every output that counts one prints `anchor pinned on first use … independent: false`.
+
+### Settled or recorded, with dates
+
+- **The four pinned TSA issuing CAs** (2026-11-04, offline). They came from the recorded responses of 2026-11-03 (DigiCert, GlobalSign, SwissSign) and from gh's TUF cache of tuf-repo.github.com, fetched 2026-10-20 (GitHub), via `update-trust-bundle.mjs --recorded … --trusted-root … --write`. The bundle diff is exactly those four `issuingCAs` entries, each already a bundled intermediate. They constrain which certificates count; they add no trust, because the chain must still reach the pinned anchor.
+- **Why only four.** Sigstore's, Microsoft's, Sectigo's and FreeTSA's anchors are already specific to timestamping. GitHub's Internal Services Root also issues Fulcio's code-signing CAs (its TUF `certificateAuthorities`), so its TSA intermediate is pinned.
+- **The pinned Rekor keys** (2026-11-04). Read from local TUF copies: npm 11.19.1's `@sigstore/tuf` 4.0.2 `seeds.json` (both logs), npm 10.9.8's `@sigstore/tuf` 3.1.1 (the v1 log), and gh's TUF cache of tuf-repo-cdn.sigstore.dev, fetched 2026-10-20 (both). The three copies agree. This round ran no TUF client; those files were verified by npm's and gh's TUF clients when they were fetched.
+  - `https://rekor.sigstore.dev` (v1, ECDSA P-256): logID `c0d23d6a…` = SHA-256 of the DER key.
+  - `https://log2025-1.rekor.sigstore.dev` (v2, Ed25519): TUF's logId `cf119915…` = SHA-256(`log2025-1.rekor.sigstore.dev` ‖ `\n` ‖ 0x01 ‖ key). That matches pr-rla's C2SP checkpoint key-id derivation (bolt 1's deviation 6 called it unverified), confirmed offline; the 4-byte checkpoint key id is `cf119915`.
+- **No live request in this round:** no timestamp authority, no Rekor host, no drand. `npm ci` read the npm registry.
+- **Node's `X509Certificate.checkIssued`** (OpenSSL's `X509_check_issued`) already refuses an issuer whose keyUsage lacks `keyCertSign`, so that chain never forms. It accepts an issuer with no keyUsage at all; pr-rla's own check refuses that one.
+
+### Deviations from the brief, and decisions
+
+1. **SubjectKeyIdentifier `sid`s stay accepted when consistent** (the brief: "either form"); OpenSSL refuses them all. The strictest reading kept: exactly one certificate may match (by its SKI extension or by the SHA-1 of its key, the way pkijs resolves it), and its issuer and serial must be unique in the token.
+2. **An identical duplicate of the signer certificate is refused**, as "more than one certificate carries the signer's issuer and serial". OpenSSL accepts it.
+3. **A certificate-set entry that is not an X.509 certificate** fails the token (rule 4). Before, it could make `checkToken` throw.
+4. **An unregistered authority's token is ignored even when it breaks rules 1–7**: it is not evidence, so it is not a FAIL. Tamper fixture 4 (an expired signer) used such a token; it now mints the expired signer under test-b's own root (`makeTestAuthority({ under })`), so it still FAILs on rule 6.
+5. **A verified log entry still counts as operator Sigstore**, also under `--log-key`: a log adds at most one operator.
+6. **`transparency_log.public_key_file` is still read by `--submit --rekor-api v2`**, to check the log's response at submission (the submitter's own check, unchanged; the config template comment says so). Verify and status never read it. `--submit` on v1 still checks its response with that log's `/publicKey`; neither path feeds evidence.
+7. **`logPublicKey` keeps its signature** (`config` and `offline` are now unused), so U5's moved copy takes the same one-line body.
+8. **`status` gained no `--log-key`**, to keep the CLI edits to one help string. Its v1 tamper-proof check now also requires the commitment's log entry to verify, as v2 already did.
+9. **Issuing CAs are pinned by certificate SHA-256**, and the constraint applies to the signer's direct issuer. A rotation of an operator's issuing CA needs a bundle update (the NFR21 release diff); issuing CAs are only added, so old tokens keep verifying.
+10. **Anchors are trust inputs** (RFC 5280 §6.1): only their path length is enforced, not keyUsage or criticality. FreeTSA's root, for one, has non-critical basicConstraints.
+11. **A v2 envelope without `timestamps` is a FAIL in verify**, not a thrown error, so verify can report it.
+12. **The differential test's `beforeAll`** forges or rebuilds 80 tokens and runs OpenSSL on each, so it has a 180 s hook timeout; vitest's 10 s default was too tight under a loaded parallel run.
+
+### Tests
+
+467 passed, 1 skipped (468) → **550 passed, 1 skipped (551)**: 83 new. The new files are `timestamp-signer-identity` (45), `timestamp-trust-bundle` (21), `translog-keys` (7) and `timestamp-openssl-differential` (5). Existing files gained tests: `timestamps-e2e` +3, `timestamp-verify` +1 (FR1.4 was rewritten in place), `v1-compat` +1. The skipped test is U2b's RK-02 Node 25 test, as before. The new helper `test/helpers/forge-tsa.ts` makes synthetic forgeries from the recorded certificates. `test-tsa.ts` gained `sidSki`, `extraCerts`, `under` and `rootKey`.
+
+### Verified (command → output)
+
+From fresh `git clone`s of `fix/trusted-time` at `07ce083` (the last code commit; only docs change after it), 2026-11-04T04:32Z to 04:39Z, Node 22.23.2, OpenSSL 3.6.4:
+
+```
+npm ci                                     → found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 46 passed (46) · Tests 550 passed | 1 skipped (551)
+npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+- **Every run was a fresh clone running the whole command**, 16 at this branch (4 at `07ce083`, 12 at the docs commit) and 8 at `4b72ecb` for comparison. The last three runs at the docs commit, and runs 2–4 at `07ce083`, were green in a row.
+- **Two load-dependent tests from other units fail at times, at `4b72ecb` as well.** Other agents' suites ran on this machine throughout (load averages 18–98 on 10 cores; a quiet `npm test` takes 24 s, these took 45–72 s).
+  - U2b's `plugin-host.test.ts › a slow call that keeps sending heartbeats is not stopped` (`plugin hostile sent no heartbeat for 1 s and was stopped`).
+  - Wave 1's `wave1-integration.test.ts › the Jira example passes the ledger conformance kit with every instance in its own plugin host` (the 60 s test timeout).
+  - Failing runs: 5 of 16 on this branch (heartbeat 4, Jira host 2) and 3 of 8 at `4b72ecb` (heartbeat 3, Jira host 1). The failures are the same, at a similar rate, without this round's code.
+- **The heartbeat test's cause.** The host's watchdog is armed from spawn, so the test's 500 ms limit also covers the child's start-up (Node with `--permission`, loading the TypeScript child). A cold or loaded start exceeds it.
+  - In this worktree under `~/Documents`, that test run alone fails 3 of 3. In `/private/tmp` clones, at `4b72ecb` and this branch alike, it passes 3 of 3 alone.
+  - It is probably the unexplained first-run failure the wave-1 integration recorded.
+- **Both are left alone here**, since `fix/ledgers-selector` touches the plugin host files. A start-up allowance in the host's watchdog, and a longer timeout for the 67-child Jira test, would settle them. This round's four new test files add about 16 s of CPU to the suite (U2b's `plugin-host.test.ts` alone takes 8 s).
+- `npm test` makes no network call: OpenSSL runs locally, and every log, authority and beacon is a mock or a recording under the network-deny harness.
+
+### Unverified
+
+- The pinned Rekor keys against a live log (D3: no Rekor contact at all). The v2 key-id derivation is confirmed only against TUF's logId.
+- An issuing-CA rotation by DigiCert, GlobalSign, SwissSign or GitHub: a token under a new issuing CA fails until the bundle carries it.
+- The OpenSSL differential on Linux or another OpenSSL version. It is skipped where `openssl ts` is missing, and the divergence test expects OpenSSL 3.6's `PKCS7_ISSUER_AND_SERIAL` decode error.
+- The three TOFU anchors, against an independent source.
+- Whether any real authority issues SubjectKeyIdentifier-`sid` tokens: none of the eight does.
+
+### For the integration step
+
+- **U5 moved `logPublicKey` to `src/api/translog.ts`.** Its body must become `return trustedLogKey(logUrl, flag ? readFileSync(resolve(ctx.cwd, flag), "utf8") : null);`, or finding 3 reopens.
+  - U5's `src/api/timestamps.ts` needs `logBound` exported (status's v1 branch uses it) and the anchor lines in `reportTimestamps`.
+  - U5's status (`timeStanding`) needs the v1 log check and the `anchors` line.
+  - U5's `session.ts` still confines `transparency_log.public_key_file`, which is harmless: `--submit --rekor-api v2` reads it.
+- **`src/core/verify.ts`** (U8 and U9 edit it too). This round's hunks are in `checkLog` (three messages), `checkTimestamps` (the ignored and anchor lines), check 1 (the absent-`timestamps` FAIL and v1's `time unproven` summary) and check 2 (the absent-`timestamps` line and `logged (unverified)`).
+- **`src/core/records.ts`** (U8): `isSignedV2` and `effectiveTime` only.
+- **`src/cli.ts`**: the `--log-key` help string. **`src/config.ts`**: the template comment. Also README and `docs/security-model.md` (a new trusted-time section).
+- **Test helpers.**
+  - `audit-scenario.ts` no longer writes `rekor.pub` or `public_key_file` into the audit repo. A test that needs a mock-logged entry verified passes `logKey: s.logKeyFile`.
+  - `TestAuthority` has a new `rootKey` field, so a hand-built `TestAuthority` literal elsewhere needs it.
+  - A test elsewhere that relies on a token from an unregistered authority counting toward k, or on verify trusting an audit-repo log key, will now fail by design.

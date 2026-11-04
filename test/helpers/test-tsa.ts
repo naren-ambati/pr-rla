@@ -53,6 +53,8 @@ export interface TestAuthority {
   operator: string;
   alg: TestAlg;
   root: pkijs.Certificate;
+  /** The key that signs the root's certificates (the root's own, or for RSA-SHA1 a separate RSA key). */
+  rootKey: CryptoKey;
   signer: pkijs.Certificate;
   signerKey: CryptoKey;
   hash: string;
@@ -70,28 +72,38 @@ export async function makeTestAuthority(o: {
   signerValidFrom?: string;
   signerValidTo?: string;
   eku?: { purposes: string[]; critical: boolean } | null;
+  /** Issue this signer under another authority's existing root (same id and algorithm), e.g. a rotated or expired signer. */
+  under?: TestAuthority;
 }): Promise<TestAuthority> {
-  const alg = o.alg ?? "ECDSA-P256";
+  const alg = o.under?.alg ?? o.alg ?? "ECDSA-P256";
   const a = ALGS[alg];
   const usage: KeyUsage[] = ["sign", "verify"];
-  const rootKeys = (await subtle.generateKey(a.gen, true, usage)) as CryptoKeyPair;
   const signerKeys = (await subtle.generateKey(a.gen, true, usage)) as CryptoKeyPair;
   // Certificates are signed with SHA-256 whatever the token uses, so only the token's own signature varies.
   const certHash = alg === "RSA-SHA1" ? "SHA-256" : a.hash;
-  const certIssuerKey = alg === "RSA-SHA1" ? ((await subtle.generateKey(ALGS.RSA.gen, true, usage)) as CryptoKeyPair) : rootKeys;
-  const root = await makeCert({ subject: `${o.id} test root`, issuer: `${o.id} test root`, publicKey: certIssuerKey.publicKey, issuerKey: certIssuerKey.privateKey, notBefore: new Date(o.validFrom ?? "2020-01-01T00:00:00Z"), notAfter: new Date(o.validTo ?? "2040-01-01T00:00:00Z"), ca: true, hash: certHash });
+  let root: pkijs.Certificate;
+  let rootKey: CryptoKey;
+  if (o.under) {
+    root = o.under.root;
+    rootKey = o.under.rootKey;
+  } else {
+    const rootKeys = (await subtle.generateKey(a.gen, true, usage)) as CryptoKeyPair;
+    const certIssuerKey = alg === "RSA-SHA1" ? ((await subtle.generateKey(ALGS.RSA.gen, true, usage)) as CryptoKeyPair) : rootKeys;
+    root = await makeCert({ subject: `${o.id} test root`, issuer: `${o.id} test root`, publicKey: certIssuerKey.publicKey, issuerKey: certIssuerKey.privateKey, notBefore: new Date(o.validFrom ?? "2020-01-01T00:00:00Z"), notAfter: new Date(o.validTo ?? "2040-01-01T00:00:00Z"), ca: true, hash: certHash });
+    rootKey = certIssuerKey.privateKey;
+  }
   const signer = await makeCert({
     subject: `${o.id} test TSA`,
     issuer: `${o.id} test root`,
     publicKey: signerKeys.publicKey,
-    issuerKey: certIssuerKey.privateKey,
+    issuerKey: rootKey,
     notBefore: new Date(o.signerValidFrom ?? "2020-01-01T00:00:00Z"),
     notAfter: new Date(o.signerValidTo ?? "2040-01-01T00:00:00Z"),
     ca: false,
     eku: o.eku === undefined ? { purposes: ["1.3.6.1.5.5.7.3.8"], critical: true } : o.eku,
     hash: certHash,
   });
-  return { id: o.id, operator: o.operator ?? `Test operator ${o.id}`, alg, root, signer, signerKey: signerKeys.privateKey, hash: a.hash };
+  return { id: o.id, operator: o.operator ?? o.under?.operator ?? `Test operator ${o.id}`, alg, root, rootKey, signer, signerKey: signerKeys.privateKey, hash: a.hash };
 }
 
 export interface MintOptions {
@@ -107,6 +119,10 @@ export interface MintOptions {
   status?: number;
   /** Name this certificate in ESSCertIDv2 instead of the signer (a mismatch fixture). */
   essFor?: pkijs.Certificate;
+  /** Identify the signer by a SubjectKeyIdentifier (SHA-1 of its key) instead of issuer and serial (RFC 5652 §5.3 allows both). */
+  sidSki?: boolean;
+  /** More certificates to carry after the signer's. */
+  extraCerts?: pkijs.Certificate[];
 }
 
 /** A DER TimeStampResp over `digestHex`, signed by the authority's test signer. */
@@ -141,8 +157,16 @@ export async function mintResponse(a: TestAuthority, o: MintOptions): Promise<Ui
   const sd = new pkijs.SignedData({
     version: 3,
     encapContentInfo: new pkijs.EncapsulatedContentInfo({ eContentType: "1.2.840.113549.1.9.16.1.4", eContent: new asn1js.OctetString({ valueHex: ab(tstDer) }) }),
-    signerInfos: [new pkijs.SignerInfo({ version: 1, sid: new pkijs.IssuerAndSerialNumber({ issuer: a.signer.issuer, serialNumber: a.signer.serialNumber }), signedAttrs: new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: attrs }) })],
-    ...(o.includeCerts === false ? {} : { certificates: [a.signer] }),
+    signerInfos: [
+      new pkijs.SignerInfo({
+        version: o.sidSki ? 3 : 1,
+        sid: o.sidSki
+          ? new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 0 }, valueHex: ab(new Uint8Array(createHash("sha1").update(a.signer.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView).digest())) })
+          : new pkijs.IssuerAndSerialNumber({ issuer: a.signer.issuer, serialNumber: a.signer.serialNumber }),
+        signedAttrs: new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: attrs }),
+      }),
+    ],
+    ...(o.includeCerts === false ? {} : { certificates: [a.signer, ...(o.extraCerts ?? [])] }),
   });
   await sd.sign(a.signerKey, 0, a.hash);
   const token = new pkijs.ContentInfo({ contentType: "1.2.840.113549.1.7.2", content: sd.toSchema(true) });
