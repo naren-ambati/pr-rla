@@ -1589,6 +1589,20 @@ Two independent reviews of `bolt/u5-audit-api-mcp` at `cf3a779` (review 1: 2 hig
 
 The review's master and branch CLIs, with the branch rebuilt at `ba882bb` and again at `d03971f` (`scratchpad/u5fix/diff`), on copies of the recorded fixture: the seventeen single commands and the eight flows plus flow 3 under `PR_RLA_PLUGINS=bogus`. Identical: status (plain, `--offline`), verify (offline, online), freeze `--force` and plain, `simulate` with bad input, flows 2, 7 and 8. Every other difference is explained: the additive `--json` fields and the JSON error form (U5's §7, as review 1 found), times and hashes of commands run seconds apart, `status --json --checkpoint` now one document with the checkpoint's error inside (M5), `draw-context` (master has none), and **simulate's numbers**: each run now stops at its decision, so the random stream advances less and a seed gives other runs (500 runs at the tolerance: 2.60% on master, 4.40% now, both under the 5% risk; the spec-table tests at 20,000 runs still hold). The refactor's two differential regressions (flow 3 under a bad PR_RLA_PLUGINS, flow 8's plugin check) are now identical to master. Between the two rebuilds the branch's own output changed only in seed rounds and hashes (the clock moved), the fence id (random per call), and flow 4's draw-context losing its "could not be decided" note for files no root marks (`e78bcc6`); the set of cases identical to master is the same.
 
+### Verified (command → output)
+
+From a fresh clone of the branch at `6fcfe33` into the session's scratchpad, three runs in a row (runs 9 to 11, 2026-11-04 06:43 to 06:50 UTC, Node v22.23.2, load averages 1.9 to 13), each: `npm ci && npm run build && npm run typecheck && npm test` at the root, `npm ci && npm test` in `packages/pr-rla-mcp`, `examples/providers/gitea` and `examples/ledgers/jira`.
+
+| Step | Each of the three runs |
+|---|---|
+| root `npm ci` | 60 packages, 0 vulnerabilities |
+| root `npm run build`, `npm run typecheck` | clean |
+| root `npm test` | 624 passed, 1 skipped, of 625 (52 files), 24 to 42 s |
+| `packages/pr-rla-mcp` | 19 packages, 0 vulnerabilities; 57 of 57 pass |
+| `examples/providers/gitea`, `examples/ledgers/jira` | 0 vulnerabilities; 1 of 1 pass each |
+
+Tests: at `cf3a779` 547 at the root (546 passed, 1 skipped) and 42 in the package; now 625 (624 passed, the same 1 skipped) and 57. The earlier runs of this round, for the record: of runs 1 to 5 on `21c6dec`, runs 2 and 5 failed master's heartbeat test at load averages above 100 (`69f0af7`); of runs 6 to 8 on `9666d25`, run 6 timed out the Jira conformance test at a load average of 24 (`6fcfe33`); no other test failed in any run.
+
 ### Deviations from the design, and why
 
 1. **`ChangeDescription` gains `attributes` (base and head `.gitattributes` by directory) and `checksTruncated`; `describeChange` takes `{ signal }`.** Optional, within provider API version 1 (contracts.md §1 has `gitattributes` only). Without `attributes`, nothing is dropped.
