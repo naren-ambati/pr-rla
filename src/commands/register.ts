@@ -4,6 +4,7 @@ import { beaconParams, derivedRoundFor, type AuditMode, type RegistrationRecordV
 import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
 import { stoppingTable, effectiveCap } from "../core/sprt.js";
+import { providerTraits } from "../provider-traits.js";
 import { pluginIdentity } from "../registry.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
@@ -58,6 +59,10 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   ctx.out(`${opts.dryRun ? "[dry run] " : ""}registration ${signed.sha256.slice(0, 12)}… · ${config.repo} · window ${config.window.name} (${config.window.start}..${config.window.end})`);
   ctx.out(`  claim D: detected-defect rate <= ${pct(config.parameters.p0)} (p1 ${pct(config.parameters.p1)}, risk ${pct(config.parameters.alpha)}) · certify after ${table} draws with 0/1/2 fails · cap ${effectiveCap(config.parameters)}`);
   ctx.out(`  selector ${JSON.stringify(config.selector)}`);
+  if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {
+    const traits = await providerTraits(config.provider, config.dir);
+    if (!traits.reportsLandedVia) ctx.out(`  warning: provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`);
+  }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}`);
   ctx.out(`  seed round R = ${r.round} (drand quicknet), publishes ${unixToIso(r.publishesAt)}: 24 h after the ${r.base === "registration" ? "registration" : "window close"}`);

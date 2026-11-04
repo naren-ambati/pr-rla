@@ -5,7 +5,7 @@ import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvide
 import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { canonicalJson, sha256Hex } from "./canonical.js";
-import { buildPopulation } from "./population.js";
+import { buildPopulation, manifestAliases } from "./population.js";
 import {
   auditMode,
   derivedRoundFor,
@@ -23,6 +23,7 @@ import {
   type AuditMode,
   type DrawsFile,
   type LoggedEntry,
+  type PluginIdentity,
   type RegistrationRecordV2,
   type RekorV2Entry,
   type SignedRecord,
@@ -62,6 +63,11 @@ export interface VerifyDeps {
   logKey: (logUrl: string) => Promise<string | null>;
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
+  /**
+   * What the verifier's provider is (its options hashed as at registration). When given for a v2
+   * registration, provider options that change the population must match the registered ones (check 5).
+   */
+  providerIdentity?: PluginIdentity;
 }
 
 export interface VerifyReport {
@@ -276,7 +282,13 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c5.status = "SKIP";
     c5.summary = "offline: population not rebuilt";
   } else {
-    const pop = await buildPopulation(deps.provider, { repo: registrationRepo(reg), window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt });
+    // Walk the frozen history (FR7.2) and match renamed accounts by id (FR7.3).
+    const pinned = isManifestV2(m) ? (m.repos[0]?.headSha ?? null) : null;
+    const aliases = manifestAliases(m.changes);
+    const pop = await buildPopulation(deps.provider, { repo: registrationRepo(reg), window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt, ...(pinned ? { head: pinned } : {}), aliases });
+    const registeredOptions = v2 ? (reg.record as RegistrationRecordV2).plugins.provider.populationOptionsSha256 : null;
+    if (registeredOptions !== null && deps.providerIdentity && deps.providerIdentity.populationOptionsSha256 !== registeredOptions)
+      c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${deps.providerIdentity.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registeredOptions.slice(0, 12)}…); rebuild with the registered options`);
     const mine = new Map(m.changes.map((x) => [x.id, x]));
     const rebuilt = new Map(pop.entries.map((x) => [x.id, x]));
     const missing = [...rebuilt.keys()].filter((id) => !mine.has(id));
@@ -288,8 +300,24 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (extra.length) c5.details.push(`FAIL population: ${n(extra.length)} changes in the manifest are not in the rebuilt population (e.g. ${extra.slice(0, 3).join(", ")})`);
     if (shaDiff.length) c5.details.push(`FAIL population: ${n(shaDiff.length)} changes have a different merge SHA (e.g. ${shaDiff.slice(0, 3).join(", ")})`);
     if (late.length) c5.details.push(`${n(late.length)} manifest changes received reviews after freeze time (ignored, as of ${m.frozenAt}): ${late.slice(0, 5).map((x) => x.id).join(", ")}`);
-    c5.status = missing.length || extra.length || shaDiff.length ? "FAIL" : "PASS";
-    c5.summary = c5.status === "FAIL" ? c5.details[0]!.replace(/^FAIL /, "") : `population ${n(pop.entries.length)}/${n(m.N)} match`;
+    let unpinned = false;
+    if (reg.record.selector.kinds.includes("direct_push")) {
+      const note = "direct pushes dated in the window but pushed after freeze will show as extra";
+      if (pinned && pop.headSha !== pinned) {
+        unpinned = true;
+        c5.details.push(`provider ${deps.provider.name} does not pin history (asked for the frozen head ${pinned.slice(0, 12)}…, ${pop.headSha ? `walked from ${pop.headSha.slice(0, 12)}…` : "reported no head"}); ${note}`);
+      } else if (pinned) c5.details.push(`history walked from the frozen head ${pinned.slice(0, 12)}…`);
+      else if (isManifestV2(m)) c5.details.push(`the manifest records no default-branch head: provider ${deps.provider.name} does not pin history; ${note}`);
+    }
+    const renamed = new Map<string, string>();
+    for (const c of pop.listed.changes)
+      for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) {
+        const was = a.id !== undefined ? aliases.get(a.id) : undefined;
+        if (was !== undefined && was !== a.login) renamed.set(`${was} → ${a.login}`, a.id!);
+      }
+    if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since freeze, matched by account id: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
+    c5.status = c5.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : unpinned ? "WARN" : "PASS";
+    c5.summary = c5.status === "FAIL" ? c5.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "") : `population ${n(pop.entries.length)}/${n(m.N)} match`;
   }
   checks.push(c5);
 

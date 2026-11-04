@@ -18,6 +18,7 @@ import {
 import { logPublicKey } from "./translog.js";
 import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
+import { pluginIdentity } from "../registry.js";
 
 export interface VerifyOptions {
   offline?: boolean;
@@ -61,6 +62,7 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
       },
       logKey: (url) => logPublicKey(ctx, config, url, opts.logKey, !!opts.offline),
       trustBundle: trustFor(ctx, opts.tsaTrust),
+      ...(opts.offline ? {} : { providerIdentity: await pluginIdentity(config.provider, "provider", config.dir) }),
     },
   );
 }
@@ -88,7 +90,7 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
   } else if (!report.timestampTamperProof) ctx.out("TIMESTAMP NOT TAMPER-PROOF: registration and/or manifest times are self-asserted (no transparency-log entry was verified)");
   if (report.status) {
     const reg = readRegistration(configFor(ctx).paths);
-    ctx.out(statusLine(report.status, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode: report.mode }));
+    ctx.out(statusLine(report.status, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode: report.mode, selector: reg.record.selector }));
   }
   ctx.out(report.ok ? "VERIFIED" : `FAILED: ${report.checks.filter((c) => c.status === "FAIL").map((c) => `check ${c.n} (${c.name})`).join(", ")}`);
   return report.ok ? 0 : 1;
