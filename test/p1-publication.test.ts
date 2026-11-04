@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as read from "pr-rla/api/read";
-import { status as apiStatus } from "../src/api/read/status.js";
+import { status as apiStatus, statusExitCode } from "../src/api/read/status.js";
 import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
@@ -354,7 +354,7 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     expect((await runVerify(s.ctx, {})).verdict).toBe("FAILED");
   }, 180_000);
 
-  it("where the sequence certifies but check 7 FAILs locally (a two-sided swap with bodies swapped, rebound): CLI status and read.status say NOT CERTIFIED, with the lines verify prints", async () => {
+  it("where the sequence certifies but check 7 FAILs locally (a two-sided swap with bodies swapped, rebound): CLI status and read.status withhold the certificate as FAILED, with the lines verify prints", async () => {
     const { s, fake: f2, third, beyond } = await seamAudit();
     const p = join(s.dir, W, "ledger-index.json");
     const index = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
@@ -368,15 +368,20 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     writeJ(s, `${W}/draws.json`, { ...readJ<DrawsFile>(s, `${W}/draws.json`), ledgerIndexSha256: ledgerIndexSha256(index) });
     const st = (await apiStatus(s.ctx, {})) as Extract<Awaited<ReturnType<typeof apiStatus>>, { verdictsRead: true }>;
     expect(st.sequence.state).toBe("CERTIFIED");
-    expect(st.line).toMatch(/NOT CERTIFIED: verify check 7 would FAIL \(.*the draw → issue publication record FAILs.*\); run "pr-rla verify"/);
+    // The one certificate rule (time round B): each kind of FAIL the gate finds is a FAILED withholding (exit 1).
+    expect(st.line).toMatch(/target reached · CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the draw → issue publication record FAILs.*\)/);
     expect(st.certificateWithheld).toEqual(expect.arrayContaining(["the draw → issue publication record FAILs", "a ledger checkpoint FAILs"]));
+    expect(st.certified).toBe(false);
+    expect(st.certificate).toMatchObject({ state: "WITHHELD", withheld: expect.arrayContaining([{ verdict: "FAILED", reason: "verify check 7 would FAIL: the draw → issue publication record FAILs" }]) });
+    expect(statusExitCode(st)).toBe(1);
     const rs = (await read.status({ dir: s.dir, offline: false }, { env: s.ctx.env, fetch: s.fetch, nowMs: () => s.clock.now })) as typeof st;
-    expect(rs.line).toMatch(/NOT CERTIFIED: verify check 7 would FAIL/);
+    expect(rs.line).toMatch(/CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the draw → issue publication record FAILs/);
+    expect(rs.certified).toBe(false);
     expect(rs.certificateWithheld).toEqual(st.certificateWithheld);
     s.out.length = 0;
     await statusCommand(s.ctx, {});
     const text = s.out.join("\n");
-    expect(text).toMatch(/NOT CERTIFIED: verify check 7 would FAIL/);
+    expect(text).toMatch(/CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the draw → issue publication record FAILs/);
     expect(text).toMatch(/ {2}FAIL the ledger index is not an append-only extension of what was published/);
     const v = await runVerify(s.ctx, {});
     expect(v.verdict).toBe("FAILED");

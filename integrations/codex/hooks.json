@@ -1,0 +1,18 @@
+{
+  "description": "pr-rla guard: blocks verdict writes, verdict labels, signing, consent and edits to audit records from the assistant. Copy integrations/claude-code/hooks/guard.mjs to .codex/hooks/pr-rla-guard.mjs (docs/assistants/codex.md).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$|^apply_patch$|^mcp__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/pr-rla-guard.mjs\" --client codex",
+            "timeout": 30,
+            "statusMessage": "pr-rla guard"
+          }
+        ]
+      }
+    ]
+  }
+}

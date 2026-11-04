@@ -78,9 +78,10 @@ A registration's or a commitment's time is proven by RFC 3161 tokens from k = 2 
 
 | Evidence | Trusted when | Never from |
 |---|---|---|
-| An RFC 3161 token | its chain reaches an anchor pinned in the package for that authority (`src/timestamp/trust-bundle.json`), or in a file the verifier passes with `--tsa-trust` | the audit repo |
+| An RFC 3161 token | its chain reaches an anchor pinned in the package for that authority (`src/timestamp/trust-bundle.json`), or in a file the verifier passes with `--tsa-trust` (to `verify`, and to `status`, whose certificate needs the same proven times; in CI the `tsa-trust` input, written by whoever owns the CI configuration) | the audit repo |
 | A token toward k | it is accepted, and its authority is one the registration names in `timestamping.authorities` | any other authority, even a bundled one (`ignored (not registered)`) |
-| A transparency-log entry | its key is pinned in the package (Sigstore's production Rekor v1 and v2 logs, from Sigstore's TUF `trusted_root.json`) or passed with `verify --log-key` | `.pr-rla.yml`'s `transparency_log.public_key_file`, any file in the audit repo, the log URL in the record's unsigned envelope |
+| A transparency-log entry | its key is pinned in the package (Sigstore's production Rekor v1 and v2 logs, from Sigstore's TUF `trusted_root.json`; the pinned key always wins for those URLs), or the verifier passes it for exactly that log with `verify --log-key <log url>=<pem file>`, and then it counts as the neutral operator `log at <host>`, never as Sigstore | `.pr-rla.yml`'s `transparency_log.public_key_file`, any file in the audit repo, the log URL in the record's unsigned envelope, a `--log-key` given for another log |
+| The registration's signing key | the key the registration names inside its signed, time-stamped bytes (`publicKeyPem`, time round B) | the envelope alone: a registration re-signed under another key FAILs check 1 |
 | The time a v2 record counts as | its own signed `registeredAt` or `frozenAt`, always | the envelope: dropping `timestamps` FAILs, it never hands the time to a log |
 
 ### One signer certificate for every rule
@@ -95,8 +96,15 @@ Every intermediate must be a CA allowed to issue certificates (critical `cA`, `k
 
 - **Three anchors are trust on first use.** Microsoft's (pinned at its intermediate, because its tokens omit the root), SwissSign's and FreeTSA's were taken from the authorities' own responses. Every output that counts one prints `anchor pinned on first use … independent: false`. Confirming them from a second source is a release-checklist item.
 - **A pinned issuing CA must be updated when an operator rotates it.** A token signed under a new issuing CA fails until the bundle carries it (NFR21's release diff). Old tokens keep verifying, because issuing CAs are only added.
-- **A v1 audit logged to a log whose key is not pinned** verifies at most as `time unproven` unless the verifier passes that log's key with `--log-key`.
+- **A v1 audit logged to a log whose key is not pinned** is INCOMPLETE (exit 6) unless the verifier passes that log's key with `--log-key <log url>=<pem file>`: its time is in the record's unsigned envelope, and the seed round R is derived from it, so check 3 cannot PASS on it (pass-2 review #2).
 - **The parsing library still verifies the signature** (pkijs); pr-rla checks that it did so under the signer certificate's key, byte for byte.
+
+### Unproven is not certified, and draws cannot be ground (time round B, 2026-11-04)
+
+- **One verdict model.** A check is PASS, WARN, FAIL, INCOMPLETE (not established) or SKIP (not run); the audit is FAILED if any check FAILed, INCOMPLETE (exit 6) if any is INCOMPLETE or skipped, else VERIFIED (`src/core/verdict.ts`). A registration or commitment time that k operators do not prove is INCOMPLETE (checks 1 and 2), and so is the seed round derived from it (check 3): whoever wrote the time could have written it after the seed was public. `verify --offline` skips the population rebuild, so it is never VERIFIED.
+- **One certificate.** status, verify's line, `audit_list` and the MCP tools print CERTIFIED only when nothing withholds it (`isCertified`); otherwise `target reached · CERTIFICATE WITHHELD (why)`. `sequence.state` is the SPRT's raw state, never the claim. A population below the registered minimum never certifies: draws that exist anyway FAIL check 6.
+- **A refused read is not a missing record.** When a provider or ledger ran without its credential (withheld for want of your approval, or not set) and the server refused every read it made with 401, 403 or 404, what it read is not established: check 5 or 7, and status's verdicts, are INCOMPLETE, and the reason names the variable and the `pr-rla plugin approve --env … --origin …` command. A tracker that answers some anonymous reads is readable, so its 404s stay the server's answers (a deleted issue on a public tracker still FAILs).
+- **Draws are bound to the registration.** For schema v2, draw *i* is SHA-256(randomness ‖ registrationSha256 ‖ uint64be(*i*)) mod N over the change ids in canonical order (contracts.md §5, "Draws"). Before, the manifest's hash was the binding, and it covers what the freezer chooses (`frozenAt`, the funnel, the limitations): one registration frozen a dozen times before R gave a dozen samples to choose from (time review finding 2). Now freezing again cannot move a draw. What can still move N is SCM state that changes after landing and that pr-rla reads as of the freeze: labels (a `labels:` stratum; `register` notes it and check 2 WARNs), an approval dismissed after the merge, an account renamed. Those are stated limits, not detected.
 
 ## Verdict provenance and presence (T7, T16)
 
@@ -228,7 +236,7 @@ Only the first two are guarantees; the third is a speed bump.
    - **Registered reviewers.** `verdicts.reviewers` lists the accounts or signing keys whose verdicts count. Agent and bot accounts are never on it; a label event from an unlisted account is ignored, with a check-7 detail.
    - **App-applied labels.** On GitHub, an event with `performed_via_github_app` set is not counted by default.
    - **Presence attestation** (U9: the user-presence flag verified; key hardware not attested) is designed to be the tier that holds even then. In this release it is verified with software keys only, so pr-rla does not claim it proves a human touched a hardware key.
-3. **Client-side guards** (best effort): the assistant plugins' hooks (U6). Client permission rules and hook filters are not a security boundary.
+3. **Client-side guards** (best effort): the guard hook in the Claude Code plugin, and the same file in Codex and Cursor, with the `review-draw` skill's rules (U6, [`docs/assistants/guard.md`](assistants/guard.md)). As far as it can read a command or a tool call, the guard blocks verdict writes, verdict labels, signing, consent and edits to audit records from the assistant. Client permission rules and hooks are not a security boundary.
 
 ### Untrusted text from the change (FR3.9)
 

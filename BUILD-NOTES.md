@@ -2766,6 +2766,483 @@ Each run is a fresh `git clone --branch fix/p3-pool-head` of this worktree into 
 
 The five demo scripts (`demo-broker`, `demo-ledgers`, `demo-plugin-host`, `demo-presence`, `demo-sdk-carry-overs`) exit 0. This commit adds only these lines to `af180ac`.
 
+## Bolt 7 (U7): CI integrations (2026-11-04)
+
+Branch `bolt/u7-ci-integrations`, from `0fa9ad8` (the wave-2 integration plus the U5 seam tests). A GitHub composite action, a GitLab CI/CD component with a plain-snippet twin, and a Bitbucket Pipelines step, with a CI guide per SCM. All tested on fixtures and mock servers; nothing published, nothing written to a real service.
+
+### Definition of done (delivery-plan.md, bolt 7)
+
+FR6.1 to FR6.7 pass on fixtures and mock servers, and the templates pass schema checks. The demo: the Action's steps on a fixture ESCALATE fail the job.
+
+| ID | Covered by |
+|---|---|
+| FR6.1 Action: status and verify, summary, fails on ESCALATE, optional comment | `test/ci-github-action.test.ts`: "FR6.1: status on fixtures gives the right job outcome" (CERTIFIED passes with outputs and summary; a label-event fixture and `comment: true`; **DEMO, ESCALATE fixture fails the job**; fail-on tolerance; refusal; exit 1; verify; `dir`), "the comment is best effort and the token stays on GitHub", "what pr-rla prints is data" |
+| FR6.2 GitLab component, typed inputs, push to `audit/**` and a schedule | `test/ci-integrations.test.ts` "FR6.2, FR6.5: the GitLab component and the plain snippet pass GitLab's CI schema"; `test/ci-job-scripts.test.ts` "the GitLab component (FR6.2)" (typed inputs, the rules for push, schedule, trigger and web, `audit-path`, mock gitlab.com runs) |
+| FR6.3 Bitbucket step, no pipe | `test/ci-integrations.test.ts` "FR6.3, FR6.5: the Bitbucket step passes Bitbucket's pipelines schema"; `test/ci-job-scripts.test.ts` "the Bitbucket step (FR6.3)" |
+| FR6.4 exact version, `--plugins builtin-only` unless opted in | `test/ci-integrations.test.ts` "FR6.4, NFR18: every integration pins ..."; `test/ci-github-action.test.ts` "FR6.4"; `test/ci-job-scripts.test.ts` "pinning (FR6.4)" and "runs pr-rla --plugins builtin-only by default" |
+| FR6.5 fixtures and mocks only | the harness (`test/helpers/ci-harness.ts`), the vendored schemas test, and `denied` assertions (no socket left the machine) in every run |
+| FR6.6 no publish | `test/ci-integrations.test.ts` "FR6.6: nothing in the build publishes" |
+| FR6.7 matrix, one ledger per SCM | `docs/ci/README.md` "End-to-end matrix"; `test/ci-integrations.test.ts` "FR6.7: the end-to-end matrix names one ledger per SCM, and each cell points at a test that runs" |
+| NFR1 scopes | `docs/ci/README.md` "Scopes" (each row marked unverified); every tracker request in the Action and GitLab runs is a GET; `checkpoint` writes to the bare remote only |
+| NFR3 no public writes | every run asserts `denied` is empty; the only POSTs are the opt-in comment, to the mock |
+| NFR11 offline fixtures | `test/helpers/ci-preload.cjs` refuses non-loopback sockets in every child; `npm test` opens none |
+| NFR16 exit codes | `test/ci-integrations.test.ts` "the exit-code mapping" (15 codes by 6 lists, in dash and bash); the mapping tables in all three runners |
+| NFR18 supply chain | the pin tests above; `npm --prefix integrations/github-action ci` |
+| NFR19 platforms | `docs/ci/README.md` "Platforms" (macOS tested here; Linux unverified; Windows untested) |
+
+### Done
+
+- **`integrations/github-action/`**: `action.yml` (composite), `package.json` and `package-lock.json` (private, UNLICENSED, one dependency), `vendor/pr-rla-0.1.0.tgz`, `scripts/{prepare.sh,run.sh,exit-map.sh,report.mjs,comment.mjs}`.
+- **`integrations/gitlab/templates/pr-rla.yml`**: two YAML documents, `spec:inputs` (12 typed inputs) and the job.
+- **`docs/ci/{README,github,gitlab,bitbucket}.md`**: guides, the matrix, the scope table, the platforms note, the credentials models, and the release re-pin steps for U10. The README gets a "CI integrations" section (before "Architecture").
+- **`test/helpers/ci-harness.ts`, `ci-fixtures.ts`, `ci-preload.cjs`**: the harness (below). **`scripts/pack-action-tarball.mjs`**: rebuilds the vendored tarball and the lockfile. **`scripts/demo-ci.mjs`**: the demo.
+- **`ajv@8.20.0`** (exact) in devDependencies: the pinned JSON-schema validator.
+
+### The harness (FR6.5)
+
+- **`runComposite`** reads `action.yml`, evaluates the `${{ }}` subset it uses (contexts `inputs`, `github`, `runner`, `steps`; `==`, `!=`, `&&`, `||`, `!`; `always()`, `success()`, `failure()`; anything else throws), and runs each `run` step with `bash --noprofile --norc -e -o pipefail`, with `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY` and `GITHUB_ENV` on temporary files. A `uses` step is recorded, never fetched. The `install` step (`npm ci`, which needs the network) is skipped by id, and a test pins its exact text. The action path is a copy of the action with a `pr-rla` shim running `dist/cli.js` where `npm ci` would have put one.
+- **`runScript`** runs a GitLab job's or a Bitbucket step's `script` lines in one shell (dash for GitLab where `/bin/dash` exists, bash for Bitbucket). `renderGitLabTemplate` interpolates `$[[ inputs.x ]]` the way GitLab does and `ruleApplies` evaluates the component's `rules`.
+- **Mock servers**: `MockApi` is one HTTP server on 127.0.0.1 with a path prefix per mocked origin. The real CLI runs unchanged in a child; `ci-preload.cjs` (`NODE_OPTIONS=--require`) swaps only the last hop of `fetch` for the origins in `PRRLA_TEST_ROUTES`, so the broker's grants, read-only guard and pacing run as in production, and refuses every other socket (recorded in a file the test reads). The trackers behind it are `FakeGitHubIssues` and `FakeGitLabIssues` (synthetic).
+- **Fixtures** (`test/fixtures/ci/README.md`): synthetic github-issues, gitlab-issues and small-population audits built at test time with the in-process commands; the recorded gh-aw Q3 audit plus synthetic verdict lines for git-file; one synthetic `issues`/`labeled` event payload.
+- The child's git is hermetic (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`): a machine-wide gitconfig identity had been reaching a checkpoint commit.
+
+### Settled or recorded, with dates (all read-only; 2026-11-04)
+
+- **`actions/setup-node`**: `gh api repos/actions/setup-node/tags` at 08:21Z. Latest release v7.1.0 is commit `949feb2413d6458794dcd2491c4babbbce0c15c1` (committed 2026-10-08T02:43:26Z; a commit, not a tag object). Its `action.yml` has `package-manager-cache`, set to `false`. Pinned in `action.yml` with `# v7.1.0` at `node-version: "24"`.
+- **`actions/checkout`**: v7.0.1 is `3d3c42e5aac5ba805825da76410c181273ba90b1` (committed 2026-07-17T18:45:11Z); used in the docs example only.
+- **Schemas**, each fetched once with a GET and vendored byte for byte under `test/fixtures/schemas/` (URL, date, bytes and sha256 in `SOURCES.json`, checked by a test):
+
+  | File | Source | sha256 |
+  |---|---|---|
+  | `github-action.json` (31,255 bytes) | `https://www.schemastore.org/github-action.json` (identical to `json.schemastore.org/github-action.json`) | `224326cc…` |
+  | `gitlab-ci.json` (128,124 bytes) | `https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json` | `2ed7f27a…` |
+  | `bitbucket-pipelines.json` (33,271 bytes) | `https://api.bitbucket.org/schemas/pipelines-configuration` (SchemaStore's catalog points there and carries no copy; `json.schemastore.org/bitbucket-pipelines.json` is a 404) | `b3731926…` |
+
+  All three are JSON Schema draft-07 and compile under ajv 8.20.0 with `strict: false` and `validateFormats: false`.
+- **Image digests** (Docker Hub's public tag API): `node:24-alpine` index `sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85` and `node:24` index `sha256:e7add2a490bb17d97b485b8641bd88455fff7839ade0f5eba493c3508124d413`, both tags last updated 2026-10-28.
+- **The pin**: `npm pack` of this checkout is `integrations/github-action/vendor/pr-rla-0.1.0.tgz`, sha512 `P9hXc6xR…dng==`, recorded in the Action's lockfile. `npm ci` there installs 21 packages and `pr-rla --version` prints 0.1.0.
+
+### Verified (command → output), Node 22.23.2
+
+```
+npm ci && npm run build && npm run typecheck && npm test
+  Test Files  86 passed (86)      (before this bolt, on 0fa9ad8: 83 files)
+  Tests       1420 passed (1420)  (before: 1218; +202, all in the three new files)
+  ~118 s (before: ~79 s), the three CI files running beside the others
+npm --prefix packages/pr-rla-mcp ci && npm --prefix packages/pr-rla-mcp test     # 59 of 59
+npm --prefix examples/providers/gitea ci && npm --prefix examples/providers/gitea test   # 1 of 1
+npm --prefix examples/ledgers/jira ci && npm --prefix examples/ledgers/jira test         # 1 of 1
+npm --prefix integrations/github-action ci      # 21 packages; node_modules/.bin/pr-rla --version = 0.1.0
+```
+
+The new tests by file: `test/ci-github-action.test.ts` 46, `test/ci-job-scripts.test.ts` 113, `test/ci-integrations.test.ts` 43. Every `npm test` run listed `denied` connections as empty for the Action and the two job-script runners; the vitest process's own network-deny setup also passed for all three files.
+
+Shellcheck (not part of the suite; run by hand, 2026-11-04) is clean for `prepare.sh`, `run.sh`, `exit-map.sh` and the shared job script, apart from two info notes (`SC1091` not following a sourced file, `SC2016` about the single-quoted `node -e`).
+
+### The demo
+
+`npm run build && node scripts/demo-ci.mjs` (offline, Node 22.23.2) runs the Action's `prepare.sh` and `run.sh` as the runner would on a fixture ESCALATE audit and on a fixture CERTIFIED one:
+
+```
+== fixture ESCALATE (6 fails of 6 labelled draws) ==
+  [run.sh] pr-rla --plugins builtin-only -C . status --json --offline -> exit 2
+  [run.sh] pr-rla: prefix 6/36 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -9.657 / target 2.996 · ESCALATE: review all 1,589 or narrow the claim · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF
+  outputs: state=ESCALATE prefix=6/36 llr=-9.657 exit-code=2
+  job summary: ## pr-rla status / ### ESCALATE / the certificate line / a table / **Job result: FAIL** (exit 2: ESCALATE …; fail-on includes escalate)
+  [decide] ::error title=pr-rla::exit 2: ESCALATE (the sequential test cannot certify), or the seed round is not yet published; fail-on includes escalate
+  JOB RESULT: FAILED
+
+== fixture CERTIFIED (36 passes) ==
+  outputs: state=CERTIFIED prefix=36/36 llr=3.066 exit-code=0
+  JOB RESULT: passed
+```
+
+The same thing, with `action.yml` read and its expressions evaluated, is the test "DEMO, ESCALATE fixture fails the job" in `test/ci-github-action.test.ts`.
+
+### Deviations from the design, and why
+
+1. **`window` input dropped.** The design lists it; the CLI has no `--window` option (the window is in `.pr-rla.yml`).
+2. **Added inputs and outputs.** `comment-issue` (the audit issue, defaulting to the event's), `approve-origins`, `accept-lock-grants`, `allow-writes`, `token`; output `exit-code`. The design's `sample` stays out of the default and is accepted only with `allow-writes: true`, as in the draft.
+3. **pr-rla is a vendored tarball, not an npm version.** Nothing is published, so the lockfile pins a tarball made by `npm pack` from this checkout and its integrity. The re-pin to the published version is written out in `docs/ci/github.md`. The tarball is a snapshot: it does not move when `src/` does, and `node scripts/pack-action-tarball.mjs` re-takes it. The root `.gitignore` ignores `pr-rla-0.1.0.tgz`, so one exception was added for that directory.
+4. **GitLab and Bitbucket offer `status` and `verify` only.** The design lists `checkpoint` for the component. Pushing needs a write credential and git auth plumbing a job does not have, and none of it could be exercised against a real remote with a token, so the guides say to run `checkpoint` and `sample` from a clone with push rights. (The Action's checkpoint uses the checkout's own credentials and was tested against a local bare repo.)
+5. **No `act`-style full workflow run.** The harness runs the composite action's steps only (`workflow` events, `permissions:` and `uses:` resolution are not simulated); the example workflow is a documented example and is checked only for its pins.
+6. **GitLab and Bitbucket install by version, not by lockfile.** They have no lockfile of their own. The script requires one exact version, checks `--version` after the install, installs with `--ignore-scripts`, and takes an optional `integrity` (checked against `npm view`). Transitive dependencies still resolve on the day. Recorded for U10: publish with an `npm-shrinkwrap.json`.
+7. **Credential approvals use `approve-origins`**, the typed input the brief suggests, in the Action and the component; `PRRLA_APPROVE_ORIGINS` in the snippet and Bitbucket. Entries are `ENV_VAR=https://host`.
+8. **Booleans of the component are strings with `options`.** GitLab keeps the type of an input that is the whole value, which would put a boolean in a `variables:` map.
+
+### Findings
+
+- **A withheld credential does not fail anything.** On GitHub Enterprise Server with no `approve-origins`, `pr-rla status` runs anonymously, a private tracker answers 404, and the job passes `NOT_CERTIFIED 0/36` with exit 0. The only sign is one stderr line (`… is not approved on this machine, so withheld`). The Action now puts stderr in the summary, and the guides name the line. Whether `status` should exit non-zero when a credential was withheld and the ledger then read nothing is a CLI decision I did not make. Test: "a self-hosted SCM gets no token without an approve-origins entry".
+- **`npm install --package-lock-only` keeps a stale integrity for a `file:` tarball whose bytes changed**, both from the lockfile and from `node_modules/.package-lock.json`. The first version of the pack script reported success with the old integrity. It now deletes both and checks the result against the tarball's own sha512.
+- **The Bitbucket schema accepts a step with no `script` and a step with an unknown key.** The GitLab and GitHub schemas refuse the equivalents. The Bitbucket test records this and adds its own structural assertions.
+- **The `git-file` ledger cannot be checkpointed** ("ledger git-file has no readHistory"), so `checkpoint --push` in CI needs an issue ledger. The harness test uses github-issues and a local bare remote.
+- **Exit 3 comes from `sample` in practice.** `status` reports a refusal only when a sampled audit's population is below the minimum, which `sample` refuses to produce; the harness covers exit 3 through `sample` on a 12-change audit and the REFUSED state through a canned status result.
+- **A runner has no git identity.** The checkpoint is a commit, so `run.sh` sets the `github-actions[bot]` identity unless the repository sets one. The harness caught the other direction: the machine's own system gitconfig identity leaked into the commit until the harness made git hermetic.
+- **A child bash inherits no `-e`, but `run.sh` is also run directly in the demo.** `run.sh` now says `set +e` itself, since the exit code is its data.
+- **An offline `verify` of a tracker ledger skips check 7 and still says VERIFIED** (exit 0). The Action therefore reports no `state` for it (the certificate was not read); the summary shows the verdict and the seven checks.
+- **A shell glob in `approve-origins`** would have expanded against the checkout; both shell versions run the loop under `set -f`. Origins are checked to `https://` plus host characters, and the approvals file's directory is compared by physical path (a symlink cannot move it into the workspace; the GitLab and Bitbucket first version compared strings and the test caught the macOS `/var` to `/private/var` case).
+
+### Unverified
+
+- Any run on a real GitHub runner, GitLab instance or Bitbucket pipeline. In particular: GitLab's own interpolation of `spec:inputs` and its rule evaluation; Bitbucket's handling of the YAML anchor for the shared script; `condition: changesets` on Bitbucket; the Actions runner's expression semantics beyond the subset the harness implements.
+- Linux. Everything ran on macOS 26 (Node 22.23.2, bash 5.3, dash from `/bin/dash`). Alpine's `ash` is not dash; the script uses only POSIX constructs, but it was not run under ash.
+- The webhook route for GitLab label events (described from GitLab's documentation).
+- Bitbucket Data Center (as in phase 2).
+- That `npm install pr-rla@X` from the registry behaves like the tarball: nothing is published.
+- That `GITHUB_TOKEN`'s default permissions cover reading the audit repository's issues (documented as the scope, exercised on a mock).
+
+### Shared files touched (for the integration step)
+
+- `README.md`: a "CI integrations" section inserted before "Architecture: bring-your-own providers and ledgers". U6 will add its own README section; keep both.
+- `package.json` and `package-lock.json`: one devDependency, `ajv` `8.20.0`. U8 and U9 changed neither when branched; resolve by keeping both sides' edits and re-running `npm install`.
+- `.gitignore`: one appended exception for `integrations/github-action/vendor/pr-rla-*.tgz`.
+- `BUILD-NOTES.md`: this section is at the end.
+- Nothing in `src/` changed, so no code from U5, U8 or U9 can conflict. The vendored tarball is a snapshot of `dist/` at this branch's tip; after the merge, re-take it with `node scripts/pack-action-tarball.mjs` (it is the only place the integrated build would otherwise differ from what the Action installs).
+- `test/ci-*.test.ts` read `dist/cli.js`, so run `npm run build` before `npm test` (as `api-cli-contract.test.ts` already needs).
+
+### What U10 needs to know
+
+- The re-pin is `docs/ci/github.md`, "Re-pinning at release": 7 numbered steps, including what to delete (`vendor/`, `scripts/pack-action-tarball.mjs`, the `.gitignore` exception) and which defaults to change in the GitLab template, the snippet and the Bitbucket step. The tests read the root `package.json` version, so they need no edit; they accept both the tarball form and an exact registry version.
+- Decide on `npm-shrinkwrap.json` for the published package (finding 6 above).
+- The README's Windows statement (NFR19) is U10's; `docs/ci/README.md` says only what applies to CI.
+- `<owner>/pr-rla` and `<exact ref>` in `docs/ci/*.md` are placeholders until the repository has an address.
+
+## Bolt 8 (U6): assistant integrations (2026-11-04)
+
+Goal (delivery-plan.md, bolt 8): FR3.7. The Claude Code plugin (manifest, the MCP server configuration with an exact-version `npx` pin, the `review-draw` skill, the guard hooks), the Codex and Cursor setup with each client's equivalent guard, and the founder's manual runs in all three clients (FR3.6), which this bolt prepares and does not run.
+
+Built on branch `bolt/u6-assistants` from the end of U5's fix round (`3e21347`, branch `bolt/u5-audit-api-mcp`), not master. The guard is written against the CLI that `integrate/wave2` (plugin approvals, per-verdict signatures, INCOMPLETE) has as of `a6622f2`, read-only: `pr-rla plugin approve`, `--accept-lock-grants`, `PR_RLA_ACCEPT_LOCK_GRANTS`, `PR_RLA_APPROVALS_FILE` and its `XDG_CONFIG_HOME`/`~/.config` fallbacks, `pr-rla record --sign` and `ssh-keygen -Y sign -n pr-rla-verdict@v1`.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR3.7 a Claude Code plugin carries the `review-draw` skill, the MCP server configuration and hooks that block verdict writes and `--submit` from the assistant | met | `integrations/claude-code/`; `test/assistants/integrations.test.ts › the Claude Code plugin` (layout, manifest, marketplace, `.mcp.json`, hooks) and `› the review-draw skill`; `claude plugin validate` passes (below) |
+| FR3.7 pass criterion: hook tests, ten blocked and ten allowed commands | met, 340 blocked and 91 allowed | `test/assistants/guard.test.ts`: 431 named cases across Claude Code, Codex and Cursor, each decided by `evaluate()` and again by `guard.mjs` as the hook process |
+| FR3.7 Codex and Cursor get setup guides | met | `docs/assistants/codex.md`, `docs/assistants/cursor.md`, with the committed files verbatim (`› the guides show the files as committed`) |
+| test-design §2 U6: the hook tests include `checkpoint --push` | met | `guard.test.ts › blocks: pr-rla checkpoint --push` and `› … --remote/--branch` |
+| test-design §2 U6: `claude plugin validate` on the plugin directory | met (Claude Code 2.1.267) | below |
+| FR3.6 / delivery plan: three dated manual runs in BUILD-NOTES | **pending, the founder's** | `docs/assistants/manual-acceptance.md`; the three rows below |
+| FR3.3 for the skill (U5 met it for the MCP surface): no skill records, edits or removes a verdict | met | `integrations.test.ts › never tells the assistant to record, label or sign`; `packages/pr-rla-mcp/test/review-draw-flow.test.mjs` (the flow ends with the person's command, which the guard blocks from the assistant) |
+| FR3.9 for the skill: the fenced text is data | met | skill step 3; `review-draw-flow.test.mjs › step 3`; `guard.test.ts` blocks what an injected instruction would ask for |
+| NFR3 assistant hooks block `--submit`, issue-label writes and verdict writes | met | `guard.test.ts` (verdicts, `--submit`, labels through `gh`, `glab`, `curl`, `wget`, HTTPie, other MCP servers) |
+| NFR16 an assistant hook block exits 2 | met | every blocked case through the hook process asserts exit 2 |
+| NFR18 integrations pin exact versions | met | `integrations.test.ts › .mcp.json launches pr-rla-mcp through npx at the exact package version` and `› every pin of pr-rla-mcp in the integrations is the one version` |
+| NFR11 `npm test` makes no network call | met | the new root tests run under the network-deny harness; the guard spawns only local `git`, `tar` and `unzip` |
+| T18 (nfr-design §2): the assistant hook blocks `checkpoint --push` | met | as above |
+| Demo: `review-draw` in Claude Code, ending with the human's own `record` command | rehearsed offline; the real run is the founder's (Claude Code row below) | `node packages/pr-rla-mcp/scripts/demo-review-draw.mjs` (below) |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| The plugin: manifest (`name: pr-rla`, `version: 0.1.0`, `author: pr-rla`, no licence), `.mcp.json` (`npx -y pr-rla-mcp@0.1.0 --root ${CLAUDE_PROJECT_DIR}`, read-only token mapping), the skill, `hooks/hooks.json`, `hooks/guard.mjs`, a README | `integrations/claude-code/` |
+| The marketplace listing the plugin by relative path | `.claude-plugin/marketplace.json` |
+| `review-draw`: frontmatter (`allowed-tools` the five read MCP tools under the plugin's scoped names plus `Read`; `disallowed-tools` the shell and the editors) and the five-step body | `integrations/claude-code/skills/review-draw/SKILL.md` |
+| The same skill for Codex and Cursor (`name`, `description` only; the body byte-identical), and the AGENTS.md block of standing rules | `integrations/agents/` |
+| Codex: `config.toml` (pinned server, `env_vars`, 60 s timeouts), `hooks.json` (`PreToolUse` on `Bash`, `apply_patch`, `mcp__*`) | `integrations/codex/` |
+| Cursor: `mcp.json` (pinned server, `${workspaceFolder}`, read-only token mapping), `hooks.json` (four hooks, `failClosed`), an always-applied rule | `integrations/cursor/` |
+| The guard: a shell parser, the rules, one adapter per client, `--check-shell`, `--record` | `integrations/claude-code/hooks/guard.mjs` (no dependencies) |
+| A local copy of the plugin running this checkout's server, for the founder's runs before release | `scripts/local-claude-plugin.mjs` |
+| The skill's flow through the server (test and rehearsal) | `packages/pr-rla-mcp/test/review-draw-flow.test.mjs`, `packages/pr-rla-mcp/scripts/demo-review-draw.mjs` |
+| Docs: setup index (the read-only token, before release, what a release changes, the formats' sources), one guide per client, the guard's rules and limits, the founder's checklist; a README section; the security model's tier 3 | `docs/assistants/`, `README.md`, `docs/security-model.md` |
+| Fixtures: one payload per client event, synthetic, from the documented shapes | `test/fixtures/hooks/` |
+| Tests: 901 new at the root, 7 in the package (root 624 passed and 1 skipped before, 1525 and 1 after; package 57 before, 64 after) | `guard.test.ts` 874 (431 cases × 2, the case-list check, and 11 on the hook protocol, crafted-input timing and the size limits among them), `integrations.test.ts` 27; `review-draw-flow.test.mjs` 7 |
+
+### Live reads (all read-only GETs; 2026-11-04)
+
+| When (UTC) | What |
+|---|---|
+| 07:07:18 to 07:07:39 | Claude Code docs, as Markdown (`https://code.claude.com/docs/en/<page>.md`): plugins-reference, hooks, skills, mcp, plugin-marketplaces, plugins, plugins/components, plugins/marketplace-reference, plugins/loading, plugins/cli-reference, plugins/troubleshooting, plugins/install, plugins/create |
+| about 07:09 | Codex docs: eight pages under `https://developers.openai.com/codex/` (each redirected to `learn.chatgpt.com`), then their Markdown twins 07:09:50 to 07:10:00: hooks, extend/mcp, config-file/config-reference, config-file/config-basic, build-skills, agent-configuration/agents-md, agent-configuration/rules, agent-approvals-security, and `llms.txt` |
+| 07:10:46 to 07:11:23 | Cursor docs: `https://cursor.com/llms.txt`, then rules, skills, hooks, mcp and reference/third-party-hooks as Markdown |
+
+No write anywhere; no model was called (no `claude -p`, no Codex or Cursor session); nothing was installed from a marketplace or npm. `claude plugin validate` reads local files only.
+
+### What the official docs settled
+
+- **Claude Code plugin MCP tool names** are `mcp__plugin_<plugin>_<server>__<tool>`: here `mcp__plugin_pr-rla_pr-rla__draws`. A skill's `allowed-tools` and a hook matcher must use that form; one written against the bare server name never matches (plugins/components, mcp).
+- **`${CLAUDE_PROJECT_DIR}` is substituted in a plugin's MCP `args`** (mcp, "Plugin-provided MCP servers"). So `.mcp.json` passes `--root ${CLAUDE_PROJECT_DIR}` and the plugin no longer depends on the server's working directory, the item the design left open for this bolt. The manual run still checks it.
+- **Skill frontmatter**: `allowed-tools` pre-approves for the turn that invokes the skill and restricts nothing; `disallowed-tools` exists and removes tools while the skill is active; both clear on the user's next message (skills). So across a multi-turn review only the hooks keep holding.
+- **Hooks**: exec form (`command` plus `args`) passes `${CLAUDE_PLUGIN_ROOT}` with no shell; exit 2 blocks a `PreToolUse` call with stderr as the reason; `onFailure: "block"` needs Claude Code 2.1.295 (hooks).
+- **`${VAR:-default}`** expands in `.mcp.json` `env`, and an unset variable with no default stays unexpanded with a warning (mcp), hence `${PR_RLA_READONLY_GITHUB_TOKEN:-}`.
+- **Codex hooks are now documented** (hooks): `PreToolUse` with `tool_name` `Bash`, `apply_patch` or `mcp__<server>__<tool>`, the command or patch in `tool_input.command`, plus `turn_id`; deny by exit 2 with stderr, or by `hookSpecificOutput.permissionDecision: "deny"`; hooks need a trust review per hash; plugins export `CLAUDE_PLUGIN_ROOT` for compatibility. So the design's "Codex's hook payload is unverified" becomes **documented, not observed**: nothing here ran Codex.
+- **Codex MCP**: `env_vars` whitelists variables for a stdio server; `startup_timeout_sec` defaults to 10 and `tool_timeout_sec` to 60 (extend/mcp, config-reference). Skills live in `.agents/skills` with `name` and `description` (build-skills).
+- **Claude Code's `Monitor` tool runs a shell command** (`command`, with `description`, `timeout_ms`, `persistent`; or a `ws` WebSocket, which runs nothing), read from the tool's schema in a Claude Code session on 2026-11-04, not from the docs pages above. So the hooks match it and the guard reads its `command` like `Bash`'s.
+- **Cursor** reads Agent Skills from `.agents/skills/` (and `.cursor/skills/`), reads `AGENTS.md`, and loads Claude Code hooks from `.claude/settings*.json` with its own answer format (skills, rules, third-party-hooks). Its permission hooks (`beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile`, `preToolUse`) block on invalid JSON even without `failClosed`, so the guard always prints `{"permission":"allow"}` or a deny object for Cursor (hooks).
+
+### Verified (command → output)
+
+`claude plugin validate`, Claude Code 2.1.267, 2026-11-04:
+
+```
+claude plugin validate integrations/claude-code            → ✔ Validation passed
+claude plugin validate --strict integrations/claude-code   → ✔ Validation passed (exit 0)
+claude plugin validate .                                   → ✔ Validation passed (the marketplace)
+claude plugin validate integrations/agents                 → ✔ Validation passed (the portable skill)
+node scripts/local-claude-plugin.mjs <scratch>/local-plugin && claude plugin validate <scratch>/local-plugin → ✔ Validation passed
+```
+
+Its checks of MCP server entries need 2.1.281 or later, so `.mcp.json` rests on the docs and `integrations.test.ts`. It accepted the `onFailure` field that 2.1.295 acts on. An experiment in the scratchpad confirmed it does read `hooks/hooks.json` and skills: an unknown hook type and invalid JSON each fail validation; a skill with no `description` warns.
+
+From a fresh `git clone` of the branch at `9a38be8`, 2026-11-04T09:09:27Z, Node 22.23.2, Claude Code 2.1.267 (load average about 20: other work ran on the machine):
+
+```
+npm ci                                       → added 60 packages … found 0 vulnerabilities
+npm run build                                → exit 0
+npm run typecheck                            → exit 0
+npm test                                     → Test Files 54 passed (54) · Tests 1525 passed | 1 skipped (1526)
+npm --prefix packages/pr-rla-mcp ci          → added 19 packages … found 0 vulnerabilities
+npm --prefix packages/pr-rla-mcp test        → exit 0 · # tests 64 · # suites 17 · # pass 64 · # fail 0
+npm --prefix examples/providers/gitea ci     → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test   → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci        → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test      → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+claude plugin validate integrations/claude-code → ✔ Validation passed
+claude plugin validate .                     → ✔ Validation passed
+npm ls --prod --depth=0                      → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1 (no new dependency)
+```
+
+- 1526 = the base's 625 (`3e21347`: 1526 less the 901 new, as no existing test file changed; its 1 skip is U2b's `UNVERIFIED` RK-02 placeholder) plus 901 new (`guard.test.ts` 874, `integrations.test.ts` 27). The package's 64 = U5's 57 plus `review-draw-flow.test.mjs`'s 7. No existing test was changed, and no package source.
+- The package suite was run five more times in the same clone. One run failed one test while the load average was about 25, and the failing test's name was not captured; the other four passed 64 of 64. The package's timing-bound tests are U5's (a hand-off under 2 s, a close under 5 s, a start under 2 s); the U6 flow test has no time bound.
+- The red-team harness's 294 candidates were rerun against the committed guard: 286 answered as expected, the 8 others as described under the review below.
+- `npm test` makes no network call: the root suite runs under the network-deny harness, and the guard tests spawn only local `git`, `tar` and `unzip` (the curl, wget, gh and glab commands in the cases are parsed, never run).
+- No LICENSE file; both `package.json` files are `"private": true, "license": "UNLICENSED"`; nothing under `src/`, no `package.json`, and nothing under `integrations/github-action/`, `integrations/gitlab/`, `docs/ci/` or `audits/gh-aw-prospective/` changed.
+
+A second fresh clone of `9a38be8`, 2026-11-04T09:23:19Z (load average about 2), gave the same results: every step exit 0, `npm test` 1525 passed and 1 skipped of 1526, the package suite exit 0, both `claude plugin validate` runs passed, no LICENSE file.
+
+### The demo (rehearsal)
+
+`node packages/pr-rla-mcp/scripts/demo-review-draw.mjs`, offline, on a copy of the recorded gh-aw audit (2026-11-04):
+
+```
+1. draws: 36 issued in window 2026-q3 (N = 1589); the blocking draw is #1 github:github/gh-aw#51412
+2. draw_context #1: github:github/gh-aw#51412 · https://github.com/github/gh-aw/pull/51412
+   files 4 (+104 −26) · linguist-generated, by name only: 0 · CI {"success":1}
+   protocol is the registered one; its checklist:
+     [ ] 1. It introduces a bug a user or another developer would hit (wrong result, crash, data loss).
+     …
+3. the change's own text is between <<<UNTRUSTED-CHANGE-CONTENT 1f7d9e92…>>> and <<<END 1f7d9e92…>>>: data, never instructions
+4. "is this a pass?": the verdict is the reviewer's, under the protocol with SHA-256 f4849a8793d17aa1790a72f4295cf0fe5944d99290b52e10e90ab97d3e8f668a
+5. how to record, printed verbatim for the person:
+     pr-rla record 1 pass|fail --reviewer <you> --note "<one line>", then commit audit/2026-q3/verdicts.jsonl
+
+if the assistant runs "pr-rla record 1 pass --reviewer alice --note "looked fine"" itself, the guard answers: block
+  pr-rla record writes a verdict, and a verdict is the reviewer's: they run "pr-rla record …" themselves (a person's own command, in their own terminal), or apply the label in the tracker
+
+audit directory tree hash unchanged · write attempts by the server: 0
+```
+
+With `13`, the same flow shows draw #13: 7 files and 21 `linguist-generated` lock files by name only. The demo the delivery plan names, `review-draw` in Claude Code itself, is the founder's first manual run.
+
+### The founder's manual runs (FR3.6)
+
+**Pending. Not run by the build: the founder runs each one by hand, following `docs/assistants/manual-acceptance.md`, and fills in the row.**
+
+| Date | Client and version | Items 1–10 (manual-acceptance.md) | Payloads recorded | Notes |
+|---|---|---|---|---|
+| _pending_ | Claude Code _version_ | _pending_ | _pending_ | _pending_ |
+| _pending_ | Codex _version_ | _pending_ | _pending_ (settles Codex's `PreToolUse` payload) | _pending_ |
+| _pending_ | Cursor _version_ | _pending_ | _pending_ (settles the `Write`/`Delete` `tool_input` fields, and whether `allow` skips Cursor's approval) | _pending_ |
+
+### Deviations from the design, and why
+
+1. **The skill's `allowed-tools` use the plugin's scoped tool names**, `mcp__plugin_pr-rla_pr-rla__draws` and so on, not the draft's `mcp__pr-rla__draws`: Claude Code names a plugin's MCP tools that way, and the draft's names would never match. It also lists `audit_list` and `job_status` (a hand-off returns a `jobId` the skill must poll), and `disallowed-tools` adds `PowerShell`, `MultiEdit` and `NotebookEdit` to the draft's `Bash Write Edit`.
+2. **`.mcp.json` passes `--root ${CLAUDE_PROJECT_DIR}`**, which the docs say a plugin's MCP configuration substitutes. The draft had no root and a `userConfig` fallback in case the working directory was not the project; neither is needed.
+3. **Every MCP configuration hands the server a dedicated read-only token**, `PR_RLA_READONLY_GITHUB_TOKEN` and its GitLab and Bitbucket siblings, mapped onto the variables pr-rla's read-only mode reads (`GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `BITBUCKET_TOKEN`, `BITBUCKET_USERNAME`), empty by default. The draft gave Codex a literal `env = { GITHUB_TOKEN = "<read-only token>" }` and Claude Code nothing, so the server would have inherited the user's own token. Codex cannot rename a variable in `config.toml`, so its file whitelists the standard names with `env_vars` and the guide says to start Codex with read-only tokens in them (which also makes `gh` in Codex's shell read-only).
+4. **The guard's rules go beyond the draft's list and the refined design's one addition** (`checkpoint --push`), as the brief asked: consent (`plugin approve`, `add`, `lock`, `--accept-lock-grants`, `PR_RLA_ACCEPT_LOCK_GRANTS`, `PR_RLA_APPROVALS_FILE`, `HOME`/`XDG_CONFIG_HOME` for a pr-rla command, and a session started with `PR_RLA_ACCEPT_LOCK_GRANTS` set), per-verdict signing (`record --sign`, `ssh-keygen -Y sign -n pr-rla-verdict@v1`), `gh api` PUT and PATCH as well as POST and DELETE, `gh label` and `gh alias`, `wget` and HTTPie, GraphQL label mutations, every audit record the brief names (the draft had six) plus the audit repo's `.git/` (hooks and config run commands as the person), and git commands that discard or rewrite records (`reset --hard`, `checkout`/`restore`/`rm`/`mv`/`stash`/`clean`/`apply`/`am`, `rebase`, `filter-branch`, `commit --amend`, `git config` of command keys). The draft's `git commit` rule (staged `verdicts.jsonl`) also covers `-a`, pathspecs and an earlier `git add` in the same command line.
+5. **`register`, `freeze`, `sample` and `init` are blocked in every form, `--dry-run` included**: the brief lists the commands without exceptions, and the MCP tool `freeze_preview` is the read-only dry run. **Plain `checkpoint` and `status --checkpoint` pass**: the refined design names only `--push`, and a local checkpoint is pr-rla's own append of what the ledger already says.
+6. **Unknown pr-rla subcommands are blocked** (default deny), so a write command added later is blocked until the guard knows it. `guard.test.ts › classifies every subcommand src/cli.ts defines` fails when `src/cli.ts` gains one the guard has not classified; it already classifies wave 2's `plugin approve`.
+7. **Hook matchers**: `Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep` and `mcp__.*`. The brief names Bash, Write, Edit and MultiEdit; `Read` and `mcp__.*` serve the draft's rules on the signing key and on other MCP servers' label tools; `PowerShell` because Claude Code routes shell commands through it on Windows; `Monitor` because it runs a shell command in the background (the review found it unhooked); `Grep` and `NotebookEdit` for completeness. The current Claude Code docs no longer list a `MultiEdit` tool; matching a name that never comes is harmless. Each handler sets `onFailure: "block"`.
+8. **The guard answers in each client's documented form** (exit 2 and stderr for Claude Code and Codex; exit 2 and a deny object for Cursor, which also gets `{"permission":"allow"}` for an allowed call), **fails closed** on input it cannot read, and **reads a payload as Cursor's or Codex's whenever it carries their markers**, whatever `--client` says, because Cursor can load Claude Code hooks.
+9. **`--check-shell` and `--record` are additions**: the first lets a person see what the guard decides for a command; the second saves the payloads a running client sends, which is how the founder's runs settle the payload shapes this build could only read about.
+10. **Codex and Cursor files live in `integrations/codex/`, `integrations/cursor/` and `integrations/agents/`**, beyond units-of-work's `integrations/claude-code/`, `.claude-plugin/marketplace.json` and `docs/assistants/`: the guides embed them verbatim and the tests check them, so they are files, not just guide text.
+11. **Cursor gets the skill as an Agent Skill** in `.agents/skills/`, which Cursor now reads, instead of the draft's `.cursor/rules/pr-rla.mdc` "carrying the skill text". The rule file now carries the standing rules, the same text as the AGENTS.md block (Cursor also reads `AGENTS.md`; the guide says to use one or the other).
+12. **The manual acceptance runs the recorded gh-aw audit in all three clients**, not test-design §3's split (Claude Code on GitHub with `github-issues`, Codex on GitLab, Cursor on Bitbucket). Those cells need live audit repositories with trackers, which do not exist yet and cannot be made as scratch repos (D8); they become runnable once a real audit exists, the prospective gh-aw audit first. Each run still calls every MCP tool once, as §3 asks.
+13. **`scripts/local-claude-plugin.mjs` is new**: before `pr-rla-mcp` is published, `npx -y pr-rla-mcp@0.1.0` has nothing to install, so the founder's Claude Code run needs a copy of the plugin whose `.mcp.json` runs the checkout's server. It changes nothing else, so the skill, hooks and tool names are the released plugin's.
+14. **The plugin's `author` is `{ "name": "pr-rla" }`**, the project's name (the founder's rule: never a personal name), and the marketplace's `owner` likewise. The manifest has no `license` field.
+15. **Label requests are judged by the labels they carry, not by the endpoint.** The draft blocked a `gh api` POST or DELETE to a label endpoint outright, and this bolt's first version did the same for every write method. After the review, a request other than GET, HEAD or OPTIONS is blocked when it carries or names a verdict label, sends a GraphQL label mutation, posts a GitLab quick action on a verdict label, or has a body the guard cannot read. Adding `bug` or creating `enhancement` passes, which the review counted among the first version's false positives. Replacing or clearing an issue's labels passes even when that drops a verdict label: `verify` reports a verdict label that disappeared, while an added one is what the ledger would count.
+16. **The guard blocks what it does not finish reading**, beyond the brief's "fail closed on input it cannot read": a command over 512 KiB, code over 1 MiB, commands nested more than 8 deep (the first version skipped them, which the review turned into a bypass), a decision that takes more than 8 s, and, in an audit repo, a script it cannot read (missing when the line is checked, unreadable, or over 1 MiB) or a shell fed from a pipe it cannot read (`curl … | sh`, `base64 -d | sh`). Outside an audit repo those two pass, because large bundles and install scripts are ordinary there; `guard.md` lists it as a limit.
+
+### Findings
+
+1. **The draft's `allowed-tools` would never have matched** a plugin's MCP tools (deviation 1).
+2. **A skill's tool grants and removals last one turn.** The person's next message clears `allowed-tools` and `disallowed-tools`, so in a real review, which runs over many messages, the shell and the editors come back: only the hooks still block. The guide says so.
+3. **`claude plugin validate` 2.1.267 does not check MCP server entries** (that needs 2.1.281), so a broken `.mcp.json` would pass it here.
+4. **Cursor blocks a permission hook's action on empty or invalid output**, even without `failClosed`: a Claude Code-style "print nothing to allow" hook would block everything in Cursor. Hence the Cursor form, and the payload-marker rule (deviation 8).
+5. **pr-rla's read-only mode already treats an empty token as none** (`readOnlyBuiltinCredentials` keeps only non-empty variables), so mapping an unset `PR_RLA_READONLY_*` to an empty `GITHUB_TOKEN` makes the server read anonymously rather than fail.
+6. **The hook costs about what starting Node costs**: 140 ms per call on an idle machine (Node 22.23.2, five runs) for the first version; 310 to 470 ms for the hardened one while a fresh-clone verification ran alongside, against 330 to 450 ms for `node -e 0` at the same moment. Claude Code runs it before every shell command, file edit, file read and MCP call.
+7. **In pr-rla's own repository the guard blocks some development commands**: the test fixtures under `test/fixtures/audits/` and `examples/` are audit repos (they have a `.pr-rla.yml`), and scripts such as `scripts/build-gh-aw-recorded-audit.mjs` run `pr-rla register`, `freeze` and `sample`. That is the rule working; developing pr-rla with the plugin enabled means approving those commands in your own terminal.
+
+### The adversarial review (2026-11-04)
+
+A separate agent was given the guard, its rules and its doc, and asked to find ways an assistant could get round it (blocked things that pass) and ordinary commands it blocks wrongly. It worked in a scratch audit repo it made under the scratchpad (registered, frozen, sampled, with a verdict committed, a dirty sibling, a tracker with a custom label and a forged window) and ran its candidates through `guard.mjs --check-shell` and the hook entry point. Nothing left the machine: no tracker, no push, no model.
+
+| | Candidates | Wrong answers |
+|---|---|---|
+| First version | about 315 written, 294 in the harness's batches | 166 (bypasses and false positives together) |
+| After the fixes | the same 294 | 8 |
+
+The 8 that remain:
+
+- **Right for the scratch repo's state** (the candidate expected a block, but the command could not hurt there): g21 `git stash pop` with no record in the stash, g30 `git clean -fdX` with no ignored record, g33 `commit --amend` of a commit that holds no verdict.
+- **Decisions or limits, in `guard.md`**: g32 `git pull --rebase` (replays local commits), l30 and l31 `gh label create --force` and `gh label clone --force` (they change colour and description, not names), g27 `git worktree remove --force` (not read; it can discard an uncommitted verdict in another worktree), t5 Grep over the audit repo's root (the guard cannot tell whether the search reaches `.pr-rla/`).
+
+What was found and fixed, by kind (each now a named case in `guard.test.ts`):
+
+- **Code the guard did not read**: programs on stdin and in heredocs (`python3 - <<'PY'`), combined flags (`node -pe`, `python3 -uc`), write APIs its patterns missed (pathlib's `open('a')`, `mode='w'`, Perl's three-argument `open`, `os.system`, `execSync`, `fs.rm`, `IO.write`, `Deno.writeTextFile`, `bun -e`), awk's `system()` and `print >`, sed's `w` and `e` commands, and pr-rla's write API through `import()`.
+- **Writers it did not know**: `sort -o`, `uniq`'s output file, `yq -i`, `curl -o`, `wget -O`, `tar -c`, `git archive -o`, `python -m json.tool`, `script`, `link`, `cp -l`, `cp -R dir/.`, `rsync` of a directory, `gzip`, `ditto`, `ed`, `prettier --write`. In an audit repo a program the guard does not know to only read is no longer handed a record.
+- **Commands run indirectly**: Makefile recipes (`make clean`, `make --eval`), `npm pkg set` then `npm run`, lifecycle scripts run by `npm install`, `npm --silent run`, patches from stdin (`patch`, `git apply`, `apply_patch` in the shell), `find -exec`, `xargs` (also `xargs -I{} sh -c '{}'`), for loops over the window, `su -c`, `tmux`, `flock`, `gtimeout`, `trap`, `PROMPT_COMMAND`, `BASH_ENV`, an in-line `PATH`, and Claude Code's `Monitor` tool, which the hooks did not match.
+- **The parser**: `$[…]` hiding the next line, `((cmd) )` and `$((cmd) )`, brace sequences and `{gh,}` as the program, an empty variable before the program, `cd -`, `pushd`/`popd`, a computed `cd`, `bash <(…)`, `source <(…)`, `/dev/stdin`, `IFS` splitting, arrays, `printf -v`, zsh's `=cmd`, glob qualifiers, `nocorrect` and `source =(…)`. Fixed after the review's batches, while writing the regression cases: substitutions inside arithmetic (`(( $(…) ))`, `$(( $(…) ))`, `` $[ `…` ] ``) and in unquoted heredoc bodies, which bash and zsh run and the guard skipped; and commands nested more than 8 deep (nine `sh -c` levels), which it skipped instead of blocking.
+- **Consent and links**: consent written into `~/.zshenv` or `~/.zshrc` (by shell or by the Write tool), `node --env-file`, the approvals directory linked elsewhere in a fresh home, a link to the window made earlier in the line, a link standing for pr-rla, `.GIT/hooks` and `.PR-RLA/` in another case.
+- **git**: a one-shot `core.hooksPath`, `--git-dir`/`--work-tree` and `GIT_DIR`/`GIT_WORK_TREE`, `-C` with a computed directory, `--pathspec-from-file`, `update-ref`, `revert`, `cherry-pick`, `switch -f`, `checkout <rev> --`, `restore --source`, `checkout -B`, `reset --soft HEAD~1`, pushes forced by configuration, `include.path`, `--config-env` and `GIT_CONFIG_COUNT` aliases, an alias without `!` that force-pushes, `rebase --autosquash`, `GIT_EXTERNAL_DIFF`.
+- **Labels**: `gh issue -R … edit`, `gh alias set --shell` and `gh alias import`, `gh api` creating an issue with a verdict label, GitLab quick actions in notes (by `glab` and by request), GitLab's `issueSetLabels`, a GraphQL mutation behind a `\u` escape, curl URL globs, `--url-query`, `--expand-data`, `wget --post-data`, HTTPie with `-a`, `curl -d @-` and `gh api --input -` from heredocs, `xargs gh issue edit`, a configured label with a space, `gh issue delete`.
+- **The signing key**: Grep on its directory, `grep -r`, `find -exec cat`, `cat $(ls …)`, `curl -d @key`, `tar` of the directory, `openssl -in=`, `git show REV:key`.
+- **Other MCP servers**: a shell tool taking argv, a code tool, an HTTP tool with a JSON body, a GitLab note with a quick action, a tool named `mv`; Cursor's `edit_file`.
+- **Resource use**: brace bombs, deep nesting and backtracking patterns. Each is now decided well inside the 8 s budget (`guard.test.ts › decides crafted inputs …`), the label-mutation and record-name patterns are bounded, and a decision over the budget blocks.
+- **False positives fixed** (now allowed cases): `sed -i '' -e`, `find -delete` outside audit repos, code that reads a record and writes elsewhere, label requests with other labels, `mv` into the window's directory, `git commit -- notes.md`, `git add notes.md && git commit`, `make build`, `export -n`, `declare -p`, `env -u`, `[[ a > b ]]`, a plain rebase, `git config core.editor`, `git stash push -- notes.md`.
+
+### Unverified
+
+- **FR3.6, all three clients**: the founder's runs above. Until then nothing here has run inside Claude Code, Codex or Cursor.
+- **Claude Code**: the real `PreToolUse` payload (the tests use the documented shape); whether the plugin's server starts in the project directory (sidestepped by `--root ${CLAUDE_PROJECT_DIR}`); `${VAR:-}` expansion in a plugin's `.mcp.json` `env` (documented for `.mcp.json` files); how it shows progress notifications and whether it polls `job_status`; `onFailure: "block"` (needs 2.1.295; 2.1.267 is installed).
+- **Codex**: everything, as Codex is not installed here. The `PreToolUse` payload is documented, not observed (a string or an argv `command`; the guard takes both); whether exit 2's reason is shown; the default environment of a stdio server; whether it asks before `readOnlyHint` tools.
+- **Cursor**: everything, likewise. The `Write`/`Delete` `tool_input` fields (the guard checks every path-like field); whether `{"permission":"allow"}` skips Cursor's own approval; what `${env:NAME}` gives when `NAME` is unset (an empty string is assumed).
+- **Windows**: PowerShell commands are read with the POSIX parser plus the file cmdlets; untested.
+- **Claude Code's Grep and hidden directories**: whether its Grep searches `.pr-rla/` when aimed at the repo's root was not checked (the guard lets that call through).
+- **The review's harness is not a proof**: 286 of its 294 candidates are now answered as expected, and the regression cases pin them, but a reviewer with more time will find more. The guard stays a speed bump (tier 3); `verify` is what decides.
+- **The guard is best effort**: what it cannot see is listed in `docs/assistants/guard.md`.
+
+### For the integration
+
+- **Files this bolt touched that U7, U8, U9 or the plugin fix round may touch too**: `README.md` (a section appended at the end), `BUILD-NOTES.md` (this section, at the end), `docs/security-model.md` (one bullet in U5's tier list, tier 3), `packages/pr-rla-mcp/test/review-draw-flow.test.mjs` and `packages/pr-rla-mcp/scripts/demo-review-draw.mjs` (new files in U5's package). Nothing under `src/`, no `package.json`, no `src/cli.ts` or `src/commands/*`. U7's directories (`integrations/github-action/`, `integrations/gitlab/`, `docs/ci/`) are untouched.
+- **The guard already knows wave 2's commands**: `plugin approve` (and `--env`/`--origin`), `--accept-lock-grants`, `PR_RLA_ACCEPT_LOCK_GRANTS`, `PR_RLA_APPROVALS_FILE`, `record --sign`, `ssh-keygen -Y sign -n pr-rla-verdict@v1`. A new **read-only** subcommand must be added to `PRRLA_READ` in `guard.mjs` and to the `reads` set in `guard.test.ts`; a new write one only to the `writes` set (the guard blocks it already).
+- **U8's `freeze --estimate` is blocked** (freeze in every form). If the assistant should run it, allow `freeze --estimate` without `--resume` in `prRla()` and add a case; the read path is the MCP tool `freeze_preview` with `estimate`.
+- **A release** bumps the `pr-rla-mcp@` pin in `integrations/claude-code/.mcp.json`, `integrations/codex/config.toml`, `integrations/cursor/mcp.json` and `docs/assistants/*.md`, and the plugin's `version`; `integrations.test.ts` fails until they all equal `packages/pr-rla-mcp/package.json`'s version, which must equal `package.json`'s.
+- **When the approvals store lands** (`operatorConsents` in `src/api/credentials.ts`), nothing here needs to change: the guard keeps the assistant from writing an approval, whatever the store then grants. Which approved credentials the MCP server may use is the fix round's decision, not this bolt's.
+
+## P2 time round B (2026-11-04)
+
+Branch `fix/p2-time-b`, off `integrate/wave2` at `0fa9ad8` (U1–U5, U8, U9, the ledger, trusted-time and plugins-broker rounds merged). It fixes time review findings 2, 6, 7 and 9 (`master-time-review.md`), pass-2 findings 2 and 6 and the trusted-time test gaps (`pass2-ledgers-time.md`), and two cases the coordinator added during the round: the CI round's withheld-credential case and the seam review's "CERTIFIED shown where it cannot stand". P1, P3 and P4 ran in parallel; this round stayed out of checks 5 and 7's logic, the ledgers, the providers and the freeze store, except the narrow seams listed under "For the integration step".
+
+### The shared names
+
+- **`src/core/verdict.ts`**, the one verdict model:
+  - `CheckStatus` (`PASS | WARN | FAIL | SKIP | INCOMPLETE`), re-exported by `src/core/verify.ts` as before;
+  - `AuditVerdict` (`VERIFIED | INCOMPLETE | FAILED`; `VerifyVerdict` is an alias);
+  - `auditVerdict(checks)`: any FAIL → FAILED; any INCOMPLETE **or SKIP** → INCOMPLETE; else VERIFIED;
+  - `VERDICT_EXIT_CODES` / `verdictExitCode(verdict)`: 0, 6, 1 (`src/api/read/verify.ts` re-exports `verdictExitCode`; the CLI's `verifyExitCode` calls it);
+  - `raiseStatus(status, to)`: FAIL > INCOMPLETE > WARN > PASS;
+  - `Withholding` (`{ verdict: "INCOMPLETE" | "FAILED", reason }`), `Certificate` (`{ state, withheld }`), `CertificateState` (`CERTIFIED | WITHHELD | NOT CERTIFIED | ESCALATE | REFUSED | INCOMPLETE`);
+  - `certificateFor(sprtState, refusal, withheld, unread)`: the certificate; `isCertified(certificate)`: **the only "certified" any surface shows**; `verdictWithholdings(checks)`: verify's withholdings; `failedWithholdings(reasons)`: a status-side gate's FAIL reasons as withholdings; `withheldVerdict(withheld)`.
+- **`src/api/access.ts`**: `accessShortfall(auditContext, pluginId, label)`, the CI-round rule.
+- **`src/core/records.ts`**: `drawBinding(registration, manifest)`, `compareChangeIds`, `reviewHorizonFor(registration)`, `RegistrationRecordV2.publicKeyPem`.
+
+### Findings fixed
+
+| # | What was wrong | What changed | Regression tests (fail at `0fa9ad8`, pass now) |
+|---|---|---|---|
+| time #2 (HIGH) | each draw index hashed the manifest's sha256, which covers `frozenAt`, the funnel, limitations and the version: one registration frozen twelve times before R gave twelve samples to choose from | schema v2: `index_i = SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N` over the change ids in canonical order (contracts.md §5, "Draws"); v1 keeps the manifest binding; the population audit below; `unreviewed: no-review` counts review objects at landing (v2) | `time-round-b › time review #2` (twelve freezes: twelve manifests, twelve old-binding samples, one new-binding sample; a review added after landing between two freezes changes neither N nor the ids); `seed › time round B` (binding per schema, the 72-byte message checked independently, strict encoding); `selector-review-rules › time round B` (both horizons) |
+| time #6 | verify said VERIFIED / CERTIFIED / exit 0 with a commitment time no operator proved, and with checks 4–7 skipped | unproven times are INCOMPLETE in checks 1 and 2 (v2: fewer than k registered operators; v1: no log entry verified under a trusted key), and so is check 3 when its R rests on an unproven registration time; any SKIP makes the verdict INCOMPLETE (exit 6); the certificate is withheld whenever the verdict is not VERIFIED; status withholds it for unproven times (exit 6) | `time-round-b › time review #6` (the late commitment: INCOMPLETE, exit 6, `ok` false, `certificate.state` WITHHELD, in text, `--json` and status `--json`; `--offline` before sample: exit 6; offline after sample: check 5's skip alone is INCOMPLETE, online the same audit is VERIFIED and CERTIFIED) |
+| time #7 | N below `minPopulation`: hand-made draws certified, verify VERIFIED, status `--json` reported `sequence.state` CERTIFIED next to the refusal | draws that exist below the minimum FAIL check 6 (exit 1); without draws check 6 SKIPs naming the minimum (INCOMPLETE); status refuses with exit 3 (U5 had already fixed the exit code) and `certificate.state` REFUSED | `time-round-b › time review #7` (both cases, text and `--json`) |
+| pass-2 #2 | a v1 envelope's unsigned `integratedTime` chose R and check 3 PASSed: CERTIFIED, VERIFIED, exit 0 | check 3 INCOMPLETE ("it could have been written after round R was public, to choose R"), certificate withheld, exit 6; with the log's key the edit FAILs checks 1 and 2 | `time-round-b › pass-2 review #2` (the reviewer's steer, both ways); `v1-compat` (rewritten: the old test enshrined `3:PASS`); `timestamp-verify › FR1.4` (the v1 clause now also runs verify: check 3 INCOMPLETE) |
+| pass-2 #6 | one `--log-key` replaced the pinned key for every URL, and anything verified under it counted as operator Sigstore | `--log-key <log url>=<pem file>`, repeatable, each key scoped to its log; the pinned key always wins for a pinned log (a key given for one is ignored, and check 1 says so); a log only the verifier vouches for counts as `log at <host>`; malformed values, non-keys and two keys for one log are usage errors (exit 1) | `translog-keys` (scoping, pinned-wins, neutral operator, the parser's refusals; a key for another log vouches for nothing); `e2e`, `rekor-v2` (the operator line) |
+| time #9 | swapped "logged by k of n"; check 6 counted issued draws, not compared ones, and passed an empty `draws[]`; `frozenAt` of manifest and commitment never compared; `opensAt`/`closesAt` never re-derived; `publicKeyPem` outside the signed bytes | `manifest logged by <operators> operators (k = <k>)`; check 6 compares every entry (index, change, url, merge SHA, first occurrence), needs every issued draw, FAILs duplicates, an empty list and `issued < 1`, and names the derivation; a single repo's commitment must carry the manifest's `frozenAt`; check 1 re-derives the window from its days; v2 registrations name `publicKeyPem` inside their signed bytes (check 1 FAILs a re-signed one, WARNs one without the field) | `time-round-b › time review #9` (six tests) |
+
+The CI round's two cases (the coordinator, during this round):
+
+| Case | What changed | Tests |
+|---|---|---|
+| a withheld or missing credential, then 401/403/404 | the broker records each 401/403/404 by caller (`stats.denied`) and each 2xx (`stats.answered`); the context records each provider's and ledger's credential standing (`credentialStanding`: granted, withheld with the approve command, not set). A plugin that ran without a credential and had every read refused (`accessShortfall`) makes check 5 (provider) or 7 (ledger) INCOMPLETE, even where those reads made it FAIL, and status `INCOMPLETE: not established (…)` with exit 6; the reason names the variable and `pr-rla plugin approve --env <ENV> --origin <origin>` (built-ins) or `pr-rla plugin approve <use>` (isolated plugins) | `access-incomplete` (GHES tracker: status text and `--json`, verify text and `--json`, withheld and not set; the provider in check 5; the control; a public tracker's deleted issue still FAILs anonymously) |
+| offline verify with a tracker ledger | covered by "a SKIP is INCOMPLETE": check 7 SKIPs offline, so exit 6 | `access-incomplete › offline verify with a tracker ledger` |
+
+The seam review's case (the coordinator, after P4's merge, `zz-seam-auditlist`): `audit_list`'s `certified`, verify's `statusLine` and `--json`, and status now all ask `isCertified(certificate)`. `StatusReport.sequence.state` stays the SPRT's **raw** state (documented in contracts.md §7, the MCP tool descriptions and README); `certified` and `certificate` are the claim. verify's line on a FAILED verdict reads `target reached · CERTIFICATE WITHHELD (verify check 7 (labels) FAILED)` (`time-round-b › seam review`).
+
+### The population: every input to N and to the sorted list
+
+| Input | Fixed by | Status after this round |
+|---|---|---|
+| window, kinds, authors, bots, `direct_push_via_merge`, `max_changed_lines`, `merged_by` | the signed registration (check 2 compares the manifest's copy; check 1 re-derives the window) | fixed |
+| review state for `no-human-review` | reviews submitted at or before `mergedAt` (since the ledger round) | fixed at landing |
+| review objects for `no-review` | v2: submitted at or before `mergedAt` (this round; was as of `frozenAt`); v1: as of `frozenAt`, as v1 manifests were made | fixed at landing (v2) |
+| `frozenAt`, the funnel, limitations, `prRlaVersion`, the provider's identity fields, `repoListing`, `goneRepos` | in the manifest hash only | no longer reach a draw |
+| the canonical id order | `compareChangeIds` (UTF-16 code units), validated by check 2, used by `sample` and check 6 | fixed |
+| labels (a `labels:` stratum) | read as of the freeze | **stated limit**: `register` notes it and check 2 WARNs; not refused, because the spec lists label strata and pr-rla reads no label history |
+| an approval dismissed after the merge, an account renamed | the SCM's current record | stated limit (providers' review normalisation is P1's area) |
+| a pool's repositories and heads | U8's registered repos and listing, P3's push-log proof | P3's area |
+
+### Fixtures: what changed and why
+
+- **`test/fixtures/audits/gh-aw-q3-recorded`** (recorded population, synthetic times) is a schema-v2 audit, so its draws change. It was rebuilt with its own scripts: `scripts/build-gh-aw-recorded-audit.mjs` (it now takes the protocol file as a third argument, so the fixture keeps its own `review-protocol.md`) on the fixture's own `changes.json` as `{ listed, selected, limitations }`, which reproduced the manifest's changes byte for byte; only the registration (a new key, named inside it), the manifest's `registrationSha256` and `sha256`, the commitment and the draws differ. The 36 new draws name 36 changes, none of the old 36.
+- **The new draws' descriptions were recorded live**, read-only, by `scripts/record-draw-descriptions.mjs` (new `--only` and `--merge` options): GitHub API with the operator's `gh auth token`, pr-rla's broker in read-only mode, GETs only. 2026-11-04T09:05:19Z–09:06:40Z, 249 GETs (all 36); 09:19:35Z and 09:20:00Z, 30 GETs each (four of them again, for the replay file; the first of these two runs wrote a wrong count into its description, fixed in the script and run again). 309 GETs in all, to `api.github.com` only. No write anywhere; no timestamp authority, drand relay or Rekor host was contacted in this round.
+- `changes.json` keeps the 36 old descriptions (recorded 04:50Z) beside the 36 new ones, because `test/fixtures/github/gh-aw-q3-draws-2026-11-04.json` still replays four of them for the provider's `describeChange` tests; `recordedDescriptions` says which is which (its text was rewritten by hand to say so; no recorded data was edited). That file's `description` now says its four changes were the draws before this round.
+- **New `test/fixtures/github/gh-aw-q3-draws-v2-binding-2026-11-04.json`** (recorded): the four kept changes of the new draws 5, 7, 13 and 31, which the MCP package's mock GitHub serves.
+- Tests moved to the new draws: draw #7 is gh-aw#58625 (a lock file and a changeset dropped), #27 gh-aw#55696 (12 of 18 files generated; it replaces the old #13, gh-aw#49685, 21 of 28). The MCP demo's default draw is 27.
+- **The bolt-1 TSA recording** (`test/fixtures/tsa/recorded-2026-11-03.json`, recorded) is unchanged, but `register` can no longer reproduce its digest: the recorded record names no key, and a registration now does. The replay tests (`timestamps-e2e`, `timestamp-trust-bundle`) install the recorded record and its four registered tokens as a registration (`test/helpers/recorded-registration.ts`), signed with the tests' fixed key: all four tokens still verify (`4 of 4 … PROVEN`, U_k 2026-11-03T22:32:28Z), register's printer gives its recorded lines, and verify WARNs that the record names no key. No new timestamp request was made.
+- The v1 fixture keeps its draws (v1 binding). No other committed fixture carries draws; the e2e, pooled and ledger tests draw at run time.
+
+### Decisions and deviations
+
+1. **v1 with an unverified log: INCOMPLETE, not FAIL.** An honest v1 audit verified without its log's key shows nothing false; INCOMPLETE says the time, and R with it, is not established. R is still derived from the logged time, so every verifier computes the same R.
+2. **Check 3 is INCOMPLETE on an unproven registration time for either base.** With a window-close base, the claim that the registration preceded R is the unproven time too.
+3. **SKIP counts as not verified** for every check, not only 4–7 (checks 1–3 never skip).
+4. **A wholly refused, uncredentialed plugin turns its check from FAIL to INCOMPLETE**, as the coordinator decided. Only "wholly": a plugin with any 2xx read is reading a public tracker or repository, its 404s are the server's answers, and the plugin's own probes decide (so a deleted issue on a public tracker still FAILs). Without that limit, U8's anonymous-verifier tests showed genuine FAILs masked.
+5. **Status can now exit 6** (a withheld certificate or unread verdicts), and 1 when a status-side gate shows a check would FAIL. contracts.md §7 says so; U7's CI map already treats 6 as "incomplete".
+6. **`CertificateState` gained `INCOMPLETE`**: the verdicts were not readable, so even the SPRT's state is not established.
+7. **The withheld line reads `target reached · CERTIFICATE WITHHELD (reasons)`**, so it never says CERTIFIED; P4's merged line says `NOT CERTIFIED: verify check 7 would FAIL (…)` (see the integration notes).
+8. **Label strata are noted and WARNed, not refused** (above).
+9. **A registration without `publicKeyPem` WARNs** rather than FAILs or INCOMPLETE: it can be re-keyed, but the draws no longer depend on the commitment, the tokens still bind its digest, and the only such records are test fixtures and the 2026-11-03 recording (P4 chose the same for its new field).
+10. **The trust-bundle "not cA" and "absent" cases are refused before pr-rla's own clause:** node's `checkIssued` (OpenSSL's `X509_check_issued`) refuses such an issuer, so no chain forms (`rule 6: chain … does not reach an anchor`). The tests assert that; pr-rla's clause stays for another OpenSSL. The "not critical" case reaches it.
+11. **SPRT cap-reached is reachable**, so the branch stays: with a registered cap of 36, 35 passes then a fail escalate at the cap. Under the default cap (144) it cannot fire for claim D's parameters; a test enumerates every split of the 143 draws before the cap and finds none landing within one pass of the target.
+12. **Rule 3's index and key-equality findings are reached by replacing pkijs's `SignedData.verify`** in the test: pr-rla resolves the signer itself, so an agreeing library never trips them. The finding for a certificate outside the token said "certificate 0 of the token"; it now says "a certificate that is not in the token".
+13. **Draw encoding is strict:** `drawIndex` refuses anything but 64 lowercase hex characters for the randomness and the binding; check 6 reports a refusal as a FAIL instead of throwing.
+
+### Tests
+
+At `0fa9ad8`: 83 files, **1218** passed. Now: 85 files, **1269** passed (+51): `time-round-b` (16) and `access-incomplete` (8) are new; `timestamp-signer-identity` +20 (the sixteen distinct-serial forgeries against DigiCert, GlobalSign, Microsoft and Sigstore, and four tests of rule 3's cross-check); `seed` +2; `sprt` +2 (one rewritten: the old "at the cap" test reached target-unreachable); `selector-review-rules` +1; `translog-keys` +1; `timestamps-e2e` +1; `timestamp-trust-bundle` (the not-cA and absent cases in the existing test). The MCP package keeps 59. Tests rewritten for the new behaviour, each to what the round decided, none weakened: `e2e`, `v1-compat`, `timestamps-e2e`, `translog-keys`, `rekor-v2`, `timestamp-trust-bundle`, `git-file-unchanged`, `pooled-verify`, `pooled-plugin`, `u8-review` (an honest frozen, unsampled pool is INCOMPLETE now, and check 5 is still its own PASS), `wave2-integration`, `api-cli-contract`, `draw-context`, `single-repo-anchor` (time round B's differences from master are applied to master's output rule by rule, so nothing else may differ), and the MCP tests. Helpers: `signing-key.ts` (a fixed synthetic key, which `setupAuditRepo` installs in every scenario: a registration names its key now, so with a fresh key per run its digest, and the draws, changed from run to run; the first verification runs caught one test, `e2e › one failure …`, that assumed draw #37 was new and failed when the random draws repeated a change; it now reads the blocking draw from `draws.json`), `recorded-registration.ts`, `audit-scenario.ts` (`logKeyArgs`), `forge-tsa.ts` (distinct-serial twins).
+
+The reproductions, run against `0fa9ad8` (a `git archive` with the new test files copied in): `time-round-b` and `access-incomplete`, 23 of 24 fail; the one that passes is the guard that a public tracker's deleted issue FAILs anonymously. The reviewers' own files, run on this branch: `rvtime-grind`, `rvtime-small`'s offline test and `rv2-v1-steer` (which assert the vulnerable behaviour) fail; `rvtime-late` and `rvtime-small`'s minimum-population test only print what verify said, and print `INCOMPLETE` exit 6 (`ok` false) and `FAILED: check 6 (draws)` exit 1 with status exit 3 (its `state CERTIFIED` is `sequence.state`, the raw SPRT state, beside `certificate.state` REFUSED).
+
+### Unverified
+
+- The new descriptions against GitHub after 2026-11-04T09:20Z (the recording is what GitHub said then).
+- `accessShortfall` against a real GitHub Enterprise Server, GitLab self-managed or Bitbucket Data Center: tested on fakes that answer 404 to anonymous reads, as GitHub does for a private repository.
+- The neutral `log at <host>` operator against any real non-Sigstore log (none was contacted).
+
+### For the integration step
+
+A trial merge of this branch (`1a32174`) into `integrate/wave2` at `6b0ec01` (P3, P4 and U7 merged), in a scratch clone, 2026-11-04:
+
+- **Conflicts:** 11 files. In source, four, each small: `src/core/verify.ts` (the import line: keep P4's `auditBinding` and this round's `./verdict.js` and `./window.js` imports), `src/api/pool-list.ts` (keep P3's `now` line beside this round's `horizon`), `src/cli.ts` (keep P3's `--verbose` and this round's exit-code help), and `src/api/read/status.ts`. Docs: `contracts.md`, `packages/pr-rla-mcp/README.md`. Tests: `api-cli-contract`, `git-file-unchanged`, `pooled-plugin`, `single-repo-anchor`, `u8-review`.
+- **`src/api/read/status.ts`, the seam.** Keep P4's `ledgerIntegrity` and `certificateWithheld` fields beside `certificate` and `certified`; keep this round's `statusLine` (it still takes P4's `info.withheld`) and its verdict text; keep P4's extra arguments to `countedLedgerVerdicts` inside this round's `try`, and add `ineligible: () => null` to the fallback `CountedVerdicts` (P4 added the field); then fold P4's gate into the one certificate: `const withholdings = [...timeWithheld, ...failedWithholdings(withheld.map((w) => \`verify check 7 would FAIL: ${w}\`))]`. P1's check-7 local gate goes into the same list the same way. The resolved four source files are in `scratchpad/p2b-merge-resolution/src/`; with them the merged tree builds and typechecks (both tsconfigs).
+- **What then fails, 40 tests in 9 files, each an expectation of the old model, none a crash:**
+  - U7's CI tests (`ci-github-action` 7, `ci-job-scripts` 17): their fixtures certify on self-asserted times (no timestamp authority), and status now withholds that certificate and exits 6, which U7's map turns into a failed job (`fail-on` includes incomplete by default); one also counts a labelled prefix that the new draws move (20/36 → 21/36). They pass on `integrate/wave2` alone. Give those fixtures mock authorities (as `test/time-round-b.test.ts` does), or expect INCOMPLETE where the times are unproven.
+  - P3's `p3-pool-head` (8), `u8-review` (2) and `pooled-verify` (1): VERIFIED on audits with no timestamp authority, or before sample; now INCOMPLETE for checks 1–3 (and 6–7 when unsampled). Assert check 5's own status and `honestButUnsampled` (in `u8-review`), or add authorities.
+  - P4's `p4-review-regressions` (2) and `wave2-integration` (1): they match P4's line `NOT CERTIFIED: verify check 7 would FAIL (…)`; the one line is now `target reached · CERTIFICATE WITHHELD (verify check 7 would FAIL: …)`, and `certified` is false.
+  - `single-repo-anchor`: the three rule sets (P3's moved heads and `headEvidence`, P4's ledger path, this round's `timeRoundB`) must be combined; P3's moved-head scenarios are VERIFIED on master and INCOMPLETE here (no authority), so `timeRoundB` applies to them too.
+  - `api-cli-contract` flow 2: P4 expects `verify --offline` to exit 1 (an uncommitted git-file ledger FAILs check 7); FAIL still wins over INCOMPLETE, so keep P4's 1 and re-check the other steps' codes.
+- **Files this round touched that P1, P3 or P4 also own:** `src/core/verify.ts` (check 5: one line passing `reviewHorizonFor`; check 7: only `checkTimestamps(..., "WARN")` for checkpoints, so their coverage keeps WARNing), `src/api/read/verify.ts` (`noteAccess` runs after P1's and P3's checks and only lowers a check to INCOMPLETE), `src/api/pool-list.ts` and `src/api/read/freeze-preview.ts` (the review horizon), `src/api/write/register.ts` (`publicKeyPem` in the record; the label note), `src/net/broker.ts` (`stats.denied`, `stats.answered`), `src/plugins/open.ts` and `src/api/context.ts` (credential standing).
+- **Every registration's digest changes** (it names its key), so anything a test or fixture pinned to a registration's sha256, or to draws, moves; P4's verdict payload v2 names the manifest and the beacon, which this round does not change.
+
+### Verified (command → output)
+
+From fresh `git clone`s of `fix/p2-time-b` at `e450463` (the last code and test commit; only this section comes after it), 2026-11-04T10:04Z to 10:14Z, Node 22.23.2, OpenSSL 3.6.4, three runs in a row, each the whole command, every step exit 0:
+
+```
+npm ci                                       → found 0 vulnerabilities
+npm run build                                → exit 0
+npm run typecheck                            → exit 0 (both tsconfigs)
+npm test                                     → Test Files 85 passed (85) · Tests 1269 passed (1269)
+npm --prefix packages/pr-rla-mcp ci && test  → # pass 59 · # fail 0
+npm --prefix examples/providers/gitea ci && test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci && test    → # pass 1 · # fail 0
+node scripts/demo-{broker,ledgers,plugin-host,presence,sdk-carry-overs}.mjs, packages/pr-rla-mcp/scripts/demo-draw-context.mjs → exit 0
+```
+
+- An earlier set of three runs, at `3110a10`, had run 2 fail on `e2e › one failure …` (the random-key draws above); `e450463` fixed it, and the three runs above followed it.
+- The ledgers demo now ends `INCOMPLETE … (exit 6)` for the relabel fixture (its audit has no timestamp authority) and still `FAILED: check 7 (labels)` for the deleted issue, read anonymously from a recorded public tracker.
+- `npm test` makes no network call. The only network use of the round is the 309 read-only GitHub GETs listed under "Fixtures".
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
@@ -3000,3 +3477,70 @@ Merged after U5 and P4 on the coordinator's instruction. P3 was cut from `integr
   - `test/plugin-host.test.ts` (P3 × plugins-broker): an isolated plugin's 5 ms `blindRateLimitWaitMs` reaches the broker as 1 s, then 2 s, and a body-only 403 comes back at once. Without the host change the test fails (checked).
   - `pushLog` over v2 is P3's own `pooled-plugin` test, unchanged, now on the v2 frames.
 - **Verified** (in this worktree, 2026-11-04, load average 1–7): build 0 · typecheck 0 (both tsconfigs) · `npm test` 86 files, **1311 passed (1311)** · `packages/pr-rla-mcp` `npm test` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.
+- **Verified from three fresh clones of `integrate/wave2` at `45f1c9d`** (2026-11-04, 08:43Z–08:57Z, Node v22.23.2, load average 3–17), each run the same: `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 86 files, **1311 passed (1311)** · `packages/pr-rla-mcp` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.
+
+### Merge 9: `bolt/u7-ci-integrations` (d83d991)
+
+Merged on top of `45f1c9d` on the coordinator's instruction. U7 was cut from `0fa9ad8` and changes nothing under `src/`.
+
+- **Conflicts:** only `BUILD-NOTES.md`; U7's section goes before this one. `README.md` auto-merged: U7's "CI integrations" section sits before "Architecture", with P4's and P3's edits around it unchanged. `package.json`, `package-lock.json` (`ajv` 8.20.0) and `.gitignore` (the `vendor/` exception) merged cleanly.
+- **Tests:** U7's 202 tests (46 + 113 + 43) pass against the integrated build unchanged. They run `dist/cli.js`, so they run P4's and P3's code: the merged suite is 89 files, 1513 passed.
+- **The Action's pin, re-taken from the integrated build** (`node scripts/pack-action-tarball.mjs`): `vendor/pr-rla-0.1.0.tgz` is now `npm pack` of this tree, sha512 `umZUL1XC…nB0Xg==` in the Action's lockfile (it was U7's snapshot of `0fa9ad8`, `P9hXc6xR…dng==`). The tarball gains P4's and P3's modules (`core/head-proof`, `core/ledger-path`, `io/executables`). Packing twice gives the same bytes (sha256 `71fff18d…`). `npm --prefix integrations/github-action ci` installs it, `pr-rla --version` prints 0.1.0, and its `verify --help` lists P3's `--verbose`.
+- **Fixed on the way:** the first re-pin shipped `dist/commands/freeze-pool.*`, compiled from a file U5 removed. tsc never deletes the output of a deleted source, and this worktree's `dist/` predates merge 6. A fresh clone does not have the problem, but a maintainer's checkout does. The pack script now removes `dist/` before it builds; with a stale file planted in `dist/`, the tarball is byte-identical to a clean one.
+- **Verified from a fresh clone of `integrate/wave2` at `6b0ec01`** (2026-11-04, 09:13Z–09:19Z, Node v22.23.2): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 89 files, **1513 passed (1513)** · `npm pack` of the clone equals the vendored tarball · `npm --prefix integrations/github-action ci` 0 vulnerabilities, `pr-rla --version` 0.1.0 · `packages/pr-rla-mcp` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0 (`demo-ci` among them).
+
+### Merge 10: `bolt/u6-assistants` (16a7a64)
+
+Merged on top of `6b0ec01` on the coordinator's instruction. U6 was cut from U5's tip `3e21347` and changes nothing under `src/` and no package file.
+
+- **Conflicts:** `BUILD-NOTES.md`, where U6's section goes before this one, and `docs/security-model.md`'s tiers. There P4's wording of the tier-2 attestation bullet is kept, and U6's tier-3 bullet (the guard hook, the skill's rules, `docs/assistants/guard.md`) replaces the old one-line tier 3. `README.md` auto-merged (U6's section appended).
+- **The guard knows every command and option of the integrated CLI.** U6's guard already classified `plugin approve` and the consent routes (`--accept-lock-grants`, `PR_RLA_ACCEPT_LOCK_GRANTS`, `PR_RLA_APPROVALS_FILE`, `HOME`/`XDG_CONFIG_HOME`, writes to the approvals file), and its subcommand test passes unchanged. A new test beside it classifies every option `src/cli.ts` defines, on its command, and runs the guard on each:
+  - **blocked:** every option of a write command (`record --sign`, `freeze --estimate`, `--resume` and `--dry-run`, `register --dry-run`, `plugin approve --env/--origin`), `--accept-lock-grants` before any command, and `checkpoint --push`, `--remote` and `--branch`;
+  - **allowed:** the read and format options of the commands that only read (`verify --verbose`, `--offline`, `--log-key`, `--tsa-trust`, `--beacon-file`, `--json`; `status --offline`, `--json`; `draw-context --max-patch-bytes`; `plugin check`'s; `simulate`'s; the global `--dir`, `--config`, `--from-file`, `--plugins`).
+
+  An option added later fails the test until it is classified. `freeze` stays blocked in every form, since the assistant has the MCP `freeze_preview` (its dry run and its `estimate`); `docs/assistants/guard.md` says so and names the option test. Plain `checkpoint` and `status --checkpoint` stay allowed, as U6 classified them: they append pr-rla's own local checkpoint line and push nothing, and the instruction named `checkpoint --push` as the write to block.
+- **Tests adapted, none weakened:**
+  - `integrations.test.ts` read the default token variables from `src/api/credentials.ts`, which merge 6 removed when consent became one store. It now reads them from the approvals store's `BUILTIN_DEFAULT_GRANTS` (`src/plugins/approvals.ts`). The variables are the same five, and the `.mcp.json` and Cursor assertions are unchanged.
+  - Its licence check met U7's Action package. That package's own `"license": "UNLICENSED"` (in `package.json` and the lockfile's root entry) is the project's no-licence marker, as in the root `package.json`, and the lockfile's dependency entries carry third-party packages' licences (npm's metadata, not a licence of ours). The check now requires a package's own licence field to be exactly `UNLICENSED` and leaves those fields out of the text check, which every other byte of `integrations/` and `docs/assistants/` still goes through. An installed `node_modules` (not committed) is skipped.
+- **Tool names:** the skill's `allowed-tools` (`mcp__plugin_pr-rla_pr-rla__` plus `audit_list`, `status`, `draws`, `draw_context`, `job_status`) name tools the integrated server registers (plugin `pr-rla`, server `pr-rla`; eight tools, `TOOL_NAMES`). U6's test reads them from the server's source.
+- **Wording:** U6's docs pass the allow-list as they are.
+- **The Action's pin** is re-taken (`node scripts/pack-action-tarball.mjs`), because `npm pack` includes `README.md`, which U6 extended. Nothing else in the tarball changed.
+- **Verified** (in this worktree, 2026-11-04, load average 17–34): build 0 · typecheck 0 · `npm test` 91 files, **2415 passed (2415)** (U6's 901 and the option test among them) · `packages/pr-rla-mcp` **66 pass, 0 fail** (U6's review-draw flow among them) · `claude plugin validate integrations/claude-code` and `claude plugin validate .` (the marketplace), Claude Code 2.1.267: both pass · gitea 1 pass · jira 1 pass · every demo exits 0 (`demo-review-draw` among them) · `npm --prefix integrations/github-action ci` 0 vulnerabilities, `pr-rla --version` 0.1.0.
+- **Verified from a fresh clone of `integrate/wave2` at `1943f7f`** (2026-11-04, 09:41Z–09:49Z, Node v22.23.2, load average 31–48): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 91 files, **2415 passed (2415)** · `npm pack` of the clone equals the vendored tarball · the Action's `npm ci` 0 vulnerabilities, `pr-rla --version` 0.1.0 · `packages/pr-rla-mcp` **66 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0 · both `claude plugin validate` runs pass.
+
+### Merge 11: `fix/p2-time-b` (2a8fa2d)
+
+Merged on top of `1943f7f` on the coordinator's instruction. P2 was cut from `0fa9ad8`; its section's "For the integration step" (a trial merge against `6b0ec01`, with resolved source files in the scratchpad) was the plan.
+
+- **Conflicts (12 files):**
+  - **Source.** `src/core/verify.ts`, `src/api/pool-list.ts` and `src/cli.ts` are each a both-sides line: P4's `auditBinding` import beside P2's `./verdict.js` and `./window.js`; P3's `now` beside P2's `horizon`; P3's `--verbose` beside P2's exit-code help. Resolved by hand, they are byte-equal to P2's reference resolutions. `src/api/read/status.ts` is the seam. P4's `ledgerIntegrity` and `certificateWithheld` sit beside P2's `certificate` and `certified`, and P4's extra arguments to `countedLedgerVerdicts` sit inside P2's access `try`, with `ineligible: () => null` in its fallback. P4's gate goes through P2's one certificate: `failedWithholdings(withheld.map((w) => "verify check 7 would FAIL: " + w))`, beside the unproven times. P2's reference file was taken after a line-by-line review against both sides.
+  - **Docs.** `contracts.md` keeps P3's two registration rows and P2's `publicKeyPem` row and "Draws" section, and P3's `verbose` sentence and P2's verdict-model bullet. The MCP README's `verify` row has P3's `verbose` and P2's wording and `certified`.
+  - **Tests.** `api-cli-contract`, `git-file-unchanged`, `pooled-plugin`, `u8-review` and `single-repo-anchor` (below). In BUILD-NOTES, P2's section goes before this one.
+- **Tests that expected the old model, each updated to the same intent under the stricter one (none weakened):**
+  - **P4 (3).** `p4-review-regressions` E1 and attack B, and the wave-2 seam test, now assert the one line, `target reached · CERTIFICATE WITHHELD (verify check 7 would FAIL: the ledger's integrity check FAILs)`, and the reason names check 7. Attack B also asserts `certified: false`, the certificate `{ state: WITHHELD, withheld: [{ verdict: FAILED, … }] }`, status exit 1, and `sequence.state` CERTIFIED as the raw state. The seam test now registers with two mock authorities. Through the CLI's context, which trusts their roots, the honest audit is CERTIFIED (exit 0) and the rewritten one withheld by check 7 alone (exit 1). Through `pr-rla/api/read`, which trusts only the shipped bundle, both are withheld for the unproven times, and the rewritten one by check 7 too.
+  - **P3.**
+    - `p3-pool-head`'s finding-3 shapes (12 cases) are frozen, unsampled pools without authorities. They now assert that check 5 keeps its own status, that nothing FAILs, and that the INCOMPLETE comes only from checks 1–4 and 6–7 (plus 5 where a window commit is not placed), each test saying why.
+    - A new test keeps VERIFIED where that is the intent: with two mock authorities, a commit dated in the window and pushed onto the frozen head after freeze, then sample and verify, is VERIFIED with check 5's FR7.2 note.
+    - `u8-review`'s backdated push uses P2's `honestButUnsampled`.
+    - `pooled-verify` records one verdict per drawn change: the draws moved, and draw 1 now repeats a change among the first 12.
+  - **U7 (24).** The CI fixtures now register and freeze with two mock authorities, and each audit carries a trust file for them. The CERTIFIED tests pass it as the owner's `tsa-trust` and are truly PROVEN, and still exit 0. New tests run the same audit without the anchors: the state is `WITHHELD`, the exit 6, and the job fails unless `fail-on` leaves `incomplete` out. The tests changed beyond that:
+    - the label-event prefix is computed from the draws (20 labelled changes now cover 21 draws);
+    - a self-hosted tracker without approval is `INCOMPLETE`, exit 6 (P2's access rule, where U7 expected NOT_CERTIFIED and exit 0);
+    - an offline verify is INCOMPLETE (exit 6) and passes only when `fail-on` leaves `incomplete` out;
+    - the Action's checkpoint test keeps the authorities' server up, since a checkpoint asks them again.
+  - **`single-repo-anchor`.** The three rule sets apply in turn: U8's, P4's ledger path, P3's head evidence, P3's moved heads, then P2's key and draws and `timeRoundB`. P3's moved shapes are VERIFIED on master. Here only checks 1–3 become INCOMPLETE (exit 6), with check 5 and the FR7.2 note as master has them.
+  - **`api-cli-contract`.** P4's exit 1 stays for the uncommitted ledger. After the commit, offline verify is INCOMPLETE (exit 6) with no FAIL.
+  - **U6's review-draw flow** and its docs move to draw #27 (gh-aw#55696: 12 of 18 files generated; CI 29 success, 3 skipped), as P2 moved the MCP demo.
+  - **Wording.** P2's line listing the demo files is vetted under `names`.
+- **Added by the merge, where two rounds met:**
+  - **`pr-rla status --tsa-trust <file>`** (repeatable; `StatusOptions.tsaTrust`; passed on to `status --checkpoint`'s checkpoint).
+    - Under P2 a certificate needs proven times. `register`, `freeze`, `checkpoint` and `verify` all take the verifier's extra anchors, but `status` could prove only the shipped bundle's. So an audit stamped by any other authority could never show a certificate in status, and no CI job could pass one.
+    - `pr-rla/api/read` and the MCP `status` tool are unchanged: they trust the shipped bundle only.
+    - U6's option test now classifies `status --tsa-trust` as a read. It also runs the guard on the value forms: `verify --log-key https://…=key.pem --tsa-trust …` and `status --tsa-trust …` are allowed, while `--accept-lock-grants status …` and `checkpoint --push --tsa-trust …` are blocked.
+  - **CI integrations.**
+    - A `tsa-trust` input on the Action and the GitLab component, and `PRRLA_TSA_TRUST` in the plain snippet and the Bitbucket step. These are anchor files that whoever owns the CI configuration trusts, passed as `--tsa-trust` to `status` and `verify` (and to the Action's `checkpoint`). Relative paths are made absolute, since `-C` moves the CLI.
+    - The Action's prepare step, and the shared job scripts, refuse a name that is not a file, and a shell metacharacter in it never runs (tested).
+    - The exit map's reason for 6 now names unproven times and skipped checks, in all four copies, which stay identical (tested).
+    - The Action's `state` output is now the certificate's state, never `sequence.state` (P2's one display decision): CERTIFIED, WITHHELD, NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE.
+    - `docs/ci/*`, the README and `docs/security-model.md` say so, and that these anchors are the CI owner's trust, which proves nothing to a third party.
+- **Verified** (in this worktree, 2026-11-04, load average 4–10): build 0 · typecheck 0 · `npm test` 93 files, **2472 passed (2472)** · `packages/pr-rla-mcp` **66 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.

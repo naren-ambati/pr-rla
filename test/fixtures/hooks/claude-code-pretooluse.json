@@ -1,0 +1,18 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Claude Code hooks reference, PreToolUse input (common input fields and the Bash, Write, Edit and Read tool_input tables), https://code.claude.com/docs/en/hooks, read 2026-11-04",
+    "note": "The shape of one PreToolUse payload; the guard tests fill in cwd, tool_name and tool_input per case. Not recorded from a running client: the founder's manual run records real payloads with guard.mjs --record (docs/assistants/manual-acceptance.md)."
+  },
+  "payload": {
+    "session_id": "00000000-0000-4000-8000-000000000000",
+    "prompt_id": "00000000-0000-4000-8000-000000000001",
+    "transcript_path": "/home/user/.claude/projects/example/transcript.jsonl",
+    "cwd": "/home/user/audit-repo",
+    "permission_mode": "default",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": { "command": "pr-rla status", "description": "Show the audit status", "timeout": 120000, "run_in_background": false },
+    "tool_use_id": "toolu_01ABC123"
+  }
+}

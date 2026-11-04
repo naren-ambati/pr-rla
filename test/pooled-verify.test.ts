@@ -46,7 +46,11 @@ describe("verify on an untouched pooled freeze", () => {
     expect(c5.details).toContain("history walked from the frozen heads of 30 repo(s)");
     expect(report.checks.find((c) => c.n === 2)!.status).not.toBe("FAIL");
     expect(report.checks.find((c) => c.n === 2)!.details.join("\n")).toMatch(/commitment|frozen with pr-rla/);
-    expect(report.ok).toBe(true);
+    // Nothing fails. Frozen but not sampled, on self-asserted times: INCOMPLETE, not ok (time round B; U8 asserted ok here).
+    expect(report.checks.filter((c) => c.status === "FAIL")).toEqual([]);
+    expect(report.checks.find((c) => c.n === 6)!.status).toBe("SKIP");
+    expect(report.verdict).toBe("INCOMPLETE");
+    expect(report.ok).toBe(false);
   });
 
   it("offline, check 5 is skipped and the rest still run", async () => {
@@ -256,9 +260,11 @@ describe("FR5.3: one certificate for the pool; per-repo counts are descriptive",
     const s = await frozen(org);
     await s.advance(13 * 3600_000); // 2026-10-21T01:00Z: R has published
     expect(await s.clock.run(sampleCommand(s.ctx, { through: 40 }))).toBe(0);
-    const draws = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/draws.json"), "utf8")) as { repo: string; draws: { draw: number; changeId: string }[] };
+    const draws = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/draws.json"), "utf8")) as { repo: string; draws: { draw: number; changeId: string; firstOccurrence: boolean }[] };
     expect(draws.repo).toBe("acme-org (30 repos)");
-    for (const d of draws.draws.slice(0, 12)) expect(await s.clock.run(recordCommand(s.ctx, String(d.draw), "pass", { reviewer: "alice" }))).toBe(0);
+    // One verdict per change among the first 12 draws (a change drawn twice reuses its first verdict); the draws depend
+    // on the registration's bytes, which the wave-2 rounds extended, so which draws repeat is read, not assumed.
+    for (const d of draws.draws.slice(0, 12).filter((x) => x.firstOccurrence)) expect(await s.clock.run(recordCommand(s.ctx, String(d.draw), "pass", { reviewer: "alice" }))).toBe(0);
     s.out.length = 0;
     expect(await s.clock.run(statusCommand(s.ctx, {}))).toBe(0);
     const text = s.out.join("\n");

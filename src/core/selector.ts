@@ -15,7 +15,8 @@ export interface Selector {
    * account that is not the author, submitted at or before the change landed (`isHumanDecision`).
    * Known semantic limit: an approval is not tied to the commit it approved, so an approval of an earlier
    * head commit still counts; only a dismissed or reset approval (`DISMISSED`) stops counting.
-   * `no-review`: no review object at all as of freeze time. `any`: no filter.
+   * `no-review`: no review object at all, submitted at or before the change landed (schema v2; v1 audits: as of
+   * freeze time, `ReviewHorizon`). `any`: no filter.
    */
   unreviewed: Unreviewed;
   merged_by: MergedBy;
@@ -161,9 +162,17 @@ export function hasHumanDecision(change: Pick<ChangeRecord, "author" | "mergedAt
   return reviews.some((r) => isHumanDecision(change, r));
 }
 
-export function matchesUnreviewed(change: ChangeRecord, mode: Unreviewed, cutoffIso: string): boolean {
+/**
+ * Which reviews `no-review` sees: `landing` (schema v2) those submitted at or before the change's mergedAt, so
+ * nothing after landing, and nothing chosen at freeze, changes the stratum; `cutoff` (schema v1) those as of the
+ * cutoff (the freeze time), as v1 manifests were made. `no-human-review` is the same under both: a human decision
+ * counts only if submitted at or before mergedAt (`isHumanDecision`).
+ */
+export type ReviewHorizon = "landing" | "cutoff";
+
+export function matchesUnreviewed(change: ChangeRecord, mode: Unreviewed, cutoffIso: string, horizon: ReviewHorizon = "landing"): boolean {
   if (mode === "any") return true;
-  const reviews = reviewsAsOf(change, cutoffIso);
+  const reviews = reviewsAsOf(change, horizon === "landing" && Date.parse(change.mergedAt) < Date.parse(cutoffIso) ? change.mergedAt : cutoffIso);
   if (mode === "no-review") return reviews.length === 0;
   return !hasHumanDecision(change, reviews);
 }
@@ -194,10 +203,11 @@ export interface SelectionResult {
 /**
  * Applies the selector. Steps are applied in a fixed order so the funnel is
  * reproducible; the final set is the intersection of all filters.
- * `cutoffIso` is the freeze time: reviews submitted after it are ignored.
+ * `cutoffIso` is the freeze time: reviews submitted after it are ignored. `horizon` (default `landing`) says which
+ * reviews `no-review` sees (`ReviewHorizon`): a v1 audit passes `cutoff`.
  * The registered bot list is applied first (on copies), and selected changes carry its labels.
  */
-export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string, opts: { aliases?: ActorAliases } = {}): SelectionResult {
+export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string, opts: { aliases?: ActorAliases; horizon?: ReviewHorizon } = {}): SelectionResult {
   const funnel: FunnelStep[] = [{ step: "landed in window", count: changes.length }];
   const bots = sel.bots ?? [];
   const relabel = applyBotList(changes, bots, opts.aliases);
@@ -214,7 +224,7 @@ export function applySelector(changes: readonly ChangeRecord[], sel: Selector, c
     cur = cur.filter((c) => sel.labels.every((l) => c.labels.includes(l)));
     funnel.push({ step: `labels ${sel.labels.join("+")}`, count: cur.length });
   }
-  cur = cur.filter((c) => matchesUnreviewed(c, sel.unreviewed, cutoffIso));
+  cur = cur.filter((c) => matchesUnreviewed(c, sel.unreviewed, cutoffIso, opts.horizon ?? "landing"));
   funnel.push({ step: sel.unreviewed === "any" ? "any review state" : sel.unreviewed === "no-review" ? "no review object" : "no recorded human review", count: cur.length });
   const mergedByBreakdown = { human: 0, bot: 0, unknown: 0 };
   for (const c of cur) mergedByBreakdown[c.mergedBy ? c.mergedBy.kind : "unknown"]++;

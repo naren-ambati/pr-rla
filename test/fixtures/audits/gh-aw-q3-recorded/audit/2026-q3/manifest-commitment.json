@@ -2,17 +2,17 @@
   "record": {
     "schema": "pr-rla/commitment/v2",
     "window": "2026-q3",
-    "manifestSha256": "c5c4ce3dc3ba201f036071a27a8624bf1a6a548b37f0d032c06e599ac50da09c",
+    "manifestSha256": "8cb7aab07227175b651169548c2e776ea8560de8407ad31b5ec41e89fa5754f6",
     "N": 1589,
-    "registrationSha256": "fa92428046ba75b3bcb48a592893b0f2adca54e5867e4734138d703816fd7345",
+    "registrationSha256": "1a619c365fb07deaf9c9e39f5a0396628ff252a83259ffe431a9a86689a3a3a5",
     "frozenAt": "2026-10-20T12:00:00Z",
     "seedRound": 33245812,
     "seedRoundPublishesAt": "2026-10-21T00:00:00Z",
     "prRlaVersion": "0.1.0"
   },
-  "sha256": "a69217e44b821e0524fe75e6e95c7ec87c2a76c0b38bbb2209a503c69027cd1b",
-  "signature": "MEYCIQCwvEvonPnaqFkI/fhqbK858DDkHt5IJLRYg2dT5yGdhwIhAN0cW2u1mCQls3xReajEuFUv5YqRKrFF0q+F1MqQaEJy",
-  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJEywWDTxhMRXiT53cazO1nQlpfk+\nC/RUatu/7F422HwdVPuzAH6A/6zCEBNhaVND8UzP5anwPxJqM22FLG0adg==\n-----END PUBLIC KEY-----\n",
+  "sha256": "10a50ae8f6fb48ee4ed63c64683e85735fcf733c149ccfe964cf201303177543",
+  "signature": "MEUCIBx6t36CI4UoXsTO0gV2pdqMA38FKFaDE9wdcOxoD9oBAiEAzInroSoLLA21hZVaAmOsw2GCP4wmoNeuBIEFMs1UbcQ=",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElYmxY0G4eOWj8U3OimLJH8Ax8q0w\ntcYLwyiBaSMKBjNLtDp8oLWUQza/v07kCgFI8K2hBM0AI4kyXcm1LSQw+A==\n-----END PUBLIC KEY-----\n",
   "log": null,
   "timestamps": []
 }

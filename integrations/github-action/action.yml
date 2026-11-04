@@ -1,0 +1,145 @@
+name: pr-rla
+description: Runs pr-rla status, verify or checkpoint on an audit repository, writes the job summary, and fails the job on ESCALATE, a refusal, too few timestamps or an incomplete verification.
+
+# A composite action, not a JavaScript one: it runs the CLI that package.json and package-lock.json in
+# this directory pin by exact version and integrity. Nothing here is published; docs/ci/github.md says
+# what a release changes.
+
+inputs:
+  command:
+    description: "status, verify, checkpoint or sample. checkpoint runs `pr-rla checkpoint --push` and sample runs `pr-rla sample` (never --submit); both write to the audit repository and need allow-writes: true."
+    required: false
+    default: status
+  dir:
+    description: Directory of the audit repository (where .pr-rla.yml is), relative to the workspace.
+    required: false
+    default: .
+  offline:
+    description: "Pass --offline to status and verify: no provider calls, no population rebuild. Online verify of a large population needs far more than GITHUB_TOKEN's 1,000 requests an hour."
+    required: false
+    default: "true"
+  comment:
+    description: "Post the status line on the audit issue (needs issues: write and an issue number)."
+    required: false
+    default: "false"
+  comment-issue:
+    description: "The audit issue to comment on. Defaults to the issue of an issues event."
+    required: false
+    default: ${{ github.event.issue.number }}
+  fail-on:
+    description: "Comma-separated names of the non-zero exit codes that fail the job: escalate (2), refusal (3), timestamps (5), incomplete (6). Exit 1 and exit 4 always fail."
+    required: false
+    default: escalate,refusal,timestamps,incomplete
+  plugins:
+    description: "builtin-only refuses every external provider and ledger plugin. allow lets the audit's pr-rla.lock.json plugins load (their credentials still need approve-origins or a local approval)."
+    required: false
+    default: builtin-only
+  approve-origins:
+    description: "Credentials the built-in providers and ledgers may send beyond the defaults (GITHUB_TOKEN to api.github.com, GITLAB_TOKEN to gitlab.com, BITBUCKET_TOKEN and BITBUCKET_USERNAME to api.bitbucket.org). Entries like GITHUB_TOKEN=https://ghe.example.com, separated by spaces, commas or newlines. Needed for GitHub Enterprise Server, GitLab self-managed, Bitbucket Data Center, or another token variable. Written by whoever owns this workflow; never taken from the audited repository."
+    required: false
+    default: ""
+  tsa-trust:
+    description: "Timestamp-authority anchor files (pr-rla's trust-extra JSON) that whoever owns this workflow trusts beyond the bundle pr-rla ships, as paths relative to the workspace separated by commas or newlines. Passed to status, verify and checkpoint as --tsa-trust. Needed only when the audit registers an authority outside the shipped bundle: a certificate needs its times proven, and status and verify can prove only what they trust. Your trust, not the audited repository's; a third party verifies with their own."
+    required: false
+    default: ""
+  accept-lock-grants:
+    description: "Take the credential grants and trust in the audit repository's pr-rla.lock.json as given. Only for an audit repository you control."
+    required: false
+    default: "false"
+  allow-writes:
+    description: "Allow commands that write to the audit repository (checkpoint, sample). The workflow also needs contents: write."
+    required: false
+    default: "false"
+  token:
+    description: "The token pr-rla reads as GITHUB_TOKEN and the comment is posted with."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  state:
+    description: "The certificate's state (status and verify): CERTIFIED, WITHHELD (the target is reached but something withholds the certificate, such as an unproven time), NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE (the verdicts could not be read); empty for other commands."
+    value: ${{ steps.run.outputs.state }}
+  prefix:
+    description: "The longest fully labelled prefix as labelled/issued, for example 24/36."
+    value: ${{ steps.run.outputs.prefix }}
+  llr:
+    description: "The log-likelihood ratio, to three decimals."
+    value: ${{ steps.run.outputs.llr }}
+  json:
+    description: "Path to the command's --json output (status and verify)."
+    value: ${{ steps.run.outputs.json }}
+  exit-code:
+    description: "pr-rla's exit code."
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js 24
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: "24"
+        package-manager-cache: false
+
+    - name: Install the pinned pr-rla
+      id: install
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: npm ci --prefix "$ACTION_PATH" --ignore-scripts --no-audit --no-fund
+
+    - name: Check inputs and record approvals
+      id: prepare
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PR_RLA_APPROVALS_FILE: ${{ runner.temp }}/pr-rla-approvals.json
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_DIR: ${{ inputs.dir }}
+        INPUT_OFFLINE: ${{ inputs.offline }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_COMMENT_ISSUE: ${{ inputs.comment-issue }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_APPROVE_ORIGINS: ${{ inputs.approve-origins }}
+        INPUT_TSA_TRUST: ${{ inputs.tsa-trust }}
+        INPUT_ACCEPT_LOCK_GRANTS: ${{ inputs.accept-lock-grants }}
+        INPUT_ALLOW_WRITES: ${{ inputs.allow-writes }}
+      run: bash "$ACTION_PATH/scripts/prepare.sh"
+
+    - name: Run pr-rla
+      id: run
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PR_RLA_APPROVALS_FILE: ${{ runner.temp }}/pr-rla-approvals.json
+        GITHUB_TOKEN: ${{ inputs.token }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_DIR: ${{ inputs.dir }}
+        INPUT_OFFLINE: ${{ inputs.offline }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_TSA_TRUST: ${{ inputs.tsa-trust }}
+        INPUT_ACCEPT_LOCK_GRANTS: ${{ inputs.accept-lock-grants }}
+      run: bash "$ACTION_PATH/scripts/run.sh"
+
+    - name: Comment on the audit issue
+      id: comment
+      if: ${{ inputs.comment == 'true' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+        INPUT_COMMENT_ISSUE: ${{ inputs.comment-issue }}
+        PRRLA_COMMENT_FILE: ${{ runner.temp }}/pr-rla-comment.md
+      run: node "$ACTION_PATH/scripts/comment.mjs"
+
+    - name: Apply the exit-code mapping
+      id: decide
+      if: ${{ steps.run.outputs.result == 'fail' }}
+      shell: bash
+      env:
+        REASON: ${{ steps.run.outputs.reason }}
+      run: |
+        echo "::error title=pr-rla::$REASON"
+        exit 1

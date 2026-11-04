@@ -3,3 +3,6 @@ dist/
 coverage/
 .pr-rla/
 *.log
+
+# The GitHub Action's pinned snapshot of pr-rla (integrations/github-action/vendor/): committed on purpose
+!integrations/github-action/vendor/pr-rla-*.tgz

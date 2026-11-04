@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "pr-rla": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "pr-rla-mcp@0.1.0", "--root", "${workspaceFolder}"],
+      "env": {
+        "GITHUB_TOKEN": "${env:PR_RLA_READONLY_GITHUB_TOKEN}",
+        "GH_TOKEN": "${env:PR_RLA_READONLY_GITHUB_TOKEN}",
+        "GITLAB_TOKEN": "${env:PR_RLA_READONLY_GITLAB_TOKEN}",
+        "BITBUCKET_TOKEN": "${env:PR_RLA_READONLY_BITBUCKET_TOKEN}",
+        "BITBUCKET_USERNAME": "${env:PR_RLA_READONLY_BITBUCKET_USERNAME}"
+      }
+    }
+  }
+}

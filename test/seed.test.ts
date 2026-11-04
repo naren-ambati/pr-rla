@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { verifyQuicknetBeacon } from "../src/beacon/drand.js";
 import { sha256Hex } from "../src/core/canonical.js";
+import { drawBinding, type AnyRegistration, type SignedRecord } from "../src/core/records.js";
 import { computeDraws, deriveSeedRound, drawIndex, firstRoundAtOrAfter, roundPublishTime } from "../src/core/seed.js";
 import { recordedBeacon } from "./helpers/fixtures.js";
 
@@ -73,6 +74,27 @@ describe("draws", () => {
     expect(computeDraws(recordedBeacon(33244800).randomness, manifest, 1590, 144)).not.toEqual(a);
     expect(a.every((d) => d.index >= 0 && d.index < 1590)).toBe(true);
     expect(a.map((d) => d.draw)).toEqual(Array.from({ length: 144 }, (_, i) => i + 1));
+  });
+
+  it("time round B: schema v2 draws are bound to the registration's sha256, v1 draws to the manifest's (keyed on the signed registration's schema)", () => {
+    const reg = (schema: string) => ({ record: { schema }, sha256: sha256Hex("a registration") }) as unknown as SignedRecord<AnyRegistration>;
+    const manifest = { sha256: sha256Hex("a manifest") };
+    expect(drawBinding(reg("pr-rla/registration/v2"), manifest)).toEqual({ hex: sha256Hex("a registration"), derivation: "registration" });
+    expect(drawBinding(reg("pr-rla/registration/v1"), manifest)).toEqual({ hex: sha256Hex("a manifest"), derivation: "manifest" });
+    // contracts.md §5, independently: SHA-256 over the 72 bytes randomness ‖ registrationSha256 ‖ uint64be(i), big-endian, mod N.
+    const binding = sha256Hex("a registration");
+    const want = [1, 2, 3, 144].map((i) => {
+      const i8 = Buffer.alloc(8);
+      i8.writeBigUInt64BE(BigInt(i));
+      return Number(BigInt(`0x${sha256Hex(Buffer.concat([Buffer.from(randomness, "hex"), Buffer.from(binding, "hex"), i8]))}`) % 1589n);
+    });
+    expect([1, 2, 3, 144].map((i) => drawIndex(randomness, binding, i, 1589))).toEqual(want);
+  });
+
+  it("the randomness and the binding must be exactly 32 bytes of lowercase hex", () => {
+    expect(() => drawIndex(randomness, "ab", 1, 10)).toThrow(/the draw binding must be 32 bytes as 64 lowercase hex characters/);
+    expect(() => drawIndex(randomness, manifest.toUpperCase(), 1, 10)).toThrow(/draw binding/);
+    expect(() => drawIndex(`${randomness}00`, manifest, 1, 10)).toThrow(/the randomness must be 32 bytes/);
   });
 
   it("golden values (any reimplementation must match)", () => {

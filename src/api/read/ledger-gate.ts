@@ -14,19 +14,21 @@ import { readPublications } from "./publications.js";
 /**
  * Check 7's gate for a caller other than verify (P1, the seam review of 45f1c9d): status, and anything that
  * prints a certificate. It reads the window's local files (the index, the publication records, the
- * checkpoints), assesses their tokens offline under the registration's timestamping, and runs the same
+ * checkpoints), assesses their tokens offline under the registration's timestamping (with the caller's `tsaTrust`
+ * anchors, as status assesses the registration's and the commitment's), and runs the same
  * src/core/ledger-gate.ts check 7 runs, with what the caller got from the ledger (`ledger`; null when the
  * ledger was not read). Whatever it FAILs, verify's check 7 FAILs; `withheld` says why a certificate
  * must not be printed.
  */
-export async function localLedgerGate(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, input: { registration: SignedRecord<AnyRegistration>; manifest: AnyManifest; draws: DrawsFile; ledger: GateLedger | null; ledgerIdentity: BindingIdentity | null }): Promise<LedgerGate> {
+export async function localLedgerGate(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, input: { registration: SignedRecord<AnyRegistration>; manifest: AnyManifest; draws: DrawsFile; ledger: GateLedger | null; ledgerIdentity: BindingIdentity | null; tsaTrust?: readonly string[] }): Promise<LedgerGate> {
   const reg = input.registration;
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
   const publications = readPublications(paths.windowDir);
   const checkpointStamps = new Map<CheckpointArtifact, TimeEvidenceSummary>();
   const publicationStamps: (TimeEvidenceSummary | null)[] = [];
   if (isRegistrationV2(reg)) {
-    const bundle = trustFor(ctx);
+    // The caller's extra anchors too (status --tsa-trust), as for the registration's and the commitment's times.
+    const bundle = trustFor(ctx, input.tsaTrust ?? []);
     for (const cp of checkpoints) if (cp.line.timestamps.length) checkpointStamps.set(cp, await assessRecord(ctx, config, { record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, bundle));
     for (const p of publications?.publications ?? []) publicationStamps.push(await assessRecord(ctx, config, p, p.record.publishedAt, reg.record.timestamping, bundle));
   }

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
+import { sampleCommand } from "../src/commands/sample.js";
 import { buildPopulation } from "../src/core/population.js";
 import { manifestSha256, type CommitmentRecordV2, type ManifestV2, type SignedRecord } from "../src/core/records.js";
 import { normalizeSelector } from "../src/core/selector.js";
@@ -17,6 +18,7 @@ import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
 import { fakeOrg, orgSpec, ORG, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 import { buildScenario, OID, scmScenario, type ScCommit, type ScmScenario } from "./helpers/scm-scenario.js";
+import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
 /**
  * Round P3 (frozen-head and repo-set integrity): every reproduction of the second adversarial review of U8 (its
@@ -70,6 +72,16 @@ async function proRegistered(org: FakeOrg, o: Parameters<typeof setupPoolAudit>[
   return s;
 }
 const verify = (s: PoolScenario, ctx = s.ctx) => s.clock.run(runVerify(ctx, { offline: false }));
+/**
+ * An honest pool frozen but not sampled, with no timestamp authority: nothing FAILs, and under time round B's one
+ * verdict model it is INCOMPLETE, not VERIFIED (checks 1-3: unproven times; 4: R not yet published; 6-7: not sampled),
+ * plus check 5 where a window commit is not placed. These tests are about check 5, which keeps its own status.
+ */
+function honestButUnsampled(r: Report, alsoIncomplete: number[] = []): void {
+  expect(r.checks.filter((c) => c.status === "FAIL")).toEqual([]);
+  expect(r.verdict).toBe("INCOMPLETE");
+  expect(r.checks.filter((c) => c.status === "INCOMPLETE" || c.status === "SKIP").map((c) => c.n)).toEqual([1, 2, 3, 4, ...alsoIncomplete, 6, 7]);
+}
 
 /** What an auditee who holds the audit's signing key can do before R: rewrite the manifest and re-sign the commitment. */
 function resign(s: { dir: string }, edit: (m: ManifestV2) => ManifestV2) {
@@ -234,13 +246,13 @@ describe("pass 2 finding 3: honest pushes after freeze are FR7.2, as master says
     },
   };
 
-  it.each(Object.keys(shapes))("%s: PASS and VERIFIED", async (name) => {
+  it.each(Object.keys(shapes))("%s: check 5 PASSes, and nothing FAILs", async (name) => {
     const org = org30();
     const s = await frozen(org);
     const { missing } = shapes[name]!(org);
     const r = await verify(s);
     expect(check(r, 5).status).toBe("PASS");
-    expect(r.verdict).toBe("VERIFIED");
+    honestButUnsampled(r);
     if (missing) expect(lines(r, 5)).toMatch(/commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*: the push log shows [0-9a-f]{12}… was the branch's tip at freeze \(it became the default branch's tip at .*\) and that it reaches everything on the branch when the window closed, so they are not in the population \(FR7\.2\)/);
   });
 
@@ -251,7 +263,7 @@ describe("pass 2 finding 3: honest pushes after freeze are FR7.2, as master says
     org.control.pushLog.set("*", 404);
     const r = await verify(s);
     expect(check(r, 5).status).toBe(missing ? "INCOMPLETE" : "PASS");
-    expect(r.verdict).toBe(missing ? "INCOMPLETE" : "VERIFIED");
+    honestButUnsampled(r, missing ? [5] : []);
   });
 
   it("the push log's retention: a log that no longer reaches the window's close is no evidence (INCOMPLETE), never a FAIL", async () => {
@@ -263,6 +275,40 @@ describe("pass 2 finding 3: honest pushes after freeze are FR7.2, as master says
     expect(check(r, 5).status).toBe("INCOMPLETE");
     expect(lines(r, 5)).toMatch(/INCOMPLETE acme-org\/svc-03: 1 direct push\(es\) .*no push-time evidence to place them \(the push log does not reach back to the window's close \(2026-10-01T00:00:00Z\): its oldest update is from 2026-10-20T15:00:00Z\)/);
   });
+});
+
+describe("pass 2 finding 3, end to end: an honest push after freeze VERIFIES once the times are proven and the draws issued (time round B)", () => {
+  let tsa: MockTsaServer;
+  beforeAll(async () => {
+    tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+  });
+  afterAll(async () => {
+    await tsa.stop();
+  });
+
+  it("a commit dated in the window pushed straight onto the frozen head after freeze: check 5 PASSes with the FR7.2 note, and verify says VERIFIED", async () => {
+    const org = org30();
+    const s = setupPoolAudit(org, { tsa: { ids: ["test-a", "test-b"], server: tsa }, timestamping: "{ authorities: [test-a, test-b], min_tokens: 2 }" });
+    // The org's API on api.github.com; the two authorities on their local mock server.
+    const ctx = s.ctxFor((async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return new URL(url).hostname === "api.github.com" ? org.fetch(input, init) : globalThis.fetch(input, init);
+    }) as typeof fetch);
+    const at = () => (tsa.nowMs = s.clock.now());
+    at();
+    expect(await s.clock.run(registerCommand(ctx, {}))).toBe(0);
+    await s.advance(12 * 3600_000);
+    at();
+    expect(await s.clock.run(freezeCommand(ctx, {}))).toBe(0);
+    org.pushCommits("svc-03", [{ oid: sha1("bd-e2e"), date: "2026-09-30T20:00:00Z", parents: [org.history("svc-03").head] }], { at: "2026-10-20T15:00:00Z" });
+    await s.advance(13 * 3600_000); // 2026-10-21T01:00Z: R has published
+    expect(await s.clock.run(sampleCommand(ctx, {}))).toBe(0);
+    const r = await s.clock.run(runVerify(ctx, { offline: false }));
+    expect(r.checks.filter((c) => c.status === "FAIL" || c.status === "INCOMPLETE" || c.status === "SKIP"), JSON.stringify(r.checks.map((c) => [c.n, c.status, c.summary]))).toEqual([]);
+    expect(check(r, 5).status).toBe("PASS");
+    expect(lines(r, 5)).toMatch(/commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*\(FR7\.2\)/);
+    expect(r.verdict).toBe("VERIFIED");
+  }, 180_000);
 });
 
 describe("the freeze records the push log's evidence for every pinned head", () => {

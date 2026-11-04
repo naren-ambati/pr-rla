@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [{ "command": "node .cursor/hooks/pr-rla-guard.mjs --client cursor", "timeout": 30, "failClosed": true }],
+    "beforeMCPExecution": [{ "command": "node .cursor/hooks/pr-rla-guard.mjs --client cursor", "timeout": 30, "failClosed": true }],
+    "beforeReadFile": [{ "command": "node .cursor/hooks/pr-rla-guard.mjs --client cursor", "timeout": 30, "failClosed": true }],
+    "preToolUse": [{ "command": "node .cursor/hooks/pr-rla-guard.mjs --client cursor", "matcher": "Write|Delete", "timeout": 30, "failClosed": true }]
+  }
+}

@@ -9,7 +9,7 @@ import { logPublicKey } from "../src/commands/translog.js";
 import { runVerify } from "../src/commands/verify.js";
 import { configFor } from "../src/commands/context.js";
 import type { LoggedEntry, RegistrationRecordV2, SignedRecord } from "../src/core/records.js";
-import { PINNED_LOG_KEYS, keySha256, pinnedLogKey, trustedLogKey } from "../src/translog/keys.js";
+import { PINNED_LOG_KEYS, keySha256, neutralLogOperator, parseLogKeyArgs, pinnedLogKey, trustedLogKey } from "../src/translog/keys.js";
 import { RekorClient, buildHashedRekord } from "../src/translog/rekor.js";
 import { noteKeyId } from "../src/translog/rekor-v2.js";
 import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
@@ -37,12 +37,30 @@ describe("pinned log keys (src/translog/keys.ts)", () => {
     expect(Buffer.from(noteKeyId(origin, v2.publicKeyPem)).toString("hex")).toBe(v2.logId.slice(0, 8));
   });
 
-  it("the verifier's key wins; else the pinned key for that URL; else none", () => {
-    const mine = "-----BEGIN PUBLIC KEY-----\nmine\n-----END PUBLIC KEY-----\n";
-    expect(trustedLogKey("https://rekor.sigstore.dev", mine)).toBe(mine);
-    for (const u of ["https://rekor.sigstore.dev", "https://rekor.sigstore.dev/", "HTTPS://Rekor.Sigstore.dev//"]) expect(trustedLogKey(u, null)).toBe(PINNED_LOG_KEYS[0]!.publicKeyPem);
+  it("pass-2 review #6: the pinned key always wins for a pinned log; a verifier's key counts only for its own log, under a neutral operator", () => {
+    const mine = new MockRekor().publicKeyPem;
+    const keys = new Map([["https://rekor.example.org", { url: "https://rekor.example.org", publicKeyPem: mine }]]);
+    // Before the fix one --log-key replaced the pinned key for every URL: a genuine Sigstore entry then FAILed, and anything verified was "Sigstore".
+    for (const u of ["https://rekor.sigstore.dev", "https://rekor.sigstore.dev/", "HTTPS://Rekor.Sigstore.dev//"]) expect(trustedLogKey(u, keys)).toEqual({ publicKeyPem: PINNED_LOG_KEYS[0]!.publicKeyPem, source: "pinned", operator: "Sigstore", url: "https://rekor.sigstore.dev" });
+    expect(trustedLogKey("https://rekor.example.org/", keys)).toEqual({ publicKeyPem: mine, source: "verifier", operator: "log at rekor.example.org", url: "https://rekor.example.org" });
+    expect(trustedLogKey("https://other.example.org", keys)).toBeNull(); // scoped: no other log is vouched for
     expect(pinnedLogKey("https://rekor.sigstage.dev")).toBeNull();
-    expect(trustedLogKey("http://127.0.0.1:61085", null)).toBeNull();
+    expect(trustedLogKey("http://127.0.0.1:61085")).toBeNull();
+    expect(neutralLogOperator("http://127.0.0.1:61085")).toBe("log at 127.0.0.1:61085");
+  });
+
+  it("--log-key takes <log url>=<pem file>, repeatable: malformed values, non-keys and two keys for one log are refused; a key for a pinned log is ignored and said so", () => {
+    const a = new MockRekor().publicKeyPem;
+    const b = new MockRekor().publicKeyPem;
+    const files: Record<string, string> = { "a.pub": a, "b.pub": b, "junk.pub": "not a key" };
+    const read = (f: string) => files[f]!;
+    const r = parseLogKeyArgs(["https://one.example=a.pub", "http://127.0.0.1:9/=b.pub", "https://rekor.sigstore.dev=a.pub"], read);
+    expect([...r.keys.keys()]).toEqual(["https://one.example", "http://127.0.0.1:9"]);
+    expect(r.ignored).toEqual(["--log-key for https://rekor.sigstore.dev is not used: pr-rla pins that log's key, and the pinned key always wins"]);
+    expect(parseLogKeyArgs(["https://one.example=a.pub", "https://one.example/=a.pub"], read).keys.size).toBe(1); // the same key twice is one
+    for (const bad of ["a.pub", "=a.pub", "https://one.example=", "ftp://one.example=a.pub", "one.example=a.pub"]) expect(() => parseLogKeyArgs([bad], read)).toThrow(/--log-key takes <log url>=<pem file>/);
+    expect(() => parseLogKeyArgs(["https://one.example=junk.pub"], read)).toThrow(/junk\.pub is not a public key/);
+    expect(() => parseLogKeyArgs(["https://one.example=a.pub", "https://one.example=b.pub"], read)).toThrow(/two different keys for https:\/\/one\.example/);
   });
 });
 
@@ -57,10 +75,11 @@ describe("logPublicKey reads no key from the audit repo and fetches none", () =>
     const { config } = configFor(ctx);
     expect(config.transparencyLog.publicKeyFile).toBe("rekor.pub");
     expect(await logPublicKey(ctx, config, "http://127.0.0.1:9", undefined, false)).toBeNull();
-    expect(await logPublicKey(ctx, config, "https://rekor.sigstore.dev", undefined, false)).toBe(PINNED_LOG_KEYS[0]!.publicKeyPem);
+    expect((await logPublicKey(ctx, config, "https://rekor.sigstore.dev", undefined, false))?.publicKeyPem).toBe(PINNED_LOG_KEYS[0]!.publicKeyPem);
     const mine = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "log.pub");
     writeFileSync(mine, log.publicKeyPem);
-    expect(await logPublicKey(ctx, config, "http://127.0.0.1:9", mine, true)).toBe(log.publicKeyPem);
+    expect(await logPublicKey(ctx, config, "http://127.0.0.1:9", [`http://127.0.0.1:9=${mine}`], true)).toMatchObject({ publicKeyPem: log.publicKeyPem, source: "verifier", operator: "log at 127.0.0.1:9" });
+    expect(await logPublicKey(ctx, config, "http://127.0.0.1:10", [`http://127.0.0.1:9=${mine}`], true)).toBeNull();
     expect(fetched).toEqual([]);
   });
 });
@@ -102,7 +121,8 @@ describe("review finding 3: a log run by the auditee is not an operator", () => 
     expect(reg.logCounted).toBe(false);
     expect(reg.proven).toBe(false);
     expect(reg.operators.map((o) => o.via)).toEqual(["test-a"]);
-    expect(r.checks[0]!.status).toBe("WARN");
+    // Time round B: 1 of 2 is not proven, so check 1 is INCOMPLETE (it WARNed before).
+    expect(r.checks[0]!.status).toBe("INCOMPLETE");
     expect(r.checks[0]!.details.join("\n")).toMatch(/registration log entry unverified: no trusted key for http:\/\/127\.0\.0\.1:\d+ /);
     expect(r.checks[0]!.details.join("\n")).toMatch(/registration timestamps: 1 of 2 TSAs \(test-a\) · k = 2 · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)/);
     expect(evil.requests.filter((q) => q.path === "/api/v1/log/publicKey")).toEqual([]); // the envelope's URL is never asked for a key
@@ -119,9 +139,15 @@ describe("review finding 3: a log run by the auditee is not an operator", () => 
     const s = await auditeeLogged();
     const key = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "their-log.pub");
     writeFileSync(key, evil.publicKeyPem);
-    const r = await runVerify(s.ctx, { logKey: key });
+    const r = await runVerify(s.ctx, { logKey: [`${evil.url}=${key}`] });
     expect(r.timestamps.registration!.logCounted).toBe(true);
-    expect(r.checks[0]!.details.join("\n")).toMatch(/SET and inclusion proof verified under the verifier's --log-key/);
+    // pass-2 review #6: counted as its own operator, never as Sigstore.
+    expect(r.timestamps.registration!.operators.map((o) => o.operator)).toEqual(expect.arrayContaining([`log at ${new URL(evil.url).host}`]));
+    expect(r.timestamps.registration!.operators.map((o) => o.operator)).not.toContain("Sigstore");
+    expect(r.checks[0]!.details.join("\n")).toMatch(/SET and inclusion proof verified under the verifier's --log-key for http:\/\/127\.0\.0\.1:\d+; operator log at 127\.0\.0\.1:\d+/);
+    // A key the verifier gave for another log vouches for nothing here.
+    const other = await runVerify(s.ctx, { logKey: [`https://rekor.example.org=${key}`] });
+    expect(other.timestamps.registration!.logCounted).toBe(false);
   });
 
   it("an entry that claims Sigstore's URL is checked under the pinned key, so a self-signed SET FAILs", async () => {

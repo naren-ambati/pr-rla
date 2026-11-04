@@ -94,9 +94,9 @@ describe("register --submit --rekor-api v2", () => {
     // The verifier's own copy of the log key, outside the audit repo.
     const keyFile = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "rekor-v2.pub");
     writeFileSync(keyFile, log.publicKeyPem);
-    const c1 = (await runVerify(s.ctx, { offline: true, logKey: keyFile })).checks[0]!;
+    const c1 = (await runVerify(s.ctx, { offline: true, logKey: [`${log.url}=${keyFile}`] })).checks[0]!;
     expect(c1.status).toBe("PASS");
-    expect(c1.details.join("\n")).toMatch(/registration in Rekor v2 log .* index 0 \(inclusion proof and signed checkpoint verified under the verifier's --log-key; v2 entries carry no time/);
+    expect(c1.details.join("\n")).toMatch(/registration in Rekor v2 log .* index 0 \(inclusion proof and signed checkpoint verified under the verifier's --log-key for http:\/\/127\.0\.0\.1:\d+; operator log at 127\.0\.0\.1:\d+; v2 entries carry no time/);
     expect(c1.details.join("\n")).toMatch(/registration timestamps: 2 of 2 TSAs \(test-a, test-b\) · k = 2 · PROVEN/);
   });
 

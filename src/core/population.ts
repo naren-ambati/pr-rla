@@ -1,6 +1,6 @@
 import { assertChangeRecord, isCommitId, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { sortChanges, type ManifestEntry } from "./records.js";
-import { applySelector, reviewsAsOf, type ActorAliases, type SelectionResult, type Selector } from "./selector.js";
+import { applySelector, reviewsAsOf, type ActorAliases, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
 /** Added to every manifest whose selector includes direct pushes, whatever the provider says. */
@@ -44,6 +44,8 @@ export interface PopulationArgs {
   head?: string;
   /** Account id -> login at freeze, so renamed accounts still match the selector (verify). */
   aliases?: ActorAliases;
+  /** Which reviews `no-review` sees (`ReviewHorizon`; `reviewHorizonFor(registration)`): `landing` unless a v1 audit passes `cutoff`. */
+  horizon?: ReviewHorizon;
 }
 
 /** What listing one repository needs from a pooled build (the rest is shared). */
@@ -106,7 +108,7 @@ export function assemblePopulation(providerName: string, unordered: readonly { r
     if (schemes.size > 1) throw new Error(`a pooled audit uses one provider, but provider ${providerName} returned changes of ${[...schemes].sort().join(" and ")}; register one audit per provider`);
   }
   const listed: ListChangesResult = only ?? mergeListings(perRepo.map((r) => r.listed), changes);
-  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, args.aliases ? { aliases: args.aliases } : {});
+  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, { ...(args.aliases ? { aliases: args.aliases } : {}), ...(args.horizon ? { horizon: args.horizon } : {}) });
   const entries = sortChanges(selection.selected.map((c) => ({ ...c, reviews: reviewsAsOf(c, args.cutoffIso) })));
   const byKind = { pull_request: 0, direct_push: 0 };
   for (const c of listed.changes) byKind[c.kind]++;

@@ -133,9 +133,9 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
       "status",
       {
         title: "Audit status",
-        description: "Where a window stands: the certificate line (prefix, fails, LLR against the target, CERTIFIED / n more needed / ESCALATE), the blocking draw and verdict provenance. Offline by default; offline: false also reads the SCM and the tracker. Never appends a checkpoint.",
+        description: "Where a window stands: the certificate line (prefix, fails, LLR against the target, CERTIFIED / CERTIFICATE WITHHELD / n more needed / ESCALATE / INCOMPLETE), the blocking draw and verdict provenance. `certified` (and `certificate.state`, with `certificate.withheld` saying why) is the only claim to report; `sequence.state` is the SPRT's raw state and can be CERTIFIED while the certificate is withheld. Offline by default; offline: false also reads the SCM and the tracker. Never appends a checkpoint.",
         inputSchema: z.strictObject({ dir, window, offline }),
-        outputSchema: z.looseObject({ phase: z.string().optional(), line: z.string().optional(), ...handle }),
+        outputSchema: z.looseObject({ phase: z.string().optional(), line: z.string().optional(), certified: z.boolean().optional(), ...handle }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>
@@ -182,9 +182,9 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
       "verify",
       {
         title: "Verify an audit",
-        description: "A third party's check of the seven audit properties (registration, timing, seed, population, draws, labels and protocol). `verdict` is VERIFIED, FAILED, or INCOMPLETE (nothing failed, but part could not be checked: not a verification), and `exitCode` what pr-rla verify exits with (0, 1, 6). Offline by default; offline: false rebuilds the population from the SCM and reads the tracker, and becomes a job if it runs past 25 s.",
+        description: "A third party's check of the seven audit properties (registration, timing, seed, population, draws, labels and protocol). `verdict` is VERIFIED, FAILED, or INCOMPLETE (nothing failed, but part could not be established or was skipped: not a verification), and `exitCode` what pr-rla verify exits with (0, 1, 6). `certified` is true only for a VERIFIED audit whose SPRT certified; `status.sequence.state` is the SPRT's raw state. Offline by default; offline: false rebuilds the population from the SCM and reads the tracker, and becomes a job if it runs past 25 s.",
         inputSchema: z.strictObject({ dir, window, offline }),
-        outputSchema: z.looseObject({ ok: z.boolean().optional(), verdict: z.enum(["VERIFIED", "FAILED", "INCOMPLETE"]).optional(), exitCode: z.number().optional(), checks: z.array(z.looseObject({ n: z.number(), status: z.string() })).optional(), ...handle }),
+        outputSchema: z.looseObject({ ok: z.boolean().optional(), verdict: z.enum(["VERIFIED", "FAILED", "INCOMPLETE"]).optional(), exitCode: z.number().optional(), certified: z.boolean().optional(), checks: z.array(z.looseObject({ n: z.number(), status: z.string() })).optional(), ...handle }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>

@@ -341,6 +341,27 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 | `verdicts` | `{ minProvenance: ProvenanceLevel, reviewers: string[] \| null, require_signed?: boolean, allowed_signers?: string[] }` | `reviewers` are logins or account ids (who may count); `allowed_signers` (U9 fix round) are OpenSSH allowed-signers lines, sorted, present only when keys are registered; `require_signed` only when true, and only with the built-in git-file ledger |
 | `registeredRepos?` | `{ repo, repoId }[]` | A `rule` only (U8 fix round): the repos the rule matched at `register`, by id, sorted. Freeze includes each that still exists, whatever its attributes. Required for a rule (P3): check 2 FAILs a rule registration without it |
 | `registeredVisibility?` | `{ identity, visibility: { <v>: { listed, complete, reason } } }` | A `rule` only (P3): what the registering token could prove it saw. A visibility the rule admits whose proof is not complete leaves check 5 INCOMPLETE |
+| `publicKeyPem` | PEM (SPKI) | Time round B (2026-11-04): the P-256 key that signs this registration and the audit's commitment, inside the signed and time-stamped bytes, so the registration cannot be re-signed under another key. `verify` check 1 FAILs when the envelope's `publicKeyPem` is not this key (compared as SPKI DER), and check 2 FAILs a commitment signed by another key. A v2 registration without the field (written before it existed: test fixtures and the 2026-11-03 recording; nothing was released) WARNs that it can be re-keyed |
+
+### Draws (time round B, 2026-11-04)
+
+Draw *i* (1-based, *i* = 1 … cap) of an audit with *N* changes is the 0-based index
+
+```
+index_i = int_be( SHA-256( randomness ‖ binding ‖ uint64be(i) ) ) mod N
+```
+
+- `randomness`: drand quicknet round R's `randomness` (SHA-256 of its BLS signature), 32 bytes, from its 64 lowercase hex characters.
+- `binding`, keyed on the **signed registration's** `schema`, never on a field of an unsigned file:
+  - `pr-rla/registration/v2`: the registration's `sha256` (SHA-256 of its canonical JSON), 32 bytes from 64 lowercase hex characters;
+  - `pr-rla/registration/v1`: the manifest's `sha256`, as v1 audits were drawn (read-only compatibility).
+- `uint64be(i)`: *i* as an unsigned 64-bit big-endian integer (8 bytes). The hashed message is exactly 72 bytes.
+- `int_be`: the 32-byte digest read as an unsigned 256-bit big-endian integer; the remainder mod *N* is exact (BigInt).
+- `index_i` points into the population's change ids **in canonical order**: ascending by UTF-16 code units, which is JavaScript's `<` on strings (equivalently, the ids' UTF-16BE encodings compared byte by byte). Ids are unique; the manifest's `changes` are stored in this order (check 2 FAILs a manifest that is not), and `draws.json`'s `index` is into it.
+
+Anything else (non-hex, upper-case hex, another length) is refused, never coerced. So for a v2 audit the draws are a function of the registration, the beacon and the set of change ids alone: nothing chosen at freeze (`frozenAt`, the funnel, the limitations, `prRlaVersion`, the provider's description of itself, the pool's listing) can move a draw, and freezing again cannot grind for a better sample (time review finding 2).
+
+**The population, too, is fixed before the freeze.** N and the id list are the registered selector applied to the SCM's record of each change at landing: the window, kinds, authors, bots and `direct_push_via_merge` are registered; a review counts for `no-human-review` only if submitted at or before the change's `mergedAt`; and from schema v2 `unreviewed: no-review` likewise sees only review objects submitted at or before `mergedAt` (v1 manifests counted them as of `frozenAt`). What stays outside pr-rla's reach, and is stated as a limit (BUILD-NOTES, "P2 time round B"): SCM state that can change after landing (labels, which a `labels:` stratum reads as of freeze; an approval dismissed after the merge; an account renamed), and, for a pool, which repositories exist and their heads, which the U8 and P3 rules hold to the registration and the push log.
 
 ### `PluginIdentity`
 
@@ -442,12 +463,13 @@ It runs outside the broker, because git speaks its own protocols and authenticat
 | 3 | Population below the registered minimum (review all instead) | `status`, `sample` |
 | 4 | Stopped before finishing; re-running the printed command finishes it (rate budget exhausted; checkpoint push rejected 3 times or blocked by a non-checkpoint conflict) | `freeze`, `checkpoint --push` |
 | 5 | Record written without enough timestamps (`n of k`, including `0 of k` when every authority was unreachable) | `register`, `freeze`, `checkpoint`, `sample` (its ledger publication record, P1) |
-| 6 | `verify` INCOMPLETE: no check failed, but part of the population could not be rebuilt (a repo gone, unreadable or rate limited) or its completeness could not be established (a token that cannot be shown to see every private or internal repo, a provider that cannot tell a late merge from a hidden landing). It prints `INCOMPLETE`, never `VERIFIED`. *(Added in the U8 fix round, 2026-11-04.)* | `verify` |
+| 6 | INCOMPLETE. `verify`: no check failed, but something was not established or a check did not run: part of the population could not be rebuilt (a repo gone, unreadable or rate limited) or its completeness could not be established (a token that cannot be shown to see every private or internal repo, a provider that cannot tell a late merge from a hidden landing); a registration or commitment time that k operators do not prove (v1: no log entry verified under a trusted key), and the seed round resting on it; a read a provider or ledger made without its credential (withheld or not set) that was refused with 401, 403 or 404 while nothing it read was answered; and any SKIPped check (`--offline`, before `sample`, a tracker ledger not read). It prints `INCOMPLETE`, never `VERIFIED`. `status`: the SPRT reached its target but the certificate is withheld for such a reason (an unproven time), or the verdicts were read without the ledger's credential and refused. *(Added in the U8 fix round; widened in time round B, 2026-11-04.)* | `verify`, `status` |
 
 With no authority configured at all, `register` and `freeze` exit 0 with the `TIMESTAMP NOT TAMPER-PROOF` warning (FR1.6, FR1.11).
 
 **`--json`:**
 - The `--json` output of each command is the AuditApi result object. `verify --json` carries `verdict` (`VERIFIED`, `INCOMPLETE` or `FAILED`), and `ok` is true only for `VERIFIED`; a check's `status` can be `INCOMPLETE`. A check may carry `verbose` (P3): the per-item lines a summary line in `details` stands for, printed by `verify --verbose`.
+- **One verdict model** (`src/core/verdict.ts`, time round B): `auditVerdict(checks)` (any FAIL → FAILED; any INCOMPLETE or SKIP → INCOMPLETE; else VERIFIED), `verdictExitCode` (0, 6, 1), and `certificateFor(sprtState, refusal, withheld, unread)` → `certificate: { state, withheld }` with `state` one of `CERTIFIED`, `WITHHELD`, `NOT CERTIFIED`, `ESCALATE`, `REFUSED`, `INCOMPLETE`, and `withheld: { verdict: "INCOMPLETE" | "FAILED", reason }[]`. `isCertified(certificate)` is the only claim any surface makes: status and verify `--json` carry it as `certified`, `audit_list` as `certified`, and the certificate line says `CERTIFIED (risk …)` only then (`target reached · CERTIFICATE WITHHELD (why)` when withheld). `StatusReport.sequence.state` is the SPRT's raw state and is never the claim. verify's withholdings are its non-passing checks; status's are the unproven times, plus whatever a status-side gate of check 7 shows would FAIL.
 - Adding a field is compatible. Renaming or removing a field is a minor version below 1.0 and is listed in the CHANGELOG.
 - Errors print `{ "error": { "code", "message", "host"?, "next"? } }` to stdout with `--json`, and a plain sentence plus the next step to stderr without it (NFR17).
 

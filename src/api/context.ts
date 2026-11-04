@@ -83,6 +83,22 @@ export interface AuditContext {
   setRateLimits(overrides: RateLimitOverrides): void;
   /** Hosts named in `rate_limits:` that no default budget covers yet. */
   pendingRateLimits(): string[];
+  /**
+   * Each opened provider's and ledger's credentials as this run gives them (time round B), by plugin id: which reach it,
+   * which are withheld for want of your approval (with the command that approves each) and which are not set. With the
+   * broker's denied reads it tells an access failure of yours from a missing record (src/api/access.ts).
+   */
+  readonly credentialStanding: Map<string, CredentialStanding>;
+}
+
+/** What credentials a plugin runs with in this context (`AuditContext.credentialStanding`). */
+export interface CredentialStanding {
+  /** At least one credential reaches the plugin. */
+  granted: boolean;
+  /** Set, but not approved for where the plugin would send it: the plugin runs without it. */
+  withheld: { env: string; origins: string[]; approve: string[] }[];
+  /** Read by the plugin, but not set in this environment. */
+  missing: string[];
 }
 
 export interface AuditContextOptions {
@@ -208,6 +224,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
       for (const [host, ov] of Object.entries(overrides)) if (!applyTo(host, ov)) pending.set(host, ov);
     },
     pendingRateLimits: () => [...pending.keys()],
+    credentialStanding: new Map(),
   };
   if (o.rateLimits) ctx.setRateLimits(o.rateLimits);
   return ctx;
@@ -247,13 +264,17 @@ export function requireReadWrite(ctx: AuditContext, operation: string): void {
  * (test/builtin-consent.test.ts checks every one). Any other set variable is withheld, so the
  * built-in runs anonymously, and one line names the command that approves it.
  */
-export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "log">, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; granted: BuiltinCredentialUse[] } {
+export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "log">, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; granted: BuiltinCredentialUse[]; standing: CredentialStanding } {
   const env: Record<string, string | undefined> = {};
   const granted: BuiltinCredentialUse[] = [];
   const withheld: string[] = [];
   const accepted: string[] = [];
+  const standing: CredentialStanding = { granted: false, withheld: [], missing: [] };
   for (const u of builtinCredentialUses(kind, name, options)) {
-    if (!ctx.env[u.env]) continue;
+    if (!ctx.env[u.env]) {
+      standing.missing.push(u.env);
+      continue;
+    }
     const line = `${u.env} -> ${u.origins.join(", ") || "no origin"}`;
     const https = u.origins.length > 0 && u.origins.every((o) => o.startsWith("https://"));
     const sources = u.origins.map((o) => ctx.consent.builtin(u.env, o));
@@ -261,11 +282,16 @@ export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "
       granted.push(u);
       env[u.env] = ctx.env[u.env];
       if (sources.includes("accepted")) accepted.push(line);
-    } else withheld.push(`${line}${https ? "" : " (not https)"}`);
+    } else {
+      withheld.push(`${line}${https ? "" : " (not https)"}`);
+      const unapproved = u.origins.filter((o, i) => sources[i] === null && o.startsWith("https://"));
+      standing.withheld.push({ env: u.env, origins: u.origins, approve: unapproved.map((o) => `pr-rla plugin approve --env ${u.env} --origin ${o}`) });
+    }
   }
+  standing.granted = granted.length > 0;
   if (withheld.length) ctx.log(`${kind} ${use}: ${withheld.join("; ")} ${withheld.length > 1 ? "are" : "is"} not approved on this machine, so withheld (the ${kind} runs without ${withheld.length > 1 ? "them" : "it"}); to approve: pr-rla plugin approve ${use}`);
   if (accepted.length) ctx.log(`${kind} ${use}: accepting ${accepted.join("; ")} from .pr-rla.yml for this run, not approved on this machine; --accept-lock-grants is only for a repo you control`);
-  return { env, granted };
+  return { env, granted, standing };
 }
 
 /** What a built-in may send, for the broker's grant (its recorder scrubs these values). */
@@ -278,7 +304,8 @@ const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => gr
  * swaps each only on the origin it was approved for (U5 fix round, joined to the approvals store).
  */
 export function builtinEnv(ctx: AuditContext, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; credentials: PluginCredential[] } {
-  const { env, granted } = builtinEnvironment(ctx, kind, name, use, options);
+  const { env, granted, standing } = builtinEnvironment(ctx, kind, name, use, options);
+  ctx.credentialStanding.set(`${kind}:${name}`, standing);
   const credentials = builtinGrantCredentials(granted);
   // A person's read-only context (the CLI's verify and status) gives built-ins the values, as read-write does.
   if (ctx.mode !== "read-only" || ctx.caller === "person") return { env, credentials };

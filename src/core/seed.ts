@@ -39,6 +39,8 @@ export function deriveSeedRound(inputs: SeedRoundInputs): number {
   return firstRoundAtOrAfter(base + SEED_DELAY_SECONDS);
 }
 
+const HEX32 = /^[0-9a-f]{64}$/;
+
 function uint64be(i: number): Uint8Array {
   if (!Number.isSafeInteger(i) || i < 0) throw new Error(`draw number must be a non-negative safe integer: ${i}`);
   const b = new Uint8Array(8);
@@ -47,13 +49,20 @@ function uint64be(i: number): Uint8Array {
 }
 
 /**
- * Draw i (1-based): SHA-256(randomness || manifest-hash || uint64be(i)) read as
- * a big-endian unsigned integer, mod N. randomness and manifest-hash are the
- * raw 32-byte values (hex-decoded). Returns a 0-based index into the sorted manifest.
+ * Draw i (1-based): SHA-256(randomness || binding || uint64be(i)) read as a big-endian unsigned
+ * 256-bit integer, mod N. `randomness` and `binding` are raw 32-byte values (64 lowercase hex
+ * characters each, hex-decoded). Returns a 0-based index into the population's change ids in
+ * canonical order (contracts.md §5, "Draws").
+ *
+ * The binding is the registration's sha256 for schema-v2 audits (`drawBinding` in records.ts), so
+ * nothing chosen at freeze (frozenAt, the funnel, limitations, the pr-rla version, the provider's
+ * self-description) can move a draw; v1 audits keep the manifest's sha256, as they were drawn.
  */
-export function drawIndex(randomnessHex: string, manifestSha256Hex: string, i: number, N: number): number {
+export function drawIndex(randomnessHex: string, bindingHex: string, i: number, N: number): number {
   if (!Number.isInteger(N) || N < 1) throw new Error(`population N must be >= 1 (got ${N})`);
-  const digest = sha256Bytes(hexToBytes(randomnessHex), hexToBytes(manifestSha256Hex), uint64be(i));
+  for (const [what, hex] of [["randomness", randomnessHex], ["draw binding", bindingHex]] as const)
+    if (!HEX32.test(hex)) throw new Error(`the ${what} must be 32 bytes as 64 lowercase hex characters (got ${JSON.stringify(hex.slice(0, 70))})`);
+  const digest = sha256Bytes(hexToBytes(randomnessHex), hexToBytes(bindingHex), uint64be(i));
   return Number(BigInt(`0x${bytesToHex(digest)}`) % BigInt(N));
 }
 
@@ -62,9 +71,10 @@ export interface Draw {
   index: number;
 }
 
-export function computeDraws(randomnessHex: string, manifestSha256Hex: string, N: number, count: number): Draw[] {
+/** Draws 1..count: `drawIndex` for each. */
+export function computeDraws(randomnessHex: string, bindingHex: string, N: number, count: number): Draw[] {
   const out: Draw[] = [];
-  for (let i = 1; i <= count; i++) out.push({ draw: i, index: drawIndex(randomnessHex, manifestSha256Hex, i, N) });
+  for (let i = 1; i <= count; i++) out.push({ draw: i, index: drawIndex(randomnessHex, bindingHex, i, N) });
   return out;
 }
 

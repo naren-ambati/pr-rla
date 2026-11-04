@@ -16,7 +16,8 @@ import { join } from "node:path";
 import { FIXTURE, body, startServer, treeHash } from "../test/helpers.mjs";
 
 const live = process.argv.includes("--live");
-const draw = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) ?? 13);
+// Draw #27 (github/gh-aw#55696) drops 12 linguist-generated lock files (time round B's draws; before, #13 showed that).
+const draw = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) ?? 27);
 let dir = FIXTURE;
 if (live) {
   dir = mkdtempSync(join(tmpdir(), "prrla-live-"));

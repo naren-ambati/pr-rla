@@ -1,4 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
 import { X509Certificate, createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,6 +67,28 @@ describe("review finding 1: forged tokens 'from' every bundled authority are ref
   });
 });
 
+describe("pass-2 review: a twin with its own, distinct serial (beyond the twin rule) cannot sign for an authority either", () => {
+  // The twin-count rule catches a same-serial twin first; these sixteen take it out of play (the reviewer's
+  // rv2-forge-variants). The twin is the only certificate the signer identifier names, so the signature verifies under
+  // the attacker's key; what refuses them is that the twin chains to no pinned anchor (rule 6), and for ESS → real, rule 4.
+  const variants: [string, NonNullable<Parameters<typeof forgeToken>[4]>, string[]][] = [
+    ["SubjectKeyIdentifier sid, distinct serial, ESSCertID → the real signer", { sid: "ski", twinAt: "last", essFor: "real", twinSerial: 777001 }, ["rule 4: ESSCertIDv2 does not match the signer certificate"]],
+    ["SubjectKeyIdentifier sid, distinct serial, ESSCertID → the twin", { sid: "ski", twinAt: "last", essFor: "twin", twinSerial: 777002 }, []],
+    ["issuer-and-serial sid naming the twin, distinct serial, ESSCertID → the twin", { sid: "twinIssuerSerial", twinAt: "last", essFor: "twin", twinSerial: 777003 }, []],
+    ["the same, with the real signer certificate left out", { sid: "twinIssuerSerial", twinAt: "last", essFor: "twin", twinSerial: 777004, dropReal: true }, []],
+  ];
+  for (const id of ["digicert", "globalsign", "microsoft", "sigstore"])
+    for (const [name, o, rule4] of variants)
+      it(`${id}: ${name}`, async () => {
+        const c = await forgedCheck(id, o);
+        expect(c.accepted).toBe(false);
+        expect(c.genuine).toBe(false);
+        expect(c.problems.filter((p) => p.startsWith("rule 3"))).toEqual([]); // the signature itself verifies, under the twin's key
+        expect(c.problems.filter((p) => p.startsWith("rule 4"))).toEqual(rule4);
+        expect(c.problems.some((p) => /^rule 6: chain .* does not reach an anchor pinned for /.test(p))).toBe(true);
+      });
+});
+
 describe("review finding 1: the certificate set of a real token (unsigned) cannot smuggle in a second signer", () => {
   it.each(RECORDED_IDS)("%s: a twin appended after the real signer certificate is refused, though the signature still verifies under the real key", async (id) => {
     const token = recordedToken(id);
@@ -120,6 +144,66 @@ describe("review finding 1: SubjectKeyIdentifier signer identifiers (RFC 5652 §
     const c = await syn(A, withCertificates(der, [new Uint8Array(B.signer.toSchema().toBER(false))]));
     expect(c.accepted).toBe(false);
     expect(c.problems).toContain(`rule 4: no certificate in the token matches the signer identifier (subject key identifier ${createHash("sha1").update(A.signer.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView).digest("hex")})`);
+  });
+});
+
+describe("rule 3's own cross-check fires when the CMS library verified with another certificate (pass-2 review: it never could)", () => {
+  // pr-rla resolves the signer itself, so a pkijs that agrees with it never trips this check: the only way to reach it
+  // is a library that picked another certificate, simulated here by replacing pkijs's SignedData.verify (synthetic).
+  let A: TestAuthority;
+  let bundle: TrustBundle;
+  beforeAll(async () => {
+    A = await makeTestAuthority({ id: "test-a" });
+    bundle = mergeTrust(SHIPPED_TRUST_BUNDLE, [trustExtra([A])]);
+  });
+  afterEach(() => vi.restoreAllMocks());
+  const check = (der: Uint8Array) => checkToken({ evidence: evidenceOf(A.id, der, "0102"), data, digestHex, signedTimeIso: T0, toleranceSeconds: 600, defaultAccuracySeconds: 60, bundle });
+  /** pkijs reports that it verified with the token's certificate `k` (or with `other`, outside the token). */
+  const pkijsUses = (k: number | null, other?: pkijs.Certificate) =>
+    vi.spyOn(pkijs.SignedData.prototype, "verify").mockImplementation(async function (this: pkijs.SignedData) {
+      return { signatureVerified: true, signerCertificate: k === null ? other! : this.certificates![k] as pkijs.Certificate } as never;
+    });
+  /** A second certificate for the signer's own key (same subject and issuer, another serial), as a re-issue would carry. */
+  async function sameKeyCert(): Promise<pkijs.Certificate> {
+    const c = new pkijs.Certificate();
+    c.version = 2;
+    c.serialNumber = new asn1js.Integer({ value: 990011 });
+    c.issuer = A.signer.issuer;
+    c.subject = A.signer.subject;
+    c.notBefore.value = new Date("2020-01-01T00:00:00Z");
+    c.notAfter.value = new Date("2040-01-01T00:00:00Z");
+    c.subjectPublicKeyInfo = A.signer.subjectPublicKeyInfo;
+    c.extensions = A.signer.extensions;
+    await c.sign(A.rootKey, "SHA-256");
+    return c;
+  }
+
+  it("control: with pkijs untouched, the same token passes rule 3", async () => {
+    const der = tokenOf(await mintResponse(A, { digestHex, nonceHex: "0102", genTime: new Date(T0), extraCerts: [A.root] }));
+    expect((await check(der)).problems).toEqual([]);
+  });
+
+  it("another certificate of the token, with another key: both the index and the key-equality findings", async () => {
+    const der = tokenOf(await mintResponse(A, { digestHex, nonceHex: "0102", genTime: new Date(T0), extraCerts: [A.root] }));
+    pkijsUses(1); // the root, carried second
+    const c = await check(der);
+    expect(c.accepted).toBe(false);
+    expect(c.problems).toEqual(["rule 3: the signature was checked with certificate 2 of the token, not the signer certificate (1)", "rule 3: the key that verified the signature is not the signer certificate's key"]);
+  });
+
+  it("another certificate of the token for the same key: the index finding alone (the keys are byte-equal)", async () => {
+    const der = tokenOf(await mintResponse(A, { digestHex, nonceHex: "0102", genTime: new Date(T0), extraCerts: [await sameKeyCert()] }));
+    pkijsUses(1);
+    const c = await check(der);
+    expect(c.accepted).toBe(false);
+    expect(c.problems).toEqual(["rule 3: the signature was checked with certificate 2 of the token, not the signer certificate (1)"]);
+  });
+
+  it("a certificate that is not in the token at all", async () => {
+    const der = tokenOf(await mintResponse(A, { digestHex, nonceHex: "0102", genTime: new Date(T0) }));
+    pkijsUses(null, A.root);
+    const c = await check(der);
+    expect(c.problems).toEqual(["rule 3: the signature was checked with a certificate that is not in the token, not the signer certificate (1)", "rule 3: the key that verified the signature is not the signer certificate's key"]);
   });
 });
 

@@ -66,24 +66,83 @@ export function pinnedLogKey(logUrl: string): PinnedLogKey | null {
   return PINNED_LOG_KEYS.find((k) => normalizeLogUrl(k.url) === want) ?? null;
 }
 
+/** A key verify trusts for a log, where it came from, and the operator a verified entry counts as. */
+export interface TrustedLogKey {
+  publicKeyPem: string;
+  source: "pinned" | "verifier";
+  /** "Sigstore" for a pinned log; a neutral `log at <host>` for a log only the verifier's --log-key vouches for. */
+  operator: string;
+  /** The log URL the key is for, as pinned or as the verifier named it. */
+  url: string;
+}
+
 /**
- * The key verify trusts for an entry: the verifier's own `--log-key`, else the key pinned for that
- * log URL, else none (the entry is then unverified). Nothing else is consulted.
+ * The verifier's `--log-key <url>=<pem-file>` keys, by normalised log URL. Each is scoped to its URL: a
+ * key for one log never verifies another log's entries.
  */
-export function trustedLogKey(logUrl: string, verifierKeyPem: string | null): string | null {
-  return verifierKeyPem ?? pinnedLogKey(logUrl)?.publicKeyPem ?? null;
+export type VerifierLogKeys = ReadonlyMap<string, { url: string; publicKeyPem: string }>;
+
+/** The operator a log only the verifier vouches for counts as: never "Sigstore", whatever its URL claims. */
+export function neutralLogOperator(logUrl: string): string {
+  try {
+    return `log at ${new URL(logUrl).host}`;
+  } catch {
+    return `log at ${normalizeLogUrl(logUrl)}`;
+  }
+}
+
+/**
+ * The key verify trusts for an entry (pass-2 review #6): the key pinned for that log URL, which always wins for a
+ * pinned log; else the verifier's own `--log-key` for exactly that URL; else none (the entry is then unverified).
+ * Nothing else is consulted: not the audit repo, not the URL's /publicKey.
+ */
+export function trustedLogKey(logUrl: string, verifierKeys: VerifierLogKeys = new Map()): TrustedLogKey | null {
+  const pinned = pinnedLogKey(logUrl);
+  if (pinned) return { publicKeyPem: pinned.publicKeyPem, source: "pinned", operator: pinned.operator, url: pinned.url };
+  const own = verifierKeys.get(normalizeLogUrl(logUrl));
+  return own ? { publicKeyPem: own.publicKeyPem, source: "verifier", operator: neutralLogOperator(own.url), url: own.url } : null;
 }
 
 /** Where a trusted key came from, for the verify output (NFR4). */
-export function logKeySource(logUrl: string, keyPem: string): string {
-  const pinned = pinnedLogKey(logUrl);
-  const der = (pem: string) => createPublicKey(pem).export({ type: "spki", format: "der" });
-  try {
-    if (pinned && der(pinned.publicKeyPem).equals(der(keyPem))) return `the key pinned for ${pinned.url} (Sigstore TUF)`;
-  } catch {
-    /* an unreadable key is reported where it is used */
+export function logKeySource(key: TrustedLogKey): string {
+  return key.source === "pinned" ? `the key pinned for ${key.url} (Sigstore TUF)` : `the verifier's --log-key for ${key.url}`;
+}
+
+/**
+ * Parses `--log-key <url>=<pem-file>` values (repeatable). The URL is everything before the first `=`; an http(s)
+ * URL. A key for a log pr-rla pins is reported in `ignored`: the pinned key wins. Two keys for one URL are refused.
+ */
+export function parseLogKeyArgs(args: readonly string[], readPem: (file: string) => string): { keys: Map<string, { url: string; publicKeyPem: string }>; ignored: string[] } {
+  const keys = new Map<string, { url: string; publicKeyPem: string }>();
+  const ignored: string[] = [];
+  for (const arg of args) {
+    const at = arg.indexOf("=");
+    const url = at > 0 ? arg.slice(0, at).trim() : "";
+    const file = at > 0 ? arg.slice(at + 1).trim() : "";
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      parsed = null;
+    }
+    if (!url || !file || !parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:"))
+      throw new Error(`--log-key takes <log url>=<pem file> (e.g. --log-key https://rekor.example.org=rekor.pub), got ${JSON.stringify(arg)}`);
+    const pem = readPem(file);
+    try {
+      createPublicKey(pem);
+    } catch (e) {
+      throw new Error(`--log-key ${url}: ${file} is not a public key (PEM): ${(e as Error).message}`);
+    }
+    const norm = normalizeLogUrl(url);
+    if (pinnedLogKey(url)) {
+      ignored.push(`--log-key for ${url} is not used: pr-rla pins that log's key, and the pinned key always wins`);
+      continue;
+    }
+    const prev = keys.get(norm);
+    if (prev && keySha256(prev.publicKeyPem) !== keySha256(pem)) throw new Error(`--log-key names two different keys for ${url}`);
+    keys.set(norm, { url, publicKeyPem: pem });
   }
-  return "the verifier's --log-key";
+  return { keys, ignored };
 }
 
 /** SHA-256 of a PEM key's DER, hex (a Rekor v1 logID). */

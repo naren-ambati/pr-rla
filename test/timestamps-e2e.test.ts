@@ -19,9 +19,11 @@ import { obtainTimestamps } from "../src/commands/timestamps.js";
 import { TSA_RETRY_DEADLINE_MS } from "../src/net/contract.js";
 import { roundPublishTime } from "../src/core/seed.js";
 import { loadConfig } from "../src/config.js";
-import { isoMs, readToken } from "../src/timestamp/verify.js";
+import { SHIPPED_TRUST_BUNDLE } from "../src/timestamp/bundle.js";
+import { assessTimestamps, isoMs, readToken, timestampsLine } from "../src/timestamp/verify.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { FIXTURES, readJsonFixture } from "./helpers/fixtures.js";
+import { RECORDING, installRecordedRegistration, recordedRegistration } from "./helpers/recorded-registration.js";
 import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAuthority } from "./helpers/test-tsa.js";
 
 const W = "audit/2026-q3";
@@ -315,15 +317,19 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     reg.timestamps = reg.timestamps!.slice(0, 1);
     writeJ(s, regPath, reg);
     const r = await runVerify(s.ctx, {});
-    expect(r.checks[0]!.status).toBe("WARN");
-    expect(r.ok).toBe(true);
+    // Time round B: an unproven registration time is not established (it WARNed, ok, before), and neither is R.
+    expect(r.checks[0]!.status).toBe("INCOMPLETE");
+    expect(r.checks[2]!.status).toBe("INCOMPLETE");
+    expect(r.ok).toBe(false);
+    expect(r.verdict).toBe("INCOMPLETE");
     expect(r.timestampTamperProof).toBe(false);
     expect(r.checks[0]!.details).toContain("TIMESTAMP NOT TAMPER-PROOF (1 of 2): the registration's time is the signer's own clock, bounded by 1 operator(s) where 2 are required");
-    expect(await verifyCommand(s.ctx, {})).toBe(0);
+    expect(await verifyCommand(s.ctx, {})).toBe(6);
     expect(s.out.join("\n")).toMatch(/TIMESTAMP NOT TAMPER-PROOF \(1 of 2\): registration and\/or manifest times are self-asserted/);
+    expect(s.out.join("\n")).not.toMatch(/CERTIFIED \(risk/);
     s.out.length = 0;
-    await statusCommand(s.ctx, {});
-    expect(s.out[0]).toMatch(/CERTIFIED \(risk 5%\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
   });
 
   // A log entry 5 min after the signed time: if it were the time, R would move from 33,245,812 to 33,245,912.
@@ -339,7 +345,9 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     expect(r.derivedRound).toBe(33245812);
     expect(r.checks[0]!.status).toBe("FAIL");
     expect(r.checks[0]!.details).toContain("FAIL registration: a schema-v2 record has no timestamps field (writers always store one); its time evidence was removed");
-    expect(r.checks[2]!.status).toBe("PASS"); // the commitment still names the honest R
+    // The commitment still names the honest R (no FAIL), but the registration time R rests on is now unproven (time round B).
+    expect(r.checks[2]!.status).toBe("INCOMPLETE");
+    expect(r.checks[2]!.summary).toBe("R = 33,245,812: first round ≥ 24 h after registration, but the registration time it rests on is unproven");
   });
 
   it("review finding 4: the same for the commitment: check 2 FAILs", async () => {
@@ -364,7 +372,7 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     const r = await runVerify(s.ctx, {});
     expect(r.timestamps.registration!.proven).toBe(false);
     expect(r.timestamps.registration!.operators.map((o) => o.via)).toEqual(["test-a"]);
-    expect(r.checks[0]!.status).toBe("WARN");
+    expect(r.checks[0]!.status).toBe("INCOMPLETE");
     expect(r.checks[0]!.details).toContain("registration token from test-d ignored (not registered: the registration names test-a, test-b)");
     expect(r.checks[0]!.details.join("\n")).toMatch(/registration timestamps: 1 of 2 TSAs \(test-a\) · k = 2 · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\) · ignored \(not registered\): test-d/);
   });
@@ -389,14 +397,16 @@ describe("FR1.6: a zero-token audit says TIMESTAMP NOT TAMPER-PROOF in status, v
     s.git("add", "-A");
     s.git("commit", "-qm", "v");
     s.out.length = 0;
-    await statusCommand(s.ctx, {});
-    expect(s.out[0]).toMatch(/· CERTIFIED \(risk 5%\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)$/);
+    // Time round B: the certificate is withheld while the times are unproven (status exit 6), and verify is INCOMPLETE.
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)$/);
     s.out.length = 0;
-    expect(await verifyCommand(s.ctx, {})).toBe(0);
+    expect(await verifyCommand(s.ctx, {})).toBe(6);
     const text = s.out.join("\n");
-    expect(text).toMatch(/1\. WARN registration/);
+    expect(text).toMatch(/1\. INCOMPLETE registration/);
     expect(text).toMatch(/TIMESTAMP NOT TAMPER-PROOF \(0 of 2\): registration and\/or manifest times are self-asserted/);
-    expect(text).toMatch(/CERTIFIED \(risk 5%\) · RETROSPECTIVE\nVERIFIED$/);
+    expect(text).toMatch(/· target reached · CERTIFICATE WITHHELD \(verify check 1 \(registration\) incomplete; verify check 2 \(manifest before seed\) incomplete; verify check 3 \(seed round\) incomplete\) · RETROSPECTIVE\nINCOMPLETE: /);
+    expect(text).not.toMatch(/CERTIFIED \(risk|\nVERIFIED$/);
   });
 
   it("no authority configured: the plain line, everywhere", async () => {
@@ -424,37 +434,45 @@ describe("init", () => {
 });
 
 describe("the bolt-1 demo, replayed from the live recording of 2026-11-03", () => {
-  type Rec = { registeredAt: string; digest: string; nonces: Record<string, string>; authorities: Record<string, { url: string; request: string; status: number; contentType: string; response: string }>; demo: { register: string[] } };
-  const rec = readJsonFixture<Rec>("tsa", "recorded-2026-11-03.json");
+  // Time round B: a registration names its signing key inside its signed bytes, so `register` cannot reproduce the
+  // recorded digest any more (the recorded record names no key). The recording is replayed as stored: the recorded
+  // record and its four default authorities' real tokens (test/helpers/recorded-registration.ts).
   let dir: string;
   let ctx: CommandContext;
   const out: string[] = [];
-  const replay = (async (input: string | URL, init?: RequestInit) => {
-    const url = new URL(String(input)).href;
-    const [id, ex] = Object.entries(rec.authorities).find(([, e]) => new URL(e.url).href === url) ?? [];
-    if (!ex) throw new Error(`no recorded exchange for ${url}`);
-    expect(Buffer.from(init!.body as ArrayBuffer).toString("base64"), `request to ${id}`).toBe(ex.request);
-    return new Response(Buffer.from(ex.response, "base64"), { status: ex.status, headers: { "content-type": ex.contentType } });
-  }) as typeof fetch;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "prrla-demo-"));
     cpSync(join(FIXTURES, "audits", "tsa-demo"), dir, { recursive: true });
-    ctx = { cwd: dir, env: {}, nowMs: () => T(rec.registeredAt), fetch: replay, nonceFor: (id) => new Uint8Array(Buffer.from(rec.nonces[id]!, "hex")), out: (l) => out.push(l), err: (l) => out.push(`ERR ${l}`) };
+    installRecordedRegistration(dir);
+    ctx = { cwd: dir, env: {}, nowMs: () => T(RECORDING.registeredAt), fetch: (async () => { throw new Error("the replay sends nothing"); }) as unknown as typeof fetch, out: (l) => out.push(l), err: (l) => out.push(`ERR ${l}`) };
   });
 
-  it("register prints `timestamps: 4 of 4 … k = 2 · PROVEN` (the same digest, offline)", async () => {
-    expect(await registerCommand(ctx, {})).toBe(0);
-    expect(out).toContain("  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN");
-    expect(out).toContain("  PROSPECTIVE · registration existed by 2026-11-03T22:32:28Z (U_k)");
-    const reg = JSON.parse(readFileSync(join(dir, "audit/demo-2026-q4/registration.json"), "utf8")) as SignedRecord<RegistrationRecordV2>;
-    expect(reg.sha256).toBe(rec.digest);
-    expect(rec.demo.register).toContain("  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN");
+  it("the recorded tokens still give `timestamps: 4 of 4 … k = 2 · PROVEN` over the recorded digest, offline, as register printed it", async () => {
+    const reg = recordedRegistration();
+    expect(reg.sha256).toBe(RECORDING.digest);
+    const data = new Uint8Array(Buffer.from(canonicalJson(reg.record)));
+    const summary = await assessTimestamps({ timestamps: reg.timestamps!, data, digestHex: reg.sha256, signedTimeIso: reg.record.registeredAt, timestamping: reg.record.timestamping, bundle: SHIPPED_TRUST_BUNDLE });
+    expect(`  ${timestampsLine(summary)}`).toBe("  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN");
+    expect(isoMs(summary.ukMs!)).toBe("2026-11-03T22:32:28Z"); // register printed "PROSPECTIVE · registration existed by 2026-11-03T22:32:28Z (U_k)"
+    expect(RECORDING.demo.register).toContain("  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN");
+    expect(RECORDING.demo.register).toContain("  PROSPECTIVE · registration existed by 2026-11-03T22:32:28Z (U_k)");
   });
 
-  it("verify check 1 PASSes offline on the real tokens; a forged token makes it FAIL", async () => {
+  it("a registration made now names its key, so its digest is not the recorded one (and the recorded tokens could not count for it)", async () => {
+    out.length = 0;
+    const fresh = mkdtempSync(join(tmpdir(), "prrla-demo-new-"));
+    cpSync(join(FIXTURES, "audits", "tsa-demo"), fresh, { recursive: true });
+    expect(await registerCommand({ ...ctx, cwd: fresh }, { dryRun: true })).toBe(0);
+    expect(out.join("\n")).toMatch(/^\[dry run\] registration [0-9a-f]{12}…/m);
+    expect(out.join("\n")).not.toContain(`registration ${RECORDING.digest.slice(0, 12)}…`);
+  });
+
+  it("verify check 1 is not FAILED offline on the real tokens (it WARNs that the record names no key); a forged token makes it FAIL", async () => {
     const good = await runVerify(ctx, { offline: true });
-    expect(good.checks[0]!.status).toBe("PASS");
+    expect(good.checks[0]!.status).toBe("WARN");
+    expect(good.checks[0]!.details).toContain("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
+    expect(good.timestamps.registration!.proven).toBe(true);
     expect(good.mode).toBe("PROSPECTIVE");
     const path = join(dir, "audit/demo-2026-q4/registration.json");
     const reg = JSON.parse(readFileSync(path, "utf8")) as SignedRecord<RegistrationRecordV2>;
@@ -472,3 +490,4 @@ describe("the bolt-1 demo, replayed from the live recording of 2026-11-03", () =
     expect(out.join("\n")).toMatch(/1\. FAIL registration/);
   });
 });
+

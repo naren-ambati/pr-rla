@@ -1,0 +1,20 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Cursor hooks documentation: beforeReadFile input, https://cursor.com/docs/hooks.md, read 2026-11-04",
+    "note": "Documented, not observed."
+  },
+  "payload": {
+    "conversation_id": "conv-1",
+    "generation_id": "gen-1",
+    "model": "claude-opus-4-7-thinking-max",
+    "hook_event_name": "beforeReadFile",
+    "cursor_version": "1.7.2",
+    "workspace_roots": ["/home/user/audit-repo"],
+    "user_email": null,
+    "transcript_path": null,
+    "file_path": "/home/user/audit-repo/review-protocol.md",
+    "content": "",
+    "attachments": []
+  }
+}

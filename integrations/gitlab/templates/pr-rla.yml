@@ -1,0 +1,243 @@
+# pr-rla as a GitLab CI/CD component. Include it from a project that can reach this repository's
+# integrations/gitlab/templates/pr-rla.yml:
+#
+#   include:
+#     - component: $CI_SERVER_FQDN/<group>/<project>/pr-rla@<exact ref>
+#       inputs: { version: "0.1.0" }
+#
+# pr-rla is not published and this component is not in the CI/CD Catalog: publishing is the founder's
+# decision (FR6.6). docs/ci/gitlab.md has the same job as a plain snippet for self-managed instances
+# that cannot reach it, and says which credentials each case needs.
+spec:
+  inputs:
+    version:
+      type: string
+      default: "0.1.0"
+      regex: '^[0-9]+\.[0-9]+\.[0-9]+$'
+      description: "The exact pr-rla version to install. Never a range or a tag."
+    integrity:
+      type: string
+      default: ""
+      description: "Optional npm integrity (sha512-...) of that version. When set, the job stops unless the registry reports the same integrity."
+    command:
+      type: string
+      default: status
+      options: [status, verify]
+      description: "pr-rla status or pr-rla verify. checkpoint is not offered here: it pushes to the repository, which this job has no credentials for."
+    dir:
+      type: string
+      default: "."
+      description: "The audit repository directory (where .pr-rla.yml is), relative to the project."
+    audit-path:
+      type: string
+      default: "audit/**/*"
+      description: "Pushes that change files matching this pattern start the job (relative to the project root)."
+    offline:
+      type: string
+      default: "true"
+      options: ["true", "false"]
+      description: "Pass --offline: no provider calls and no population rebuild."
+    fail-on:
+      type: string
+      default: "escalate,refusal,timestamps,incomplete"
+      description: "Names of the non-zero exit codes that fail the job: escalate (2), refusal (3), timestamps (5), incomplete (6). Exit 1 and exit 4 always fail."
+    plugins:
+      type: string
+      default: builtin-only
+      options: [builtin-only, allow]
+      description: "builtin-only refuses every external provider and ledger plugin."
+    approve-origins:
+      type: string
+      default: ""
+      description: "Credentials the built-ins may send beyond the defaults (GITLAB_TOKEN to gitlab.com, GITHUB_TOKEN to api.github.com, BITBUCKET_TOKEN and BITBUCKET_USERNAME to api.bitbucket.org). ENV_VAR=https://host entries, separated by spaces or commas. Needed for GitLab self-managed or another token variable. Written by whoever owns this pipeline; never taken from the audited repository."
+    tsa-trust:
+      type: string
+      default: ""
+      description: "Timestamp-authority anchor files (pr-rla's trust-extra JSON) that whoever owns this pipeline trusts beyond the bundle pr-rla ships, as paths relative to the project separated by spaces or commas; passed as --tsa-trust. Needed only when the audit registers an authority outside the shipped bundle: a certificate needs its times proven. Your trust, not the audited repository's."
+    accept-lock-grants:
+      type: string
+      default: "false"
+      options: ["true", "false"]
+      description: "Take the grants and trust in the audit repository's pr-rla.lock.json as given. Only for an audit repository you control."
+    image:
+      type: string
+      default: "node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85"
+      description: "A Node 24 image, pinned by digest (the tag's index digest on 2026-11-04)."
+    stage:
+      type: string
+      default: test
+---
+pr-rla-$[[ inputs.command ]]:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  variables:
+    PRRLA_VERSION: "$[[ inputs.version ]]"
+    PRRLA_INTEGRITY: "$[[ inputs.integrity ]]"
+    PRRLA_COMMAND: "$[[ inputs.command ]]"
+    PRRLA_DIR: "$[[ inputs.dir ]]"
+    PRRLA_OFFLINE: "$[[ inputs.offline ]]"
+    PRRLA_FAIL_ON: "$[[ inputs.fail-on ]]"
+    PRRLA_PLUGINS: "$[[ inputs.plugins ]]"
+    PRRLA_APPROVE_ORIGINS: "$[[ inputs.approve-origins ]]"
+    PRRLA_TSA_TRUST: "$[[ inputs.tsa-trust ]]"
+    PRRLA_ACCEPT_LOCK_GRANTS: "$[[ inputs.accept-lock-grants ]]"
+  rules:
+    # Pushes that touch the audit directory, the schedule that notices the window closing and the
+    # seed round publishing, a pipeline trigger (the optional issue-event webhook), and a manual run.
+    - if: $CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "$[[ inputs.audit-path ]]"
+  script:
+    - |
+      set -e
+      # 1. The exit-code mapping (identical in integrations/github-action/scripts/exit-map.sh).
+      # >>> pr-rla exit map
+      prrla_check_fail_on() {
+        prrla_list=$(printf '%s' "$1" | tr -d ' \t\r\n')
+        prrla_oldifs=$IFS
+        IFS=,
+        for prrla_name in $prrla_list; do
+          case "$prrla_name" in
+            escalate | refusal | timestamps | incomplete | "") ;;
+            *)
+              IFS=$prrla_oldifs
+              echo "fail-on: unknown name '$prrla_name' (use escalate, refusal, timestamps, incomplete)" >&2
+              return 1
+              ;;
+          esac
+        done
+        IFS=$prrla_oldifs
+        return 0
+      }
+
+      prrla_decide() {
+        prrla_rc=$1
+        prrla_on=",$(printf '%s' "$2" | tr -d ' \t\r\n'),"
+        PRRLA_RESULT=fail
+        case "$prrla_rc" in
+          0)
+            PRRLA_RESULT=pass
+            PRRLA_REASON="exit 0"
+            return 0
+            ;;
+          1)
+            PRRLA_REASON="exit 1: a check failed, a precondition was not met, or pr-rla refused the command"
+            return 1
+            ;;
+          4)
+            PRRLA_REASON="exit 4: pr-rla stopped before it finished; running the printed command again finishes it"
+            return 1
+            ;;
+          2)
+            prrla_name=escalate
+            prrla_what="exit 2: ESCALATE (the sequential test cannot certify), or the seed round is not yet published"
+            ;;
+          3)
+            prrla_name=refusal
+            prrla_what="exit 3: the population is below the registered minimum (review every change instead)"
+            ;;
+          5)
+            prrla_name=timestamps
+            prrla_what="exit 5: a record was written with too few trusted timestamps"
+            ;;
+          6)
+            prrla_name=incomplete
+            prrla_what="exit 6: INCOMPLETE (nothing failed, but something was not established: a time not proven by enough timestamp authorities, the population not rebuilt or shown complete, or a check skipped)"
+            ;;
+          *)
+            PRRLA_REASON="exit $prrla_rc: not a pr-rla exit code (pr-rla did not run to its end)"
+            return 1
+            ;;
+        esac
+        case "$prrla_on" in
+          *",$prrla_name,"*)
+            PRRLA_REASON="$prrla_what; fail-on includes $prrla_name"
+            return 1
+            ;;
+        esac
+        PRRLA_RESULT=pass
+        PRRLA_REASON="$prrla_what; fail-on does not include $prrla_name, so the job passes"
+        return 0
+      }
+      # <<< pr-rla exit map
+
+      # 2. Inputs, checked. The approvals file lives in the runner's temp directory, never in the project.
+      case "$PRRLA_VERSION" in
+        "" | *[!0-9.]*) prrla_ok=0 ;;
+        [0-9]*.[0-9]*.[0-9]*) prrla_ok=1 ;;
+        *) prrla_ok=0 ;;
+      esac
+      [ "$prrla_ok" = 1 ] || { echo "PRRLA_VERSION must be one exact version such as 0.1.0, not a range or a tag" >&2; exit 1; }
+      case "$PRRLA_COMMAND" in status | verify) ;; *) echo "PRRLA_COMMAND must be status or verify" >&2; exit 1 ;; esac
+      case "$PRRLA_PLUGINS" in builtin-only | allow) ;; *) echo "PRRLA_PLUGINS must be builtin-only or allow" >&2; exit 1 ;; esac
+      prrla_check_fail_on "$PRRLA_FAIL_ON"
+      prrla_tmp=$(cd "${TMPDIR:-/tmp}" && pwd -P) || { echo "TMPDIR is not a directory" >&2; exit 1; }
+      prrla_here=$(pwd -P)
+      case "$prrla_tmp" in "$prrla_here" | "$prrla_here"/*) echo "the approvals file must be outside the project directory" >&2; exit 1 ;; esac
+      export PR_RLA_APPROVALS_FILE="$prrla_tmp/pr-rla-approvals.json"
+
+      # 3. Install the pinned version. PRRLA_BIN skips the install (an image that already has it); the version is checked either way.
+      if [ -z "${PRRLA_BIN:-}" ]; then
+        PRRLA_HOME="${TMPDIR:-/tmp}/pr-rla-tool"
+        if [ -n "${PRRLA_INTEGRITY:-}" ]; then
+          prrla_seen=$(npm view "pr-rla@$PRRLA_VERSION" dist.integrity)
+          [ "$prrla_seen" = "$PRRLA_INTEGRITY" ] || { echo "pr-rla@$PRRLA_VERSION has integrity $prrla_seen, not the $PRRLA_INTEGRITY you pinned" >&2; exit 1; }
+        fi
+        npm install --prefix "$PRRLA_HOME" --ignore-scripts --no-audit --no-fund --no-package-lock "pr-rla@$PRRLA_VERSION"
+        PRRLA_BIN="$PRRLA_HOME/node_modules/.bin/pr-rla"
+      fi
+      [ "$("$PRRLA_BIN" --version)" = "$PRRLA_VERSION" ] || { echo "the pr-rla at $PRRLA_BIN is not version $PRRLA_VERSION" >&2; exit 1; }
+
+      # 4. Credential approvals the owner of this CI configuration asks for: ENV_VAR=https://host entries.
+      #    The same consent a person gives with "pr-rla plugin approve"; never read from the audited repository.
+      set -f
+      for prrla_entry in $(printf '%s' "${PRRLA_APPROVE_ORIGINS:-}" | tr ',\r\n\t' '    '); do
+        prrla_env=${prrla_entry%%=*}
+        prrla_origin=${prrla_entry#*=}
+        [ "$prrla_entry" != "$prrla_env" ] || { echo "approve-origins entries look like ENV_VAR=https://host" >&2; exit 1; }
+        case "$prrla_env" in "" | [0-9]* | *[!A-Za-z0-9_]*) echo "approve-origins: '$prrla_env' is not an environment variable name" >&2; exit 1 ;; esac
+        case "$prrla_origin" in https://*) ;; *) echo "approve-origins: the origin for $prrla_env must start with https://" >&2; exit 1 ;; esac
+        case "${prrla_origin#https://}" in "" | *[!A-Za-z0-9.:-]*) echo "approve-origins: the origin for $prrla_env must be https://host or https://host:port" >&2; exit 1 ;; esac
+        "$PRRLA_BIN" -C "$PRRLA_DIR" plugin approve --env "$prrla_env" --origin "$prrla_origin" --yes
+      done
+      set +f
+
+      # 5. Run. --plugins builtin-only unless the owner opted out. Global options come before the subcommand.
+      set -- -C "$PRRLA_DIR"
+      if [ "$PRRLA_PLUGINS" = builtin-only ]; then set -- --plugins builtin-only "$@"; fi
+      if [ "${PRRLA_ACCEPT_LOCK_GRANTS:-false}" = true ]; then set -- --accept-lock-grants "$@"; fi
+      set -- "$@" "$PRRLA_COMMAND" --json
+      if [ "$PRRLA_OFFLINE" = true ]; then set -- "$@" --offline; fi
+      # The timestamp-authority anchors the owner of this CI configuration trusts beyond the shipped bundle
+      # (PRRLA_TSA_TRUST: files, relative to the project): a certificate needs its times proven.
+      set -f
+      for prrla_f in $(printf '%s' "${PRRLA_TSA_TRUST:-}" | tr ',\r\n\t' '    '); do
+        [ -f "$prrla_f" ] || { echo "tsa-trust: $prrla_f is not a file" >&2; exit 1; }
+        case "$prrla_f" in /*) ;; *) prrla_f="$(pwd -P)/$prrla_f" ;; esac
+        set -- "$@" --tsa-trust "$prrla_f"
+      done
+      set +f
+      set +e
+      "$PRRLA_BIN" "$@" > pr-rla.json
+      PRRLA_RC=$?
+      set -e
+
+      # 6. Report and map the exit code.
+      node -e '
+      const { readFileSync } = require("node:fs");
+      const clean = (s) => String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+      try {
+        const j = JSON.parse(readFileSync("pr-rla.json", "utf8"));
+        console.log(j.error ? `pr-rla error ${clean(j.error.code)}: ${clean(j.error.message)}` : clean(j.verdict ? `${j.verdict}: ${j.statusLine ?? ""}` : j.line));
+      } catch {
+        console.log("pr-rla printed no JSON result");
+      }'
+      prrla_decide "$PRRLA_RC" "$PRRLA_FAIL_ON" || true
+      echo "pr-rla: $PRRLA_RESULT ($PRRLA_REASON)"
+      [ "$PRRLA_RESULT" = pass ]
+  artifacts:
+    paths:
+      - pr-rla.json
+    when: always
+    expire_in: 30 days

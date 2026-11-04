@@ -320,11 +320,13 @@ describe("drawContext on the recorded gh-aw audit (FR3.4: linguist-generated fil
     throw new Error("no network");
   }) as typeof fetch, err: () => {}, mode: "read-only" as const };
 
-  it("draw #7 (github/gh-aw#42597): the two lock files are dropped, the workflow source is shown, with gh-aw's real patch", async () => {
+  // Time round B rebuilt the fixture (its draws are bound to the registration now): the draws name other changes, recorded
+  // the same way. Draw #7 is gh-aw#58625 and #27 gh-aw#55696 (before: #7 was gh-aw#42597 and #13 gh-aw#49685).
+  it("draw #7 (github/gh-aw#58625): the lock file and the changeset are dropped, the Go sources are shown, with gh-aw's real patches", async () => {
     const c = await drawContext(api, { draw: 7, fenceId: FENCE });
-    expect(c.changeId).toBe("github:github/gh-aw#42597");
-    expect(c.untrusted.generatedFiles).toEqual([".github/workflows/breaking-change-checker.lock.yml", ".github/workflows/pr-code-quality-reviewer.lock.yml"]);
-    expect(c.untrusted.files.map((f) => f.path)).toHaveLength(1);
+    expect(c.changeId).toBe("github:github/gh-aw#58625");
+    expect(c.untrusted.generatedFiles).toEqual([".changeset/patch-preserve-awf-setup-path.md", ".github/workflows/smoke-service-ports.lock.yml"]);
+    expect(c.untrusted.files.map((f) => f.path)).toHaveLength(12);
     expect(c.untrusted.files.every((f) => !f.path.endsWith(".lock.yml"))).toBe(true);
     expect(lockFiles(c.untrusted.files.map((f) => f.patch ?? "").join("\n"))).toEqual([]);
     expect(c.protocol).toMatchObject({ ok: true, failsIf: expect.arrayContaining([expect.stringMatching(/security weakness/)]) });
@@ -332,9 +334,10 @@ describe("drawContext on the recorded gh-aw audit (FR3.4: linguist-generated fil
     expect(c.howToRecord).toBe('pr-rla record 7 pass|fail --reviewer <you> --note "<one line>", then commit audit/2026-q3/verdicts.jsonl');
   });
 
-  it("draw #13 (github/gh-aw#49685): 21 of 28 files are linguist-generated and dropped; the rest keep their patches", async () => {
-    const c = await drawContext(api, { draw: 13 });
-    expect(c.summary).toMatchObject({ files: 7, generatedFiles: 21, generatedExcluded: true });
+  it("draw #27 (github/gh-aw#55696): 12 of 18 files are linguist-generated and dropped; the rest keep their patches", async () => {
+    const c = await drawContext(api, { draw: 27 });
+    expect(c.changeId).toBe("github:github/gh-aw#55696");
+    expect(c.summary).toMatchObject({ files: 6, generatedFiles: 12, generatedExcluded: true });
     expect(c.untrusted.generatedFiles.every((p) => p.endsWith(".lock.yml"))).toBe(true);
     expect(c.untrusted.files.some((f) => f.path.endsWith(".lock.yml"))).toBe(false);
     expect(c.untrusted.fence).toMatch(/^[0-9a-f]{32}$/);
@@ -351,8 +354,8 @@ describe("drawContext on the recorded gh-aw audit (FR3.4: linguist-generated fil
   });
 
   it("refuses a maxPatchBytes over 1 MiB, and caps the patches at the one given", async () => {
-    await expect(drawContext(api, { draw: 13, maxPatchBytes: 1024 * 1024 + 1 })).rejects.toThrow(/at most|from 0 to 1048576/);
-    const c = await drawContext(api, { draw: 13, maxPatchBytes: 1000 });
+    await expect(drawContext(api, { draw: 27, maxPatchBytes: 1024 * 1024 + 1 })).rejects.toThrow(/at most|from 0 to 1048576/);
+    const c = await drawContext(api, { draw: 27, maxPatchBytes: 1000 });
     expect(c.untrusted.files.reduce((a, f) => a + Buffer.byteLength(f.patch ?? ""), 0)).toBeLessThanOrEqual(1000);
     expect(c.truncated).toBe(true);
   });
@@ -360,7 +363,7 @@ describe("drawContext on the recorded gh-aw audit (FR3.4: linguist-generated fil
   it("falls back to the manifest's fields when the export recorded no description", async () => {
     const d2 = recordedAudit();
     const cf = JSON.parse(readFileSync(join(d2, "changes.json"), "utf8"));
-    delete cf.descriptions["github:github/gh-aw#42597"];
+    delete cf.descriptions["github:github/gh-aw#58625"];
     writeFileSync(join(d2, "changes.json"), JSON.stringify(cf));
     const c = await drawContext({ ...api, cwd: d2 }, { draw: 7 });
     expect(c.untrusted.files).toEqual([]);

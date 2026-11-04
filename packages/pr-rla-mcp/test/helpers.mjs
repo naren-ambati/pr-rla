@@ -13,7 +13,8 @@ import { canonicalJson, sha256Hex } from "pr-rla";
 export const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const REPO = resolve(PKG, "..", "..");
 export const FIXTURE = join(REPO, "test", "fixtures", "audits", "gh-aw-q3-recorded");
-export const RECORDING = join(REPO, "test", "fixtures", "github", "gh-aw-q3-draws-2026-11-04.json");
+/** The recorded GitHub responses for four of the audit's issued draws (5, 7, 13, 31), as time round B derives the draws. */
+export const RECORDING = join(REPO, "test", "fixtures", "github", "gh-aw-q3-draws-v2-binding-2026-11-04.json");
 export const BIN = join(PKG, "dist", "bin.js");
 export const GUARD = join(PKG, "test", "preload-guard.mjs");
 

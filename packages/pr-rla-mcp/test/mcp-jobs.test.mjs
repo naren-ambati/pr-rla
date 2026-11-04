@@ -56,12 +56,12 @@ describe("the hand-off: a long call returns { jobId } and keeps running (FR3.5)"
     assert.equal(r.state, "running");
     assert.ok(handedOffMs < 2000, `handed off after ${handedOffMs} ms`);
     assert.ok(notes.length >= 1, "a progress notification arrived before the hand-off");
-    assert.ok(notes.some((n) => /asking github for github:github\/gh-aw#42597/.test(n.message)), JSON.stringify(notes));
+    assert.ok(notes.some((n) => /asking github for github:github\/gh-aw#58625/.test(n.message)), JSON.stringify(notes));
     const running = body(await s.call("job_status", { jobId: r.jobId }));
     assert.equal(running.state, "running");
     const done = await waitForJob(s, r.jobId);
     assert.equal(done.state, "done");
-    assert.equal(done.result.changeId, "github:github/gh-aw#42597");
+    assert.equal(done.result.changeId, "github:github/gh-aw#58625");
     assert.equal(done.result.untrusted.generatedFiles.length, 2);
     assert.deepEqual(slow.requests.filter((q) => !q.read), []);
     assert.deepEqual(s.writes(), []);
@@ -89,7 +89,7 @@ describe("the hand-off: a long call returns { jobId } and keeps running (FR3.5)"
     const s = await startServer({ roots: [dir], args: ["--handoff-ms", "25000"] });
     servers.push(s);
     const r = body(await s.call("draw_context", { draw: 7 }));
-    assert.equal(r.changeId, "github:github/gh-aw#42597");
+    assert.equal(r.changeId, "github:github/gh-aw#58625");
   });
 
   it("the hand-off cannot be set past 25 s (the tool budget is 30 s)", () => {

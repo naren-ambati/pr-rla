@@ -61,6 +61,20 @@ export function pluginConsent(ctx: Pick<AuditContext, "consent" | "env" | "log">
   return consent;
 }
 
+/**
+ * The plugin's credential standing for this run (time round B, `AuditContext.credentialStanding`): what reaches it, what
+ * is withheld without your approval (`pr-rla plugin approve <use>` grants it) and what is not set.
+ */
+function recordStanding(ctx: AuditContext, id: string, use: string, entry: LockEntry, consent: ConsentSource | null): void {
+  const set = setCredentials(ctx, entry);
+  const withheld = entry.trust === "isolated" && consent === null ? set : [];
+  ctx.credentialStanding.set(id, {
+    granted: set.length > 0 && withheld.length === 0,
+    withheld: withheld.map((c) => ({ env: c.env, origins: c.hosts.map((h) => (h.includes("://") ? h : `https://${h}`)), approve: [approveCommand(use)] })),
+    missing: entry.credentials.filter((c) => !ctx.env[c.env]).map((c) => c.env),
+  });
+}
+
 const within = (asked: readonly string[], granted: readonly string[]) => asked.filter((x) => !granted.includes(x));
 
 /** Starts the host and refuses when the plugin now asks for more than its lock entry grants (options or code changed). */
@@ -111,6 +125,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   refuseFullTrust(ctx.plugins, "provider", spec.use, entry);
   const id = `provider:${entry.name}`;
   const consent = pluginConsent(ctx, spec.use, entry);
+  recordStanding(ctx, id, spec.use, entry, consent);
   if (entry.trust === "full") {
     refuseFullTrustUnapproved(spec.use, entry, consent);
     ctx.log(fullTrustLine(entry));
@@ -166,6 +181,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   refuseFullTrust(ctx.plugins, "ledger", spec.use, entry);
   const id = `ledger:${entry.name}`;
   const consent = pluginConsent(ctx, spec.use, entry);
+  recordStanding(ctx, id, spec.use, entry, consent);
   if (entry.trust === "full") {
     refuseFullTrustUnapproved(spec.use, entry, consent);
     ctx.log(fullTrustLine(entry));

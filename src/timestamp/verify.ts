@@ -425,7 +425,7 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
       if (used && signer) {
         const at = signedData.certificates?.indexOf(used) ?? -1;
         const usedDer = at >= 0 ? certs[at]?.der : undefined;
-        if (at !== signerIndex) p.push(`rule 3: the signature was checked with certificate ${at + 1} of the token, not the signer certificate (${signerIndex! + 1})`);
+        if (at !== signerIndex) p.push(`rule 3: the signature was checked with ${at >= 0 ? `certificate ${at + 1} of the token` : "a certificate that is not in the token"}, not the signer certificate (${signerIndex! + 1})`);
         let sameKey = false;
         try {
           sameKey = !!usedDer && spkiBytes(usedDer).equals(spkiBytes(signer.der));

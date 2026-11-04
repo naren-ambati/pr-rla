@@ -8,6 +8,7 @@ import { describeRepoSet } from "../../core/repo-set.js";
 import { unixToIso } from "../../core/seed.js";
 import type { Selector } from "../../core/selector.js";
 import { computeStatus, provenanceOf, type StatusReport } from "../../core/status.js";
+import { certificateFor, failedWithholdings, isCertified, verdictExitCode, withheldVerdict, type Certificate, type Withholding } from "../../core/verdict.js";
 import { windowDays } from "../../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../../config.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
@@ -17,6 +18,7 @@ import { anchorLines, notTamperProof } from "../../timestamp/verify.js";
 import { latestCheckpointAt, readCheckpoints } from "./checkpoints.js";
 import { localLedgerGate } from "./ledger-gate.js";
 import { bindRegisteredPlugin, readOnlyContext, auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { accessShortfall } from "../access.js";
 import { assessRecord, logBound } from "../timestamps.js";
 
 /**
@@ -34,6 +36,12 @@ export interface StatusOptions {
    * draws without verdict state. The CLI always reads the ledger; the MCP `status` tool skips it offline.
    */
   skipTrackerLedger?: boolean;
+  /**
+   * Timestamp-authority anchors the caller trusts beyond the shipped bundle (files, as verify's `--tsa-trust`; the
+   * audit repo cannot add its own). Since time round B a certificate cannot stand on a time status cannot prove, so
+   * status needs the same anchors verify is given for an authority outside the shipped bundle.
+   */
+  tsaTrust?: string[];
 }
 
 interface TimeStanding {
@@ -44,6 +52,11 @@ interface TimeStanding {
   timestampNote: string;
   /** Each counted authority's anchor and its independence (NFR4, trusted-time round); empty for v1 or no tokens. */
   timestampAnchors: string[];
+  /**
+   * Why a certificate cannot stand on these times (time round B): one INCOMPLETE withholding per record whose time is
+   * not proven (the registration, the commitment). Empty when both are proven. verify's checks 1–3 say the same.
+   */
+  timeWithheld: Withholding[];
 }
 
 interface SeedRound {
@@ -85,6 +98,13 @@ export type StatusResult =
       ledgerGate: { fails: string[]; warns: string[]; shown: string[] };
       /** Why CERTIFIED is withheld although the sequence certifies: what check 7 would FAIL (P4). Empty otherwise. */
       certificateWithheld: string[];
+      /**
+       * What the certificate line may say (src/core/verdict.ts): CERTIFIED only when the SPRT certified, the population
+       * is not below the minimum, and nothing withholds it (an unproven time; `withheld` says what). `status` exits by it.
+       */
+      certificate: Certificate;
+      /** `isCertified(certificate)`: the only "certified" a client may show. `sequence.state` is the SPRT's raw state. */
+      certified: boolean;
       /** The certificate line (or the refusal), as the CLI prints it first. */
       line: string;
     } & TimeStanding &
@@ -107,27 +127,46 @@ export type StatusResult =
  * under a pinned log key (an entry in any other log is unverified). v2: the stored tokens are checked
  * offline; the mode is proven by U_k when k operators agree, and the note says TIMESTAMP NOT TAMPER-PROOF
  * (n of k) when the registration or the commitment falls short. `anchors` names each counted authority's
- * anchor and its independence (NFR4), or is empty.
+ * anchor and its independence (NFR4), or is empty. `withheld` has one INCOMPLETE withholding per record
+ * whose time is not proven (time round B): a certificate cannot stand on it.
  */
-export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string[] }> {
+export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>, tsaTrust: readonly string[] = []): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string[]; withheld: Withholding[] }> {
   if (!isRegistrationV2(reg)) {
-    const logged = (await logBound(ctx, config, reg)) !== null && (!existsSync(paths.commitment) || (await logBound(ctx, config, readCommitment(paths))) !== null);
-    return { mode: auditMode(reg), note: logged ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: logged, anchors: [] };
+    const withheld: Withholding[] = [];
+    if ((await logBound(ctx, config, reg)) === null) withheld.push({ verdict: "INCOMPLETE", reason: "registration time unproven: no transparency-log entry verified under a pinned key" });
+    if (existsSync(paths.commitment) && (await logBound(ctx, config, readCommitment(paths))) === null) withheld.push({ verdict: "INCOMPLETE", reason: "manifest commitment time unproven: no transparency-log entry verified under a pinned key" });
+    return { mode: auditMode(reg), note: withheld.length ? " · TIMESTAMP NOT TAMPER-PROOF" : "", tamperProof: !withheld.length, anchors: [], withheld };
   }
   const v2 = reg as SignedRecord<RegistrationRecordV2>;
-  const bundle = trustFor(ctx);
+  const bundle = trustFor(ctx, tsaTrust);
   const ts = v2.record.timestamping;
   const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle);
   let short = r.proven ? null : r;
+  const withheld: Withholding[] = r.proven ? [] : [{ verdict: "INCOMPLETE", reason: `registration time unproven (${notTamperProof(r)})` }];
   const anchors = anchorLines(r);
   if (existsSync(paths.commitment)) {
     const cm = readCommitment(paths);
     const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle);
     if (!c.proven && !short) short = c;
+    if (!c.proven) withheld.push({ verdict: "INCOMPLETE", reason: `manifest commitment time unproven (${notTamperProof(c)})` });
     for (const l of anchorLines(c)) if (!anchors.includes(l)) anchors.push(l);
   }
   const mode: AuditMode = r.proven ? (r.ukMs! < Date.parse(v2.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE") : auditMode(reg);
-  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short, anchors };
+  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short, anchors, withheld };
+}
+
+/**
+ * The exit code of a status result (contracts.md §7): 1 not registered; 3 below the registered minimum population;
+ * 2 ESCALATE; for a certificate the SPRT reached but something withholds, the exit code of the withholding's verdict
+ * (src/core/verdict.ts: 6 INCOMPLETE, 1 FAILED); else 0. The CLI exits with it; the MCP status tool reports it.
+ */
+export function statusExitCode(r: StatusResult): number {
+  if (r.phase === "unregistered") return 1;
+  if (r.phase !== "sampled" || !r.verdictsRead) return 0;
+  if (r.certificate.state === "REFUSED") return 3;
+  if (r.certificate.state === "ESCALATE") return 2;
+  if (r.certificate.state === "WITHHELD" || r.certificate.state === "INCOMPLETE") return verdictExitCode(withheldVerdict(r.certificate.withheld));
+  return 0;
 }
 
 /**
@@ -158,16 +197,26 @@ export function stratumChoices(sel: Partial<Pick<Selector, "kinds" | "bots" | "d
   return parts.map((p) => `, ${p}`).join("");
 }
 
-/** The certificate line every status and verify prints. */
-export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector>; withheld?: readonly string[] }): string {
+/**
+ * The certificate line every status and verify prints. It says CERTIFIED only when `certificate` (src/core/verdict.ts)
+ * is CERTIFIED: a certificate the SPRT reached but something withholds reads `CERTIFICATE WITHHELD (why)`, and a
+ * population below the registered minimum reads its refusal, whatever the SPRT says. Without `certificate`, the
+ * SPRT's state and the refusal decide, with `info.withheld` (reasons a check would FAIL) withholding a CERTIFIED.
+ */
+export function statusLine(
+  r: StatusReport,
+  info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector>; withheld?: readonly string[] },
+  certificate: Certificate = certificateFor(r.sequence.state, r.refusal ?? null, failedWithholdings(info.withheld ?? [])),
+): string {
   const s = r.sequence;
   const stratum = `${info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : ""}${stratumChoices(info.selector)}`;
   const head = `prefix ${r.labelledPrefix}/${r.drawsIssued} · fails ${s.fails} · claim D (detected-defect rate ≤ ${pct(info.p0)}, protocol ${info.protocol.slice(0, 4)}…${stratum}) · LLR ${s.llr.toFixed(3)} / target ${s.target.toFixed(3)}`;
   let verdict: string;
-  // P4: never CERTIFIED where verify would FAIL check 7.
-  if (s.state === "CERTIFIED" && info.withheld?.length) verdict = `NOT CERTIFIED: verify check 7 would FAIL (${info.withheld.join("; ")}); run "pr-rla verify"`;
-  else if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
-  else if (s.state === "ESCALATE") verdict = `ESCALATE: review all ${fmt(r.N)} or narrow the claim`;
+  if (certificate.state === "REFUSED") verdict = `REFUSED: ${r.refusal ?? `population ${fmt(r.N)} < ${fmt(r.minPopulation)}: review all ${fmt(r.N)} instead`}`;
+  else if (certificate.state === "INCOMPLETE") verdict = `INCOMPLETE: not established (${certificate.withheld.map((w) => w.reason).join("; ")})`;
+  else if (certificate.state === "WITHHELD") verdict = `target reached · CERTIFICATE WITHHELD (${certificate.withheld.map((w) => w.reason).join("; ")})`;
+  else if (certificate.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
+  else if (certificate.state === "ESCALATE") verdict = `ESCALATE: review all ${fmt(r.N)} or narrow the claim`;
   else verdict = `NOT CERTIFIED · ${s.morePassesNeeded} more passing draws needed (${s.draws + (s.morePassesNeeded ?? 0)} total)`;
   return `${head} · ${verdict} · ${info.mode}`;
 }
@@ -198,8 +247,8 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     return { phase: "unregistered", window, start: config.window.start, end: config.window.end, line: `not registered: window ${window} (${config.window.start}..${config.window.end}). Run "pr-rla register".` };
   }
   const reg = readRegistration(paths);
-  const { mode, note: timestampNote, tamperProof: timestampTamperProof, anchors: timestampAnchors } = await timeStanding(ctx, config, paths, reg);
-  const standing: TimeStanding = { mode, timestampTamperProof, timestampNote, timestampAnchors };
+  const { mode, note: timestampNote, tamperProof: timestampTamperProof, anchors: timestampAnchors, withheld: timeWithheld } = await timeStanding(ctx, config, paths, reg, opts.tsaTrust ?? []);
+  const standing: TimeStanding = { mode, timestampTamperProof, timestampNote, timestampAnchors, timeWithheld };
   const w = reg.record.window;
   const now = Math.floor(ctx.nowMs() / 1000);
   const { round, publishesAt } = derivedRoundFor(reg);
@@ -239,13 +288,22 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
       const verdictsSkipped = `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; read its verdicts with offline: false`;
       const line = `${mode} · frozen N ${fmt(manifest.N)} · ${draws.issued} draw(s) issued · verdicts not read (${verdictsSkipped})${timestampNote}`;
       // Check 7's local rules still run (the index, its publication, the checkpoint file): what verify would FAIL without reading the tracker.
-      const g = await localLedgerGate(ctx, config, paths, { registration: reg, manifest, draws, ledger: null, ledgerIdentity });
+      const g = await localLedgerGate(ctx, config, paths, { registration: reg, manifest, draws, ledger: null, ledgerIdentity, tsaTrust: opts.tsaTrust ?? [] });
       return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing, ledgerGate: { fails: g.fails, warns: g.warns } };
     }
   }
   const ledger = await ledgerFor(ctx, config, paths, { command: "status" });
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${ledger.name}` });
-  const capped = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
+  // Time round B: a verdict read refused to a ledger running without its credential is not "no verdicts" (src/api/access.ts).
+  const actx = auditContextFor(ctx);
+  let capped: CountedVerdicts;
+  try {
+    capped = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
+  } catch (e) {
+    if (!accessShortfall(actx, `ledger:${ledger.name}`, `ledger ${ledger.name}`)) throw e;
+    capped = { verdicts: [], notes: [`ledger ${ledger.name}: readVerdicts failed: ${(e as Error).message}`], findings: [], warnings: [], ineligible: () => null };
+  }
+  const unread = accessShortfall(actx, `ledger:${ledger.name}`, `ledger ${ledger.name}`);
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
@@ -289,6 +347,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     manifest,
     draws,
     ledgerIdentity,
+    tsaTrust: opts.tsaTrust ?? [],
     ledger: { name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: capped.verdicts, counted: countedFirst, firstVerdicts: report.firstVerdicts, integrity, history },
   });
   const withheld = report.sequence.state === "CERTIFIED" ? gate.withheld : [];
@@ -304,9 +363,14 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     const cp = latestCheckpointAt(paths.windowDir);
     checkpointAdvised = cp === null || Date.parse(cp) < Date.parse(lastVerdict);
   }
+  // The one certificate rule (src/core/verdict.ts): what status can establish offline withholds it. The times give
+  // INCOMPLETE withholdings; a status-side gate of check 7 (P4's git-file walk, P1's local gate) adds its FAIL reasons
+  // here as failedWithholdings(...), so status never shows CERTIFIED where verify would not.
+  const withholdings = [...timeWithheld, ...failedWithholdings(withheld.map((w) => `verify check 7 would FAIL: ${w}`))];
+  const certificate = certificateFor(report.sequence.state, report.refusal, withholdings, unread ? [unread] : []);
   const line =
     report.refusal ??
-    statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector, withheld }) + timestampNote;
+    statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }, certificate) + timestampNote;
   return {
     phase: "sampled",
     window,
@@ -324,6 +388,8 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     ledgerIntegrity,
     ledgerGate: { fails: gate.fails, warns: gate.warns, shown: shown.map((l) => l.text) },
     certificateWithheld: withheld,
+    certificate,
+    certified: isCertified(certificate),
     line,
   };
 }
