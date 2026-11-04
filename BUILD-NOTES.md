@@ -2279,3 +2279,9 @@ Nothing was written anywhere; no scratch repository was used.
 
 Each run is a fresh `git clone --branch fix/p3-pool-head` of this worktree into the scratch directory, then `npm ci && npm run build && npm run typecheck && npm test`, then `npm --prefix examples/providers/gitea ci && npm --prefix examples/providers/gitea test` and the same for `examples/ledgers/jira` (`packages/pr-rla-mcp` and `integrations/github-action` do not exist yet). The suite makes no network call (the network-deny harness).
 
+| Run (2026-11-04, UTC) | At | Load average | Result |
+|---|---|---|---|
+| 1, 2, 3 (07:46–07:58) | `8b74947` | 14–28 | build and typecheck (both tsconfigs) clean; `Test Files 73 passed (73) · Tests 1042 passed \| 1 skipped (1043)`; gitea `# pass 1`, jira `# pass 1`, in all three |
+| 4, 5, 6 (08:02–08:12), one after another | `af180ac` (the last code: the FR7.2 note's condition and the bulk push at the close) | 6–29 | the same, with `Tests 1043 passed \| 1 skipped (1044)`, in all three |
+
+The five demo scripts (`demo-broker`, `demo-ledgers`, `demo-plugin-host`, `demo-presence`, `demo-sdk-carry-overs`) exit 0. This commit adds only these lines to `af180ac`.
