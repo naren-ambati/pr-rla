@@ -4,8 +4,12 @@ import bitbucketDc from "../src/providers/bitbucket-data-center/index.js";
 import github from "../src/providers/github/index.js";
 import gitlab from "../src/providers/gitlab/index.js";
 import { resolveRepoSet } from "../src/core/repo-set.js";
-import type { ListChangesRequest, ProviderContext, RepoSetRule, ScmProvider } from "../src/sdk/provider.js";
-import { runProviderConformance, formatConformanceReport, type ConformanceFixture } from "../src/testing/index.js";
+import { isRepoEmpty, isRepoUnavailable, RepoEmptyError, RepoUnavailableError, type ListChangesRequest, type ProviderContext, type RepoSetRule, type ScmProvider } from "../src/sdk/provider.js";
+import { CONFORMANCE_CHECKS, OPT_IN_CONFORMANCE_CHECKS, runProviderConformance, formatConformanceReport, type ConformanceCheck, type ConformanceFixture, type OptInConformanceCheck } from "../src/testing/index.js";
+import { fakeBitbucketCloud } from "./helpers/fake-bitbucket-cloud.js";
+import { fakeBitbucketDc } from "./helpers/fake-bitbucket-dc.js";
+import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
+import { scmScenario } from "./helpers/scm-scenario.js";
 import { fakeOrg, orgSpec, ORG, WINDOW } from "./helpers/fake-org.js";
 
 /**
@@ -51,12 +55,64 @@ describe("GitHub listRepos", () => {
     await expect((await github.create({}, ctxWith(f))).listRepos!(rule("nobody"))).rejects.toMatchObject({ status: 404 });
   });
 
-  it("an empty repository has no changes in any window: it does not stop an org-wide pool", async () => {
+  it("an empty repository throws master's error, with a code the pooled freeze and verify read as 'empty' (finding 7)", async () => {
     const org = fakeOrg({ owner: ORG, seed: 1, repos: [{ name: "empty", prs: 0, pushes: 0, empty: true }] });
     const p = await github.create({}, ctxWith(org.fetch));
-    const r = await p.listChanges({ repo: `${ORG}/empty`, window: WINDOW, kinds: ["pull_request", "direct_push"] });
-    expect(r).toMatchObject({ changes: [], defaultBranch: "" });
-    expect(r.headSha).toBeUndefined();
+    const err = await p.listChanges({ repo: `${ORG}/empty`, window: WINDOW, kinds: ["pull_request", "direct_push"] }).catch((e) => e);
+    expect(err).toBeInstanceOf(RepoEmptyError);
+    expect(err).toMatchObject({ message: `${ORG}/empty has no default branch`, code: "REPO_EMPTY" });
+    expect(isRepoEmpty(err)).toBe(true);
+  });
+
+  it("describeRepo reads one repository by its id (found after a rename) or its path; 404 is a RepoUnavailableError, 403 an access error", async () => {
+    const org = fakeOrg(orgSpec({ eligible: 3 }));
+    const p = await github.create({}, ctxWith(org.fetch));
+    const id = org.idOf("svc-01");
+    org.renameRepo("svc-01", "renamed");
+    expect(await p.describeRepo!({ repo: `${ORG}/svc-01`, id })).toMatchObject({ repo: `${ORG}/renamed`, id, createdAt: "2020-01-01T00:00:00Z" });
+    expect(await p.describeRepo!({ repo: `${ORG}/svc-02` })).toMatchObject({ repo: `${ORG}/svc-02`, visibility: "public" });
+    await expect(p.describeRepo!({ repo: `${ORG}/nope` })).rejects.toMatchObject({ code: "REPO_UNAVAILABLE", status: 404 });
+    org.control.gone.set(`${ORG}/svc-02`, 403);
+    const forbidden = await p.describeRepo!({ repo: `${ORG}/svc-02` }).catch((e) => e);
+    expect(forbidden).toMatchObject({ status: 403 });
+    expect(forbidden.code).toBeUndefined();
+  });
+
+  it("listingVisibility: complete for private and internal only for an org owner with a classic token holding repo", async () => {
+    const org = fakeOrg(orgSpec({ eligible: 3 }));
+    const p = await github.create({}, { ...ctxWith(org.fetch), env: { GITHUB_TOKEN: "synthetic" } });
+    const seen = () => p.listingVisibility!(rule(ORG));
+    expect(await seen()).toEqual({ identity: "auditor", visibilities: { public: { complete: true, reason: "GitHub lists every public repository to anyone" }, private: { complete: true, reason: expect.stringMatching(/owner \(admin\) of acme-org, with a classic token holding the repo scope/) }, internal: { complete: true, reason: expect.stringMatching(/owner/) } } });
+    org.control.viewer.scopes = "read:org";
+    expect((await seen()).visibilities.private).toEqual({ complete: false, reason: "the classic token's scopes (read:org) do not include repo, so GitHub shows it no private repository" });
+    org.control.viewer.scopes = null;
+    expect((await seen()).visibilities.internal.reason).toMatch(/no X-OAuth-Scopes header, so it is a fine-grained personal access token or a GitHub App token/);
+    org.control.viewer.scopes = "repo";
+    org.control.viewer.role = "member";
+    expect((await seen()).visibilities.private.complete).toBe(false);
+    const anonymous = await github.create({}, ctxWith(org.fetch));
+    expect(await anonymous.listingVisibility!(rule(ORG))).toMatchObject({ identity: null, visibilities: { public: { complete: true }, private: { complete: false, reason: "no token: GitHub shows only public repositories" } } });
+  });
+
+  it("firstParentPath reads the compare API: the first-parent commits after the base, or null when the base is not on that chain", async () => {
+    const org = fakeOrg({ owner: ORG, seed: 3, repos: [{ name: "r", prs: 4, pushes: 2 }] });
+    const h = org.history("r");
+    const side = { oid: "a".repeat(40), date: "2026-09-30T12:00:00Z", parents: [h.commits.find((c) => c.oid === h.head)!.parents[0]!] };
+    const merge = { oid: "b".repeat(40), date: "2026-10-25T09:00:00Z", parents: [h.head, side.oid] };
+    org.pushCommits("r", [side, merge]);
+    const p = await github.create({}, ctxWith(org.fetch));
+    expect(await p.firstParentPath!({ repo: `${ORG}/r`, base: h.head, head: merge.oid })).toEqual([{ sha: merge.oid, committedAt: "2026-10-25T09:00:00Z" }]);
+    expect(await p.firstParentPath!({ repo: `${ORG}/r`, base: side.oid, head: merge.oid })).toBeNull(); // reached only through the merge's second parent
+    expect(await p.firstParentPath!({ repo: `${ORG}/r`, base: merge.oid, head: h.head })).toBeNull(); // behind
+    expect(await p.firstParentPath!({ repo: `${ORG}/r`, base: h.head, head: h.head })).toEqual([]);
+  });
+
+  it("a 403 whose body says secondary rate limit is transient (GitHub documents it with or without headers), never 'unavailable'", async () => {
+    const f = (async () => new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit. Please wait a few minutes before you try again." }), { status: 403, headers: { "content-type": "application/json" } })) as typeof fetch;
+    const p = await github.create({}, ctxWith(f));
+    const err = await p.listChanges({ repo: `${ORG}/a`, window: WINDOW, kinds: ["pull_request"] }).catch((e) => e);
+    expect(err).toMatchObject({ status: 0, message: expect.stringMatching(/HTTP 403 \(secondary rate limit\)/) });
+    expect(isRepoUnavailable(err)).toBe(false);
   });
 
   it("a deleted or invisible repository is a 404 or 403, whichever API reports it", async () => {
@@ -232,5 +288,89 @@ describe("kit: list-repos and estimate-requests are opt-in checks", () => {
     expect((await run({ requests: 0 })).message).toMatch(/requests must be a whole number of at least 1/);
     expect((await run({ requests: 3, graphql: 5 })).message).toMatch(/graphql must be a whole number of at most requests/);
     expect((await run({ requests: 3, probed: 1.5 })).message).toMatch(/probed must be a whole number of at most requests/);
+  });
+});
+
+describe("kit: repo-unavailable is an opt-in check (finding 6)", () => {
+  const fixture = (over: Partial<ConformanceFixture> = {}): ConformanceFixture => ({ name: "synthetic org", request: { repo: `${ORG}/svc-00`, window: WINDOW, kinds: ["pull_request", "direct_push"] }, expect: {}, ...over });
+  const only = (r: Awaited<ReturnType<typeof runProviderConformance>>) => r.results.filter((x) => x.check === "repo-unavailable");
+
+  it("the GitHub built-in passes: it describes a repo, throws RepoUnavailableError(404) for a deleted one, and a rate limit is not 'gone'", async () => {
+    const org = fakeOrg(orgSpec({ eligible: 2 }));
+    const r = await runProviderConformance((_f, h) => github.create({}, h.context({ fetch: org.fetch, env: { GITHUB_TOKEN: "x" } })) as never, [fixture({ repoUnavailable: { gone: `${ORG}/deleted` } })]);
+    expect(only(r)).toEqual([{ fixture: "synthetic org", check: "repo-unavailable", ok: true }]);
+  });
+
+  it("catches a provider that reports a deleted repo as a plain error, or a rate limit as a gone repo", async () => {
+    const make = (gone: () => Error, limited: (e: unknown) => Error): ((f: ConformanceFixture, h: { context(b: { fetch: typeof fetch }): ProviderContext }) => ScmProvider) => (_f, h) => {
+      const ctx = h.context({ fetch: (async () => new Response("{}")) as typeof fetch });
+      return {
+        apiVersion: 1,
+        name: "bad",
+        listChanges: async () => {
+          try {
+            await ctx.fetch("https://scm.invalid/x", { destination: "scm" } as RequestInit);
+          } catch (e) {
+            throw limited(e);
+          }
+          return { changes: [], defaultBranch: "main", limitations: [] };
+        },
+        describeRepo: async (ref) => {
+          if (ref.repo.endsWith("deleted")) throw gone();
+          return { repo: ref.repo, id: "1", defaultBranch: "main", archived: false, fork: false, visibility: "public" };
+        },
+      };
+    };
+    const plain = await runProviderConformance(make(() => new Error("not found"), (e) => e as Error) as never, [fixture({ repoUnavailable: { gone: `${ORG}/deleted` } })]);
+    expect(only(plain)[0]).toMatchObject({ ok: false, message: expect.stringMatching(/threw Error: not found, not a RepoUnavailableError \(code REPO_UNAVAILABLE\)/) });
+    const lying = await runProviderConformance(make(() => new RepoUnavailableError(`${ORG}/deleted`, 404), () => Object.assign(new Error("gone"), { status: 403 })) as never, [fixture({ repoUnavailable: { gone: `${ORG}/deleted` } })]);
+    expect(only(lying)[0]).toMatchObject({ ok: false, message: "under a rate-limited 403, listChanges threw Error: gone, which counts as a gone repository (isRepoUnavailable): a rate limit never is one" });
+    const none: ScmProvider = { apiVersion: 1, name: "none", listChanges: async () => ({ changes: [], defaultBranch: "main", limitations: [] }) };
+    expect(only(await runProviderConformance(none, [fixture({ repoUnavailable: { gone: "x/y" } })]))[0]).toMatchObject({ ok: false, message: "the fixture expects describeRepo, but the provider implements none" });
+  });
+
+  it("ConformanceCheck is unchanged for an exhaustive switch; the opt-in checks have their own type", () => {
+    // A compile-time test (npm run typecheck covers test/): this switch must stay exhaustive over ConformanceCheck.
+    const label = (c: ConformanceCheck): number => {
+      switch (c) {
+        case "api-version": case "normalization": case "window-and-kinds": case "classification": case "merge-strategies": case "no-double-counting": case "stable-sorted-ids": case "review-state-mapping": case "actors": case "bot-detection": case "pagination": case "kind-filtering": case "transient-faults": case "pinned-head": case "actor-ids": case "review-granularity": case "revoked-approval":
+          return 1;
+        default: {
+          const never: never = c;
+          return never;
+        }
+      }
+    };
+    expect(CONFORMANCE_CHECKS.map(label).length).toBe(17);
+    const optIn: readonly OptInConformanceCheck[] = OPT_IN_CONFORMANCE_CHECKS;
+    expect(optIn).toEqual(["list-repos", "estimate-requests", "repo-unavailable"]);
+  });
+});
+
+describe("describeRepo and firstParentPath on GitLab, Bitbucket Cloud and Bitbucket Data Center (U8 fix round)", () => {
+  const sc = scmScenario({ latePush: true });
+  it("GitLab: a project by id or path; first parents from a revision range", async () => {
+    const p = await gitlab.create({ base_url: GL_BASE }, ctxWith(fakeGitLab(sc).fetch));
+    expect(await p.describeRepo!({ repo: sc.repo })).toMatchObject({ repo: sc.repo, id: "42", createdAt: "2020-01-01T00:00:00Z" });
+    expect(await p.describeRepo!({ repo: sc.repo, id: "42" })).toMatchObject({ repo: sc.repo });
+    await expect(p.describeRepo!({ repo: "acme/nope" })).rejects.toMatchObject({ code: "REPO_UNAVAILABLE", status: 404 });
+    expect(await p.firstParentPath!({ repo: sc.repo, base: sc.frozenHead, head: sc.head })).toEqual([{ sha: sc.head, committedAt: sc.byOid.get(sc.head)!.date }]);
+    expect(await p.firstParentPath!({ repo: sc.repo, base: sc.head, head: sc.frozenHead })).toBeNull();
+  });
+
+  it("Bitbucket Cloud: a repository by slug or {uuid}; first parents from include/exclude", async () => {
+    const p = await bitbucketCloud.create({}, ctxWith(fakeBitbucketCloud(sc).fetch));
+    expect(await p.describeRepo!({ repo: sc.repo })).toMatchObject({ repo: sc.repo, id: "{fake-uuid}", visibility: "public", createdAt: "2020-01-01T00:00:00Z" });
+    expect(await p.describeRepo!({ repo: sc.repo, id: "{fake-uuid}" })).toMatchObject({ repo: sc.repo });
+    await expect(p.describeRepo!({ repo: "acme/nope" })).rejects.toMatchObject({ code: "REPO_UNAVAILABLE", status: 404 });
+    expect(await p.firstParentPath!({ repo: sc.repo, base: sc.frozenHead, head: sc.head })).toEqual([{ sha: sc.head, committedAt: sc.byOid.get(sc.head)!.date }]);
+  });
+
+  it("Bitbucket Data Center: a repository by path; first parents from since/until (UNVERIFIED against a live server)", async () => {
+    const fake = fakeBitbucketDc(sc);
+    const p = await bitbucketDc.create({ base_url: "https://bitbucket.example.com" }, ctxWith(fake.fetch));
+    expect(await p.describeRepo!({ repo: fake.repo })).toMatchObject({ repo: fake.repo, id: "1", visibility: "private" });
+    await expect(p.describeRepo!({ repo: "ACME/nope" })).rejects.toMatchObject({ code: "REPO_UNAVAILABLE", status: 404 });
+    expect(await p.firstParentPath!({ repo: fake.repo, base: sc.frozenHead, head: sc.head })).toEqual([{ sha: sc.head, committedAt: sc.byOid.get(sc.head)!.date }]);
   });
 });

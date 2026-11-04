@@ -103,7 +103,12 @@ export function fakeBitbucketDc(sc: ScmScenario, opts: { limit?: number } = {}) 
       const p = pr(m[1]!);
       return json(diff(p.additions, p.deletions, p.number === 1));
     }
-    if (path === `${api}/commits`) return page(url, sc.reachable(url.searchParams.get("until")!).map(commitJson));
+    if (path === api) return json({ id: 1, slug, project: { key }, public: false }); // repository metadata (U8, describeRepo)
+    if (path === `${api}/commits`) {
+      // since (U8, firstParentPath): commits reachable from until and not from since.
+      const behind = new Set(url.searchParams.get("since") ? sc.reachable(url.searchParams.get("since")!).map((c) => c.oid) : []);
+      return page(url, sc.reachable(url.searchParams.get("until")!).filter((c) => !behind.has(c.oid)).map(commitJson));
+    }
     if ((m = new RegExp(`^${api}/commits/([0-9a-f]{40})/diff$`).exec(path))) {
       const c = sc.byOid.get(m[1]!)!;
       return json(diff(c.additions, c.deletions));

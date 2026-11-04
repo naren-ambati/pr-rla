@@ -7,6 +7,7 @@ export {
   OPT_IN_CONFORMANCE_CHECKS,
   INJECTED_RETRY_AFTER_SECONDS,
   type ConformanceCheck,
+  type OptInConformanceCheck,
   type ConformanceFixture,
   type ConformanceHarness,
   type ConformanceOptions,

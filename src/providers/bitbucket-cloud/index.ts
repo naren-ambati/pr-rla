@@ -1,7 +1,10 @@
 import {
   PROVIDER_API_VERSION,
+  RepoEmptyError,
+  RepoUnavailableError,
   defineProvider,
   type ChangeRecord,
+  type FirstParentCommit,
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
@@ -10,8 +13,9 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
+import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
-import { HttpClient, isoUtcSeconds } from "../http.js";
+import { HttpClient, HttpError, isoUtcSeconds } from "../http.js";
 import {
   buildReviews,
   mergeEvent,
@@ -66,6 +70,22 @@ const COMMIT_FIELDS = ["next", "values.hash", "values.date", "values.parents.has
 interface Page<T> {
   values: T[];
   next?: string;
+}
+
+interface BbRepo {
+  full_name: string;
+  uuid: string;
+  is_private?: boolean;
+  mainbranch?: { name?: string } | null;
+  parent?: unknown;
+  created_on?: string | null;
+}
+const REPO_FIELDS = "full_name,uuid,is_private,mainbranch.name,parent.full_name,created_on";
+
+/** A Bitbucket Cloud repository as a RepoRef. */
+function bbRepoRef(r: BbRepo): RepoRef {
+  const created = r.created_on ? Date.parse(r.created_on) : NaN;
+  return { repo: r.full_name, id: r.uuid, defaultBranch: r.mainbranch?.name ?? "", archived: false, fork: r.parent !== undefined && r.parent !== null, visibility: r.is_private === false ? "public" : "private", ...(Number.isFinite(created) ? { createdAt: new Date(created).toISOString().replace(".000Z", "Z") } : {}) };
 }
 
 /**
@@ -142,23 +162,41 @@ export class BitbucketCloudProvider implements ScmProvider {
    * archived state, `parent` marks a fork, and a repository is public or private.
    */
   async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
-    interface BbRepo {
-      full_name: string;
-      uuid: string;
-      is_private?: boolean;
-      mainbranch?: { name?: string } | null;
-      parent?: unknown;
-    }
-    const fields = "next,values.full_name,values.uuid,values.is_private,values.mainbranch.name,values.parent.full_name";
+    const fields = `next,${REPO_FIELDS.split(",").map((f) => `values.${f}`).join(",")}`;
     const repos = await this.paged<BbRepo>(`/repositories/${encodeURIComponent(set.owner)}?pagelen=100&fields=${fields}`);
-    return repos.map((r) => ({ repo: r.full_name, id: r.uuid, defaultBranch: r.mainbranch?.name ?? "", archived: false, fork: r.parent !== undefined && r.parent !== null, visibility: r.is_private === false ? "public" : "private" }));
+    return repos.map(bbRepoRef);
+  }
+
+  /**
+   * One repository's metadata (U8): `GET /repositories/{workspace}/{repo}`, by its `{uuid}` where known (it survives a
+   * rename), else by slug. A 404 is a RepoUnavailableError(404); any other failure is thrown as it is.
+   */
+  async describeRepo(ref: { repo: string; id?: string }): Promise<RepoRef> {
+    const ws = ref.repo.split("/")[0]!;
+    const path = ref.id ? `/repositories/${encodeURIComponent(ws)}/${encodeURIComponent(ref.id)}` : this.split(ref.repo);
+    try {
+      return bbRepoRef((await this.http.get<BbRepo>(`${path}?fields=${REPO_FIELDS}`)).data);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) throw new RepoUnavailableError(ref.repo, 404, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * The main branch's first-parent commits from `head` back to `base` (U8): `GET …/commits?include=head&exclude=base`
+   * lists the commits reachable from `head` and not from `base`, with their parents. Null when `base` is not on the chain.
+   */
+  async firstParentPath(req: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null> {
+    if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
+    const commits = await this.paged<BbCommit>(`${this.split(req.repo)}/commits?include=${req.head}&exclude=${req.base}&pagelen=100&fields=next,values.hash,values.date,values.parents.hash`, req.signal);
+    return firstParentChain(commits.map((c) => ({ sha: c.hash, parents: c.parents.map((x) => x.hash), committedAt: c.date })), req.base, req.head);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {
     const base = this.split(req.repo);
     const { data: repo } = await this.http.get<{ mainbranch?: { name: string } | null }>(`${base}?fields=mainbranch.name`, req.signal);
     const branch = repo.mainbranch?.name;
-    if (!branch) throw new Error(`bitbucket-cloud: ${req.repo} has no main branch`);
+    if (!branch) throw new RepoEmptyError(req.repo, `bitbucket-cloud: ${req.repo} has no main branch`);
     const opens = Date.parse(req.window.opensAt);
     const closes = Date.parse(req.window.closesAt);
 

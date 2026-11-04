@@ -2,7 +2,9 @@ import { canonicalJson } from "../core/canonical.js";
 import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   DEFAULT_REVIEW_GRANULARITY,
+  REPO_UNAVAILABLE,
   SUPPORTED_PROVIDER_API_VERSIONS,
+  isRepoUnavailable,
   changeRecordProblems,
   normalizeLogin,
   type Actor,
@@ -77,6 +79,13 @@ export interface ConformanceFixture {
    * provider implements it. Off by default, so a fixture that cannot answer the probes is not failed for it.
    */
   estimate?: boolean;
+  /**
+   * U8 (`repo-unavailable`): `gone` names a repository the fixture's transport answers 404 for, as for a deleted one.
+   * `describeRepo` must describe `request.repo` and throw a `RepoUnavailableError` (status 404) for `gone`. Then, for a
+   * provider given as a factory, the kit answers every request with a rate-limited 403: whatever the provider throws
+   * must not count as a gone repository (`isRepoUnavailable` false), because a rate limit never is one.
+   */
+  repoUnavailable?: { gone: string };
   /** How many requests/pages the fixture transport has served (pagination check). Defaults to the harness's request count. */
   pagesServed?: () => number;
   /**
@@ -154,9 +163,11 @@ export const CONFORMANCE_CHECKS = [
   "review-granularity",
   "revoked-approval",
 ] as const;
-/** Checks that run only for a fixture that opts in (`listRepos`, `estimate`): a fixture without them adds no result. */
-export const OPT_IN_CONFORMANCE_CHECKS = ["list-repos", "estimate-requests"] as const;
-export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number] | (typeof OPT_IN_CONFORMANCE_CHECKS)[number];
+/** The checks every fixture runs. Unchanged by the opt-in checks, so an exhaustive switch over it still compiles. */
+export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
+/** Checks that run only for a fixture that opts in (`listRepos`, `estimate`, `repoUnavailable`): a fixture without them adds no result. */
+export const OPT_IN_CONFORMANCE_CHECKS = ["list-repos", "estimate-requests", "repo-unavailable"] as const;
+export type OptInConformanceCheck = (typeof OPT_IN_CONFORMANCE_CHECKS)[number];
 
 /** The Retry-After the kit sends with its injected 429, in seconds. */
 export const INJECTED_RETRY_AFTER_SECONDS = 7;
@@ -287,7 +298,7 @@ function idMaps(changes: readonly ChangeRecord[]): { byLogin: Map<string, Set<st
 export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[], options: ConformanceOptions = {}): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
   for (const f of fixtures) {
-    const push = (check: ConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
+    const push = (check: ConformanceCheck | OptInConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
     const skip = (check: ConformanceCheck, message: string) => results.push({ fixture: f.name, check, ok: true, skipped: true, message });
     const h1 = makeHarness();
     const p1 = await instantiate(provider, f, h1);
@@ -497,6 +508,10 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const est = await estimateCheck(provider, f);
       push("estimate-requests", est.length === 0, est.join("; "));
     }
+    if (f.repoUnavailable) {
+      const ru = await repoUnavailableCheck(provider, f, f.repoUnavailable);
+      push("repo-unavailable", ru.length === 0, ru.join("; "));
+    }
   }
   return { ok: results.every((r) => r.ok), results };
 }
@@ -559,6 +574,44 @@ async function estimateCheck(provider: ProviderUnderTest, f: ConformanceFixture)
   if (!e || !whole(e.requests) || e.requests < 1) problems.push(`requests must be a whole number of at least 1 (got ${JSON.stringify(e?.requests)})`);
   if (e?.graphql !== undefined && (!whole(e.graphql) || e.graphql > e.requests)) problems.push(`graphql must be a whole number of at most requests (got ${JSON.stringify(e.graphql)})`);
   if (e?.probed !== undefined && (!whole(e.probed) || e.probed > e.requests)) problems.push(`probed must be a whole number of at most requests (got ${JSON.stringify(e.probed)})`);
+  return problems;
+}
+
+/**
+ * `repo-unavailable` (U8): `describeRepo` describes a repository that exists, throws a RepoUnavailableError (404) for a
+ * deleted one, and a rate limit is never reported as a gone repository, from `describeRepo` or from `listChanges`.
+ */
+async function repoUnavailableCheck(provider: ProviderUnderTest, f: ConformanceFixture, want: NonNullable<ConformanceFixture["repoUnavailable"]>): Promise<string[]> {
+  const p = await instantiate(provider, f, makeHarness());
+  if (typeof p.describeRepo !== "function") return ["the fixture expects describeRepo, but the provider implements none"];
+  const problems: string[] = [];
+  const msg = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 200);
+  try {
+    const r = await p.describeRepo({ repo: f.request.repo });
+    if (!r || typeof r.repo !== "string" || r.repo.toLowerCase() !== f.request.repo.toLowerCase() || typeof r.id !== "string" || r.id === "") problems.push(`describeRepo(${f.request.repo}) returned ${JSON.stringify(r)?.slice(0, 120)}, not that repository with its id`);
+  } catch (e) {
+    problems.push(`describeRepo(${f.request.repo}) threw ${msg(e)}`);
+  }
+  try {
+    await p.describeRepo({ repo: want.gone });
+    problems.push(`describeRepo(${want.gone}) resolved, but the transport answers 404 for it: a deleted repository must throw RepoUnavailableError`);
+  } catch (e) {
+    const x = e as { code?: unknown; status?: unknown };
+    if (x?.code !== REPO_UNAVAILABLE) problems.push(`describeRepo(${want.gone}) threw ${msg(e)}, not a RepoUnavailableError (code ${REPO_UNAVAILABLE})`);
+    else if (x.status !== 404) problems.push(`describeRepo(${want.gone}) threw a RepoUnavailableError with status ${String(x.status)}, not 404`);
+  }
+  if (typeof provider === "function") {
+    const limited = (): Response => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403, headers: { "content-type": "application/json", "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 60), "retry-after": "60" } });
+    const faults = Array.from({ length: 200 }, (_, i): Fault => ({ call: i + 1, response: limited, minWaitMs: 0, label: "rate-limited 403" }));
+    const q = await instantiate(provider, f, makeHarness(faults));
+    for (const [what, call] of [["describeRepo", () => q.describeRepo!({ repo: f.request.repo })], ["listChanges", () => q.listChanges(f.request)]] as const) {
+      try {
+        await call();
+      } catch (e) {
+        if (isRepoUnavailable(e)) problems.push(`under a rate-limited 403, ${what} threw ${msg(e)}, which counts as a gone repository (isRepoUnavailable): a rate limit never is one`);
+      }
+    }
+  }
   return problems;
 }
 

@@ -32,6 +32,9 @@ export const GAVE_UP = 0;
 /** GraphQL errors GitHub documents as transient (timeouts, internal errors, rate limits). */
 const TRANSIENT_GRAPHQL = /something went wrong|timeout|timed out|rate limit|abuse|secondary|try again/i;
 
+/** A 403 body that says the request was rate limited (primary or secondary limit, or the older abuse-detection wording). */
+export const RATE_LIMIT_BODY = /rate limit|abuse detection/i;
+
 export class GitHubHttp {
   readonly apiUrl: string;
   readonly graphqlUrl: string;
@@ -65,10 +68,19 @@ export class GitHubHttp {
       let reason: string;
       try {
         const res = await this.o.fetch(url, init);
-        const retryable = res.status >= 500 || res.status === 429 || (res.status === 403 && (res.headers.get("retry-after") !== null || res.headers.get("x-ratelimit-remaining") === "0"));
-        if (!res.ok && !retryable) throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, res.status);
+        let retryable = res.status >= 500 || res.status === 429 || (res.status === 403 && (res.headers.get("retry-after") !== null || res.headers.get("x-ratelimit-remaining") === "0"));
+        let limitBody = false;
+        if (!res.ok && !retryable) {
+          const text = (await res.text()).slice(0, 300);
+          // GitHub documents a secondary rate limit as a 403 (or 429) whose message says so, possibly with neither
+          // retry-after nor x-ratelimit-remaining: 0. It is transient, never "the repository is unavailable".
+          if (res.status === 403 && RATE_LIMIT_BODY.test(text)) retryable = limitBody = true;
+          else throw new GitHubHttpError(`GitHub ${init.method ?? "GET"} ${short}: HTTP ${res.status} ${text}`, res.status);
+        }
         if (retryable) {
-          reason = `HTTP ${res.status}`;
+          reason = limitBody ? `HTTP ${res.status} (secondary rate limit)` : `HTTP ${res.status}`;
+          // Without a header, GitHub asks for at least a minute before the next try.
+          if (limitBody) wait = Math.max(wait, 60_000);
           const after = Number(res.headers.get("retry-after"));
           const reset = Number(res.headers.get("x-ratelimit-reset"));
           if (Number.isFinite(after) && after > 0) wait = after * 1000;
@@ -98,12 +110,17 @@ export class GitHubHttp {
     }
   }
 
-  /** GET a REST path (or absolute URL). Returns parsed JSON and the rel="next" link if any. */
-  async rest<T>(pathOrUrl: string): Promise<{ data: T; next: string | null }> {
+  /** GET a REST path (or absolute URL). Returns parsed JSON, the rel="next" link if any, and the response headers. */
+  async rest<T>(pathOrUrl: string): Promise<{ data: T; next: string | null; headers: Headers }> {
     const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${this.apiUrl}${pathOrUrl}`;
     const { body, res } = await this.request<T>(url, { headers: this.headers() });
     const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get("link") ?? "")?.[1] ?? null;
-    return { data: body, next };
+    return { data: body, next, headers: res.headers };
+  }
+
+  /** Whether requests carry a token. */
+  get authenticated(): boolean {
+    return !!this.o.token;
   }
 
   async graphql<T>(query: string, variables: Record<string, unknown>, opts: { maxRetries?: number } = {}): Promise<T> {
