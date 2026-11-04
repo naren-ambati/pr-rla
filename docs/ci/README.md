@@ -29,6 +29,22 @@ pr-rla runs in CI to keep a certificate honest between humans: on every verdict 
 - **Treat what pr-rla prints as data.** The Action escapes it before it reaches markdown and defangs `::` lines.
 - **Stay read-only by default.** `status` and `verify` read. Only the Action's `checkpoint` and `sample` write, and only with `allow-writes: true`.
 
+## Scopes
+
+What each integration needs, by SCM. Every row is **unverified against the live service**: the build exercises the integrations on mock servers only (D8).
+
+| SCM | `status` and `verify` (read) | `checkpoint` (write) | Comment on the audit issue |
+|---|---|---|---|
+| GitHub | `contents: read`; a token that can read the audit repository's issues (`issues: read`) | `contents: write`, and `allow-writes: true` | `issues: write` |
+| GitLab | A masked `GITLAB_TOKEN` with `read_api` | Not offered in the component | Not offered |
+| Bitbucket Cloud | An access token with Repositories: Read and Pull requests: Read, or an API token with `read:repository:bitbucket` and `read:pullrequest:bitbucket` | Not offered in the step | Not offered |
+
+Nothing here writes to a public service. The only writes are the Action's opt-in `checkpoint` and `sample`, and the Action's opt-in comment, each to the audit repository.
+
+## Platforms
+
+The Action's scripts need `bash` and Node 24; the GitLab and Bitbucket jobs run in Linux containers (`node:24-alpine`, `node:24`). The tests ran on macOS here. Linux runners are what the integrations target, and a run on one is unverified. Windows runners are untested.
+
 ## End-to-end matrix
 
 Intent metric 3 asks for one ledger that completes the audit on each SCM. Every cell runs on fixtures and mock servers in this phase. **H** marks the steps a human does by design: deep review, and recording the verdict.

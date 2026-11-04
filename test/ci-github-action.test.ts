@@ -438,6 +438,23 @@ describe("the comment is best effort and the token stays on GitHub", () => {
   });
 });
 
+describe("run.sh does not depend on the calling shell's flags", () => {
+  it("under bash -e a non-zero pr-rla exit is still data: the outputs and the summary are written, and the step ends 0", () => {
+    const temp = mkdtempSync(join(tmpdir(), "prrla-run-e-"));
+    const actionPath = join(temp, "action");
+    mkdirSync(join(actionPath, "node_modules", ".bin"), { recursive: true });
+    cannedShim(join(actionPath, "node_modules", ".bin"), { code: 2, stdout: JSON.stringify({ phase: "unregistered", line: "x" }) });
+    const outFile = join(temp, "out");
+    const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", join(ACTION, "scripts", "run.sh")], {
+      cwd: temp,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH!, ACTION_PATH: join(temp, "action"), RUNNER_TEMP: temp, GITHUB_OUTPUT: outFile, GITHUB_STEP_SUMMARY: join(temp, "summary"), INPUT_COMMAND: "status", INPUT_DIR: ".", INPUT_OFFLINE: "true", INPUT_FAIL_ON: "escalate", INPUT_PLUGINS: "builtin-only", INPUT_ACCEPT_LOCK_GRANTS: "false" },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(outFile, "utf8")).toContain("exit-code=2\nresult=fail\n");
+  });
+});
+
 describe("the action is wired as designed (FR6.1, FR6.4, NFR18)", () => {
   it("the install step is exactly an npm ci from the action's own lockfile", async () => {
     const x = await action({ dir: audit.dir, trackers: { [API]: certified() } });

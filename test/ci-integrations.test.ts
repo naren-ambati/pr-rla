@@ -430,5 +430,9 @@ describe("the docs: a CI guide per SCM, linked from the README", () => {
     expect(read("docs", "ci", "gitlab.md")).toContain("CI/CD Catalog");
     expect(read("docs", "ci", "gitlab.md")).toContain("`CI_JOB_TOKEN` cannot call the issues API");
     expect(read("docs", "ci", "bitbucket.md")).toContain("2025-09-09");
+    const index = read("docs", "ci", "README.md");
+    expect(index).toContain("## Scopes");
+    expect(index).toContain("unverified against the live service");
+    expect(index).toMatch(/## Platforms\n\n.*Windows runners are untested/s);
   });
 });
