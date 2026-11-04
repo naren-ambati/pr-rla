@@ -154,11 +154,92 @@ export interface ProviderContext {
   sleep?: (ms: number) => Promise<void>;
 }
 
+export type RepoVisibility = "public" | "private" | "internal";
+export const REPO_VISIBILITIES: readonly RepoVisibility[] = ["public", "private", "internal"];
+
+/**
+ * A repository set rule (U8, FR5.1): every repository under `owner` (a GitHub org or user, a GitLab group,
+ * a Bitbucket workspace or project) whose path matches `include` and not `exclude`, filtered by the flags.
+ * It is registered as written and resolved once, at freeze.
+ */
+export interface RepoSetRule {
+  kind: "rule";
+  owner: string;
+  /** Globs over the repo path (`*` within a segment, `**` across segments). A pattern with no `/` matches the repo's last segment. Sorted; default `["*"]`. */
+  include: string[];
+  exclude: string[];
+  /** true includes archived repositories (default false: excluded). */
+  archived: boolean;
+  /** true includes forks (default false: excluded). */
+  forks: boolean;
+  /** Which visibilities count. Sorted; default all three. */
+  visibility: RepoVisibility[];
+}
+
+/** One repository `listRepos` found. `id` is the SCM's stable repository id. */
+export interface RepoRef {
+  /** Provider-scoped repository path, as `ListChangesRequest.repo` takes it (for example `navikt/pdfgenrs`). */
+  repo: string;
+  id: string;
+  defaultBranch: string;
+  archived: boolean;
+  fork: boolean;
+  visibility: RepoVisibility;
+}
+
+/**
+ * Optional (U8): the requests one `listChanges` for this request would make, predicted from a cheap
+ * probe (the first page of what it would read). `freeze --dry-run --estimate` sums these.
+ */
+export interface RequestEstimate {
+  /** Every request, GraphQL queries included. */
+  requests: number;
+  /** How many of `requests` are GraphQL queries (they have their own budget on GitHub). Default 0. */
+  graphql?: number;
+  /** The requests the probe itself made (already spent; part of `requests`). */
+  probed?: number;
+}
+
+/**
+ * Thrown by a provider when a repository no longer exists, or the token cannot see it (HTTP 404 or 403
+ * that is not a rate limit). `verify` then reports the repo as unverifiable (a WARN with a count) instead of
+ * failing; `freeze` names the repo and stops. Across the plugin host the `code` carries it.
+ */
+export const REPO_UNAVAILABLE = "REPO_UNAVAILABLE";
+export class RepoUnavailableError extends Error {
+  // No parameter properties or field initialisers: this module also runs under Node's type stripping (the plugin host).
+  readonly code: string;
+  readonly repo: string;
+  readonly status: 403 | 404;
+  constructor(repo: string, status: 403 | 404, detail = "") {
+    super(`${repo}: HTTP ${status}${detail ? ` ${detail}` : ""}`);
+    this.name = "RepoUnavailableError";
+    this.code = REPO_UNAVAILABLE;
+    this.repo = repo;
+    this.status = status;
+  }
+}
+
+/** True for a RepoUnavailableError, one that crossed the plugin host (code), or a provider's own 403/404. */
+export function isRepoUnavailable(e: unknown): boolean {
+  const x = e as { code?: unknown; status?: unknown } | null;
+  return !!x && typeof x === "object" && (x.code === REPO_UNAVAILABLE || x.status === 404 || x.status === 403);
+}
+
 export interface ScmProvider {
   readonly apiVersion: number;
   /** Short scheme, used as the `id` prefix. e.g. `github`. */
   readonly name: string;
   listChanges(request: ListChangesRequest): Promise<ListChangesResult>;
+  /**
+   * Optional (U8, same API version): the repositories under `set.owner` the token can see. A provider may
+   * skip archived repositories, forks or visibilities the rule excludes, but need not: the core applies the
+   * rule's globs and flags itself, sorts, and refuses a result outside `set.owner`. Required to register a
+   * `rule` repo set; absent, `register` refuses and names the provider.
+   */
+  listRepos?(set: RepoSetRule): Promise<RepoRef[]>;
+  /** Optional (U8): predicts `listChanges` request counts for `freeze --dry-run --estimate`. Absent: no estimate for this provider. */
+  estimateRequests?(request: ListChangesRequest): Promise<RequestEstimate>;
   /**
    * Optional: provider-native counts for a selector (e.g. a search-API figure)
    * printed next to pr-rla's own population so readers see the difference.

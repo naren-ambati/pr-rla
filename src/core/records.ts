@@ -1,4 +1,4 @@
-import type { ChangeRecord } from "../sdk/provider.js";
+import type { ChangeRecord, RepoSetRule } from "../sdk/provider.js";
 import { canonicalJson, hashCanonical, sha256Hex } from "./canonical.js";
 import type { FunnelStep, Selector } from "./selector.js";
 import { QUICKNET, SEED_DELAY_SECONDS, deriveSeedRound, isoToUnix, roundPublishTime, unixToIso } from "./seed.js";
@@ -114,11 +114,11 @@ export interface ManifestEntry extends ChangeRecord {}
  * (or their documented default) until then, so the shape does not change again.
  * ------------------------------------------------------------------------- */
 
-/** Which repositories an audit covers. Only `repo` is supported until org-pooled freeze (bolt 9). */
-export type RepoSet =
-  | { kind: "repo"; repo: string }
-  | { kind: "list"; repos: string[] }
-  | { kind: "rule"; owner: string; include: string[]; exclude: string[]; archived: false; forks: false; visibility: ("public" | "private" | "internal")[] };
+/**
+ * Which repositories an audit covers (U8). `repo` is a pool of one; `list` names repositories;
+ * `rule` names an owner plus globs and flags and is resolved once, at freeze (src/core/repo-set.ts).
+ */
+export type RepoSet = { kind: "repo"; repo: string } | { kind: "list"; repos: string[] } | RepoSetRule;
 
 export type ProvenanceLevel = "self-asserted" | "account" | "presence";
 
@@ -166,7 +166,7 @@ export interface RegistrationRecordV2 {
 
 export interface ManifestRepo {
   repo: string;
-  /** The SCM's stable repository id (bolt 9). */
+  /** The SCM's stable repository id, from `listRepos` (a `rule` repo set); null for a `repo` or `list` set. */
   repoId: string | null;
   defaultBranch: string;
   /** The default-branch head the population was walked from (bolt 5). */
@@ -217,19 +217,37 @@ export const isRegistrationV2 = (r: SignedRecord<AnyRegistration>): r is SignedR
 export const isCommitmentV2 = (c: SignedRecord<AnyCommitment>): c is SignedRecord<CommitmentRecordV2> => c.record.schema === "pr-rla/commitment/v2";
 export const isManifestV2 = (m: AnyManifest): m is ManifestV2 => m.schema === "pr-rla/manifest/v2";
 
-/** The one repository of a single-repo audit (every v1 audit, and v2 with `repos.kind: "repo"`). */
-export function registrationRepo(reg: SignedRecord<AnyRegistration>): string {
+/** The repo set a registration covers: a v1 registration and a v2 `repo` set are a pool of one. */
+export function registrationRepoSet(reg: SignedRecord<AnyRegistration>): RepoSet {
   const r = reg.record;
-  if (r.schema !== "pr-rla/registration/v2") return r.repo;
-  const set = r.repos;
-  if (set.kind === "repo") return set.repo;
-  throw new Error(`registration covers a repo set of kind "${set.kind}"; org-pooled audits are not supported by this build`);
+  return r.schema !== "pr-rla/registration/v2" ? { kind: "repo", repo: r.repo } : r.repos;
 }
 
+/** The one repository of a single-repo audit (every v1 audit, and v2 with `repos.kind: "repo"`). Pooled audits use `registrationRepoSet`. */
+export function registrationRepo(reg: SignedRecord<AnyRegistration>): string {
+  const set = registrationRepoSet(reg);
+  if (set.kind === "repo") return set.repo;
+  throw new Error(`registration covers a repo set of kind "${set.kind}", not one repository`);
+}
+
+/** The one repository of a single-repo manifest. A pooled manifest has `repos.length > 1` or a non-`repo` registration: use `manifestRepos`. */
 export function manifestRepo(m: AnyManifest): string {
   if (m.schema !== "pr-rla/manifest/v2") return m.repo;
-  if (m.repos.length !== 1) throw new Error(`manifest covers ${m.repos.length} repos; org-pooled audits are not supported by this build`);
+  if (m.repos.length !== 1) throw new Error(`manifest covers ${m.repos.length} repos, not one repository`);
   return m.repos[0]!.repo;
+}
+
+/** The repositories a manifest covers, in manifest order (a v1 manifest has one, without id or head). */
+export function manifestRepos(m: AnyManifest): ManifestRepo[] {
+  return m.schema === "pr-rla/manifest/v2" ? m.repos : [{ repo: m.repo, repoId: null, defaultBranch: m.defaultBranch, headSha: null }];
+}
+
+/** What a draws file and a ledger's draw issues call the audited repositories: the repo, or `owner (n repos)`. */
+export function repoLabel(m: AnyManifest): string {
+  const repos = manifestRepos(m);
+  if (repos.length === 1) return repos[0]!.repo;
+  const owners = new Set(repos.map((r) => r.repo.split("/")[0]!));
+  return `${owners.size === 1 ? [...owners][0]! : "pool"} (${repos.length} repos)`;
 }
 
 export interface Manifest {

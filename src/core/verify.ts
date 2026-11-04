@@ -6,7 +6,9 @@ import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvide
 import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { canonicalJson, sha256Hex } from "./canonical.js";
-import { buildPopulation, manifestAliases } from "./population.js";
+import { buildPooledPopulation, buildPopulation, checkListed, listRepoChanges, manifestAliases, type Population } from "./population.js";
+import { manifestRepoProblems, resolveRepoSet } from "./repo-set.js";
+import { isRepoUnavailable } from "../sdk/provider.js";
 import {
   auditMode,
   derivedRoundFor,
@@ -14,9 +16,9 @@ import {
   isCommitmentV2,
   isManifestV2,
   isRegistrationV2,
-  manifestRepo,
+  manifestRepos,
   manifestSha256,
-  registrationRepo,
+  registrationRepoSet,
   registrationTime,
   type AnyCommitment,
   type AnyManifest,
@@ -213,23 +215,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (new Set(ids).size !== ids.length) c2.details.push("manifest lists a change twice");
     if (ids.some((id, i) => i > 0 && ids[i - 1]! >= id)) c2.details.push("manifest changes are not sorted by id");
     if (m.registrationSha256 !== reg.sha256) c2.details.push("manifest names a different registration");
-    let mRepo: string | null = null;
-    let rRepo: string | null = null;
-    try {
-      mRepo = manifestRepo(m);
-      rRepo = registrationRepo(reg);
-    } catch (e) {
-      c2.details.push((e as Error).message);
-    }
     if (isManifestV2(m) !== v2 || isCommitmentV2(cm) !== v2) c2.details.push("registration, manifest and commitment use different schema versions");
     for (const [k, mine, theirs] of [
       ["selector", m.selector, reg.record.selector],
       ["window", m.window, reg.record.window],
       ["parameters", m.parameters, reg.record.parameters],
       ["protocol", m.protocolSha256, reg.record.protocolSha256],
-      ["repo", mRepo, rRepo],
     ] as const)
       if (canonicalJson(mine) !== canonicalJson(theirs)) c2.details.push(`manifest ${k} differs from the registration`);
+    // The repos the manifest covers are the registered ones: the repo, the list, or inside the rule (U8, FR5.1/FR5.2).
+    c2.details.push(...manifestRepoProblems(registrationRepoSet(reg), manifestRepos(m).map((r) => r.repo), m.changes.map((x) => x.repo)));
     const csig = verifySignedRecord(cm);
     if (!csig.ok) c2.details.push(`commitment signature: ${csig.reason}`);
     if (cm.publicKeyPem.trim() !== reg.publicKeyPem.trim()) c2.details.push("commitment is signed by a different key than the registration");
@@ -237,6 +232,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (cm.record.N !== m.N) c2.details.push("commitment names a different N");
     if (cm.record.registrationSha256 !== reg.sha256) c2.details.push("commitment names a different registration");
     if (isoToUnix(m.frozenAt) < isoToUnix(reg.record.window.closesAt)) c2.details.push(`frozen ${m.frozenAt}, before the window closed`);
+    // A pooled freeze signs its commitment when it finishes, after the as-of time its manifest records; never before it.
+    if (isoToUnix(cm.record.frozenAt) < isoToUnix(m.frozenAt)) c2.details.push(`commitment dated ${cm.record.frozenAt}, before the manifest's as-of time ${m.frozenAt}`);
     if (c2.details.length) c2.status = "FAIL";
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
     if (v2 && isRegistrationV2(reg)) {
@@ -289,35 +286,100 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c5.status = "SKIP";
     c5.summary = "offline: population not rebuilt";
   } else {
+    const provider = deps.provider;
+    const set = registrationRepoSet(reg);
+    const mrepos = manifestRepos(m);
+    // A pool: more than one repo, or a list or rule (which may resolve to one). Gone repos are tolerated only there.
+    const pooled = set.kind !== "repo" || mrepos.length !== 1;
+    const headOf = new Map(mrepos.map((r) => [r.repo, isManifestV2(m) ? r.headSha : null]));
     // Walk the frozen history (FR7.2) and match renamed accounts by id (FR7.3).
-    const pinned = isManifestV2(m) ? (m.repos[0]?.headSha ?? null) : null;
     const aliases = manifestAliases(m.changes);
-    const pop = await buildPopulation(deps.provider, { repo: registrationRepo(reg), window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt, ...(pinned ? { head: pinned } : {}), aliases });
+    const window = reg.record.window;
+    const selector = reg.record.selector;
+    let pop: Population;
+    let unavailable: { repo: string; error: Error }[] = [];
+    if (pooled) {
+      const built = await buildPooledPopulation(provider, { repos: mrepos.map((r) => ({ repo: r.repo, ...(headOf.get(r.repo) ? { head: headOf.get(r.repo)! } : {}) })), window, selector, cutoffIso: m.frozenAt, aliases, tolerateUnavailable: true });
+      pop = built;
+      unavailable = built.unavailable;
+    } else {
+      const pinned = headOf.get(mrepos[0]!.repo) ?? null;
+      pop = await buildPopulation(provider, { repo: set.kind === "repo" ? set.repo : mrepos[0]!.repo, window, selector, cutoffIso: m.frozenAt, ...(pinned ? { head: pinned } : {}), aliases });
+    }
     // Identical options cannot differ in the ones that change the population (a registration made before
     // U3 hashed no population options, so the population hash alone would differ for nothing).
     const registered = v2 ? (reg.record as RegistrationRecordV2).plugins.provider : null;
     const id = deps.providerIdentity;
     if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256)
       c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
-    const mine = new Map(m.changes.map((x) => [x.id, x]));
+    // Repos the verifier cannot read (deleted, or not visible to its token): their changes cannot be rebuilt (FR5.2; draft 05 §U8).
+    const goneRepos = new Set(unavailable.map((u) => u.repo));
+    const verifiable = m.changes.filter((x) => !goneRepos.has(x.repo));
+    let unverified = 0;
+    for (const u of unavailable) {
+      const count = m.changes.filter((x) => x.repo === u.repo).length;
+      unverified += count;
+      const status = (u.error as { status?: unknown }).status;
+      c5.details.push(`WARN cannot rebuild ${u.repo} (${typeof status === "number" ? status : "404/403"}): its ${n(count)} changes are unverified`);
+    }
+    // A repo the rule matches now but the manifest does not list (created or made visible after freeze) FAILs, unless it
+    // has no change in the window at all (its first commit came after the window closed), so it cannot change the population.
+    let warned = unavailable.length > 0;
+    if (set.kind === "rule") {
+      let current: Awaited<ReturnType<typeof resolveRepoSet>> | null = null;
+      try {
+        current = await resolveRepoSet(provider, set);
+      } catch (e) {
+        warned = true;
+        c5.details.push(`WARN cannot re-resolve the registered rule (${(e as Error).message}): repos added after freeze would not be seen`);
+      }
+      const have = new Set(mrepos.map((r) => r.repo.toLowerCase()));
+      for (const added of (current ?? []).filter((r) => !have.has(r.repo.toLowerCase()))) {
+        try {
+          const listed = await listRepoChanges(provider, { repo: added.repo, window, selector });
+          checkListed(provider.name, listed, { repo: added.repo, window, selector });
+          if (listed.changes.length > 0) c5.details.push(`FAIL repo ${added.repo} matches the registered rule but is not in the manifest (${n(listed.changes.length)} changes landed in the window)`);
+          else c5.details.push(`repo ${added.repo} matches the registered rule but is not in the manifest; it has no change in the window (its first commit is after the window closed), so it cannot change the population`);
+        } catch (e) {
+          if (!isRepoUnavailable(e)) throw e;
+          warned = true;
+          c5.details.push(`WARN repo ${added.repo} matches the registered rule but is not in the manifest, and cannot be read (${(e as { status?: unknown }).status ?? "404/403"}): whether it holds changes in the window is unverified`);
+        }
+      }
+    }
+    const mine = new Map(verifiable.map((x) => [x.id, x]));
     const rebuilt = new Map(pop.entries.map((x) => [x.id, x]));
     const missing = [...rebuilt.keys()].filter((id) => !mine.has(id));
     const extra = [...mine.keys()].filter((id) => !rebuilt.has(id));
     const shaDiff = [...mine.keys()].filter((id) => rebuilt.has(id) && rebuilt.get(id)!.mergeSha !== mine.get(id)!.mergeSha);
     const frozen = Date.parse(m.frozenAt);
     const late = pop.listed.changes.filter((x) => mine.has(x.id) && x.reviews.some((r) => Date.parse(r.submittedAt) > frozen));
-    if (missing.length) c5.details.push(`FAIL population: ${n(missing.length)} changes on ${deps.provider.name} are missing from the manifest (e.g. ${missing.slice(0, 3).join(", ")})`);
+    if (missing.length) c5.details.push(`FAIL population: ${n(missing.length)} changes on ${provider.name} are missing from the manifest (e.g. ${missing.slice(0, 3).join(", ")})`);
     if (extra.length) c5.details.push(`FAIL population: ${n(extra.length)} changes in the manifest are not in the rebuilt population (e.g. ${extra.slice(0, 3).join(", ")})`);
     if (shaDiff.length) c5.details.push(`FAIL population: ${n(shaDiff.length)} changes have a different merge SHA (e.g. ${shaDiff.slice(0, 3).join(", ")})`);
     if (late.length) c5.details.push(`${n(late.length)} manifest changes received reviews after freeze time (ignored, as of ${m.frozenAt}): ${late.slice(0, 5).map((x) => x.id).join(", ")}`);
     let unpinned = false;
-    if (reg.record.selector.kinds.includes("direct_push")) {
+    if (selector.kinds.includes("direct_push")) {
       const note = "direct pushes dated in the window but pushed after freeze will show as extra";
-      if (pinned && pop.headSha !== pinned) {
-        unpinned = true;
-        c5.details.push(`provider ${deps.provider.name} does not pin history (asked for the frozen head ${pinned.slice(0, 12)}…, ${pop.headSha ? `walked from ${pop.headSha.slice(0, 12)}…` : "reported no head"}); ${note}`);
-      } else if (pinned) c5.details.push(`history walked from the frozen head ${pinned.slice(0, 12)}…`);
-      else if (isManifestV2(m)) c5.details.push(`the manifest records no default-branch head: provider ${deps.provider.name} does not pin history; ${note}`);
+      if (!pooled) {
+        const pinned = headOf.get(mrepos[0]!.repo) ?? null;
+        if (pinned && pop.headSha !== pinned) {
+          unpinned = true;
+          c5.details.push(`provider ${provider.name} does not pin history (asked for the frozen head ${pinned.slice(0, 12)}…, ${pop.headSha ? `walked from ${pop.headSha.slice(0, 12)}…` : "reported no head"}); ${note}`);
+        } else if (pinned) c5.details.push(`history walked from the frozen head ${pinned.slice(0, 12)}…`);
+        else if (isManifestV2(m)) c5.details.push(`the manifest records no default-branch head: provider ${provider.name} does not pin history; ${note}`);
+      } else {
+        const walked = new Map(pop.repos.map((r) => [r.repo, r.headSha]));
+        const notPinned = mrepos.filter((r) => !goneRepos.has(r.repo) && headOf.get(r.repo) && walked.get(r.repo) !== headOf.get(r.repo)).map((r) => r.repo);
+        const noHead = mrepos.filter((r) => !goneRepos.has(r.repo) && !headOf.get(r.repo)).map((r) => r.repo);
+        const pinnedCount = mrepos.length - goneRepos.size - notPinned.length - noHead.length;
+        if (notPinned.length) {
+          unpinned = true;
+          c5.details.push(`provider ${provider.name} does not pin history for ${n(notPinned.length)} repo(s) (e.g. ${notPinned.slice(0, 3).join(", ")}); ${note}`);
+        }
+        if (noHead.length && isManifestV2(m)) c5.details.push(`the manifest records no default-branch head for ${n(noHead.length)} repo(s) (e.g. ${noHead.slice(0, 3).join(", ")}): provider ${provider.name} does not pin history; ${note}`);
+        if (pinnedCount > 0) c5.details.push(`history walked from the frozen heads of ${n(pinnedCount)} repo(s)`);
+      }
     }
     const renamed = new Map<string, string>();
     for (const c of pop.listed.changes)
@@ -326,8 +388,13 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         if (was !== undefined && was !== a.login) renamed.set(`${was} → ${a.login}`, a.id!);
       }
     if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since freeze, matched by account id: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
-    c5.status = c5.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : unpinned ? "WARN" : "PASS";
-    c5.summary = c5.status === "FAIL" ? c5.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "") : `population ${n(pop.entries.length)}/${n(m.N)} match`;
+    c5.status = c5.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : unpinned || warned ? "WARN" : "PASS";
+    c5.summary =
+      c5.status === "FAIL"
+        ? c5.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "")
+        : unverified
+          ? `population ${n(pop.entries.length)}/${n(verifiable.length)} match · ${n(unverified)} changes in ${n(unavailable.length)} repo(s) could not be rebuilt`
+          : `population ${n(pop.entries.length)}/${n(m.N)} match`;
   }
   checks.push(c5);
 
