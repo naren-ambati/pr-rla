@@ -1,6 +1,6 @@
 // The bolt 10 (U9) demo (delivery-plan.md), as changed after review: a software -sk signature with UP
 // set passes at presence, and one with UP clear fails; one signature is one verdict, for one draw of one
-// registration; and a cut history is refused. Offline and local: it reads the synthetic sk-dummy
+// frozen audit (P4: the registration, the manifest and the seed); and a cut history is refused. Offline and local: it reads the synthetic sk-dummy
 // fixture (test/fixtures/presence/sk-dummy-verdicts.json, one `ssh-keygen -Y sign -n pr-rla-verdict@v1`
 // per verdict, made by scripts/make-presence-fixtures.mjs with software keys only) through the git-file
 // ledger, attests each verdict's own signature against the fixture's registration and allowed signers,
@@ -12,7 +12,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import gitFile from "../dist/ledgers/git-file.js";
-import { PRESENCE_LIMIT, attestVerdicts, parseAllowedSigners, provenanceLabel, verdictRuleFailures } from "../dist/core/presence/index.js";
+import { PRESENCE_LIMIT, attestVerdicts, countedVerdicts, parseAllowedSigners, provenanceLabel, verdictRuleFailures } from "../dist/core/presence/index.js";
 import { provenanceLine } from "../dist/core/status.js";
 
 const fx = JSON.parse(readFileSync(new URL("../test/fixtures/presence/sk-dummy-verdicts.json", import.meta.url), "utf8"));
@@ -22,15 +22,20 @@ writeFileSync(join(dir, "audit/w/verdicts.jsonl"), fx.steps.map((s) => s.line).j
 writeFileSync(join(dir, "allowed_signers"), `${fx.allowedSigners.join("\n")}\n`);
 
 console.log(`fixture: ${fx.source}, made ${fx.made} with ${fx.tools.sshKeygen}; -sk keys in OpenSSH 10.3p1's sk-dummy (a software-emulated authenticator)`);
-console.log(`one SSHSIG per verdict, namespace ${fx.namespace}, over the README's bytes; registration ${fx.registrationSha256.slice(0, 12)}…`);
+console.log(`one SSHSIG per verdict, namespace ${fx.namespace}, over the README's bytes (${fx.payloadVersion}); registration ${fx.registrationSha256.slice(0, 12)}…, manifest ${fx.manifestSha256.slice(0, 12)}…, beacon round ${fx.beaconRound}`);
 console.log(`registered: ${fx.allowedSigners.map((l) => `${l.split(" ")[0]} (${l.split(" ").at(-2)})`).join(", ")}\n`);
 const ledger = await gitFile.create({}, { cwd: dir, windowDir: join(dir, "audit/w"), env: {}, log: () => {}, fetch });
 const read = await ledger.readVerdicts();
-const a = attestVerdicts(read, fx.registrationSha256, parseAllowedSigners(fx.allowedSigners));
+const binding = { registrationSha256: fx.registrationSha256, manifestSha256: fx.manifestSha256, beaconRound: fx.beaconRound, beaconRandomness: fx.beaconRandomness };
+const a = attestVerdicts(read, binding, parseAllowedSigners(fx.allowedSigners));
 const rules = { minProvenance: "presence", requireSigned: true };
+// The registration's rules as check 7 reads them (P4): with keys and require_signed, a line without a valid registered signature is ignored.
+const registration = { sha256: fx.registrationSha256, record: { schema: "pr-rla/registration/v2", verdicts: { minProvenance: "presence", reviewers: null, require_signed: true, allowed_signers: fx.allowedSigners } } };
+const counted = countedVerdicts(read, { registration, binding, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" });
 const hasSshKeygen = spawnSync("ssh-keygen", ["-?"]).error === undefined;
-for (const v of a.events) {
+for (const [i, v] of a.events.entries()) {
   const step = fx.steps.find((s) => s.draw === v.draw);
+  const ignored = counted.ineligible(counted.verdicts[i]);
   const failures = verdictRuleFailures(v, rules);
   let oracle = "";
   if (hasSshKeygen && step.signer) {
@@ -41,7 +46,7 @@ for (const v of a.events) {
   }
   console.log(`draw #${String(v.draw).padEnd(2)} reviewer ${v.reviewer.padEnd(7)} ${step.expect.why}`);
   console.log(`         → ${provenanceLabel(v.provenance?.level ?? "self-asserted")}${oracle}`);
-  console.log(`         → check 7 under min_provenance presence + require_signed: ${failures.length ? `FAIL: ${failures.join("; ")}` : "PASS"}`);
+  console.log(`         → check 7 under min_provenance presence + require_signed: ${ignored ? `ignored (never counted): ${ignored}` : failures.length ? `FAIL: ${failures.join("; ")}` : "PASS"}`);
 }
 console.log(`\nsignatures: ${a.warnings.length ? "WARN" : "PASS"}`);
 for (const w of a.warnings) console.log(`  WARN ${w}`);

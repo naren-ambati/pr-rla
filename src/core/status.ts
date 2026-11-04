@@ -64,10 +64,12 @@ export function computeStatus(input: {
   params: SprtParams;
   /** The registration's `verdicts.reviewers`: only their verdicts count. null/absent: any account that is not a bot or an app. */
   reviewers?: readonly string[] | null;
+  /** Why a verdict cannot count under the registration's signing rules (P4: `countedVerdicts(…).ineligible`), or null. */
+  ineligible?: (v: VerdictEvent) => string | null;
 }): StatusReport {
   const { N, minPopulation, draws, verdicts, params } = input;
   const refusal = N < minPopulation ? `population ${N} < ${minPopulation}: review all ${N} instead` : null;
-  const { first, ignored, relabels } = classifyVerdicts(verdicts, { protocolSha256: input.protocolSha256, draws, reviewers: input.reviewers ?? null });
+  const { first, ignored, relabels } = classifyVerdicts(verdicts, { protocolSha256: input.protocolSha256, draws, reviewers: input.reviewers ?? null, ...(input.ineligible ? { ineligible: input.ineligible } : {}) });
   const seq: ("pass" | "fail")[] = [];
   let blockingDraw: DrawnChange | null = null;
   const ordered = [...draws].sort((a, b) => a.draw - b.draw);

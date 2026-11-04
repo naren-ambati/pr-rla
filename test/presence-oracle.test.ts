@@ -29,6 +29,8 @@ const SKIP = process.env.PR_RLA_SKIP_ORACLE === "1";
 const hasSshKeygen = spawnSync("ssh-keygen", ["-Y", "check-novalidate", "-n", NAMESPACE, "-s", "/nonexistent"], { encoding: "utf8" }).error === undefined;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REG = createHash("sha256").update("oracle registration").digest("hex");
+/** The audit the oracle's verdicts are signed for (P4: the registration, the manifest and the seed). */
+const B = { registrationSha256: REG, manifestSha256: createHash("sha256").update("oracle manifest").digest("hex"), beaconRound: 22745280, beaconRandomness: createHash("sha256").update("oracle beacon").digest("hex") };
 const P = "ab".repeat(32);
 const fields = (reviewer: string, extra: Partial<LineFields> = {}): LineFields => ({ draw: 1, changeId: "json:acme/widgets#101", verdict: "pass", protocolSha256: P, reviewer, recordedAt: "2026-10-21T03:00:00Z", ...extra });
 
@@ -67,7 +69,7 @@ function prRla(line: string, allowed: string[]) {
       }
     });
   }
-  const c = checkVerdictSignature(JSON.parse(line) as VerdictEvent, REG, signers);
+  const c = checkVerdictSignature(JSON.parse(line) as VerdictEvent, B, signers);
   return { valid: c.state === "signed" || c.state === "unlisted" || c.state === "mismatch", accepted: c.state === "signed", sk: c.sk ? { counter: c.sk.counter, flags: c.sk.flags } : null, state: c.state, detail: c.detail };
 }
 
@@ -85,11 +87,11 @@ interface Case {
 
 let k: Record<string, TestKey>;
 /** A case signed by the emulated authenticator over the verdict bytes, or over other bytes (`bytesFor`). */
-function signed(key: TestKey, reviewer: string, allowed: string[], expectation: Case["expect"], opts: SignOptions & { fields?: Partial<LineFields>; stricter?: string; bytesFor?: { registrationSha256?: string } } = {}): Case {
+function signed(key: TestKey, reviewer: string, allowed: string[], expectation: Case["expect"], opts: SignOptions & { fields?: Partial<LineFields>; stricter?: string; bytesFor?: Partial<typeof B>; v1?: boolean } = {}): Case {
   const f = fields(reviewer, opts.fields);
-  const line = signedLine(REG, f, key, opts);
+  const line = signedLine(B, f, key, opts);
   const sig = armor(new Uint8Array(Buffer.from(JSON.parse(line).sshsig as string, "base64")));
-  return { sig, bytes: verdictBytes(REG, f), line, allowed, principal: reviewer, expect: expectation, ...(opts.stricter ? { stricter: opts.stricter } : {}) };
+  return { sig, bytes: verdictBytes(B, f), line, allowed, principal: reviewer, expect: expectation, ...(opts.stricter ? { stricter: opts.stricter } : {}) };
 }
 
 beforeAll(() => {
@@ -138,13 +140,16 @@ describe.skipIf(SKIP || !hasSshKeygen)("oracle: ssh-keygen -Y verify and check-n
       const c = signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { fields: { verdict: "fail" } });
       // The line now says pass: pr-rla checks the bytes of what the line says, and so does ssh-keygen here.
       const line = JSON.stringify({ ...JSON.parse(c.line), verdict: "pass" });
-      return { ...c, line, bytes: verdictBytes(REG, fields("bob")) };
+      return { ...c, line, bytes: verdictBytes(B, fields("bob")) };
     }],
     ["signed for another registration", () => {
       const other = createHash("sha256").update("another audit").digest("hex");
       const c = signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { bytesFor: { registrationSha256: other } });
       return c; // ssh-keygen verifies it over this audit's bytes, as pr-rla does
     }],
+    ["P4: signed for another manifest under the same registration", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { bytesFor: { manifestSha256: "e6".repeat(32) } })],
+    ["P4: signed for another seed (beacon randomness)", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { bytesFor: { beaconRandomness: "f7".repeat(32) } })],
+    ["P4: signed over the v1 bytes (no manifest, no seed), verified over this audit's v2 bytes", () => signed(k.edSk!, "bob", [k.edSk!.allowedSigner("bob")], { valid: false, accepted: false }, { v1: true })],
     ["namespace git (a commit signature), verified as pr-rla-verdict@v1", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { namespace: "git" })],
     ["SSHSIG version 2", () => signed(k.ed25519!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { version: 2 })],
     ["a blob claiming another key", () => signed(k.other!, "alice", [k.ed25519!.allowedSigner("alice")], { valid: false, accepted: false }, { claimKey: k.ed25519! })],
@@ -197,7 +202,7 @@ describe.skipIf(SKIP || !hasSshKeygen)("oracle: ssh-keygen -Y verify and check-n
       return Buffer.concat([len, body]);
     };
     const blob = Buffer.concat([str("ssh-ed25519"), str(identity)]);
-    const bytes = verdictBytes(REG, fields("mallory"));
+    const bytes = verdictBytes(B, fields("mallory"));
     const sshsig = Buffer.concat([Buffer.from("SSHSIG"), Buffer.from([0, 0, 0, 1]), str(blob), str(NAMESPACE), str(""), str("sha512"), str(Buffer.concat([str("ssh-ed25519"), str(Buffer.concat([identity, Buffer.alloc(32)]))]))]);
     const allowed = [`mallory ssh-ed25519 ${blob.toString("base64")}`];
     expect(oracle(armor(new Uint8Array(sshsig)), bytes, allowed, "mallory").verify).toBe(0);
@@ -227,27 +232,41 @@ describe.skipIf(SKIP || !hasSshKeygen)("oracle: ssh-keygen -Y verify and check-n
     const pub = readFileSync(join(d, "dana.pub"), "utf8").trim().split(" ").slice(0, 2).join(" ");
     const allowed = [`dana namespaces="${NAMESPACE}" ${pub}`];
     const f = fields("dana");
-    writeFileSync(join(d, "verdict.txt"), verdictBytes(REG, f));
+    writeFileSync(join(d, "verdict.txt"), verdictBytes(B, f));
     execFileSync("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", join(d, "dana"), join(d, "verdict.txt")], { stdio: "ignore", env: { PATH: process.env.PATH, HOME: d } });
     const sig = readFileSync(join(d, "verdict.txt.sig"), "utf8");
     const line = JSON.stringify({ ...f, registrationSha256: REG, schema: "pr-rla/verdict/v1", sshsig: unarmor(sig) });
     const mine = prRla(line, allowed);
     expect(mine).toMatchObject({ valid: true, accepted: true, sk: null });
-    expect(oracle(sig, verdictBytes(REG, f), allowed, "dana").verify).toBe(0);
-    expect(verdictPayloadText({ registrationSha256: REG, ...f })).toBe(readFileSync(join(d, "verdict.txt"), "utf8"));
+    expect(oracle(sig, verdictBytes(B, f), allowed, "dana").verify).toBe(0);
+    expect(verdictPayloadText({ ...B, ...f })).toBe(readFileSync(join(d, "verdict.txt"), "utf8"));
     // A flipped verdict under the same signature: both refuse.
     expect(prRla(JSON.stringify({ ...JSON.parse(line), verdict: "fail" }), allowed).accepted).toBe(false);
-    expect(oracle(sig, verdictBytes(REG, { ...f, verdict: "fail" }), allowed, "dana").verify).not.toBe(0);
+    expect(oracle(sig, verdictBytes(B, { ...f, verdict: "fail" }), allowed, "dana").verify).not.toBe(0);
   });
 
   it("the recorded sk-dummy signatures (real ssh-keygen -Y sign, -sk keys with UP set and clear) verify in ssh-keygen as they do in pr-rla, flags and counter included", () => {
-    const fx = JSON.parse(readFileSync(join(ROOT, "test/fixtures/presence/sk-dummy-verdicts.json"), "utf8")) as { registrationSha256: string; allowedSigners: string[]; steps: { draw: number; reviewer: string; signer: string | null; namespace?: string; registrationSha256?: string; payload: string; line: string }[] };
+    const fx = JSON.parse(readFileSync(join(ROOT, "test/fixtures/presence/sk-dummy-verdicts.json"), "utf8")) as {
+      registrationSha256: string;
+      manifestSha256: string;
+      beaconRound: number;
+      beaconRandomness: string;
+      allowedSigners: string[];
+      steps: { draw: number; reviewer: string; signer: string | null; namespace?: string; registrationSha256?: string; manifestSha256?: string; payloadVersion?: string; payload: string; line: string }[];
+    };
     const signers = parseAllowedSigners(fx.allowedSigners);
     let sk = 0;
     for (const s of fx.steps.filter((x) => x.signer)) {
       const v = JSON.parse(s.line) as VerdictEvent;
-      const c = checkVerdictSignature(v, s.registrationSha256 ?? fx.registrationSha256, signers);
+      // Each signature against the audit it was made for (another registration or manifest for the foreign ones).
+      const c = checkVerdictSignature(v, { registrationSha256: s.registrationSha256 ?? fx.registrationSha256, manifestSha256: s.manifestSha256 ?? fx.manifestSha256, beaconRound: fx.beaconRound, beaconRandomness: fx.beaconRandomness }, signers);
       const theirs = oracle(armor(new Uint8Array(Buffer.from(v.sshsig!, "base64"))), s.payload, fx.allowedSigners, s.reviewer);
+      if (s.payloadVersion === "v1") {
+        // Stricter on purpose: ssh-keygen accepts the signature over the v1 bytes it was made over; pr-rla refuses v1 bytes, which name no manifest and no seed.
+        expect(theirs.verify, `draw #${s.draw}: ${theirs.verifyOut}`).toBe(0);
+        expect(c).toMatchObject({ state: "invalid", detail: expect.stringMatching(/pr-rla-verdict\/v1 bytes/) });
+        continue;
+      }
       expect(theirs.verify === 0, `draw #${s.draw}: ${theirs.verifyOut}`).toBe(c.state === "signed");
       if (c.sk) {
         sk++;

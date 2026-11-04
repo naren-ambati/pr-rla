@@ -5,7 +5,7 @@ import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrati
 import { describeRepoSet } from "../core/repo-set.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
-import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
+import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
 import { certificateWithheld, gitFileLedgerGate } from "../core/ledger-path.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
 import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
@@ -126,7 +126,8 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
   const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins));
   const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
-  const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
+  const binding = auditBinding(reg.sha256, manifest.sha256, draws.beacon);
+  const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, binding, verifiesSignatures, ceiling, ledger: ledger.name });
   const report = computeStatus({
     N: manifest.N,
     minPopulation: reg.record.parameters.minPopulation,
@@ -136,6 +137,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     protocolSha256: reg.record.protocolSha256,
     params: reg.record.parameters,
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
+    ineligible: capped.ineligible,
   });
   const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
   const requireSigned = isRegistrationV2(reg) && reg.record.verdicts.require_signed === true;

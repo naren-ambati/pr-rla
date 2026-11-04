@@ -19,7 +19,7 @@ import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./
 import { recordedBeacon } from "./helpers/fixtures.js";
 import { commitAll } from "./helpers/signed-commits.js";
 import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
-import { NAMESPACE, signedLine } from "./helpers/verdict-lines.js";
+import { NAMESPACE, bindingOf, signedLine } from "./helpers/verdict-lines.js";
 import { claimsIn, jsonSentences, unlabelledPresence } from "./helpers/wording.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
@@ -169,27 +169,34 @@ describe("each way a verdict can fall short (FR9.1, FR9.3, FR9.4, FR9.5)", () =>
     // Draw #3's line, replaced by one signed with mallory's key (an unsigned line was recorded; rewrite it before committing anything else would show in the walk, so append to a fresh copy).
     const victim = readJ<DrawsFile>(t, `${W}/draws.json`).draws.find((d) => d.draw === reviewedDraws[2])!;
     const lines = readFileSync(join(t.dir, W, "verdicts.jsonl"), "utf8").split("\n").filter(Boolean);
-    const forged = signedLine(regOf(t).sha256, { draw: victim.draw, changeId: victim.changeId, verdict: "pass", protocolSha256: regOf(t).record.protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z" }, keys.mallory!);
+    const forged = signedLine(bindingOf(join(t.dir, W)), { draw: victim.draw, changeId: victim.changeId, verdict: "pass", protocolSha256: regOf(t).record.protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z" }, keys.mallory!);
     const u = cloneScenario(base);
     writeFileSync(join(u.dir, W, "verdicts.jsonl"), lines.map((l) => (JSON.parse(l).draw === victim.draw ? forged.trim() : l)).join("\n") + "\n");
     commitAll(u.dir, "verdicts", null);
-    const c7 = check(await runVerify(u.ctx, {}), 7);
-    expect(c7.status).toBe("FAIL");
-    expect(c7.details.join("\n")).toMatch(new RegExp(`verdict on draw #${victim.draw} \\(\\S+\\) is self-asserted; the registration requires ${UP}`));
-    expect(c7.details.join("\n")).toMatch(new RegExp(`verdict on draw #${victim.draw} \\(\\S+\\) carries no valid signature by the registered key of reviewer bob; the registration requires signed verdicts \\(require_signed\\)`));
-    expect(c7.details.join("\n")).toMatch(/is signed by key SHA256:\S+ \(sk-ssh-ed25519@openssh.com\), which no registered reviewer holds: self-asserted/);
+    const r = await runVerify(u.ctx, {});
+    const c7 = check(r, 7);
+    // P4: it never counts. It is ignored with its reason, so its draw blocks the prefix and nothing certifies on it.
+    expect(c7.status).toBe("WARN");
+    expect(c7.details).toContainEqual(expect.stringMatching(new RegExp(`^ignored verdict on draw #${victim.draw}: is signed by key SHA256:\\S+ \\(sk-ssh-ed25519@openssh.com\\), which no registered reviewer holds, and the registration counts only verdicts signed with their reviewer's registered key$`)));
+    expect(r.status!.firstVerdicts.some((v) => v.draw === victim.draw)).toBe(false);
+    expect(r.status!.blockingDraw?.draw).toBe(victim.draw);
+    expect(r.status!.sequence.state).not.toBe("CERTIFIED");
   });
 
-  it("FR9.1: an unsigned verdict fails under require_signed, and record says how to sign it", async () => {
+  it("FR9.1: an unsigned verdict never counts under require_signed (P4: ignored, so its draw blocks the prefix), and record says how to sign it", async () => {
     const { s, draws } = await reviewed((_d, i) => (i === 7 ? { reviewer: "bob" } : bobSigns(i + 1)));
     expect(s.out.join("\n")).toMatch(/this verdict is not signed, so it counts as self-asserted: record it with --sign <your registered key> \(pr-rla runs ssh-keygen -Y sign -n pr-rla-verdict@v1\)/);
-    const c7 = check(await runVerify(s.ctx, {}), 7);
-    expect(c7.status).toBe("FAIL");
-    expect(c7.details.join("\n")).toMatch(new RegExp(`verdict on draw #${draws[7]} \\(\\S+\\) carries no valid signature by the registered key of reviewer bob; the registration requires signed verdicts \\(require_signed\\)`));
-    expect(c7.details).toContain(`1 verdict line(s) carry no signature (draws #${draws[7]}): self-asserted`);
+    const r = await runVerify(s.ctx, {});
+    const c7 = check(r, 7);
+    expect(c7.status).toBe("WARN");
+    expect(c7.details).toContain(`ignored verdict on draw #${draws[7]}: carries no signature, and the registration counts only verdicts signed with their reviewer's registered key`);
+    expect(r.status!.blockingDraw?.draw).toBe(draws[7]);
+    expect(r.status!.labelledPrefix).toBe(draws[7]! - 1); // every draw before it is labelled (a change drawn twice included)
     s.out.length = 0;
     await statusCommand(s.ctx, {});
-    expect(s.out.join("\n")).toMatch(new RegExp(`1 counted verdict\\(s\\) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed \\(draws #${draws[7]}\\)`));
+    expect(s.out.join("\n")).toMatch(new RegExp(`ignored verdict on draw #${draws[7]} \\(\\S+\\): carries no signature, and the registration counts only verdicts signed with their reviewer's registered key`));
+    expect(s.out.join("\n")).toMatch(new RegExp(`blocking draw: #${draws[7]} `));
+    expect(s.out.join("\n")).not.toMatch(/CERTIFIED \(risk/);
   });
 
   it("a signed verdict not committed yet still counts at its level; the walk notes it has no tamper trail yet", async () => {
@@ -206,12 +213,11 @@ describe("each way a verdict can fall short (FR9.1, FR9.3, FR9.4, FR9.5)", () =>
     authenticator(s, () => ({}));
     const d = readJ<DrawsFile>(s, `${W}/draws.json`).draws.find((x) => x.firstOccurrence)!;
     await expect(recordCommand(s.ctx, String(d.draw), "pass", { sign: keyPath("bob"), reviewer: "alice" })).rejects.toThrow(/--reviewer alice, but key SHA256:\S+ is registered to bob/);
-    const line = signedLine(regOf(s).sha256, { draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256: regOf(s).record.protocolSha256, reviewer: "alice", recordedAt: "2026-10-21T03:00:00Z" }, keys.bob!);
+    const line = signedLine(bindingOf(join(s.dir, W)), { draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256: regOf(s).record.protocolSha256, reviewer: "alice", recordedAt: "2026-10-21T03:00:00Z" }, keys.bob!);
     writeFileSync(join(s.dir, W, "verdicts.jsonl"), line);
     commitAll(s.dir, "verdict", null);
     const c7 = check(await runVerify(s.ctx, {}), 7);
-    expect(c7.details.join("\n")).toMatch(new RegExp(`verdict on draw #${d.draw} \\(\\S+\\) names reviewer alice but is signed by bob's key SHA256:\\S+: self-asserted`));
-    expect(c7.details.join("\n")).toMatch(new RegExp(`verdict on draw #${d.draw} \\(\\S+\\) is self-asserted; the registration requires ${UP}`));
+    expect(c7.details).toContainEqual(expect.stringMatching(new RegExp(`^ignored verdict on draw #${d.draw}: names reviewer alice but is signed by bob's key SHA256:\\S+, and the registration counts only verdicts signed with their reviewer's registered key$`)));
   });
 
   it("a decreasing counter is a WARN, never a FAIL", async () => {
@@ -347,21 +353,36 @@ describe("FR3.8: the default provenance with git-file, and the ceilings", () => 
     expect(maxProvenanceOf(false, "tracker", "self-asserted")).toBe("self-asserted");
   });
 
-  it("check 7 counts a ledger's claim above its ceiling at the ceiling, and WARNs", async () => {
-    const s = cloneScenario(honest);
-    const reg = regOf(s);
-    const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
-    const claims = draws.draws.slice(0, 36).filter((d) => d.firstOccurrence).map((d) => ({ draw: d.draw, changeId: d.changeId, verdict: "pass" as const, protocolSha256: reg.record.protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z", provenance: { level: "presence" as const, source: "scm-label-event" } }));
-    const tracker = { apiVersion: 1, name: "tracker", readVerdicts: async () => claims, appendVerdict: async () => {}, verifyIntegrity: async () => ({ ok: true, tamperTrail: true, findings: [] }) };
-    const r = await verifyAudit(
-      { registration: reg, manifest: readJ(s, `${W}.manifest.json`), commitment: readJ(s, `${W}/manifest-commitment.json`), draws, currentProtocolSha256: reg.record.protocolSha256 },
-      { provider: null, ledger: tracker, beacon: async (round) => recordedBeacon(round), logKey: async () => null, trustBundle: mergeTrust(SHIPPED_TRUST_BUNDLE, s.tsaTrust), provenanceCeiling: "account" },
-    );
-    const c7 = check(r, 7);
-    expect(c7.details).toContain(`ledger tracker reported ${PRESENCE_LABEL} for the verdict on draw #${claims[0]!.draw}, more than it can attest; counted as account`);
-    expect(c7.details.join("\n")).toMatch(new RegExp(`is account; the registration requires ${UP}`));
-    expect(c7.status).toBe("FAIL");
-    expect(r.status!.provenance).toEqual([{ level: "account", count: r.status!.distinctReviewed }]);
+  it("check 7 counts a ledger's claim above its ceiling at the ceiling, and WARNs; under a registration that requires signatures, another ledger's verdicts never count", async () => {
+    const tracked = async (s: Scenario) => {
+      const reg = regOf(s);
+      const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
+      const claims = draws.draws.slice(0, 36).filter((d) => d.firstOccurrence).map((d) => ({ draw: d.draw, changeId: d.changeId, verdict: "pass" as const, protocolSha256: reg.record.protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z", provenance: { level: "presence" as const, source: "scm-label-event" } }));
+      const tracker = { apiVersion: 1, name: "tracker", readVerdicts: async () => claims, appendVerdict: async () => {}, verifyIntegrity: async () => ({ ok: true, tamperTrail: true, findings: [] }) };
+      const r = await verifyAudit(
+        { registration: reg, manifest: readJ(s, `${W}.manifest.json`), commitment: readJ(s, `${W}/manifest-commitment.json`), draws, currentProtocolSha256: reg.record.protocolSha256 },
+        { provider: null, ledger: tracker, beacon: async (round) => recordedBeacon(round), logKey: async () => null, trustBundle: mergeTrust(SHIPPED_TRUST_BUNDLE, s.tsaTrust), provenanceCeiling: "account" },
+      );
+      return { r, claims };
+    };
+    // A registration that requires no signature (no keys): the claims count, at the ceiling.
+    const keyless = setupAuditRepo({ changes: makeChanges(200), tsa: { ids: ["test-a", "test-b"], server: tsa } });
+    at(keyless, "2026-10-20T00:00:00Z");
+    expect(await registerCommand(keyless.ctx, {})).toBe(0);
+    at(keyless, "2026-10-20T12:00:00Z");
+    await freezeCommand(keyless.ctx, {});
+    at(keyless, "2026-10-21T01:00:00Z");
+    await sampleCommand(keyless.ctx, {});
+    const a = await tracked(keyless);
+    expect(check(a.r, 7).details).toContain(`ledger tracker reported ${PRESENCE_LABEL} for the verdict on draw #${a.claims[0]!.draw}, more than it can attest; counted as account`);
+    expect(check(a.r, 7).status).toBe("WARN");
+    expect(a.r.status!.provenance).toEqual([{ level: "account", count: a.r.status!.distinctReviewed }]);
+    // The keyed registration (presence, require_signed): the claims are capped, and none counts (P4).
+    const b = await tracked(cloneScenario(honest));
+    expect(check(b.r, 7).details).toContain(`ledger tracker reported ${PRESENCE_LABEL} for the verdict on draw #${b.claims[0]!.draw}, more than it can attest; counted as account`);
+    expect(check(b.r, 7).details).toContain(`ignored verdict on draw #${b.claims[0]!.draw}: the ledger read is not the registered built-in git-file, so no verdict signature counts, and the registration counts only verdicts signed with their reviewer's registered key`);
+    expect(b.r.status!.provenance).toEqual([]);
+    expect(b.r.status!.sequence.state).not.toBe("CERTIFIED");
   });
 });
 
@@ -389,19 +410,20 @@ describe.skipIf(SKIP_REAL)("the real paths: record --sign through ssh-keygen, an
     s.git("add", "-A");
     s.git("commit", "-qm", "audit");
     at(s, "2026-10-21T03:00:00Z");
-    const draws = readJ<DrawsFile>(s, `${W}/draws.json`).draws.slice(0, 36).filter((x) => x.firstOccurrence);
+    const drawsFile = readJ<DrawsFile>(s, `${W}/draws.json`);
+    const draws = drawsFile.draws.slice(0, 36).filter((x) => x.firstOccurrence);
     const reg = regOf(s);
     for (const [i, d] of draws.entries()) {
       if (i % 2 === 0) await recordCommand(s.ctx, String(d.draw), "pass", { sign: join(kd, "carol") });
       else {
         // The README's manual path, verbatim: printf the bytes, ssh-keygen -Y sign them, printf the line.
         const script = [
-          `printf 'pr-rla-verdict/v1\\nregistrationSha256 %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n' "$REG" "$PROTO" "$DRAW" "$CHANGE" pass carol "$AT" > "verdict-$DRAW.txt"`,
+          `printf 'pr-rla-verdict/v2\\nregistrationSha256 %s\\nmanifestSha256 %s\\nbeaconRound %s\\nbeaconRandomness %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n' "$REG" "$MAN" "$ROUND" "$RAND" "$PROTO" "$DRAW" "$CHANGE" pass carol "$AT" > "verdict-$DRAW.txt"`,
           `ssh-keygen -Y sign -n pr-rla-verdict@v1 -f "$KEY" "verdict-$DRAW.txt"`,
           `SIG=$(sed '1d;$d' "verdict-$DRAW.txt.sig" | tr -d '\\n')`,
           `printf '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","registrationSha256":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","sshsig":"%s","verdict":"%s"}\\n' "$CHANGE" "$DRAW" "$PROTO" "$AT" "$REG" carol "$SIG" pass >> "$LEDGER"`,
         ].join("\n");
-        execFileSync("sh", ["-c", script], { cwd: kd, stdio: "ignore", env: { ...env, REG: reg.sha256, PROTO: reg.record.protocolSha256, DRAW: String(d.draw), CHANGE: d.changeId, AT: "2026-10-21T03:00:00Z", KEY: join(kd, "carol"), LEDGER: join(s.dir, W, "verdicts.jsonl") } });
+        execFileSync("sh", ["-c", script], { cwd: kd, stdio: "ignore", env: { ...env, REG: reg.sha256, MAN: drawsFile.manifestSha256, ROUND: String(drawsFile.beacon.round), RAND: drawsFile.beacon.randomness, PROTO: reg.record.protocolSha256, DRAW: String(d.draw), CHANGE: d.changeId, AT: "2026-10-21T03:00:00Z", KEY: join(kd, "carol"), LEDGER: join(s.dir, W, "verdicts.jsonl") } });
       }
       commitAll(s.dir, `verdict: draw #${d.draw}`, null, { unix: 1792551600 + i * 60 });
     }

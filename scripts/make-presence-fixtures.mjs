@@ -65,8 +65,14 @@ writeFileSync(join(work, "allowed_signers"), `${registered.join("\n")}\n`);
 
 const REGISTRATION = createHash("sha256").update("pr-rla synthetic registration for the U9 fixture").digest("hex");
 const OTHER_REGISTRATION = createHash("sha256").update("another audit's registration").digest("hex");
+// The frozen manifest and the seed the verdicts are signed for (v2 bytes, P4); synthetic values.
+const MANIFEST = createHash("sha256").update("pr-rla synthetic manifest for the U9 fixture").digest("hex");
+const OTHER_MANIFEST = createHash("sha256").update("a manifest frozen again under the same registration").digest("hex");
+const BEACON_ROUND = 22745280;
+const BEACON_RANDOMNESS = createHash("sha256").update("pr-rla synthetic beacon randomness for the U9 fixture").digest("hex");
 const PROTOCOL = "ab".repeat(32);
-// draw n names `reviewer`, is signed with `signer`'s key (null: unsigned), for `registration`, in namespace `ns`.
+// draw n names `reviewer`, is signed with `signer`'s key (null: unsigned), for `registration` and `manifest`, in namespace `ns`;
+// `v1` signs the v1 bytes, which name no manifest and no seed (refused since P4).
 const STEPS = [
   { draw: 1, reviewer: "alice", signer: "alice", expect: { level: "account", why: "a software ed25519 key" } },
   { draw: 2, reviewer: "bob", signer: "bob", expect: { level: "presence", why: "an ed25519-sk key, UP set" } },
@@ -82,10 +88,14 @@ const STEPS = [
   { draw: 12, reviewer: "ivan", signer: "ivan", expect: { level: "account", why: "a software ecdsa-sha2-nistp521 key" } },
   { draw: 13, reviewer: "bob", signer: "bob", registration: OTHER_REGISTRATION, expect: { level: "self-asserted", why: "bob's touch, but for another audit's registration" } },
   { draw: 14, reviewer: "bob", signer: "bob", ns: "git", expect: { level: "self-asserted", why: "bob's touch, but in namespace git (a commit signature), not pr-rla-verdict@v1" } },
+  { draw: 15, reviewer: "bob", signer: "bob", manifest: OTHER_MANIFEST, expect: { level: "self-asserted", why: "bob's touch, but for another manifest under the same registration" } },
+  { draw: 16, reviewer: "bob", signer: "bob", v1: true, expect: { level: "self-asserted", why: "bob's touch over the v1 bytes, which name neither the manifest nor the seed (signable before the seed)" } },
 ];
 
 // The README's manual recipe, verbatim: the bytes, then the line.
-const PAYLOAD_FORMAT = "pr-rla-verdict/v1\\nregistrationSha256 %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n";
+const PAYLOAD_FORMAT = "pr-rla-verdict/v2\\nregistrationSha256 %s\\nmanifestSha256 %s\\nbeaconRound %s\\nbeaconRandomness %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n";
+// v1's bytes (before P4), for the one step that shows they are refused.
+const PAYLOAD_FORMAT_V1 = "pr-rla-verdict/v1\\nregistrationSha256 %s\\nprotocolSha256 %s\\ndraw %s\\nchangeId %s\\nverdict %s\\nreviewer %s\\nrecordedAt %s\\n";
 const LINE_FORMAT = '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","registrationSha256":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","sshsig":"%s","verdict":"%s"}\\n';
 const UNSIGNED_FORMAT = '{"changeId":"%s","draw":%s,"protocolSha256":"%s","recordedAt":"%s","reviewer":"%s","schema":"pr-rla/verdict/v1","verdict":"%s"}\\n';
 
@@ -94,8 +104,10 @@ STEPS.forEach((s, i) => {
   const at = `2026-10-21T0${Math.floor(i / 6) + 3}:${String((i % 6) * 10).padStart(2, "0")}:00Z`;
   const change = `json:acme/widgets#${100 + s.draw}`;
   const reg = s.registration ?? REGISTRATION;
+  const manifest = s.manifest ?? MANIFEST;
   const file = join(work, `verdict-${s.draw}.txt`);
-  sh("sh", ["-c", `printf "$0" "$@" > "${file}"`, PAYLOAD_FORMAT, reg, PROTOCOL, String(s.draw), change, "pass", s.reviewer, at]);
+  if (s.v1) sh("sh", ["-c", `printf "$0" "$@" > "${file}"`, PAYLOAD_FORMAT_V1, reg, PROTOCOL, String(s.draw), change, "pass", s.reviewer, at]);
+  else sh("sh", ["-c", `printf "$0" "$@" > "${file}"`, PAYLOAD_FORMAT, reg, manifest, String(BEACON_ROUND), BEACON_RANDOMNESS, PROTOCOL, String(s.draw), change, "pass", s.reviewer, at]);
   const payload = readFileSync(file, "utf8");
   let line;
   let oracle = null;
@@ -115,7 +127,7 @@ STEPS.forEach((s, i) => {
       details: m ? { counter: Number(m[1]), flags: Number.parseInt(m[2], 16) } : null,
     };
   } else line = sh("sh", ["-c", `printf "$0" "$@"`, UNSIGNED_FORMAT, change, String(s.draw), PROTOCOL, at, s.reviewer, "pass"]);
-  steps.push({ draw: s.draw, reviewer: s.reviewer, signer: s.signer, ...(s.ns ? { namespace: s.ns } : {}), ...(s.registration ? { registrationSha256: s.registration } : {}), expect: s.expect, payload, line, oracle });
+  steps.push({ draw: s.draw, reviewer: s.reviewer, signer: s.signer, ...(s.ns ? { namespace: s.ns } : {}), ...(s.registration ? { registrationSha256: s.registration } : {}), ...(s.manifest ? { manifestSha256: s.manifest } : {}), ...(s.v1 ? { payloadVersion: "v1" } : {}), expect: s.expect, payload, line, oracle });
 });
 
 const version = (cmd, args) => {
@@ -125,14 +137,18 @@ const version = (cmd, args) => {
 const fixture = {
   source: "synthetic",
   made: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-  note: "One SSHSIG per verdict (namespace pr-rla-verdict@v1), made by ssh-keygen -Y sign with software keys over bytes written by printf with the README's manual recipe; the -sk keys live in OpenSSH's sk-dummy test middleware (a software-emulated authenticator), never a hardware key (D7). Public keys only. Made by scripts/make-presence-fixtures.mjs.",
+  note: "One SSHSIG per verdict (namespace pr-rla-verdict@v1), made by ssh-keygen -Y sign with software keys over the v2 bytes (pr-rla-verdict/v2: registration, manifest, seed, verdict) written by printf with the README's manual recipe; the -sk keys live in OpenSSH's sk-dummy test middleware (a software-emulated authenticator), never a hardware key (D7). Public keys only. Made by scripts/make-presence-fixtures.mjs.",
   tools: {
     sshKeygen: version("ssh", ["-V"]),
     skDummy: "OpenSSH 10.3p1 regress/misc/sk-dummy, built from https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.3p1.tar.gz (sha256 56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4) against Homebrew openssl@3",
     platform: `${process.platform} ${process.arch}`,
   },
   namespace: "pr-rla-verdict@v1",
+  payloadVersion: "pr-rla-verdict/v2",
   registrationSha256: REGISTRATION,
+  manifestSha256: MANIFEST,
+  beaconRound: BEACON_ROUND,
+  beaconRandomness: BEACON_RANDOMNESS,
   protocolSha256: PROTOCOL,
   allowedSigners: registered,
   unlisted: { mallory: pub.mallory },

@@ -4,6 +4,7 @@ import {
   capProvenance,
   checkVerdictSignature,
   countedVerdicts,
+  countingVerdictFor,
   dearmorSshsig,
   isSmallOrderEd25519,
   matchPatternList,
@@ -16,6 +17,7 @@ import {
   reachableProvenance,
   registeredVerdicts,
   signatureProvenance,
+  signaturesRequired,
   verdictPayloadProblems,
   verdictPayloadText,
   verdictRuleFailures,
@@ -42,6 +44,8 @@ const keys = Object.fromEntries(ALL.map((t) => [t, makeTestKey(t)])) as Record<T
 const msg = new TextEncoder().encode("pr-rla-verdict/v1\ndraw 1\n");
 const P = "ab".repeat(32);
 const REG = "c1".repeat(32);
+/** The audit the test verdicts are signed for (P4: the registration, the manifest and the seed). */
+const B = { registrationSha256: REG, manifestSha256: "e5".repeat(32), beaconRound: 12345, beaconRandomness: "f6".repeat(32) };
 const fields = (draw: number, reviewer: string, extra: Partial<LineFields> = {}): LineFields => ({ draw, changeId: `json:acme/widgets#${100 + draw}`, verdict: "pass", protocolSha256: P, reviewer, recordedAt: "2026-10-21T03:00:00Z", ...extra });
 const event = (line: string): VerdictEvent => JSON.parse(line) as VerdictEvent;
 const verdict = (draw: number, reviewer: string, extra: Partial<VerdictEvent> = {}): VerdictEvent => ({ ...fields(draw, reviewer), ...extra });
@@ -160,18 +164,21 @@ describe("SSHSIG verification in TypeScript (FR9.2)", () => {
 
 describe("the bytes one verdict signature covers (contracts.md §1)", () => {
   it("are versioned text, one field per line in a fixed order, as the README's printf writes them", () => {
-    const f = { registrationSha256: REG, ...fields(7, "bob") };
+    const f = { ...B, ...fields(7, "bob") };
     expect(verdictPayloadText(f)).toBe(
-      `pr-rla-verdict/v1\nregistrationSha256 ${REG}\nprotocolSha256 ${P}\ndraw 7\nchangeId json:acme/widgets#107\nverdict pass\nreviewer bob\nrecordedAt 2026-10-21T03:00:00Z\n`,
+      `pr-rla-verdict/v2\nregistrationSha256 ${REG}\nmanifestSha256 ${"e5".repeat(32)}\nbeaconRound 12345\nbeaconRandomness ${"f6".repeat(32)}\nprotocolSha256 ${P}\ndraw 7\nchangeId json:acme/widgets#107\nverdict pass\nreviewer bob\nrecordedAt 2026-10-21T03:00:00Z\n`,
     );
     // The test helper writes the same bytes from the contract, independently.
-    expect(verdictPayloadText(f)).toBe(verdictBytes(REG, fields(7, "bob")));
+    expect(verdictPayloadText(f)).toBe(verdictBytes(B, fields(7, "bob")));
     expect(VERDICT_NAMESPACE).toBe("pr-rla-verdict@v1");
   });
 
   it("refuse what could not be encoded unambiguously: a line break or other control character, a lone surrogate, malformed hashes, draws and times", () => {
-    const ok = { registrationSha256: REG, ...fields(7, "bob") };
+    const ok = { ...B, ...fields(7, "bob") };
     expect(verdictPayloadProblems(ok)).toEqual([]);
+    expect(verdictPayloadProblems({ ...ok, manifestSha256: "e5" })).toEqual(["manifestSha256 must be 64 lowercase hex characters"]);
+    expect(verdictPayloadProblems({ ...ok, beaconRound: 0 })).toEqual(["beaconRound must be a positive integer"]);
+    expect(verdictPayloadProblems({ ...ok, beaconRandomness: "F6".repeat(32) })).toEqual(["beaconRandomness must be 64 lowercase hex characters"]);
     expect(verdictPayloadProblems({ ...ok, changeId: "x\nverdict fail" })).toEqual(["changeId must be non-empty text with no control character"]);
     expect(verdictPayloadProblems({ ...ok, reviewer: "bob\u0000" })).toEqual(["reviewer must be non-empty text with no control character"]);
     expect(verdictPayloadProblems({ ...ok, reviewer: "b\uD800" })).toEqual(["reviewer must be non-empty text with no control character"]);
@@ -225,51 +232,59 @@ describe("each verdict's own signature (U9, after review)", () => {
   const bob = keys["sk-ssh-ed25519@openssh.com"];
   const alice = keys["ssh-ed25519"];
   const signers = parseAllowedSigners([`bob ${bob.publicText}`, `alice ${alice.publicText}`]);
-  const check = (line: string) => checkVerdictSignature(event(line), REG, signers);
+  const check = (line: string) => checkVerdictSignature(event(line), B, signers);
 
   it("a registered software key gives account; a security key with UP, presence; with UP clear, account", () => {
-    expect(signatureProvenance(check(signedLine(REG, fields(1, "alice"), alice)))).toEqual({ level: "account", source: "verdict-signature", signer: "alice", keyFingerprint: parseAllowedSigner(`a ${alice.publicText}`).key.fingerprint });
-    expect(signatureProvenance(check(signedLine(REG, fields(2, "bob"), bob, { flags: 0x01, counter: 5 })))).toMatchObject({ level: "presence", signer: "bob", counter: 5 });
-    expect(signatureProvenance(check(signedLine(REG, fields(3, "bob"), bob, { flags: 0x00, counter: 6 })))).toMatchObject({ level: "account", counter: 6 });
-    expect(check(signedLine(REG, fields(3, "bob"), bob, { flags: 0x00 }))).toMatchObject({ state: "signed", detail: expect.stringMatching(/without the user-presence flag \(no touch\)$/) });
+    expect(signatureProvenance(check(signedLine(B, fields(1, "alice"), alice)))).toEqual({ level: "account", source: "verdict-signature", signer: "alice", keyFingerprint: parseAllowedSigner(`a ${alice.publicText}`).key.fingerprint });
+    expect(signatureProvenance(check(signedLine(B, fields(2, "bob"), bob, { flags: 0x01, counter: 5 })))).toMatchObject({ level: "presence", signer: "bob", counter: 5 });
+    expect(signatureProvenance(check(signedLine(B, fields(3, "bob"), bob, { flags: 0x00, counter: 6 })))).toMatchObject({ level: "account", counter: 6 });
+    expect(check(signedLine(B, fields(3, "bob"), bob, { flags: 0x00 }))).toMatchObject({ state: "signed", detail: expect.stringMatching(/without the user-presence flag \(no touch\)$/) });
   });
 
   it("covers every field: a verdict flipped, a draw or change moved, a protocol or time changed no longer verifies", () => {
-    const line = JSON.parse(signedLine(REG, fields(4, "bob", { verdict: "fail" }), bob)) as Record<string, unknown>;
+    const line = JSON.parse(signedLine(B, fields(4, "bob", { verdict: "fail" }), bob)) as Record<string, unknown>;
     for (const [k, v] of [["verdict", "pass"], ["draw", 5], ["changeId", "json:acme/widgets#105"], ["recordedAt", "2026-10-22T03:00:00Z"], ["protocolSha256", "cd".repeat(32)]] as const)
-      expect(checkVerdictSignature({ ...line, [k]: v } as unknown as VerdictEvent, REG, signers), k).toMatchObject({ state: "invalid", detail: expect.stringMatching(/does not match the signed data/) });
-    expect(checkVerdictSignature({ ...line, reviewer: "alice" } as unknown as VerdictEvent, REG, signers).state).not.toBe("signed");
-    expect(checkVerdictSignature(line as unknown as VerdictEvent, REG, signers).state).toBe("signed");
+      expect(checkVerdictSignature({ ...line, [k]: v } as unknown as VerdictEvent, B, signers), k).toMatchObject({ state: "invalid", detail: expect.stringMatching(/does not match the signed data/) });
+    expect(checkVerdictSignature({ ...line, reviewer: "alice" } as unknown as VerdictEvent, B, signers).state).not.toBe("signed");
+    expect(checkVerdictSignature(line as unknown as VerdictEvent, B, signers).state).toBe("signed");
+  });
+
+  it("P4 finding 5: the signature binds the manifest and the seed; one made over the v1 bytes (no manifest, no seed) is refused, saying why", () => {
+    expect(check(signedLine(B, fields(1, "bob"), bob, { bytesFor: { manifestSha256: "e6".repeat(32) } }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/does not verify for this audit \(its registration, manifest and seed\)/) });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { bytesFor: { beaconRandomness: "f7".repeat(32) } }))).toMatchObject({ state: "invalid" });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { bytesFor: { beaconRound: 12346 } }))).toMatchObject({ state: "invalid" });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { v1: true }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/is signed over the pr-rla-verdict\/v1 bytes, which name neither the manifest nor the seed .* such signatures are refused/) });
+    expect(check(signedLine(B, fields(1, "bob"), bob)).state).toBe("signed");
   });
 
   it("finding 8: a verdict signed for another registration does not count here, even when its line names this one", () => {
     const OTHER = "d2".repeat(32);
-    expect(check(signedLine(OTHER, fields(1, "bob"), bob))).toMatchObject({ state: "other-registration", detail: expect.stringMatching(/is signed for registration d2d2d2d2d2d2…, not this audit's c1c1c1c1c1c1…/) });
-    expect(check(signedLine(REG, fields(1, "bob"), bob, { bytesFor: { registrationSha256: OTHER } }))).toMatchObject({ state: "invalid" });
+    expect(check(signedLine({ ...B, registrationSha256: OTHER }, fields(1, "bob"), bob))).toMatchObject({ state: "other-registration", detail: expect.stringMatching(/is signed for registration d2d2d2d2d2d2…, not this audit's c1c1c1c1c1c1…/) });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { bytesFor: { registrationSha256: OTHER } }))).toMatchObject({ state: "invalid" });
   });
 
   it("a commit-namespace signature, an unlisted key, a principal that is not the reviewer, and garbage do not count", () => {
-    expect(check(signedLine(REG, fields(1, "bob"), bob, { namespace: "git" }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/namespace "git", not "pr-rla-verdict@v1"/) });
-    expect(check(signedLine(REG, fields(1, "bob"), makeTestKey("sk-ssh-ed25519@openssh.com")))).toMatchObject({ state: "unlisted", detail: expect.stringMatching(/which no registered reviewer holds/) });
-    expect(check(signedLine(REG, fields(1, "alice"), bob))).toMatchObject({ state: "mismatch", detail: expect.stringMatching(/^names reviewer alice but is signed by bob's key SHA256:/) });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { namespace: "git" }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/namespace "git", not "pr-rla-verdict@v1"/) });
+    expect(check(signedLine(B, fields(1, "bob"), makeTestKey("sk-ssh-ed25519@openssh.com")))).toMatchObject({ state: "unlisted", detail: expect.stringMatching(/which no registered reviewer holds/) });
+    expect(check(signedLine(B, fields(1, "alice"), bob))).toMatchObject({ state: "mismatch", detail: expect.stringMatching(/^names reviewer alice but is signed by bob's key SHA256:/) });
     // Exact, as ssh-keygen -Y verify -I matches principals (finding 10): "Bob" is not "bob".
-    expect(check(signedLine(REG, fields(1, "Bob"), bob))).toMatchObject({ state: "mismatch" });
+    expect(check(signedLine(B, fields(1, "Bob"), bob))).toMatchObject({ state: "mismatch" });
     expect(check(unsignedLine(fields(1, "bob")))).toMatchObject({ state: "unsigned" });
-    expect(checkVerdictSignature({ ...verdict(1, "bob"), sshsig: "not base64!" }, REG, signers)).toMatchObject({ state: "unreadable" });
-    expect(checkVerdictSignature({ ...event(signedLine(REG, fields(1, "bob"), bob)), changeId: "x\ny" }, REG, signers)).toMatchObject({ state: "unreadable", detail: expect.stringMatching(/changeId must be non-empty text/) });
-    expect(check(signedLine(REG, fields(1, "bob"), bob, { reservedBlob: "X", reservedSigned: "X" }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/reserved field is not empty/) });
+    expect(checkVerdictSignature({ ...verdict(1, "bob"), sshsig: "not base64!" }, B, signers)).toMatchObject({ state: "unreadable" });
+    expect(checkVerdictSignature({ ...event(signedLine(B, fields(1, "bob"), bob)), changeId: "x\ny" }, B, signers)).toMatchObject({ state: "unreadable", detail: expect.stringMatching(/changeId must be non-empty text/) });
+    expect(check(signedLine(B, fields(1, "bob"), bob, { reservedBlob: "X", reservedSigned: "X" }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/reserved field is not empty/) });
   });
 
   it("attestVerdicts: a line's own claim never counts; a decreasing counter WARNs; an equal one does not; unsigned and touch-less lines are noted", () => {
     const lines = [
       { ...event(unsignedLine(fields(1, "bob"))), provenance: { level: "presence" as const, source: "typed" } },
-      event(signedLine(REG, fields(2, "bob"), bob, { counter: 10 })),
-      event(signedLine(REG, fields(3, "bob"), bob, { counter: 10 })),
-      event(signedLine(REG, fields(4, "bob"), bob, { counter: 4 })),
-      event(signedLine(REG, fields(5, "bob"), bob, { counter: 11, flags: 0x00 })),
-      event(signedLine(REG, fields(6, "bob"), makeTestKey("ssh-ed25519"))),
+      event(signedLine(B, fields(2, "bob"), bob, { counter: 10 })),
+      event(signedLine(B, fields(3, "bob"), bob, { counter: 10 })),
+      event(signedLine(B, fields(4, "bob"), bob, { counter: 4 })),
+      event(signedLine(B, fields(5, "bob"), bob, { counter: 11, flags: 0x00 })),
+      event(signedLine(B, fields(6, "bob"), makeTestKey("ssh-ed25519"))),
     ];
-    const a = attestVerdicts(lines, REG, signers);
+    const a = attestVerdicts(lines, B, signers);
     expect(a.events.map((e) => e.provenance?.level ?? "self-asserted")).toEqual(["self-asserted", "presence", "presence", "presence", "account", "self-asserted"]);
     expect(a.events[0]!.provenance).toBeUndefined();
     expect(a.events.every((e) => e.sshsig === undefined && e.registrationSha256 === undefined)).toBe(true);
@@ -279,7 +294,7 @@ describe("each verdict's own signature (U9, after review)", () => {
   });
 
   it("with no keys registered nothing is checked and nothing is noted", () => {
-    const a = attestVerdicts([event(signedLine(REG, fields(1, "bob"), bob)), event(unsignedLine(fields(2, "bob")))], REG, []);
+    const a = attestVerdicts([event(signedLine(B, fields(1, "bob"), bob)), event(unsignedLine(fields(2, "bob")))], B, []);
     expect(a.findings).toEqual([]);
     expect(a.warnings).toEqual([]);
     expect(a.events.map((e) => [e.draw, e.provenance, e.sshsig])).toEqual([[1, undefined, undefined], [2, undefined, undefined]]);
@@ -315,12 +330,41 @@ describe("the rules check 7 applies (FR9.1, FR9.4) and the ceiling", () => {
   it("countedVerdicts: only the registered git-file ledger's signatures are checked; any other ledger keeps its provenance, its signature fields ignored", () => {
     const bob = keys["sk-ssh-ed25519@openssh.com"];
     const reg = { record: { schema: "pr-rla/registration/v2", verdicts: { minProvenance: "presence", reviewers: null, allowed_signers: [`bob ${bob.publicText}`] } }, sha256: REG } as unknown as SignedRecord<RegistrationRecordV2>;
-    const line = event(signedLine(REG, fields(1, "bob"), bob));
-    expect(countedVerdicts([line], { registration: reg, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" }).verdicts[0]!.provenance?.level).toBe("presence");
-    const other = countedVerdicts([{ ...line, provenance: { level: "presence", source: "verdict-signature" } }], { registration: reg, verifiesSignatures: false, ceiling: "account", ledger: "tracker" });
+    const line = event(signedLine(B, fields(1, "bob"), bob));
+    expect(countedVerdicts([line], { registration: reg, binding: B, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" }).verdicts[0]!.provenance?.level).toBe("presence");
+    const other = countedVerdicts([{ ...line, provenance: { level: "presence", source: "verdict-signature" } }], { registration: reg, binding: B, verifiesSignatures: false, ceiling: "account", ledger: "tracker" });
     expect(other.verdicts[0]).toMatchObject({ provenance: { level: "account" } });
     expect(other.verdicts[0]!.sshsig).toBeUndefined();
     expect(other.notes).toHaveLength(1);
+  });
+
+  it("P4 finding 2: under keys and require_signed, or a minimum above self-asserted, a line without a valid registered signature is ineligible, with its reason; otherwise it counts as self-asserted", () => {
+    const bob = keys["sk-ssh-ed25519@openssh.com"];
+    const regWith = (verdicts: Record<string, unknown>) => ({ record: { schema: "pr-rla/registration/v2", verdicts: { reviewers: null, allowed_signers: [`bob ${bob.publicText}`], ...verdicts } }, sha256: REG }) as unknown as SignedRecord<RegistrationRecordV2>;
+    const lines = [event(unsignedLine(fields(1, "bob"))), event(signedLine(B, fields(1, "bob", { verdict: "fail" }), bob)), event(signedLine(B, fields(2, "bob"), makeTestKey("ssh-ed25519")))];
+    for (const v of [{ minProvenance: "self-asserted", require_signed: true }, { minProvenance: "account" }, { minProvenance: "presence" }]) {
+      expect(signaturesRequired(regWith(v)), JSON.stringify(v)).toBe(true);
+      const c = countedVerdicts(lines, { registration: regWith(v), binding: B, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" });
+      expect(c.verdicts.map((x) => c.ineligible(x))).toEqual([
+        "carries no signature, and the registration counts only verdicts signed with their reviewer's registered key",
+        null,
+        expect.stringMatching(/^is signed by key SHA256:\S+ \(ssh-ed25519\), which no registered reviewer holds, and the registration counts only/),
+      ]);
+      // The lines it ignores are not noted twice (they show as ignored verdicts).
+      expect(c.warnings).toEqual([]);
+      expect(c.findings).toEqual([]);
+      // The first eligible verdict for the change is bob's signed FAIL, not the unsigned PASS appended before it.
+      expect(countingVerdictFor(lines, fields(1, "bob").changeId, { registration: regWith(v), binding: B, verifiesSignatures: true, ledger: "git-file", protocolSha256: P, eligible: () => true })?.verdict).toBe("fail");
+      // Through another ledger than the registered git-file, nothing is eligible.
+      const other = countedVerdicts(lines, { registration: regWith(v), binding: B, verifiesSignatures: false, ledger: "tracker" });
+      expect(other.verdicts.every((x) => /^the ledger read is not the registered built-in git-file/.test(other.ineligible(x) ?? ""))).toBe(true);
+    }
+    const lax = regWith({ minProvenance: "self-asserted" });
+    expect(signaturesRequired(lax)).toBe(false);
+    const c = countedVerdicts(lines, { registration: lax, binding: B, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" });
+    expect(c.verdicts.map((x) => c.ineligible(x))).toEqual([null, null, null]);
+    expect(countingVerdictFor(lines, fields(1, "bob").changeId, { registration: lax, binding: B, verifiesSignatures: true, ledger: "git-file", protocolSha256: P, eligible: () => true })?.verdict).toBe("pass");
+    expect(c.findings).toEqual(["1 verdict line(s) carry no signature (draws #1): self-asserted"]);
   });
 
   it("FR9.6: the presence level is never printed without its limit", () => {

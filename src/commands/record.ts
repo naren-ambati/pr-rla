@@ -1,7 +1,7 @@
 import { isRegistrationV2 } from "../core/records.js";
 import { ledgerTraits } from "../ledger-traits.js";
 import { verdictIneligibility } from "../sdk/ledger.js";
-import { registeredSigners, signVerdictHint } from "../core/presence/index.js";
+import { auditBinding, countingVerdictFor, registeredSigners, signaturesCountFor, signVerdictHint } from "../core/presence/index.js";
 import { builtinLedgerName } from "../registry.js";
 import { verdictSigner, type VerdictSigner } from "../io/ssh-sign.js";
 import { auditContextFor, configFor, CommandError, isoNow, ledgerFor, readDraws, readRegistration, type CommandContext } from "./context.js";
@@ -28,14 +28,16 @@ export async function recordCommand(ctx: CommandContext, drawArg: string, verdic
   const d = draws.draws.find((x) => x.draw === draw);
   if (!d || draw > draws.issued) throw new CommandError(`draw #${draw} has not been issued (issued: ${draws.issued}; "pr-rla sample --through ${draw}" issues more)`);
   const ledger = await ledgerFor(ctx, config, paths);
-  // Only a verdict that counts blocks a new one: a bot's or an unregistered account's label does not.
+  // Only a verdict that counts blocks a new one: a bot's or an unregistered account's label does not, nor (P4) an unsigned line where the registration requires signatures.
   const reviewers = isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
-  const existing = (await ledger.readVerdicts()).find((v) => v.changeId === d.changeId && v.protocolSha256 === reg.record.protocolSha256 && !verdictIneligibility(v, reviewers));
+  const binding = auditBinding(reg.sha256, draws.manifestSha256, draws.beacon);
+  const verifiesSignatures = signaturesCountFor(isRegistrationV2(reg) ? reg.record.plugins.ledger : null) && builtinLedgerName(config.ledger.use) === "git-file";
+  const existing = countingVerdictFor(await ledger.readVerdicts(), d.changeId, { registration: reg, binding, verifiesSignatures, ledger: ledger.name, protocolSha256: reg.record.protocolSha256, eligible: (v) => !verdictIneligibility(v, reviewers) });
   if (existing && !opts.force)
     throw new CommandError(`${d.changeId} already has a ${existing.verdict} verdict (draw #${existing.draw}); a change drawn twice reuses its first verdict. --force appends anyway (it will show as a relabel; the first verdict still counts)`);
   const event = { draw, changeId: d.changeId, verdict: verdictArg, protocolSha256: reg.record.protocolSha256, reviewer: signer?.principal ?? opts.reviewer ?? "(the token's account)", recordedAt: isoNow(ctx) } as const;
   const signed = signer
-    ? await signer.sign({ ...event, registrationSha256: reg.sha256 }).catch((e: Error) => {
+    ? await signer.sign({ ...event, ...binding }).catch((e: Error) => {
         throw new CommandError(`draw #${draw} was not recorded: ${e.message}`);
       })
     : null;

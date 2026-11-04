@@ -1,7 +1,7 @@
 import type { ProvenanceLevel, VerdictEvent, VerdictProvenance } from "../../sdk/ledger.js";
 import { signersFor, type AllowedSigner } from "./allowed-signers.js";
 import { dearmorSshsig, verifySshsigBlob, type SecurityKeySignature } from "./sshsig.js";
-import { VERDICT_NAMESPACE, verdictPayload, verdictPayloadProblems, type VerdictPayloadFields } from "./verdict-payload.js";
+import { VERDICT_NAMESPACE, VERDICT_PAYLOAD_V1, verdictPayload, verdictPayloadProblems, verdictPayloadV1, type VerdictBinding, type VerdictPayloadFields } from "./verdict-payload.js";
 
 /**
  * PresenceVerifier (functional-design.md §U9, as changed after review): a verdict's provenance from
@@ -9,7 +9,8 @@ import { VERDICT_NAMESPACE, verdictPayload, verdictPayloadProblems, type Verdict
  * network.
  *
  * A verdict line carries `sshsig`, an SSHSIG over the verdict's bytes (verdict-payload.ts) in
- * namespace `pr-rla-verdict@v1`. Signed by the registered key of the reviewer it names: `account`;
+ * namespace `pr-rla-verdict@v1`, rebuilt from the line and the audit it is checked for: the
+ * registration, the manifest and the seed (P4). Signed by the registered key of the reviewer it names: `account`;
  * by that reviewer's FIDO security key with the user-presence flag set: `presence`. Every other line
  * is `self-asserted`, whatever it claims. No line is credited to a git commit.
  */
@@ -33,17 +34,26 @@ export interface VerdictSignatureCheck {
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
-/** Checks one verdict's own signature against the registration it must name and the registered allowed signers. */
-export function checkVerdictSignature(v: VerdictEvent, registrationSha256: string, signers: readonly AllowedSigner[]): VerdictSignatureCheck {
+/**
+ * Checks one verdict's own signature against the audit it must be signed for (the registration, the
+ * manifest and the seed: `binding`) and the registered allowed signers.
+ */
+export function checkVerdictSignature(v: VerdictEvent, binding: VerdictBinding, signers: readonly AllowedSigner[]): VerdictSignatureCheck {
+  const { registrationSha256 } = binding;
   if (v.sshsig === undefined) return { state: "unsigned", detail: "carries no signature" };
   if (typeof v.sshsig !== "string" || !BASE64.test(v.sshsig)) return { state: "unreadable", detail: "has an sshsig field that is not base64" };
   if (v.registrationSha256 !== undefined && v.registrationSha256 !== registrationSha256)
     return { state: "other-registration", detail: `is signed for registration ${String(v.registrationSha256).slice(0, 12)}…, not this audit's ${registrationSha256.slice(0, 12)}…` };
-  const fields = { registrationSha256, protocolSha256: v.protocolSha256, draw: v.draw, changeId: v.changeId, verdict: v.verdict, reviewer: v.reviewer, recordedAt: v.recordedAt };
+  const fields = { ...binding, protocolSha256: v.protocolSha256, draw: v.draw, changeId: v.changeId, verdict: v.verdict, reviewer: v.reviewer, recordedAt: v.recordedAt } as VerdictPayloadFields;
   const problems = verdictPayloadProblems(fields);
   if (problems.length) return { state: "unreadable", detail: `cannot be checked: ${problems.join("; ")}` };
-  const s = verifySshsigBlob(new Uint8Array(Buffer.from(v.sshsig, "base64")), verdictPayload(fields), VERDICT_NAMESPACE);
+  const blob = new Uint8Array(Buffer.from(v.sshsig, "base64"));
+  const s = verifySshsigBlob(blob, verdictPayload(fields), VERDICT_NAMESPACE);
   const key = s.key ? { type: s.key.type, fingerprint: s.key.fingerprint, securityKey: s.key.securityKey } : undefined;
+  if (!s.ok && verifySshsigBlob(blob, verdictPayloadV1(fields), VERDICT_NAMESPACE).ok)
+    return { state: "invalid", detail: `is signed over the ${VERDICT_PAYLOAD_V1} bytes, which name neither the manifest nor the seed and so could be signed before the seed was public; such signatures are refused: sign it again (pr-rla record --sign)`, ...(key ? { key } : {}) };
+  if (!s.ok && /does not match the signed data/.test(s.problem ?? ""))
+    return { state: "invalid", detail: `has a signature that does not verify for this audit (its registration, manifest and seed): ${s.problem}`, ...(key ? { key } : {}) };
   if (!s.ok) return { state: "invalid", detail: `has a signature that does not verify: ${s.problem}`, ...(key ? { key } : {}) };
   const holders = signersFor(s.key!, signers);
   const sk = s.sk ? { sk: s.sk } : {};
@@ -72,6 +82,8 @@ export function withoutSignatureFields(v: VerdictEvent): VerdictEvent {
 export interface VerdictAttestation {
   /** The verdicts in ledger order, each with the provenance its own signature gives it (none: self-asserted). */
   events: VerdictEvent[];
+  /** Each event's signature check, in the same order (null: no keys are registered, nothing was checked). */
+  checks: (VerdictSignatureCheck | null)[];
   /** Informational: unsigned lines, security-key signatures without the user-presence flag. */
   findings: string[];
   /** Check 7 WARNs: unreadable, invalid or foreign signatures, an unlisted key, a signer who is not the named reviewer, a decreasing counter. */
@@ -85,9 +97,13 @@ const drawList = (vs: readonly VerdictEvent[]) => vs.map((v) => `#${v.draw}`).jo
  * The provenance of every verdict from its own signature. A level a line claims for itself is
  * discarded. A security key's counter going down, in ledger order, is a WARN, never a FAIL:
  * authenticators differ (some always report 0, OpenSSH's test middleware a constant).
+ *
+ * `quiet` (P4): the caller reports every line without a valid registered signature itself (as an
+ * ignored verdict, under a registration that requires signatures), so they are not noted here too.
  */
-export function attestVerdicts(read: readonly VerdictEvent[], registrationSha256: string, signers: readonly AllowedSigner[]): VerdictAttestation {
+export function attestVerdicts(read: readonly VerdictEvent[], binding: VerdictBinding, signers: readonly AllowedSigner[], opts: { quiet?: boolean } = {}): VerdictAttestation {
   const events: VerdictEvent[] = [];
+  const checks: (VerdictSignatureCheck | null)[] = [];
   const findings: string[] = [];
   const warnings: string[] = [];
   const unsigned: VerdictEvent[] = [];
@@ -96,13 +112,18 @@ export function attestVerdicts(read: readonly VerdictEvent[], registrationSha256
     const { provenance: _claimed, ...rest } = withoutSignatureFields(v);
     if (!signers.length) {
       events.push(rest);
+      checks.push(null);
       continue;
     }
-    const check = checkVerdictSignature(v, registrationSha256, signers);
+    const check = checkVerdictSignature(v, binding, signers);
     const provenance = signatureProvenance(check);
     events.push(provenance ? { ...rest, provenance } : rest);
-    if (check.state === "unsigned") unsigned.push(v);
-    else if (check.state !== "signed") warnings.push(`${where(v)} ${check.detail}: self-asserted`);
+    checks.push(check);
+    if (check.state === "unsigned") {
+      if (!opts.quiet) unsigned.push(v);
+    } else if (check.state !== "signed") {
+      if (!opts.quiet) warnings.push(`${where(v)} ${check.detail}: self-asserted`);
+    }
     else if (check.sk) {
       if (!check.sk.userPresent) findings.push(`${where(v)} ${check.detail}: account`);
       const fp = check.key!.fingerprint;
@@ -115,7 +136,7 @@ export function attestVerdicts(read: readonly VerdictEvent[], registrationSha256
     }
   }
   if (unsigned.length) findings.push(`${unsigned.length} verdict line(s) carry no signature (draws ${drawList(unsigned)}): self-asserted`);
-  return { events, findings, warnings };
+  return { events, checks, findings, warnings };
 }
 
 /**
@@ -131,7 +152,8 @@ export async function signVerdict(fields: VerdictPayloadFields, signers: readonl
   } catch (e) {
     throw new Error(`the signature is not an SSH signature: ${(e as Error).message}`);
   }
-  const check = checkVerdictSignature({ ...fields, registrationSha256: fields.registrationSha256, sshsig }, fields.registrationSha256, signers);
+  const { manifestSha256: _m, beaconRound: _r, beaconRandomness: _b, ...line } = fields;
+  const check = checkVerdictSignature({ ...line, sshsig }, fields, signers);
   if (check.state !== "signed") throw new Error(`the signature would not count: the verdict ${check.detail}`);
   return { registrationSha256: fields.registrationSha256, sshsig, check };
 }
