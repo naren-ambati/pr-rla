@@ -419,6 +419,18 @@ describe("trust: full imports only what its tree hash covers (review of this rou
     expect(r.status).toBe(1);
     expect(existsSync(m)).toBe(false);
   });
+
+  it.skipIf(!existsSync(DIST))("the running pr-rla counts only for its own code: a checkout's other files are refused (needs npm run build)", async () => {
+    // Running from a checkout, pr-rla's directory also holds tests, scripts and examples nobody hashed.
+    const other = pathToFileURL(join(ROOT, "test", "fixtures", "plugins", "hostile", "package.json")).href;
+    const dir = auditWith(`if (process.env.PR_RLA_HOST !== "1") await import(${JSON.stringify(other)}, { with: { type: "json" } });\nexport default { providerApiVersion: 1, name: "acme", create() { return { apiVersion: 1, name: "acme", async listChanges() { return { changes: [], defaultBranch: "main" }; } }; } };\n`, marker());
+    const s = setupAuditRepo({ changes: [], provider: "{ use: ./plugins/p.mjs, options: {} }" });
+    cpSync(dir, s.dir, { recursive: true });
+    expect((await cli(s, ["plugin", "add", "./plugins/p.mjs", "--trust", "full", "--yes"])).code).toBe(0);
+    const r = run([join(ROOT, "dist", "cli.js"), "-C", s.dir, "freeze", "--dry-run"]);
+    expect(r.stderr).toMatch(/plugin \.\/plugins\/p\.mjs imports ".*test\/fixtures\/plugins\/hostile\/package\.json", which resolves to .*, outside the files its tree hash covers/);
+    expect(r.status).toBe(1);
+  });
 });
 
 describe("verify compares the provider it loads with the registered one (functional-design.md §U2b item 5)", () => {
