@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { checkpointCommand } from "./commands/checkpoint.js";
-import { CommandError, nodeContext, type CommandContext } from "./commands/context.js";
+import { AuditError } from "./api/errors.js";
+import { nodeContext, type CommandContext } from "./commands/context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
 import { pluginAddCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
@@ -41,7 +42,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
       // Broker and API errors name the host and the next step (NFR17).
       const next = (e as { next?: unknown }).next;
       if (typeof next === "string" && next) ctx.err(`  next: ${next}`);
-      setExit(e instanceof CommandError ? e.exitCode : 1);
+      setExit(e instanceof AuditError ? e.exitCode : 1);
     } finally {
       closeAllPluginHosts();
     }

@@ -7,6 +7,7 @@ import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
 import type { Ledger } from "../sdk/ledger.js";
 import type { PluginCredential, ScmProvider } from "../sdk/provider.js";
+import { AuditError } from "./errors.js";
 
 /**
  * The audit API foundation (functional-design.md §U2a; contracts.md §1a, §2).
@@ -80,13 +81,11 @@ export interface AuditContextOptions {
 const NO_HOSTS: ReadonlySet<string> = new Set(["(no hosts declared)"]);
 
 /** An API refusal, in the CLI error form (contracts.md §7) and the MCP error codes (§4). */
-export class AuditApiError extends Error {
-  constructor(
-    message: string,
-    readonly code: "READ_ONLY_VIOLATION",
-    readonly next: string,
-  ) {
-    super(message);
+export class AuditApiError extends AuditError {
+  declare readonly code: "READ_ONLY_VIOLATION";
+  declare readonly next: string;
+  constructor(message: string, code: "READ_ONLY_VIOLATION", next: string) {
+    super(message, 1, code, next);
     this.name = "AuditApiError";
   }
 }
