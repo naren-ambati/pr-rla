@@ -3,7 +3,7 @@ import { freezeHeadEvidence } from "../core/head-proof.js";
 import { assemblePopulation, buildPopulation, checkListed, listRepoChanges, type Population } from "../core/population.js";
 import { isTransientFailure, looksUnavailable, probeRepo } from "../core/failures.js";
 import { describeRepoSet, resolvePool, RepoSetError, type PoolResolution, type ResolvedRepo } from "../core/repo-set.js";
-import type { ReviewHorizon, Selector } from "../core/selector.js";
+import type { AccountMap, ReviewHorizon, Selector } from "../core/selector.js";
 import { isRepoEmpty, type AuditWindow, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { canonicalJson } from "../core/canonical.js";
 
@@ -164,6 +164,8 @@ export interface PooledFreezeOptions {
   now?: () => string;
   /** Which reviews `no-review` sees (`reviewHorizonFor(registration)`): `landing` (v2, the default) or `cutoff` (v1). */
   horizon?: ReviewHorizon;
+  /** The registration's account map (P5, `registeredAccounts`): the selector's logins match by these ids only. */
+  accounts?: AccountMap | null;
   /** Present for a real freeze of a list or rule: the run is checkpointed and can resume. Absent: nothing is written. */
   checkpoint?: CheckpointOptions;
 }
@@ -194,7 +196,7 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Lists the repos of a set and builds their pooled population, resuming a stopped run when there is one. */
 export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
-  const common = { window: o.window, selector: o.selector, cutoffIso: o.startedAt, ...(o.horizon ? { horizon: o.horizon } : {}) };
+  const common = { window: o.window, selector: o.selector, cutoffIso: o.startedAt, ...(o.horizon ? { horizon: o.horizon } : {}), ...(o.accounts ? { accounts: o.accounts } : {}) };
   const now = o.now ?? (() => o.startedAt);
   if (o.set.kind === "repo") {
     // A pool of one: no run to resume, and the provider's own errors reach the caller (an empty repo stops it, as before U8).

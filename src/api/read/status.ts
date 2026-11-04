@@ -3,7 +3,7 @@ import { buildPopulation } from "../../core/population.js";
 import { perRepoRows, type RepoRow } from "../../core/pooled-report.js";
 import { PRESENCE_LIMIT, auditBinding, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
 import { certificateWithheld, gitFileLedgerGate } from "../../core/ledger-path.js";
-import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
+import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registeredAccounts, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
 import { describeRepoSet } from "../../core/repo-set.js";
 import { unixToIso } from "../../core/seed.js";
 import type { Selector } from "../../core/selector.js";
@@ -244,7 +244,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     if (!opts.offline && now >= opens && set.kind === "repo") {
       const provider = await providerFor(ctx, config);
       ctx.onProgress?.({ done: 0, message: `listing ${set.repo} on ${provider.name} for N so far` });
-      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), accounts: registeredAccounts(reg), ...(ctx.signal ? { signal: ctx.signal } : {}) });
       nSoFar = pop.entries.length;
       soFar = ` · N so far ${fmt(nSoFar)}`;
       ctx.onProgress?.({ done: 1, total: 1, message: `N so far ${fmt(nSoFar)}` });

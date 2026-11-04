@@ -4,6 +4,8 @@ import {
   PROVIDER_API_VERSION,
   assertChangeRecord,
   defineProvider,
+  normalizeLogin,
+  type AccountLookup,
   type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
@@ -83,6 +85,26 @@ export class JsonFileProvider implements ScmProvider {
     const d = Array.isArray(raw) ? undefined : raw.descriptions?.[change.id];
     if (!d) throw new NoRecordedDescription(this.file, change.id);
     return structuredClone(d);
+  }
+
+  /**
+   * P5: each login's account id as the export records it on its actors (author, merger, reviews): the export stands in
+   * for the SCM. A login the export gives no id, or two ids, resolves to none.
+   */
+  async resolveAccounts(logins: readonly string[]): Promise<AccountLookup[]> {
+    const f = await this.load();
+    const ids = new Map<string, Set<string>>();
+    for (const c of f.changes)
+      for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) {
+        if (a.id === undefined) continue;
+        const k = normalizeLogin(a.login);
+        ids.set(k, (ids.get(k) ?? new Set()).add(a.id));
+      }
+    return logins.map((login) => {
+      const found = [...(ids.get(normalizeLogin(login)) ?? [])];
+      if (found.length === 1) return { login, id: found[0]! };
+      return { login, id: null, detail: found.length ? `${this.file} gives ${login} ${found.length} account ids (${found.sort().join(", ")})` : `${this.file} records no account id for ${login}` };
+    });
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

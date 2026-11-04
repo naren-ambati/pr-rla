@@ -396,6 +396,17 @@ export interface ScmProvider {
    */
   pushLog?(request: PushLogRequest): Promise<PushLog>;
   /**
+   * Optional (P5, same API version): the SCM's stable account id for each login, as `Actor.id` carries it (GitHub's
+   * user id, which GraphQL calls `databaseId`; GitLab's and Bitbucket Data Center's user id). `register` resolves every
+   * login the selector names (`authors`, `bots`) and signs the map into the registration; selection then matches those
+   * entries by id only, so a login written into a manifest for another account, or an account renamed, moves nothing.
+   * Logins come as the selector writes them (bots with their `[bot]` suffix). `id: null` when the SCM has no such
+   * account, with `detail` saying what it answered. Throw, as any read does, when it cannot be asked. Without it,
+   * `register` refuses a prospective audit that names logins, and a retrospective one matches logins as logins and
+   * says so.
+   */
+  resolveAccounts?(logins: readonly string[], opts?: { signal?: AbortSignal }): Promise<AccountLookup[]>;
+  /**
    * Optional: provider-native counts for a selector (e.g. a search-API figure)
    * printed next to pr-rla's own population so readers see the difference.
    */
@@ -410,6 +421,13 @@ export interface ScmProvider {
    * `opts.signal` aborts (a stopped job; every request through `ctx.fetch` is aborted with it too).
    */
   describeChange?(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription>;
+}
+
+/** One login `resolveAccounts` looked up (P5): its stable account id, or null with what the SCM answered. */
+export interface AccountLookup {
+  login: string;
+  id: string | null;
+  detail?: string;
 }
 
 export interface DescribeChangeOptions {

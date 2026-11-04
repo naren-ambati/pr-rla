@@ -25,6 +25,11 @@ export interface FakePr {
   additions: number;
   deletions: number;
   labels?: string[];
+  /**
+   * P5: the label history its issue events show, oldest first (REST names a label as it was when applied). Absent: each
+   * label of `labels` was applied an hour before the merge (or before `updatedAt` when unmerged).
+   */
+  labelEvents?: { at: string; action: "labeled" | "unlabeled"; name: string }[];
 }
 
 const h = (c: string) => c.repeat(40).slice(0, 40);
@@ -152,6 +157,34 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
       return json({ status, ahead_by: ahead.length, total_commits: ahead.length, commits });
     }
     if (url.pathname === `${prefix}/search/issues`) return json({ total_count: 0 });
+    // P5: a pull request's issue events (REST, oldest first, paged): its label history among other events.
+    const events = new RegExp(`^${prefix}/repos/${repo}/issues/(\\d+)/events$`).exec(url.pathname);
+    if (events) {
+      const p = prs.find((x) => x.number === Number(events[1]));
+      if (!p) return new Response(JSON.stringify({ message: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });
+      const before = new Date(Date.parse(p.mergedAt ?? p.updatedAt) - 3_600_000).toISOString().replace(".000Z", "Z");
+      const label = p.labelEvents ?? (p.labels ?? []).map((name) => ({ at: before, action: "labeled" as const, name }));
+      const all = [{ id: p.number * 1000, event: "subscribed", created_at: before }, ...label.map((e, i) => ({ id: p.number * 1000 + 1 + i, event: e.action, created_at: e.at, label: { name: e.name, color: "ededed" } }))];
+      const per = Math.min(100, Number(url.searchParams.get("per_page") ?? 30));
+      const page = Number(url.searchParams.get("page") ?? 1);
+      const next = new URL(url);
+      next.searchParams.set("page", String(page + 1));
+      return json(all.slice((page - 1) * per, page * per), page * per < all.length ? { link: `<${next.href}>; rel="next"` } : {});
+    }
+    // P5: an account by login (REST `GET /users/{username}`): a bot's REST login carries `[bot]`, its GraphQL login does not;
+    // the id is the same (`databaseId`). Only accounts this fake's history names exist.
+    const user = new RegExp(`^${prefix}/users/([^/]+)$`).exec(url.pathname);
+    if (user) {
+      const login = decodeURIComponent(user[1]!);
+      const bare = login.endsWith("[bot]") ? login.slice(0, -5) : login;
+      const actors = [
+        ...prs.flatMap((p) => [p.author, p.mergedBy, ...p.reviews.map((r) => r.author)]).flatMap((a) => (a ? [{ login: a.login, bot: a.__typename === "Bot" }] : [])),
+        ...commits.flatMap((c) => (c.author?.login ? [{ login: c.author.login, bot: false }] : [])),
+      ];
+      const hit = actors.find((a) => a.login.toLowerCase() === bare.toLowerCase());
+      if (!hit || hit.bot !== login.endsWith("[bot]")) return new Response(JSON.stringify({ message: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });
+      return json({ login: hit.bot ? `${hit.login}[bot]` : hit.login, id: idOf(hit.login), type: hit.bot ? "Bot" : "User" });
+    }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
   return { fetch: f, served: () => served };

@@ -2,7 +2,7 @@ import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/le
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import { ledgerPathFindings } from "./ledger-path.js";
-import type { ScmProvider } from "../sdk/provider.js";
+import { normalizeLogin, type ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
 import { logKeySource, type TrustedLogKey } from "../translog/keys.js";
@@ -10,10 +10,11 @@ import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { createPublicKey } from "node:crypto";
 import { canonicalJson, sha256Hex } from "./canonical.js";
-import { assemblePopulation, manifestAliases, type Population } from "./population.js";
+import { assemblePopulation, type Population } from "./population.js";
 import { drawOrder, storedInCanonicalOrder } from "./draw-key.js";
 import { checkPool } from "./rebuild.js";
 import { ruleRepoNameFindings } from "./repo-names.js";
+import { accountFindings, unselectedManifestChanges } from "./registered-selection.js";
 import { poolRecordProblems } from "./repo-set.js";
 import {
   auditMode,
@@ -27,6 +28,7 @@ import {
   manifestRepos,
   manifestSha256,
   recordedRegisteredRepos,
+  registeredAccounts,
   registeredRepos,
   registeredVisibility,
   registrationRepoSet,
@@ -337,6 +339,17 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // every registered repo included, and a listing that agrees with itself (U8, FR5.1/FR5.2; the review's finding 1).
     const mv2 = isManifestV2(m) ? m : null;
     c2.details.push(...poolRecordProblems(registrationRepoSet(reg), { repos: manifestRepos(m), changeRepos: m.changes.map((x) => x.repo), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], registered: isRegistrationV2(reg) ? recordedRegisteredRepos(reg) : [], ...(mv2?.headEvidence ? { headEvidence: mv2.headEvidence } : {}) }));
+    // P5: the selector's logins are bound to the account ids the registration signed, and every manifest change is one
+    // the registered selector selects, on the manifest's own records (a login written onto another account's change).
+    const acct = accountFindings(reg, mode);
+    c2.details.push(...acct.fails);
+    let unselected: string[] = [];
+    try {
+      unselected = unselectedManifestChanges(reg, m);
+    } catch (e) {
+      c2.details.push(`the registered selector cannot be applied to the manifest's records: ${(e as Error).message}`);
+    }
+    if (unselected.length) c2.details.push(`manifest lists ${n(unselected.length)} change(s) the registered selector does not select, applied to the manifest's own records with the registration's account ids (e.g. ${unselected.slice(0, 3).join(", ")})`);
     const csig = verifySignedRecord(cm);
     if (!csig.ok) c2.details.push(`commitment signature: ${csig.reason}`);
     if (!sameKey(cm.publicKeyPem, reg.publicKeyPem)) c2.details.push("commitment is signed by a different key than the registration");
@@ -352,6 +365,14 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (isoToUnix(cm.record.frozenAt) < isoToUnix(m.frozenAt)) c2.details.push(`commitment dated ${cm.record.frozenAt}, before the manifest's as-of time ${m.frozenAt}`);
     else if (registrationRepoSet(reg).kind === "repo" && cm.record.frozenAt !== m.frozenAt) c2.details.push(`commitment dated ${cm.record.frozenAt}, but a single-repo freeze signs it at the manifest's own time ${m.frozenAt}`);
     if (c2.details.length) c2.status = "FAIL";
+    for (const x of acct.incompletes) {
+      c2.details.push(`INCOMPLETE ${x}`);
+      c2.status = raiseStatus(c2.status, "INCOMPLETE");
+    }
+    for (const x of acct.warns) {
+      c2.details.push(`WARN ${x}`);
+      c2.status = raiseStatus(c2.status, "WARN");
+    }
     if (labelled.length) {
       c2.details.push(`WARN the registered stratum selects by labels (${labelled.join(", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
       c2.status = raiseStatus(c2.status, "WARN");
@@ -428,8 +449,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const mv2 = isManifestV2(m) ? m : null;
     // A pool: more than one repo, or a list or rule (which may resolve to one).
     const pooled = set.kind !== "repo" || mrepos.length !== 1;
-    // Walk the frozen history (FR7.2) and match renamed accounts by id (FR7.3).
-    const aliases = manifestAliases(m.changes);
+    // Walk the frozen history (FR7.2) and match the selector's logins by the account ids the registration signed (FR7.3;
+    // P5: never by what the manifest's own records say an account is called).
+    const accounts = registeredAccounts(reg);
     const window = reg.record.window;
     const selector = reg.record.selector;
     // Identical options cannot differ in the ones that change the population (a registration made before
@@ -482,10 +504,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const listings = pool.rebuilt.filter((b) => b.listed).map((b) => ({ repo: b.repo, listed: b.listed! }));
     let pop: Population;
     try {
-      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
+      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, accounts, horizon: reviewHorizonFor(reg) });
     } catch (e) {
       c5.details.push(`FAIL population: the rebuilt population is malformed: ${(e as Error).message}`);
-      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
+      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, accounts, horizon: reviewHorizonFor(reg) });
     }
     const verifiable = m.changes.filter((x) => !unrebuilt.has(x.repo));
     const mine = new Map(verifiable.map((x) => [x.id, x]));
@@ -527,13 +549,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         if (pinnedCount > 0) c5.details.push(`history walked from the frozen heads of ${n(pinnedCount)} repo(s)`);
       }
     }
+    // The registered logins whose accounts the SCM names otherwise now (P5: from the registration's account map).
     const renamed = new Map<string, string>();
+    const registeredLogin = new Map((isRegistrationV2(reg) ? (reg.record.accounts ?? []) : []).map((x) => [x.id, x.login]));
     for (const c of pop.listed.changes)
       for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) {
-        const was = a.id !== undefined ? aliases.get(a.id) : undefined;
-        if (was !== undefined && was !== a.login) renamed.set(`${was} → ${a.login}`, a.id!);
+        const was = a.id !== undefined ? registeredLogin.get(a.id) : undefined;
+        if (was !== undefined && normalizeLogin(was) !== normalizeLogin(a.login)) renamed.set(`${was} → ${a.login}`, a.id!);
       }
-    if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since freeze, matched by account id: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
+    if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since registration, matched by the account id the registration signed: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
     const has = (p: string) => c5.details.some((d) => d.startsWith(p));
     c5.status = has("FAIL ") ? "FAIL" : has("INCOMPLETE ") ? "INCOMPLETE" : unpinned || has("WARN ") ? "WARN" : "PASS";
     const others = c5.details.filter((d) => d.startsWith("INCOMPLETE ")).length - pool.rebuilt.filter((b) => !b.listed).reduce((k, b) => k + b.incomplete.length, 0);

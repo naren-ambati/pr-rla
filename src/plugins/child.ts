@@ -34,7 +34,7 @@ interface Definition {
 }
 
 const METHODS: Record<ChildBoot["kind"], readonly string[]> = {
-  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog"],
+  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog", "resolveAccounts"],
   ledger: ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"],
 };
 
@@ -250,6 +250,8 @@ async function run(m: CallMessage): Promise<void> {
       const args = [...m.args];
       // A request object carries the call's abort signal (the parent's `cancel`).
       if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests" || m.method === "firstParentPath" || m.method === "pushLog") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
+      // resolveAccounts(logins, { signal }) (P5): only the logins cross; the call's signal is the child's own.
+      if (m.method === "resolveAccounts") args.splice(1, args.length - 1, { signal: ctrl.signal });
       value = await (fn as Fn).apply(instance, args);
     }
     send({ type: "result", id: m.id, value: value === undefined ? null : value });

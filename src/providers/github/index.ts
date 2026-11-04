@@ -19,6 +19,7 @@ import {
   type RequestEstimate,
   type ScmProvider,
   type DescribeChangeOptions,
+  type AccountLookup,
 } from "../../sdk/provider.js";
 import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
@@ -619,6 +620,25 @@ export class GitHubProvider implements ScmProvider {
       graphql += Math.max(1, Math.ceil(commits / this.historyPageSize));
     }
     return { requests: Math.round(restPages + graphql), graphql: Math.round(graphql), probed };
+  }
+
+  /**
+   * P5: each login's stable account id, `GET /users/{login}` (`id`; GraphQL's `databaseId` for the same account, which
+   * `Actor.id` carries). A bot is looked up by its `[bot]` login, as GitHub names bot users. 404: no such account.
+   */
+  async resolveAccounts(logins: readonly string[], opts: { signal?: AbortSignal } = {}): Promise<AccountLookup[]> {
+    const out: AccountLookup[] = [];
+    for (const login of logins) {
+      opts.signal?.throwIfAborted();
+      try {
+        const { data } = await this.http.rest<{ login?: string; id?: unknown }>(`/users/${encodeURIComponent(login)}`);
+        out.push(typeof data?.id === "number" && Number.isSafeInteger(data.id) ? { login, id: String(data.id) } : { login, id: null, detail: `GitHub's /users/${login} sent no account id` });
+      } catch (e) {
+        if (e instanceof GitHubHttpError && e.status === 404) out.push({ login, id: null, detail: `GitHub has no account ${login} (HTTP 404 on /users/${login})` });
+        else throw e;
+      }
+    }
+    return out;
   }
 
   /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */

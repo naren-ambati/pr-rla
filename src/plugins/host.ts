@@ -714,6 +714,8 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], either(req.signal, ctx.signal)) as never;
   if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], either(signal, ctx.signal)) as never;
   if (has.has("pushLog")) p.pushLog = ({ signal, ...req }) => host.call("pushLog", [req], either(signal, ctx.signal)) as never;
+  // resolveAccounts(logins, { signal }) (P5): only the logins cross to the child; the signal stays here.
+  if (has.has("resolveAccounts")) p.resolveAccounts = (logins, o) => host.call("resolveAccounts", [[...logins]], either(o?.signal, ctx.signal)) as never;
   for (const m of ["listRepos", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
   // describeChange(change, { signal }): only the change crosses to the child; the signal stays here.
   if (has.has("describeChange")) p.describeChange = (change, o) => host.call("describeChange", [change], either(o?.signal, ctx.signal)) as never;

@@ -1,7 +1,7 @@
 import { assertChangeRecord, isCommitId, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { splitChangeId } from "./draw-key.js";
 import { sortChanges, type ManifestEntry } from "./records.js";
-import { applySelector, reviewsAsOf, type ActorAliases, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
+import { applySelector, reviewsAsOf, type AccountMap, type ReviewHorizon, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
 /** Added to every manifest whose selector includes direct pushes, whatever the provider says. */
@@ -43,8 +43,8 @@ export interface PopulationArgs {
   signal?: AbortSignal;
   /** Walk history from this default-branch commit (verify passes the manifest's headSha). */
   head?: string;
-  /** Account id -> login at freeze, so renamed accounts still match the selector (verify). */
-  aliases?: ActorAliases;
+  /** The registration's account map (P5, `registeredAccounts`): login entries match by these ids only. Never a manifest's. */
+  accounts?: AccountMap | null;
   /** Which reviews `no-review` sees (`ReviewHorizon`; `reviewHorizonFor(registration)`): `landing` unless a v1 audit passes `cutoff`. */
   horizon?: ReviewHorizon;
 }
@@ -111,7 +111,7 @@ export function assemblePopulation(providerName: string, unordered: readonly { r
     if (schemes.size > 1) throw new Error(`a pooled audit uses one provider, but provider ${providerName} returned changes of ${[...schemes].sort().join(" and ")}; register one audit per provider`);
   }
   const listed: ListChangesResult = only ?? mergeListings(perRepo.map((r) => r.listed), changes);
-  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, { ...(args.aliases ? { aliases: args.aliases } : {}), ...(args.horizon ? { horizon: args.horizon } : {}) });
+  const selection = applySelector(listed.changes, args.selector, args.cutoffIso, { ...(args.accounts ? { accounts: args.accounts } : {}), ...(args.horizon ? { horizon: args.horizon } : {}) });
   const entries = sortChanges(selection.selected.map((c) => ({ ...c, reviews: reviewsAsOf(c, args.cutoffIso) })));
   const byKind = { pull_request: 0, direct_push: 0 };
   for (const c of listed.changes) byKind[c.kind]++;
@@ -188,12 +188,3 @@ export async function buildPooledPopulation(provider: ScmProvider, args: PoolArg
   return assemblePopulation(provider.name, perRepo, args);
 }
 
-/**
- * The login each account id had in a frozen manifest (author, merger, reviews), for `verify`:
- * a renamed account keeps its id, so it still matches the logins the selector names (FR7.3).
- */
-export function manifestAliases(changes: readonly ChangeRecord[]): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const c of changes) for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) if (a.id !== undefined && !out.has(a.id)) out.set(a.id, a.login);
-  return out;
-}

@@ -1,4 +1,4 @@
-import type { ChangeRecord, RepoSetRule, RepoVisibility } from "../sdk/provider.js";
+import { normalizeLogin, type ChangeRecord, type RepoSetRule, type RepoVisibility } from "../sdk/provider.js";
 import { canonicalJson, hashCanonical, sha256Hex } from "./canonical.js";
 import type { FunnelStep, Selector } from "./selector.js";
 import { QUICKNET, SEED_DELAY_SECONDS, deriveSeedRound, isoToUnix, roundPublishTime, unixToIso } from "./seed.js";
@@ -193,6 +193,20 @@ export interface RegistrationRecordV2 {
    * admits whose proof is not complete leaves check 5 INCOMPLETE: a repo of it the token missed is not registered.
    */
   registeredVisibility?: RegisteredVisibility;
+  /**
+   * P5: every login the selector names (`authors` when a list, and `bots`; not `id:<v>` entries), each with the stable
+   * account id the provider resolved it to at `register` (`ScmProvider.resolveAccounts`), sorted by login. Selection and
+   * verify match those entries by id only, never by a login a manifest carries. Absent when the selector names no login,
+   * and when the provider could not resolve them for a retrospective audit (logins then match as logins, and check 2
+   * WARNs; register refuses that for a prospective audit).
+   */
+  accounts?: RegisteredAccount[];
+}
+
+/** One login of the selector and the account id `register` resolved it to (RegistrationRecordV2.accounts, P5). */
+export interface RegisteredAccount {
+  login: string;
+  id: string;
 }
 
 /** What a registering token could prove it saw under the rule's owner (RegistrationRecordV2.registeredVisibility). */
@@ -342,6 +356,16 @@ export function registeredRepos(reg: SignedRecord<AnyRegistration>): RegisteredR
 /** A rule registration's registeredRepos as recorded: null when the field is absent (check 2 FAILs such a rule registration, P3). */
 export function recordedRegisteredRepos(reg: SignedRecord<AnyRegistration>): RegisteredRepo[] | null {
   return reg.record.schema === "pr-rla/registration/v2" ? (reg.record.registeredRepos ?? null) : null;
+}
+
+/**
+ * The registration's account map (P5): each selector login, normalized (case-insensitive), to the account id signed at
+ * `register`. null when the registration binds none (v1, no login in the selector, or a retrospective audit whose provider
+ * could not resolve them): logins then match as logins.
+ */
+export function registeredAccounts(reg: SignedRecord<AnyRegistration>): ReadonlyMap<string, string> | null {
+  if (reg.record.schema !== "pr-rla/registration/v2" || !Array.isArray(reg.record.accounts)) return null;
+  return new Map(reg.record.accounts.map((a) => [normalizeLogin(a.login), a.id]));
 }
 
 /** What the registering token could prove it saw (a rule registration, P3); null when the registration does not record it. */
