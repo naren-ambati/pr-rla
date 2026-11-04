@@ -69,10 +69,11 @@ export async function githubIssuesAudit(o: { baseUrl?: string } = {}): Promise<T
   return build(`ledger: { use: github-issues, options: { repo: acme/audit${o.baseUrl ? `, base_url: ${o.baseUrl}` : ""} } }`, (u) => u.startsWith(`${fake.api}/`), fake, { GITHUB_TOKEN: "test-token" });
 }
 
-/** A GitLab audit on `gitlab-issues` at gitlab.com. */
-export async function gitlabIssuesAudit(): Promise<TrackerAudit<FakeGitLabIssues>> {
-  const fake = new FakeGitLabIssues("https://gitlab.com", "acme/audit");
-  return build("ledger: { use: gitlab-issues, options: { project: acme/audit } }", (u) => u.startsWith("https://gitlab.com/"), fake, { GITLAB_TOKEN: "test-token" });
+/** A GitLab audit on `gitlab-issues` at gitlab.com; with `baseUrl`, a self-managed instance at that origin. */
+export async function gitlabIssuesAudit(o: { baseUrl?: string } = {}): Promise<TrackerAudit<FakeGitLabIssues>> {
+  const base = o.baseUrl ?? "https://gitlab.com";
+  const fake = new FakeGitLabIssues(base, "acme/audit");
+  return build(`ledger: { use: gitlab-issues, options: { project: acme/audit${o.baseUrl ? `, base_url: ${o.baseUrl}` : ""} } }`, (u) => u.startsWith(`${base}/`), fake, { GITLAB_TOKEN: "test-token" });
 }
 
 /** An independent copy of a tracker, so one test's labels never reach another's. */

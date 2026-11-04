@@ -167,8 +167,10 @@ pr-rla-$[[ inputs.command ]]:
       case "$PRRLA_COMMAND" in status | verify) ;; *) echo "PRRLA_COMMAND must be status or verify" >&2; exit 1 ;; esac
       case "$PRRLA_PLUGINS" in builtin-only | allow) ;; *) echo "PRRLA_PLUGINS must be builtin-only or allow" >&2; exit 1 ;; esac
       prrla_check_fail_on "$PRRLA_FAIL_ON"
-      export PR_RLA_APPROVALS_FILE="${TMPDIR:-/tmp}/pr-rla-approvals.json"
-      case "$PR_RLA_APPROVALS_FILE" in "$PWD" | "$PWD"/*) echo "the approvals file must be outside the project directory" >&2; exit 1 ;; esac
+      prrla_tmp=$(cd "${TMPDIR:-/tmp}" && pwd -P) || { echo "TMPDIR is not a directory" >&2; exit 1; }
+      prrla_here=$(pwd -P)
+      case "$prrla_tmp" in "$prrla_here" | "$prrla_here"/*) echo "the approvals file must be outside the project directory" >&2; exit 1 ;; esac
+      export PR_RLA_APPROVALS_FILE="$prrla_tmp/pr-rla-approvals.json"
 
       # 3. Install the pinned version. PRRLA_BIN skips the install (an image that already has it); the version is checked either way.
       if [ -z "${PRRLA_BIN:-}" ]; then
@@ -190,7 +192,8 @@ pr-rla-$[[ inputs.command ]]:
         prrla_origin=${prrla_entry#*=}
         [ "$prrla_entry" != "$prrla_env" ] || { echo "approve-origins entries look like ENV_VAR=https://host" >&2; exit 1; }
         case "$prrla_env" in "" | [0-9]* | *[!A-Za-z0-9_]*) echo "approve-origins: '$prrla_env' is not an environment variable name" >&2; exit 1 ;; esac
-        case "$prrla_origin" in https://?*) ;; *) echo "approve-origins: the origin for $prrla_env must start with https://" >&2; exit 1 ;; esac
+        case "$prrla_origin" in https://*) ;; *) echo "approve-origins: the origin for $prrla_env must start with https://" >&2; exit 1 ;; esac
+        case "${prrla_origin#https://}" in "" | *[!A-Za-z0-9.:-]*) echo "approve-origins: the origin for $prrla_env must be https://host or https://host:port" >&2; exit 1 ;; esac
         "$PRRLA_BIN" -C "$PRRLA_DIR" plugin approve --env "$prrla_env" --origin "$prrla_origin" --yes
       done
       set +f

@@ -47,8 +47,11 @@ case "$approvals" in
   *) bad "the approvals file must be an absolute path" ;;
 esac
 if [ -n "${GITHUB_WORKSPACE:-}" ]; then
-  case "$approvals" in
-    "$GITHUB_WORKSPACE" | "$GITHUB_WORKSPACE"/*) bad "the approvals file must not be inside the workspace" ;;
+  # Compared as physical paths, so a symlink cannot move the file into the workspace.
+  where=$(cd "$(dirname "$approvals")" 2>/dev/null && pwd -P) || bad "the approvals file's directory does not exist"
+  workspace=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+  case "$where" in
+    "$workspace" | "$workspace"/*) bad "the approvals file must not be inside the workspace" ;;
   esac
 fi
 

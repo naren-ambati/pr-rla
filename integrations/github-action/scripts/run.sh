@@ -3,7 +3,9 @@
 # the step's outputs. It never fails the step itself; the last step of the action applies the mapping.
 #
 # Inputs arrive as INPUT_* environment variables (see action.yml).
+# No -e: pr-rla's exit code is data here, whatever flags the calling shell had.
 set -uo pipefail
+set +e
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=exit-map.sh
