@@ -67,6 +67,15 @@ Each `ChangeRecord` (validated by `assertChangeRecord`):
 
 These three definition fields are data. When the provider runs isolated (section 7), pr-rla reads them from the plugin host's `describe` message, never by importing the plugin in its own process.
 
+**Optional methods for org-pooled audits (phase 3, U8, same API version 1).** Both are optional; a provider written before them keeps working.
+
+| Method | Meaning |
+|---|---|
+| `listRepos(rule)` | The repositories under `rule.owner` (a GitHub org, GitLab group, Bitbucket workspace or project) the token can see, as `{ repo, id, defaultBranch, archived, fork, visibility }`. `repo` is the path `listChanges` takes; `id` is the SCM's stable repository id (it is recorded in the manifest). You may skip archived repositories, forks or visibilities the rule excludes, but need not: the core applies the rule's globs and flags itself, sorts, and refuses an entry outside the owner, a repeat or a malformed one. Without it, `register` refuses a `repos:` rule and names the provider (a `repos:` list still works) |
+| `estimateRequests(req)` | What `listChanges(req)` will ask for, from a cheap probe such as the first page of what it reads: `{ requests, graphql?, probed? }` (whole numbers; `graphql` and `probed` are parts of `requests`). `freeze --dry-run --estimate` sums it over a sample of the repos. Without it, `--estimate` says the provider cannot estimate |
+
+Throw `RepoUnavailableError(repo, 404 | 403)` (exported by `pr-rla/provider`; across the plugin host its `code` is `REPO_UNAVAILABLE`) when a repository is gone or the token cannot see it, or throw an error with `status` 404 or 403. `verify` then reports the repo's changes as unverified (a WARN with a count) instead of failing, and `freeze` names the repo and stops. An empty repository is not an error: return no changes. How a pooled audit uses these is in [`org-pooled-audits.md`](org-pooled-audits.md).
+
 A `DISMISSED` review is a decision that no longer stands: a dismissed review, a withdrawn approval, an approval reset by a push. A revoked approval must never come back as `APPROVED`.
 
 ## 2. Step by step: the Gitea provider
@@ -132,7 +141,7 @@ It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`,
 
 The provider must retry each one, wait at least as long as the headers say, and return exactly the same records.
 
-The four checks for the optional fields skip, and say why, when there is nothing to check:
+Two more checks run only for a fixture that opts in, and add no result otherwise: `list-repos` (a fixture's `listRepos: { rule, includes, ids? }`: every entry well formed, under the rule's owner and listed once, the expected repos found, the ids as expected, and the same answer on a second call) and `estimate-requests` (`estimate: true`: whole, consistent counts). The four checks for the optional fields skip, and say why, when there is nothing to check:
 - `pinned-head`: a provider that reports `headSha` must honour `request.head`. A fixture's `pinnedHead: { head, late }` serves a branch with commits pushed after `head`: unpinned, the `late` commits must come back; pinned, they must not, and nothing else may change.
 - `actor-ids`: once any actor has an `id`, every account actor must (a direct push's author may lack one), with one id per login, stable across two runs; `expect.actorIds` pins specific ones.
 - `review-granularity`: pass your definition as the third argument, `assertProviderConformance(factory, fixtures, { definition })`. Its declaration must match `expect.reviewGranularity`, and under `first-comment-per-user` no user may have two `COMMENTED` on one change.

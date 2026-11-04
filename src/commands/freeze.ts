@@ -81,8 +81,8 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   if (!opts.dryRun || existsSync(paths.registration)) {
     if (!existsSync(paths.registration)) throw new CommandError(`not registered: run "pr-rla register" before "pr-rla freeze" (the selector must be fixed before the population is)`);
     reg = readRegistration(paths);
-    if (canonicalJson(reg.record.selector) !== canonicalJson(config.selector) || reg.record.window.name !== config.window.name)
-      ctx.err("note: .pr-rla.yml differs from the registration; freezing with the REGISTERED selector and window");
+    if (canonicalJson(reg.record.selector) !== canonicalJson(config.selector) || reg.record.window.name !== config.window.name || canonicalJson(registrationRepoSet(reg)) !== canonicalJson(config.repoSet))
+      ctx.err("note: .pr-rla.yml differs from the registration; freezing with the REGISTERED selector, window and repos");
     selector = reg.record.selector;
     window = reg.record.window;
     parameters = reg.record.parameters;

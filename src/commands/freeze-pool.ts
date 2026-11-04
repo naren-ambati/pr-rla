@@ -20,6 +20,11 @@ import { auditContextFor, CommandError, type CommandContext } from "./context.js
 /** The resume command a stopped run prints. */
 export const resumeCommand = (runId: string) => `pr-rla freeze --resume ${runId}`;
 
+const wall = (ms: number): string => {
+  const s = Math.round(ms / 1000);
+  return s < 120 ? `${s} s` : s < 7200 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+};
+
 export interface RunArgs {
   provider: ScmProvider;
   repoSet: RepoSet;
@@ -35,8 +40,13 @@ export interface RunArgs {
 export async function runFreezeRepos(ctx: CommandContext, config: PrRlaConfig, a: RunArgs): Promise<PooledFreeze> {
   const checkpointed = a.repoSet.kind !== "repo" && !a.dryRun && a.reg !== null && isRegistrationV2(a.reg);
   if (a.resume !== undefined && !checkpointed) throw new CommandError("--resume continues a pooled freeze of a registered repo list or rule; this freeze has nothing to resume");
+  const stats = auditContextFor(ctx).broker.stats;
+  const requests0 = stats.requests;
+  const graphql = () => [...stats.byHost.values()].reduce((n, h) => n + h.graphql, 0);
+  const graphql0 = graphql();
+  const t0 = ctx.nowMs();
   try {
-    return await freezeRepos({
+    const done = await freezeRepos({
       provider: a.provider,
       set: a.repoSet,
       window: a.window,
@@ -58,6 +68,8 @@ export async function runFreezeRepos(ctx: CommandContext, config: PrRlaConfig, a
           }
         : {}),
     });
+    if (a.repoSet.kind !== "repo") ctx.err(`freeze: ${done.repos.length} repos · ${done.fetched} listed now, ${done.resumed} from checkpoints · ${stats.requests - requests0} requests (${graphql() - graphql0} GraphQL) · ${wall(ctx.nowMs() - t0)}`);
+    return done;
   } catch (e) {
     if (e instanceof FreezeStopped) throw new CommandError(`${e.message}. The ${e.done} repos listed are checkpointed${e.runId ? `; no manifest was written. Continue with: ${resumeCommand(e.runId)}` : ""}`, EXIT.STOPPED);
     if (e instanceof FreezeRepoFailed || e instanceof ResumeRefused || e instanceof RepoSetError) throw new CommandError(e.message);

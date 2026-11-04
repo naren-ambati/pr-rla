@@ -290,6 +290,22 @@ describe("FR5.5: freeze --dry-run --estimate", () => {
     expect(Math.abs(estimate.wallMs.predicted - wallMs) / wallMs).toBeLessThanOrEqual(0.5);
   });
 
+  it.each([[12, 1], [16, 1], [13, 4], [15, 4], [14, 2]] as const)("and on other synthetic orgs (seed %i, size x%i): the same bounds", async (seed, scale) => {
+    const mk = () => fakeOrg(orgSpec({ eligible: 40, archived: 3, forks: 2, scale, seed }));
+    const a = await registered(mk());
+    await a.clock.run(freezeCommand(a.ctx, { estimate: true, json: true }));
+    const { estimate } = estimateOf(a);
+    const orgB = mk();
+    const b = await registered(orgB);
+    const r0 = orgB.requests();
+    const t0 = b.clock.now();
+    await b.clock.run(freezeCommand(b.ctx, {}));
+    const requests = orgB.requests() - r0;
+    const wallMs = b.clock.now() - t0;
+    expect(Math.abs(estimate.requests.total - requests) / requests).toBeLessThanOrEqual(0.2);
+    expect(Math.abs(estimate.wallMs.predicted - wallMs) / wallMs).toBeLessThanOrEqual(0.5);
+  });
+
   it("prints the figures, the budget it paced to and the time left before R; reads only", async () => {
     const org = org40();
     const s = await registered(org);

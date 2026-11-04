@@ -147,8 +147,10 @@ function replay(ctx: AuditContext, host: string, authenticated: boolean, rest: n
     fresh.observe(g, new Response(null, { headers }));
     lines.push(`${host}: the server reports ${w.limit.toLocaleString("en-US")} ${g.graphql ? "GraphQL points" : "requests"} per window (${w.remaining.toLocaleString("en-US")} left); the estimate paces to that`);
   }
+  // The limits that apply to reads: a primary limit a server reported above replaces the default, and write limits do not bind a read-only run.
+  const reported = new Set<string>([req(false), req(true)].filter((g) => ctx.broker.governor.windowFor(g)).map((g) => (g.graphql ? "graphql" : "rest")));
   const b = budgetFor(budgets, host);
-  if (b) for (const r of b.rules) if (r.auth === "any" || r.auth === (authenticated ? "authenticated" : "anonymous")) lines.push(`${host}: ${r.id}${r.primary ? "" : " (secondary)"}: ${r.published}`);
+  if (b) for (const r of b.rules) if (r.scope !== "writes" && (r.auth === "any" || r.auth === (authenticated ? "authenticated" : "anonymous")) && !(r.primary && reported.has(r.scope))) lines.push(`${host}: ${r.id}${r.primary ? "" : " (secondary)"}: ${r.published}`);
   const total = rest + graphql;
   let doneGraphql = 0;
   for (let i = 0; i < total; i++) {

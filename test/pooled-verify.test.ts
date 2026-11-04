@@ -127,6 +127,19 @@ describe("a repo that is gone (FR5.2): WARN with a count, never a silent pass", 
   });
 });
 
+describe("a rule the verifier cannot re-resolve", () => {
+  it("is a WARN that says repos added after freeze would not be seen, not a silent pass", async () => {
+    const org = org30();
+    const s = await frozen(org);
+    const noListing = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).pathname.startsWith("/orgs/") ? Promise.resolve(new Response('{"message":"Forbidden"}', { status: 403 })) : org.fetch(input, init))) as typeof fetch;
+    const r = await runVerify(s.ctxFor(noListing), { offline: false });
+    const c5 = r.checks.find((c) => c.n === 5)!;
+    expect(c5.status).toBe("WARN");
+    expect(c5.details.join("\n")).toMatch(/WARN cannot re-resolve the registered rule \(.*HTTP 403.*\): repos added after freeze would not be seen/);
+    expect(c5.summary).toMatch(/^population [\d,]+\/[\d,]+ match$/); // every manifest repo was still rebuilt
+  });
+});
+
 describe("the manifest is held to the registered repo set (check 2, and check 5 against pruning)", () => {
   const rewrite = (s: PoolScenario, edit: (m: ManifestV2) => ManifestV2) => {
     const m = edit(readManifest(s));
