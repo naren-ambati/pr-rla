@@ -148,6 +148,7 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     c.status = "FAIL";
     c.details.push(`FAIL ${what} token from ${f.tsa}: ${f.problems.join("; ")}`);
   }
+  for (const i of ts.ignored) c.details.push(`${what} token from ${i.tsa} ignored (not registered: the registration names ${ts.configured.join(", ") || "no authority"})`);
   if (ts.logProblem) {
     c.status = "FAIL";
     c.details.push(`FAIL ${what} ${ts.logProblem}`);

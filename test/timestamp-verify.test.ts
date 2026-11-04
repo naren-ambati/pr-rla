@@ -172,6 +172,22 @@ describe("k-of-n by operator", () => {
     expect(s.failed.map((f) => f.tsa)).toEqual(["test-a"]);
   });
 
+  it("review finding 5: a token from an authority the registration does not name is ignored (not registered), never counted", async () => {
+    const two = { ...ts, authorities: ["test-a", "test-b"] };
+    const s = await assessTimestamps({ timestamps: [await evidence(auth.same1!), await evidence(A)], data, digestHex, signedTimeIso: T0, timestamping: two, bundle });
+    expect(s.proven).toBe(false);
+    expect(s.operators.map((o) => o.via)).toEqual(["test-a"]);
+    expect(s.ignored.map((c) => c.tsa)).toEqual(["sectigo-test"]);
+    expect(s.failed).toEqual([]);
+    expect(timestampsLine(s)).toBe("timestamps: 1 of 2 TSAs (test-a) · k = 2 · TIMESTAMP NOT TAMPER-PROOF (1 of 2) · ignored (not registered): sectigo-test");
+    // An unregistered token that breaks the rules is ignored too: it is not evidence, so it is not a FAIL.
+    const bad = { ...(await evidence(auth.b!)), nonce: "1" };
+    const t = await assessTimestamps({ timestamps: [bad, await evidence(A)], data, digestHex, signedTimeIso: T0, timestamping: { ...ts, authorities: ["test-a"], minTokens: 1 }, bundle });
+    expect(t.proven).toBe(true);
+    expect(t.failed).toEqual([]);
+    expect(t.ignored.map((c) => c.tsa)).toEqual(["test-b"]);
+  });
+
   it("with no authority configured nothing is proven, whatever is present", async () => {
     const s = await assessTimestamps({ timestamps: [await evidence(A), await evidence(auth.b!)], data, digestHex, signedTimeIso: T0, timestamping: { ...ts, authorities: [] }, bundle });
     expect(s.proven).toBe(false);

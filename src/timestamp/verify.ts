@@ -473,13 +473,17 @@ export interface TimeEvidenceSummary {
   checks: TokenCheck[];
   /** Accepted evidence, one bound per operator, ascending. */
   operators: OperatorBound[];
+  /** Accepted tokens from registered authorities: the ones that count. */
+  counted: TokenCheck[];
+  /** Tokens from authorities the registration does not name: never counted, never a FAIL (review finding 5). */
+  ignored: TokenCheck[];
   /** Configured authorities whose token was accepted, in configured order. */
   acceptedAuthorities: string[];
   logCounted: boolean;
   proven: boolean;
   /** U_k: the k-th smallest bound across distinct operators (ms), when proven. */
   ukMs: number | null;
-  /** Tokens failing any of rules 1–7 (a verify FAIL). */
+  /** Tokens from registered authorities failing any of rules 1–7 (a verify FAIL). */
   failed: TokenCheck[];
   logProblem: string | null;
 }
@@ -494,16 +498,21 @@ export interface AssessInput {
   log?: LogTimeEvidence | null;
 }
 
-/** Rule-checks every token and counts accepted evidence by operator (k-of-n). */
+/**
+ * Rule-checks every token and counts accepted evidence by operator (k-of-n). Only tokens from the
+ * authorities the registration names (`timestamping.authorities`) count toward k; the others are ignored.
+ */
 export async function assessTimestamps(input: AssessInput): Promise<TimeEvidenceSummary> {
   const checks: TokenCheck[] = [];
   for (const evidence of input.timestamps) checks.push(await checkToken({ evidence, data: input.data, digestHex: input.digestHex, signedTimeIso: input.signedTimeIso, toleranceSeconds: input.timestamping.toleranceSeconds, defaultAccuracySeconds: input.timestamping.defaultAccuracySeconds, bundle: input.bundle }));
+  const registered = (c: TokenCheck) => input.timestamping.authorities.includes(c.tsa);
+  const counted = checks.filter((c) => registered(c) && c.accepted && c.operator !== null && c.upperBoundMs !== null);
   const byOperator = new Map<string, OperatorBound>();
   const add = (operator: string, upperBoundMs: number, via: string) => {
     const cur = byOperator.get(operator);
     if (!cur || upperBoundMs < cur.upperBoundMs) byOperator.set(operator, { operator, upperBoundMs, via });
   };
-  for (const c of checks) if (c.accepted && c.operator && c.upperBoundMs !== null) add(c.operator, c.upperBoundMs, c.tsa);
+  for (const c of counted) add(c.operator!, c.upperBoundMs!, c.tsa);
   let logCounted = false;
   let logProblem: string | null = null;
   if (input.log) {
@@ -523,11 +532,13 @@ export async function assessTimestamps(input: AssessInput): Promise<TimeEvidence
     k,
     checks,
     operators,
-    acceptedAuthorities: configured.filter((id) => checks.some((c) => c.tsa === id && c.accepted)),
+    counted,
+    ignored: checks.filter((c) => !registered(c)),
+    acceptedAuthorities: configured.filter((id) => counted.some((c) => c.tsa === id)),
     logCounted,
     proven,
     ukMs: proven ? operators[k - 1]!.upperBoundMs : null,
-    failed: checks.filter((c) => !c.accepted),
+    failed: checks.filter((c) => registered(c) && !c.accepted),
     logProblem,
   };
 }
@@ -537,12 +548,13 @@ export function notTamperProof(s: TimeEvidenceSummary): string {
   return s.configured.length ? `TIMESTAMP NOT TAMPER-PROOF (${s.operators.length} of ${s.k})` : "TIMESTAMP NOT TAMPER-PROOF";
 }
 
-/** e.g. `timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN`. */
+/** e.g. `timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN`, plus `· ignored (not registered): freetsa` when a token's authority is not registered. */
 export function timestampsLine(s: TimeEvidenceSummary): string {
-  if (!s.configured.length) return `timestamps: no authority configured${s.logCounted ? " (transparency log only)" : ""} · TIMESTAMP NOT TAMPER-PROOF`;
+  const ignored = s.ignored.length ? ` · ignored (not registered): ${[...new Set(s.ignored.map((c) => c.tsa))].join(", ")}` : "";
+  if (!s.configured.length) return `timestamps: no authority configured${s.logCounted ? " (transparency log only)" : ""} · TIMESTAMP NOT TAMPER-PROOF${ignored}`;
   const ids = s.acceptedAuthorities.length ? ` (${s.acceptedAuthorities.join(", ")})` : "";
   const log = s.logCounted ? " + transparency log" : "";
-  return `timestamps: ${s.acceptedAuthorities.length} of ${s.configured.length} TSAs${ids}${log} · k = ${s.k} · ${s.proven ? "PROVEN" : notTamperProof(s)}`;
+  return `timestamps: ${s.acceptedAuthorities.length} of ${s.configured.length} TSAs${ids}${log} · k = ${s.k} · ${s.proven ? "PROVEN" : notTamperProof(s)}${ignored}`;
 }
 
 /** Median genTime of tokens that are genuine (rules 1–6), for the clock-skew refusal (FR1.8). */
