@@ -116,6 +116,17 @@ export interface CountedVerdicts {
 }
 
 const RULE = "the registration counts only verdicts signed with their reviewer's registered key";
+
+/**
+ * The signing rule that makes an unsigned line ineligible (`signaturesRequired`), with the setting
+ * that imposes it, for `record`'s message; null when unsigned lines count as self-asserted.
+ */
+export function signingRequirement(reg: SignedRecord<AnyRegistration>): string | null {
+  if (!signaturesRequired(reg) || !isRegistrationV2(reg)) return null;
+  const v = reg.record.verdicts;
+  return `${RULE} (${v.require_signed === true ? "require_signed is set" : `min_provenance is ${v.minProvenance}`})`;
+}
+
 const withoutClaim = ({ provenance: _claimed, ...v }: VerdictEvent): VerdictEvent => v;
 
 /** The audit a verdict signature is checked for, from the registration's digest, the manifest's and the beacon (verify passes what it has verified; status and record what the audit's files say). */

@@ -1,7 +1,7 @@
 import { isRegistrationV2 } from "../../core/records.js";
 import { ledgerTraits } from "../../ledger-traits.js";
 import { verdictIneligibility, type Verdict } from "../../sdk/ledger.js";
-import { auditBinding, countingVerdictFor, registeredSigners, signaturesCountFor, signVerdictHint } from "../../core/presence/index.js";
+import { auditBinding, countingVerdictFor, registeredSigners, signaturesCountFor, signingRequirement, signVerdictHint } from "../../core/presence/index.js";
 import { builtinLedgerName } from "../../registry.js";
 import { verdictSigner, type VerdictSigner } from "../../io/ssh-sign.js";
 import { AuditError } from "../errors.js";
@@ -30,7 +30,7 @@ export interface RecordResult {
   recordsActor: boolean;
   /** What signing this verdict gave (U9), as the CLI prints it; null when it was not signed. */
   signedLine: string | null;
-  /** For an unsigned git-file verdict under registered signers: how to sign the next one; else null. */
+  /** For an unsigned git-file verdict under registered signers: whether it counts (ignored where signatures are required, else self-asserted) and how to sign; else null. */
   signHint: string | null;
 }
 
@@ -76,6 +76,6 @@ export async function record(ctx: ApiContext, input: RecordInput): Promise<Recor
       })
     : null;
   await ledger.appendVerdict({ ...event, ...(input.note ? { note: input.note } : {}), ...(signed?.fields ?? {}) });
-  const signHint = ledger.name === "git-file" && !signed ? signVerdictHint(signers) : null;
+  const signHint = ledger.name === "git-file" && !signed ? signVerdictHint(signers, signingRequirement(reg)) : null;
   return { draw, changeId: d.changeId, verdict, protocolSha256: reg.record.protocolSha256, ledger: ledger.name, recordsActor, signedLine: signed?.line ?? null, signHint };
 }

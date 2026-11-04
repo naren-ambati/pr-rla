@@ -327,7 +327,10 @@ describe("per-verdict signatures through pr-rla/api/read: status and the draw co
     commitAll(s.dir, "verdict by bob", null);
     expect(await recordCommand(s.ctx, String(first[1]!.draw), "pass", { sign: join(keysDir, "alice") })).toBe(0);
     commitAll(s.dir, "verdict by alice", null);
+    s.out.length = 0;
     expect(await recordCommand(s.ctx, String(first[2]!.draw), "pass", { reviewer: "carol" })).toBe(0);
+    // record says what status then does with the line: it is ignored, with the rule (min_provenance account and registered keys).
+    expect(s.out).toContainEqual(expect.stringMatching(/^this verdict is not signed, so it is ignored and does not count: the registration counts only verdicts signed with their reviewer's registered key \(min_provenance is account\); record it again with --sign /));
     commitAll(s.dir, "an unsigned verdict", null);
   }, 120_000);
 

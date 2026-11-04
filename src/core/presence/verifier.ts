@@ -164,8 +164,15 @@ export function reachableProvenance(signers: readonly AllowedSigner[]): Provenan
   return signers.some((s) => s.key.securityKey) ? "presence" : "account";
 }
 
-/** What `record` tells a git-file reviewer when keys are registered and the verdict was recorded unsigned. */
-export function signVerdictHint(signers: readonly AllowedSigner[]): string | null {
+/**
+ * What `record` tells a git-file reviewer when keys are registered and the verdict was recorded
+ * unsigned. Where the registration requires signatures (`requirement`, from `signingRequirement`),
+ * the line is ignored and does not count, so it says that, with the rule; otherwise the line counts
+ * as self-asserted.
+ */
+export function signVerdictHint(signers: readonly AllowedSigner[], requirement: string | null = null): string | null {
   if (!signers.length) return null;
-  return `this verdict is not signed, so it counts as self-asserted: record it with --sign <your registered key> (pr-rla runs ssh-keygen -Y sign -n ${VERDICT_NAMESPACE}), or sign its bytes yourself (README, "Signed verdicts")`;
+  const how = `--sign <your registered key> (pr-rla runs ssh-keygen -Y sign -n ${VERDICT_NAMESPACE}), or sign its bytes yourself (README, "Signed verdicts")`;
+  if (requirement) return `this verdict is not signed, so it is ignored and does not count: ${requirement}; record it again with ${how}`;
+  return `this verdict is not signed, so it counts as self-asserted: record it with ${how}`;
 }

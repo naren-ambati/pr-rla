@@ -18,6 +18,8 @@ import {
   registeredVerdicts,
   signatureProvenance,
   signaturesRequired,
+  signingRequirement,
+  signVerdictHint,
   verdictPayloadProblems,
   verdictPayloadText,
   verdictRuleFailures,
@@ -365,6 +367,31 @@ describe("the rules check 7 applies (FR9.1, FR9.4) and the ceiling", () => {
     expect(c.verdicts.map((x) => c.ineligible(x))).toEqual([null, null, null]);
     expect(countingVerdictFor(lines, fields(1, "bob").changeId, { registration: lax, binding: B, verifiesSignatures: true, ledger: "git-file", protocolSha256: P, eligible: () => true })?.verdict).toBe("pass");
     expect(c.findings).toEqual(["1 verdict line(s) carry no signature (draws #1): self-asserted"]);
+  });
+
+  it("record's message for an unsigned line: ignored and not counted, with the rule, where signatures are required; self-asserted otherwise", () => {
+    const bob = keys["sk-ssh-ed25519@openssh.com"];
+    const signers = parseAllowedSigners([`bob ${bob.publicText}`]);
+    const regWith = (verdicts: Record<string, unknown>) => ({ record: { schema: "pr-rla/registration/v2", verdicts: { reviewers: null, allowed_signers: [`bob ${bob.publicText}`], ...verdicts } }, sha256: REG }) as unknown as SignedRecord<RegistrationRecordV2>;
+    const how = `--sign <your registered key> (pr-rla runs ssh-keygen -Y sign -n ${VERDICT_NAMESPACE}), or sign its bytes yourself (README, "Signed verdicts")`;
+    const rule = "the registration counts only verdicts signed with their reviewer's registered key";
+    for (const [v, why] of [
+      [{ minProvenance: "self-asserted", require_signed: true }, "require_signed is set"],
+      [{ minProvenance: "account" }, "min_provenance is account"],
+      [{ minProvenance: "presence", require_signed: true }, "require_signed is set"],
+    ] as const) {
+      expect(signingRequirement(regWith(v))).toBe(`${rule} (${why})`);
+      const hint = signVerdictHint(signers, signingRequirement(regWith(v)));
+      expect(hint).toBe(`this verdict is not signed, so it is ignored and does not count: ${rule} (${why}); record it again with ${how}`);
+      expect(hint).not.toMatch(/self-asserted/);
+    }
+    // No requirement: the unsigned line counts, as self-asserted.
+    expect(signingRequirement(regWith({ minProvenance: "self-asserted" }))).toBeNull();
+    expect(signVerdictHint(signers, signingRequirement(regWith({ minProvenance: "self-asserted" })))).toBe(`this verdict is not signed, so it counts as self-asserted: record it with ${how}`);
+    // No keys registered: nothing to sign with, so no message, and no requirement (signatures cannot be required).
+    const keyless = { record: { schema: "pr-rla/registration/v2", verdicts: { reviewers: null, allowed_signers: [], minProvenance: "account" } }, sha256: REG } as unknown as SignedRecord<RegistrationRecordV2>;
+    expect(signingRequirement(keyless)).toBeNull();
+    expect(signVerdictHint([], null)).toBeNull();
   });
 
   it("FR9.6: the presence level is never printed without its limit", () => {

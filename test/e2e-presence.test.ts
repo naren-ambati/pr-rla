@@ -185,7 +185,9 @@ describe("each way a verdict can fall short (FR9.1, FR9.3, FR9.4, FR9.5)", () =>
 
   it("FR9.1: an unsigned verdict never counts under require_signed (P4: ignored, so its draw blocks the prefix), and record says how to sign it", async () => {
     const { s, draws } = await reviewed((_d, i) => (i === 7 ? { reviewer: "bob" } : bobSigns(i + 1)));
-    expect(s.out.join("\n")).toMatch(/this verdict is not signed, so it counts as self-asserted: record it with --sign <your registered key> \(pr-rla runs ssh-keygen -Y sign -n pr-rla-verdict@v1\)/);
+    // Under require_signed the unsigned line never counts, and record says so, with the rule (not "counts as self-asserted").
+    expect(s.out).toContain(`this verdict is not signed, so it is ignored and does not count: the registration counts only verdicts signed with their reviewer's registered key (require_signed is set); record it again with --sign <your registered key> (pr-rla runs ssh-keygen -Y sign -n pr-rla-verdict@v1), or sign its bytes yourself (README, "Signed verdicts")`);
+    expect(s.out.join("\n")).not.toMatch(/counts as self-asserted/);
     const r = await runVerify(s.ctx, {});
     const c7 = check(r, 7);
     expect(c7.status).toBe("WARN");
