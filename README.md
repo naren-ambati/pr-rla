@@ -104,6 +104,7 @@ Package exports:
 - `pr-rla/provider`: `ScmProvider`, `ChangeRecord` and related types, `PROVIDER_API_VERSION` (1), `defineProvider()`.
 - `pr-rla/ledger`: `Ledger`, `VerdictEvent`, `LEDGER_API_VERSION` (1), `defineLedger()`.
 - `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected.
+- `pr-rla/testing` also has `runLedgerConformance()` / `assertLedgerConformance()` for ledgers: the first eligible verdict counts, relabels warn, a removal after counting, a deleted or moved issue and a deleted or renamed verdict label fail, bots, apps and unregistered reviewers are ignored, verdicts carry the tracker's time, history pages and round-trips through a checkpoint, publishing is idempotent, and reads survive injected faults. Each fixture says whether it is `recorded` or `synthetic`.
 
 Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
@@ -115,7 +116,12 @@ Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
 External: [`examples/providers/gitea`](examples/providers/gitea) (`pr-rla-provider-gitea`) for Gitea and Forgejo, loaded by path or package name.
 
-Built-in ledger: `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended).
+Built-in ledgers:
+
+- `git-file` (`audit/<window>/verdicts.jsonl`; git history is the tamper trail, and `verify` checks that every commit only appended). Verdict provenance: `self-asserted`.
+- `github-issues` and `gitlab-issues`: one issue per drawn change in an audit repo or project (GitHub Enterprise Server and GitLab self-managed through `base_url`); a reviewer applies `pr-rla:pass` / `pr-rla:fail` (`pr-rla-pass` / `pr-rla-fail` on GitLab), and the verdict is read from the label-event history, never from current labels. Verdict provenance: `account`, the default `verdicts.min_provenance` with an issue ledger. `pr-rla checkpoint [--push]` time-stamps a hash of that history into the audit repo, so an admin deleting issues shows up in `verify`.
+
+External: [`examples/ledgers/jira`](examples/ledgers/jira) (`pr-rla-ledger-jira`) for Jira Cloud, with the verdict in a single-select custom field read from the changelog.
 
 ### Adding a provider (Gerrit, Azure Repos, …)
 
