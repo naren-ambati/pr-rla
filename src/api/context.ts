@@ -2,6 +2,7 @@ import { createBroker, type Broker, type BrokerMode, type Credential, type Recor
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
 import { httpsOrigin, localConsent, type LocalConsent } from "../plugins/approvals.js";
+import { abortableSleep } from "../plugins/host.js";
 import { builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
@@ -48,7 +49,8 @@ export interface AuditContext {
   readonly mode: AuditMode;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly nowMs: () => number;
-  readonly sleep: (ms: number) => Promise<void>;
+  /** Waits on the command's clock; `signal` ends a wait early (a plugin host cancels a plugin's wait with it). */
+  readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   readonly log: (line: string) => void;
   /** Every outbound HTTP request of this context goes through this one broker, so all callers share its budgets. */
   readonly broker: Broker;
@@ -74,7 +76,7 @@ export interface AuditContextOptions {
   mode: AuditMode;
   env?: Readonly<Record<string, string | undefined>>;
   nowMs?: () => number;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   log?: (line: string) => void;
   /** The transport under the broker (tests inject fakes; default global fetch). */
   fetch?: typeof fetch;
@@ -107,7 +109,7 @@ export class AuditApiError extends Error {
   }
 }
 
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const realSleep = abortableSleep;
 
 interface Stored {
   trust: PluginGrant["trust"];

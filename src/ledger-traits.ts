@@ -15,7 +15,7 @@ export interface LedgerTraits {
 /**
  * Reads a ledger's traits. A built-in is read in process; an external ledger only after its lock
  * entry and files check out: its hosts are the locked ones, and an isolated ledger's provenance
- * comes through its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only`
+ * comes through its host's `describe` (pr-rla/ipc), never by importing it here. `builtin-only`
  * refuses an external ledger before anything is resolved.
  */
 export async function ledgerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<LedgerTraits> {

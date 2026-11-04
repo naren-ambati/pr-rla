@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../src/api/context.js";
 import { buildProgram } from "../src/cli.js";
 import { hostedProviderConformance, readRecordedFixture } from "../src/plugins/check.js";
-import { closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
+import { abortableSleep, closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, MAX_PLUGIN_SLEEP_MS, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
 import { placeholderEnv, readGrants, resolvePlugin, verifyLocked } from "../src/plugins/lock.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS, IPC_PROTOCOL, MAX_MESSAGE_BYTES } from "../src/plugins/protocol.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
@@ -55,7 +55,8 @@ describe("RK-02: IPC under --permission without --allow-net, on Node 25 or later
       host.close();
     }
   });
-  it.skipIf(NODE25)("UNVERIFIED: no Node 25 or later here (PATH or PR_RLA_NODE25), so network denial was not tested", () => {});
+  // Without a Node 25 or later the test above cannot run: say so as a skipped test, never as a green one.
+  if (!NODE25) it.skip("UNVERIFIED: no Node 25 or later here (PATH or PR_RLA_NODE25), so network denial was not tested", () => {});
 });
 
 /** The hostile fixture, locked in a temp audit repo and opened as a command would: through the broker. */
@@ -330,37 +331,67 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
     return startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "hostile", ...o });
   };
   const ctx = { cwd: ".", fetch: globalThis.fetch, log: () => {} };
+  const list = (p: ScmProvider) => p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
 
-  it("a heartbeat every 10 s; silence for 60 s stops the child, and the error carries its output", async () => {
+  it("the watchdog arms 60 s by default; firing it stops the child, and the error carries its output", async () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(10_000);
     expect(HEARTBEAT_TIMEOUT_MS).toBe(60_000);
     const armed: { ms: number; fire: () => void }[] = [];
     const host = await hostileHost({ setTimer: (fire, ms) => (armed.push({ ms, fire }), () => {}) });
     const p = await hostedProvider(host, { hang: true }, ctx);
-    const call = p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
+    const call = list(p);
     await new Promise((r) => setTimeout(r, 300)); // the child prints, then busy-loops: no more messages
     const last = armed[armed.length - 1]!;
     expect(last.ms).toBe(60_000);
     last.fire();
     await expect(call).rejects.toThrow(/plugin hostile sent no heartbeat for 60 s and was stopped[\s\S]*hostile: about to hang/);
-    await expect(p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT" });
+    await expect(list(p)).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT" });
   });
 
-  it("a slow call that keeps sending heartbeats is not stopped", async () => {
-    const host = await hostileHost({ heartbeatTimeoutMs: 500, heartbeatIntervalMs: 100 });
+  it("a call that waits sends heartbeats, which the parent receives (test gap: it used to check the constants only)", async () => {
+    const host = await hostileHost({ heartbeatIntervalMs: 100 });
     try {
       const p = await hostedProvider(host, { slowMs: 1_500, bigResultBytes: 10 }, ctx);
-      expect((await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).defaultBranch).toBe("main");
+      expect(host.stats().heartbeats).toBe(0);
+      await list(p);
+      // About 15 in 1.5 s; at least 5 even on a loaded machine.
+      expect(host.stats().heartbeats).toBeGreaterThanOrEqual(5);
     } finally {
       host.close();
     }
   });
 
-  it("a message over the limit (64 MiB by default) is refused", async () => {
+  it("a slow call that keeps sending heartbeats outlives the watchdog; a silent one is stopped by the real timer", async () => {
+    const host = await hostileHost({ heartbeatTimeoutMs: 1_500, heartbeatIntervalMs: 100 });
+    try {
+      const p = await hostedProvider(host, { slowMs: 4_000, bigResultBytes: 10 }, ctx);
+      expect((await list(p)).defaultBranch).toBe("main");
+    } finally {
+      host.close();
+    }
+    const silent = await hostileHost({ heartbeatTimeoutMs: 1_500 });
+    const started = Date.now();
+    await expect(list(await hostedProvider(silent, { hang: true }, ctx))).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT" });
+    expect(Date.now() - started).toBeLessThan(20_000);
+  });
+
+  it("a message over the limit (64 MiB by default) is refused by its length, before its body is buffered (finding 11)", async () => {
     expect(MAX_MESSAGE_BYTES).toBe(64 * 1024 * 1024);
     const host = await hostileHost({ maxMessageBytes: 1024 * 1024 });
-    const p = await hostedProvider(host, { bigResultBytes: 2 * 1024 * 1024 }, ctx);
-    await expect(p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE" });
+    const p = await hostedProvider(host, { bigResultBytes: 8 * 1024 * 1024 }, ctx);
+    await expect(list(p)).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE", message: expect.stringMatching(/^plugin hostile: a message from it is 83886\d\d bytes, over the 1 MiB message limit; refused/) });
+    // The reader held one chunk of the 8 MiB frame at most, never the frame.
+    expect(host.stats().maxBufferedBytes).toBeLessThan(1024 * 1024);
+  });
+
+  it("a frame header claiming 1 GiB is refused at once, with nothing after it buffered (finding 11)", { timeout: 15_000 }, async () => {
+    const host = await hostileHost({ maxMessageBytes: 1024 * 1024 });
+    const p = await hostedProvider(host, { rawFrameBytes: 1024 * 1024 * 1024 }, ctx);
+    const started = Date.now();
+    // Node's IPC channel used to wait for the rest of the message, buffering it (the review saw 3 GB for 500 MB).
+    await expect(list(p)).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE", message: expect.stringMatching(/a message from it is 1073741824 bytes/) });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(host.stats().maxBufferedBytes).toBeLessThan(64 * 1024);
   });
 
   it("an isolated plugin's line says what is and is not contained", async () => {
@@ -383,6 +414,93 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
     await expect(open("nothing.mjs")).rejects.toThrow(/exports no provider definition/);
     await expect(open("v2.mjs")).rejects.toThrow(/declares providerApiVersion 2; this pr-rla supports 1/);
     expect(readFileSync(join(dir, "v2.mjs"), "utf8")).toContain("future");
+  });
+});
+
+describe("a plugin's sleep: capped, only during a call, cancelled on close (finding 13)", () => {
+  const hostileHost = async () => {
+    const plugin = resolvePlugin("./hostile/index.mjs", auditDirWith({ hostile: HOSTILE }));
+    return startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "hostile" });
+  };
+  const list = (p: ScmProvider) => p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
+
+  it("a wait asked for within a call is served on the command's clock, capped at MAX_PLUGIN_SLEEP_MS (15 min)", async () => {
+    const asked: number[] = [];
+    const host = await hostileHost();
+    try {
+      const p = await hostedProvider(host, { sleepMs: 10 * 3600_000 }, { cwd: ".", fetch: globalThis.fetch, log: () => {}, sleep: async (ms) => void asked.push(ms) });
+      expect((await list(p)).limitations).toEqual(["slept"]);
+      expect(asked).toEqual([MAX_PLUGIN_SLEEP_MS]);
+      expect(MAX_PLUGIN_SLEEP_MS).toBe(15 * 60_000);
+    } finally {
+      host.close();
+    }
+  });
+
+  it("a wait asked for after the call returned is not served", async () => {
+    const asked: number[] = [];
+    const host = await hostileHost();
+    try {
+      const p = await hostedProvider(host, { sleepAfterReturnMs: 600_000 }, { cwd: ".", fetch: globalThis.fetch, log: () => {}, sleep: async (ms) => void asked.push(ms) });
+      expect((await list(p)).limitations).toEqual(["returned"]);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(asked).toEqual([]);
+    } finally {
+      host.close();
+    }
+  });
+
+  it("close() cancels a wait in progress, and the default sleep clears its timer", async () => {
+    const signals: AbortSignal[] = [];
+    const host = await hostileHost();
+    const p = await hostedProvider(host, { sleepMs: 600_000 }, { cwd: ".", fetch: globalThis.fetch, log: () => {}, sleep: (_ms, signal) => new Promise<void>((r) => (signal && signals.push(signal), signal?.addEventListener("abort", () => r()))) });
+    const call = list(p);
+    await vi.waitFor(() => expect(signals).toHaveLength(1), { timeout: 5000, interval: 10 });
+    expect(signals[0]!.aborted).toBe(false);
+    host.close();
+    expect(signals[0]!.aborted).toBe(true);
+    await expect(call).rejects.toThrow(/its host was closed/);
+    // The waits pr-rla itself provides end on abort and clear their timers: the CLI's, an AuditContext's, the host's own.
+    const { auditContextFor, nodeContext } = await import("../src/commands/context.js");
+    const cli = nodeContext({ env: {} });
+    for (const sleep of [abortableSleep, cli.sleep!, auditContextFor(cli).sleep, createAuditContext({ mode: "read-only" }).sleep]) {
+      const c = new AbortController();
+      const started = Date.now();
+      const sleeping = sleep(600_000, c.signal);
+      c.abort();
+      await sleeping;
+      expect(Date.now() - started).toBeLessThan(1000);
+    }
+  });
+});
+
+describe("an isolated plugin keeps its acceptJson rule (finding 10)", () => {
+  /** A plugin that retries, through the broker, a 2xx body its own rule rejects (a transient GraphQL error). */
+  const SOURCE = `import { defineProvider } from "pr-rla/provider";
+export default defineProvider({
+  providerApiVersion: 1, name: "picky", hosts: () => ["scm.example.com"],
+  create(options, ctx) {
+    return { apiVersion: 1, name: "picky", async listChanges() {
+      const res = await ctx.fetch("https://scm.example.com/graphql-ish", { destination: "scm", retry: { acceptJson: (b) => (b && b.errors ? "transient: " + b.errors[0] : null) } });
+      return { changes: [], defaultBranch: "main", limitations: [await res.text()] };
+    } };
+  },
+});
+`;
+  const list = (p: ScmProvider) => p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
+  it("the broker asks the child's rule about each body and retries what it rejects, as in process", async () => {
+    const dir = auditDirWith({});
+    writeFileSync(join(dir, "picky.mjs"), SOURCE);
+    await lockPlugin(dir, "./picky.mjs");
+    let calls = 0;
+    const transport = (async () => new Response(JSON.stringify(++calls < 3 ? { errors: [`busy ${calls}`] } : { data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const logs: string[] = [];
+    const actx = createAuditContext({ mode: "read-only", fetch: transport, sleep: async () => {}, log: (l) => logs.push(l) });
+    const p = await openProvider(actx, { use: "./picky.mjs", options: {} }, dir);
+    // Before the fix the rule became "the body parses", so the first {errors} body came back accepted.
+    expect((await list(p)).limitations).toEqual([JSON.stringify({ data: { ok: true } })]);
+    expect(calls).toBe(3);
+    expect(logs.filter((l) => l.includes("transient: busy"))).toHaveLength(2);
   });
 });
 

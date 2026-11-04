@@ -3,7 +3,7 @@
 // host, every attempt must come back as a placeholder, a refusal or ERR_ACCESS_DENIED; only the
 // network on Node 22 and 24 is out of reach (a stated limit of the security model).
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,23 @@ export default defineProvider({
         }
         if (options.slowMs) await new Promise((r) => setTimeout(r, options.slowMs));
         if (options.bigResultBytes) return { changes: [], defaultBranch: "main", limitations: ["x".repeat(options.bigResultBytes)] };
+        // Writes a frame header on the host's own pipe claiming this many bytes, then nothing: the parent must refuse it from the header alone.
+        if (options.rawFrameBytes) {
+          const head = Buffer.alloc(4);
+          head.writeUInt32BE(options.rawFrameBytes);
+          writeSync(3, head);
+          await new Promise(() => {});
+        }
+        // Asks the parent to wait for a very long time, awaited within the call.
+        if (options.sleepMs) {
+          await ctx.sleep(options.sleepMs);
+          return { changes: [], defaultBranch: "main", limitations: ["slept"] };
+        }
+        // Asks for a wait after the call has returned, to keep pr-rla alive.
+        if (options.sleepAfterReturnMs) {
+          setTimeout(() => void ctx.sleep(options.sleepAfterReturnMs), 20);
+          return { changes: [], defaultBranch: "main", limitations: ["returned"] };
+        }
         const token = `token ${ctx.env.GITHUB_TOKEN}`;
         const seen = {
           envToken: process.env.GITHUB_TOKEN,

@@ -1,17 +1,28 @@
 /**
- * The plugin host IPC protocol, `pr-rla/ipc/v1` (contracts.md §3).
+ * The plugin host IPC protocol, `pr-rla/ipc/v2` (contracts.md §3).
  *
- * The parent (./host.ts) and the child (./child.ts) exchange one JSON object per message
- * over the Node IPC channel. The child imports this module for its types only, so it stays
- * free of runtime imports from pr-rla.
+ * The parent (./host.ts) and the child (./child.ts) exchange one JSON object per frame on the
+ * child's file descriptor 3, a pipe: a frame is a 4-byte big-endian length, then that many bytes
+ * of UTF-8 JSON. The reader checks the length before it buffers anything more, so a frame over
+ * the limit is refused from its first four bytes (finding 11).
+ *
+ * v2 against v1: the same messages, plus `accept`/`acceptResult` (a plugin's acceptJson rule,
+ * finding 10), on this framing instead of Node's IPC channel, which buffers and parses a whole
+ * message before anyone can measure it. The parent and the child ship together in one pr-rla, and
+ * the parent refuses a child that reports another protocol; no plugin, lock or audit file carries
+ * it, so no plugin changes.
+ *
+ * The child imports this module for its types only, so it stays free of runtime imports from pr-rla.
  */
 
-export const IPC_PROTOCOL = "pr-rla/ipc/v1";
+export const IPC_PROTOCOL = "pr-rla/ipc/v2";
+/** The child's file descriptor the frames travel on. */
+export const IPC_FD = 3;
 /** The child sends a heartbeat this often while a call runs. */
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 /** The parent stops a child that sends nothing for this long while a call runs. */
 export const HEARTBEAT_TIMEOUT_MS = 60_000;
-/** Messages larger than this (serialized) are refused in both directions. */
+/** Frames larger than this (the JSON's bytes) are refused in both directions, by their length, before they are buffered. */
 export const MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 export type PluginKind = "provider" | "ledger";
@@ -34,6 +45,8 @@ export interface ChildBoot {
   /** `pr-rla/provider` etc. -> file: URL of the host's own SDK module, so a plugin links against the SDK that validates it. */
   sdk: Record<string, string>;
   heartbeatMs: number;
+  /** The frame limit the child applies to what the parent sends it. */
+  maxMessageBytes: number;
 }
 
 /** child -> parent: the plugin loaded. The parent validates the definition from these fields. */
@@ -112,6 +125,25 @@ export interface FetchMessage {
   /** The broker contract fields a wired request passes (contracts.md §2); `acceptJson` becomes a flag. */
   broker?: { destination?: string; idempotent?: boolean; retry?: false | { maxRetries?: number; maxBlindRateLimitRetries?: number; acceptJson?: boolean } };
 }
+/**
+ * parent -> child (v2, finding 10): the broker asks the plugin's own `acceptJson(body)` rule about a
+ * 2xx JSON body of fetch `fid`, which keeps the broker the only retrier with the plugin's rule. The
+ * body is the parsed response re-serialized, scrubbed of secrets like every response.
+ */
+export interface AcceptMessage {
+  type: "accept";
+  aid: number;
+  fid: number;
+  body: string;
+}
+/** child -> parent: the rule's answer, a reason to retry or null to accept; or what the rule threw. */
+export interface AcceptResultMessage {
+  type: "acceptResult";
+  aid: number;
+  problem?: string | null;
+  error?: string;
+}
+
 export interface FetchResultMessage {
   type: "fetchResult";
   fid: number;
@@ -124,7 +156,11 @@ export interface FetchResultMessage {
   error?: { name: string; code?: string; message: string; host?: string; next?: string };
 }
 
-/** child -> parent: the plugin called ctx.sleep, which waits on the parent's clock (one clock per command). */
+/**
+ * child -> parent: the plugin called ctx.sleep, which waits on the parent's clock (one clock per
+ * command). Served only while a call is in flight, for at most the SDK's MAX_WAIT_MS, and cancelled
+ * when the calls end or the host closes (finding 13).
+ */
 export interface SleepMessage {
   type: "sleep";
   sid: number;
@@ -159,5 +195,5 @@ export interface IndexResultMessage {
   error?: { name: string; code?: string; message: string };
 }
 
-export type ChildMessage = ReadyMessage | ResultMessage | ErrorMessage | FetchMessage | SleepMessage | LogMessage | HeartbeatMessage | IndexMessage;
-export type ParentMessage = CallMessage | CancelMessage | FetchResultMessage | SleptMessage | IndexResultMessage;
+export type ChildMessage = ReadyMessage | ResultMessage | ErrorMessage | FetchMessage | SleepMessage | LogMessage | HeartbeatMessage | IndexMessage | AcceptResultMessage;
+export type ParentMessage = CallMessage | CancelMessage | FetchResultMessage | SleptMessage | IndexResultMessage | AcceptMessage;

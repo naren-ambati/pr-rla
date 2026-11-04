@@ -11,7 +11,7 @@ export interface ProviderTraits extends DefinitionTraits {
 /**
  * Reads the U3 traits from the configured provider's definition. A built-in is read in process;
  * an external plugin only after its lock entry and files check out, and an isolated one through
- * its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only` refuses an
+ * its host's `describe` (pr-rla/ipc), never by importing it here. `builtin-only` refuses an
  * external plugin before anything is resolved.
  */
 export async function providerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<ProviderTraits> {
