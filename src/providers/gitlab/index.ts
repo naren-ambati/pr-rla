@@ -9,6 +9,7 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
+import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError, isoUtcSeconds, nextLink } from "../http.js";
 import {
   buildReviews,
@@ -16,6 +17,7 @@ import {
   normalizeDirectPush,
   normalizeMergeRequest,
   normalizeUser,
+  userId,
   type GlApprovals,
   type GlCommit,
   type GlMergeRequest,
@@ -129,9 +131,13 @@ export class GitLabProvider implements ScmProvider {
       diagnostics.push({ label: "MRs merged into other branches in window (excluded)", value: otherBase });
       changes.push(...(await this.mergeRequestRecords(pid, req.repo, inWindow, req.signal)));
     }
+    let headSha = req.head?.toLowerCase();
+    let viaMerge = false;
     if (req.kinds.includes("direct_push")) {
       const walk = await this.directPushes(pid, req, branch, intoDefault);
-      changes.push(...walk.pushes.map((c) => normalizeDirectPush(req.repo, c)));
+      headSha = walk.head;
+      viaMerge = walk.landedVia.size > 0;
+      changes.push(...walk.pushes.map((c) => normalizeDirectPush(req.repo, c, walk.landedVia.get(c.id)?.toLowerCase())));
       diagnostics.push(
         { label: "default-branch commits in window", value: walk.inWindow },
         { label: "commits linked to a merged MR", value: walk.linked },
@@ -139,7 +145,7 @@ export class GitLabProvider implements ScmProvider {
         { label: "direct pushes that are merge commits", value: walk.pushes.filter((c) => c.parent_ids.length > 1).length },
       );
     }
-    return { changes, defaultBranch: branch, limitations: GITLAB_LIMITATIONS, diagnostics };
+    return { changes, defaultBranch: branch, limitations: viaMerge ? [...GITLAB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITLAB_LIMITATIONS, diagnostics, ...(headSha ? { headSha } : {}) };
   }
 
   /**
@@ -189,9 +195,15 @@ export class GitLabProvider implements ScmProvider {
       const { data: approvals } = await this.http.get<GlApprovals>(`/projects/${pid}/merge_requests/${mr.iid}/approvals`, signal);
       const { data: reviewers } = await this.http.get<GlReviewer[]>(`/projects/${pid}/merge_requests/${mr.iid}/reviewers`, signal);
       const bots = new Map<string, boolean>();
+      const ids = new Map<string, string>();
       const note = (u: { username: string; bot: boolean } | null) => u && bots.set(u.username, bots.get(u.username) === true || u.bot);
       [d.author, d.mergeUser, ...d.approvedBy.nodes, ...d.reviewers.nodes, ...d.notes.nodes.map((x) => x.author)].forEach(note);
-      const actor = (u: GlUser | null): Actor => normalizeUser(u, bots);
+      // Account ids (Actor.id, U3): GraphQL has one on every user, REST on its user objects.
+      for (const u of [d.author, d.mergeUser, ...d.approvedBy.nodes, ...d.reviewers.nodes, ...d.notes.nodes.map((x) => x.author), mr.author, mr.merge_user, mr.merged_by, ...approvals.approved_by.map((a) => a.user), ...reviewers.map((r) => r.user)]) {
+        const id = userId(u);
+        if (u && id !== undefined && !ids.has(u.username)) ids.set(u.username, id);
+      }
+      const actor = (u: GlUser | null): Actor => normalizeUser(u, bots, ids);
       const reviews = buildReviews({ mrAuthor: mr.author?.username ?? null, notes: d.notes.nodes as GlNote[], approvals, reviewers, mergedAt: mr.merged_at!, actor });
       const lines = d.diffStatsSummary ? d.diffStatsSummary.additions + d.diffStatsSummary.deletions : await this.diffLines(pid, mr.iid, signal);
       out.push(normalizeMergeRequest(repo, mr, reviews, lines, actor));
@@ -212,12 +224,12 @@ export class GitLabProvider implements ScmProvider {
     for (const mr of intoDefault) {
       for (const s of [mr.merge_commit_sha, mr.squash_commit_sha, mr.squash_commit_sha ? null : mr.sha]) if (s && !known.has(s.toLowerCase())) known.set(s.toLowerCase(), mr.iid);
     }
-    // Pin the head so pushes during the walk cannot shift the pages.
-    const { data: head } = await this.http.get<{ commit: { id: string } }>(`/projects/${pid}/repository/branches/${enc(branch)}`, req.signal);
+    // Pin the head so pushes during the walk cannot shift the pages; verify passes the frozen head (U3).
+    const headSha = req.head ?? (await this.http.get<{ commit: { id: string } }>(`/projects/${pid}/repository/branches/${enc(branch)}`, req.signal)).data.commit.id;
     const opens = Date.parse(req.window.opensAt);
     const closes = Date.parse(req.window.closesAt);
     const history = await this.paged<GlCommit>(
-      `/projects/${pid}/repository/commits?ref_name=${head.commit.id}&since=${enc(req.window.opensAt)}&until=${enc(req.window.closesAt)}&with_stats=true&per_page=${this.pageSize}`,
+      `/projects/${pid}/repository/commits?ref_name=${headSha}&since=${enc(req.window.opensAt)}&until=${enc(req.window.closesAt)}&with_stats=true&per_page=${this.pageSize}`,
       req.signal,
     );
     const seen = new Set<string>();
@@ -243,7 +255,8 @@ export class GitLabProvider implements ScmProvider {
       if (mrs.some((m) => m.state === "merged" && m.target_branch === branch)) linkedByLookup++;
       else pushes.push(c);
     }
-    return { pushes, inWindow: inWindow.length, linked: res.linked + linkedByLookup, linkedByLookup };
+    const landedVia = landedViaMerges(new Map(history.map((c) => [c.id, c.parent_ids])), pushes.map((c) => c.id));
+    return { pushes, inWindow: inWindow.length, linked: res.linked + linkedByLookup, linkedByLookup, head: headSha.toLowerCase(), landedVia };
   }
 }
 
@@ -252,5 +265,9 @@ export default defineProvider<GitLabProviderOptions>({
   name: "gitlab",
   description: "gitlab.com / self-managed GitLab: REST merge requests, approvals and commits + GraphQL review notes, bot flags and diff stats",
   hosts: (options) => [new URL((options?.base_url ?? "https://gitlab.com").replace(/\/+$/, "")).host],
+  // Comments become one COMMENTED per non-author user, at their first note; approvals are events.
+  reviewGranularity: "first-comment-per-user",
+  populationOptions: ["base_url", "listing_slack_hours"],
+  reportsLandedVia: true,
   create: (options, ctx) => new GitLabProvider(options ?? {}, ctx),
 });

@@ -1,5 +1,7 @@
 /** GitLab GraphQL: review notes, bot flags and diff stats for a batch of MRs (readable without a token on public projects, unlike REST notes). */
 export interface GqlUser {
+  /** Global id, e.g. `gid://gitlab/User/1786152` (the REST id is the number at its end). */
+  id?: string;
   username: string;
   bot: boolean;
 }
@@ -19,7 +21,7 @@ export interface GqlMergeRequest {
   notes: GqlNotesPage;
 }
 
-const USER = "username bot";
+const USER = "id username bot";
 const NOTES = `pageInfo { hasNextPage endCursor } nodes { system body createdAt author { ${USER} } }`;
 
 export const MR_BATCH_QUERY = `query($path: ID!, $iids: [String!], $first: Int) {

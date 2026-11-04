@@ -12,12 +12,17 @@ import { OID, type ScCommit, type ScPr, type ScUser, type ScmScenario } from "./
  */
 export const GL_BASE = "https://gitlab.example.com";
 export const PROJECT_BOT_EMAIL = "project_42_bot_0a1b2c@noreply.gitlab.example.com";
+/** The fake's stable numeric user id for a login (REST `id`, and the number in the GraphQL gid). */
+export const glUserId = (login: string) => 100 + [...login].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1_000_000, 7);
 
 export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
   let served = 0;
   const ps = opts.pageSize ?? 3;
   const pid = 42;
-  const user = (u: ScUser | null, withBot = false) => (u ? { id: u.login.length, username: u.login, ...(withBot ? { bot: u.bot } : {}) } : null);
+  // One stable numeric id per account (REST `id`; GraphQL `gid://gitlab/User/<id>`).
+  const idOf = glUserId;
+  const gid = (login: string) => `gid://gitlab/User/${idOf(login)}`;
+  const user = (u: ScUser | null, withBot = false) => (u ? { id: idOf(u.login), username: u.login, ...(withBot ? { bot: u.bot } : {}) } : null);
   const merged = (p: ScPr) => p.mergedAt !== null;
   const mrCommits = (p: ScPr) => (p.strategy === "rebase" || p.strategy === "fast-forward" ? p.landed : p.listed);
   const mrJson = (p: ScPr) => ({
@@ -44,9 +49,9 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
       reset_by_push: [true, "reset approvals from @carol by pushing to the branch"],
     };
     return [
-      { system: true, body: "requested review from @carol", createdAt: p.createdAt, author: { username: p.author.login, bot: p.author.bot } },
-      { system: false, body: "Ready for review.", createdAt: p.createdAt, author: { username: p.author.login, bot: p.author.bot } },
-      ...p.events.map((e) => ({ system: body[e.kind]![0], body: body[e.kind]![1], createdAt: e.at, author: { username: e.user.login, bot: e.user.bot } })),
+      { system: true, body: "requested review from @carol", createdAt: p.createdAt, author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
+      { system: false, body: "Ready for review.", createdAt: p.createdAt, author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
+      ...p.events.map((e) => ({ system: body[e.kind]![0], body: body[e.kind]![1], createdAt: e.at, author: { id: gid(e.user.login), username: e.user.login, bot: e.user.bot } })),
     ];
   };
   const standing = (p: ScPr) => {
@@ -98,14 +103,14 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
       if (query.includes("mergeRequests(iids")) {
         const nodes = (variables.iids as string[]).map((iid) => {
           const p = pr(iid);
-          const g = (u: ScUser | null) => (u ? { username: u.login, bot: u.bot } : null);
+          const g = (u: ScUser | null) => (u ? { id: gid(u.login), username: u.login, bot: u.bot } : null);
           return {
             iid: String(p.number),
             diffStatsSummary: p.number === 5 ? null : { additions: p.additions, deletions: p.deletions },
             author: g(p.author),
             mergeUser: g(p.mergedBy),
             approvedBy: { nodes: standing(p).map((s) => g(s.user)) },
-            reviewers: { nodes: reviewerStates(p).map((r) => ({ username: r.user!.username, bot: sc.prs.flatMap((x) => x.events).find((e) => e.user.login === r.user!.username)?.user.bot ?? false })) },
+            reviewers: { nodes: reviewerStates(p).map((r) => ({ id: gid(r.user!.username), username: r.user!.username, bot: sc.prs.flatMap((x) => x.events).find((e) => e.user.login === r.user!.username)?.user.bot ?? false })) },
             notes: notesPage(p, null),
           };
         });

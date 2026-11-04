@@ -4,10 +4,10 @@ import { buildReviews, normalizeCommitAuthor, normalizeUser } from "../src/provi
 import { loadProviderDefinition } from "../src/registry.js";
 import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
-import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
+import { fakeGitLab, GL_BASE, glUserId } from "./helpers/fake-gitlab.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
 import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
-import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
+import { buildScenario, OID, scenarioExpectations, scmScenario, U } from "./helpers/scm-scenario.js";
 
 /** gitlab.com's 429: Retry-After plus RateLimit-Reset in epoch seconds. */
 const GITLAB_RATE_LIMIT = { status: 429, headers: (now: number) => ({ "retry-after": "20", "ratelimit-remaining": "0", "ratelimit-reset": String(now + 20) }), minWaitMs: 20_000 };
@@ -87,8 +87,28 @@ describe("GitLab provider on a synthetic self-managed instance: every merge stra
     const { provider, fake } = make();
     const before = fake.served();
     const r = await provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
-    expect(r.changes.find((c) => c.id === x.ids.squash)!.reviews).toEqual([{ author: bot("review-bot"), state: "COMMENTED", submittedAt: "2026-08-01T11:00:00Z" }]);
+    expect(r.changes.find((c) => c.id === x.ids.squash)!.reviews).toEqual([{ author: { ...bot("review-bot"), id: String(glUserId("review-bot")) }, state: "COMMENTED", submittedAt: "2026-08-01T11:00:00Z" }]);
     expect(fake.served() - before).toBeGreaterThan(10);
+  });
+
+  it("walks from request.head: a merge pushed after freeze brings in nothing from the frozen head (FR7.2)", async () => {
+    const late = scmScenario({ latePush: true });
+    const p = new GitLabProvider({ base_url: GL_BASE, page_size: 3, batch_size: 4 }, { cwd: ".", env: {}, log: () => {}, fetch: fakeGitLab(late, { pageSize: 3 }).fetch, now: () => Date.parse("2026-08-05T00:00:00Z") });
+    const now = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["direct_push"] });
+    expect(now.headSha).toBe(OID("LM"));
+    expect(now.changes.map((c) => c.id)).toContain(x.late.id);
+    const frozen = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["direct_push"], head: late.frozenHead });
+    expect(frozen.headSha).toBe(late.frozenHead);
+    expect(frozen.changes.map((c) => c.id).sort()).toEqual([...x.directPushes].sort());
+  });
+
+  it("account ids from GraphQL and REST; a release branch merged by a push gives its commits landedVia (FR7.3, FR7.6)", async () => {
+    const r = await make().provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
+    expect(r.changes.find((c) => c.id === x.ids.rebase)!.reviews.map((rv) => [rv.author.login, rv.author.id])).toEqual([["dave", String(glUserId("dave"))], ["erin", String(glUserId("erin"))]]);
+    const c = (tag: string, date: string, parents: string[]) => ({ oid: OID(tag), date: `2026-08-01T${date}:00Z`, authorDate: `2026-08-01T${date}:00Z`, parents: parents.map(OID), author: { name: "Rel", email: "rel@example.com", user: U("rel") }, additions: 1, deletions: 0, subject: tag });
+    const rel = buildScenario({ repo: sc.repo, head: OID("X"), window: sc.window, commits: [c("X", "12:00", ["B", "R2"]), c("R2", "11:00", ["R1"]), c("R1", "10:00", ["B"]), c("B", "09:00", [])], prs: [] });
+    const out = await new GitLabProvider({ base_url: GL_BASE }, { cwd: ".", env: {}, log: () => {}, fetch: fakeGitLab(rel).fetch }).listChanges({ repo: sc.repo, window: sc.window, kinds: ["direct_push"] });
+    expect(Object.fromEntries(out.changes.map((ch) => [ch.mergeSha, ch.landedVia ?? null]))).toEqual({ [OID("X")]: null, [OID("R2")]: OID("X"), [OID("R1")]: OID("X"), [OID("B")]: null });
   });
 
   it("is registered as a built-in", async () => {

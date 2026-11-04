@@ -15,6 +15,8 @@ import { PR_RLA_VERSION } from "../src/version.js";
 import { cloneScenario, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
 import { generatedGitLabScenario } from "./helpers/gitlab-population.js";
+import { buildScenario, U, type ScCommit } from "./helpers/scm-scenario.js";
+import { GitLabProvider } from "../src/providers/gitlab/index.js";
 import { MockRekor } from "./helpers/mock-rekor.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
@@ -29,7 +31,7 @@ const W = "audit/2026-q3";
 const log = new MockRekor();
 let tsa: MockTsaServer;
 const sc = generatedGitLabScenario();
-const gitlab = fakeGitLab(sc, { pageSize: 100 });
+let gitlab = fakeGitLab(sc, { pageSize: 100 });
 const viaGitLab = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   return url.startsWith(GL_BASE) ? gitlab.fetch(input, init) : globalThis.fetch(input, init);
@@ -68,8 +70,12 @@ afterAll(async () => {
 describe("end-to-end audit with the GitLab provider (fake self-managed instance, mock Rekor, recorded beacon, git-file ledger)", () => {
   it("freeze lists 400 changes through GitLab's APIs: MRs of three merge methods and direct pushes", () => {
     const m = readJ<Manifest>(honest, `${W}.manifest.json`);
-    // Schema v2: the provider identity (contracts.md §5), still naming API version 1.
-    expect(m.provider).toEqual({ name: "gitlab", apiVersion: 1, source: "builtin", version: PR_RLA_VERSION, integrity: null, optionsSha256: optionsDigest({ base_url: GL_BASE, batch_size: 20 }), populationOptionsSha256: optionsDigest({}), trust: "builtin", reviewGranularity: "submission" });
+    // Schema v2: the provider identity (contracts.md §5), still naming API version 1. U3 fills the two
+    // fields bolt 1 left at their defaults: GitLab declares first-comment-per-user review objects, and
+    // populationOptionsSha256 hashes the options that change the population (base_url here).
+    expect(m.provider).toEqual({ name: "gitlab", apiVersion: 1, source: "builtin", version: PR_RLA_VERSION, integrity: null, optionsSha256: optionsDigest({ base_url: GL_BASE, batch_size: 20 }), populationOptionsSha256: optionsDigest({ base_url: GL_BASE }), trust: "builtin", reviewGranularity: "first-comment-per-user" });
+    // The pinned head (FR7.2): the default-branch head freeze walked from.
+    expect((m as unknown as { repos: { headSha: string }[] }).repos[0]!.headSha).toBe(sc.head);
     expect(m.N).toBe(400);
     expect(m.changes.filter((c) => c.kind === "direct_push")).toHaveLength(40);
     expect(m.changes.every((c) => c.id.startsWith("gitlab:acme/widgets"))).toBe(true);
@@ -115,5 +121,32 @@ describe("end-to-end audit with the GitLab provider (fake self-managed instance,
     expect(c5.status).toBe("FAIL");
     expect(c5.summary).toMatch(/^population: 72 changes on gitlab are missing from the manifest/);
     expect(report.checks.filter((x) => x.status === "FAIL").map((x) => x.n)).toEqual([5]);
+  });
+
+  it("FR7.2: a commit dated in the window but pushed after freeze no longer fails check 5 (verify walks the frozen head)", async () => {
+    // After freeze, someone pushes a merge (dated 10-25) whose second parent is local work dated 2026-09-30.
+    const tip = sc.byOid.get(sc.head)!;
+    const lc: ScCommit = { ...tip, oid: "1a7e".repeat(10), date: "2026-09-30T12:00:00Z", authorDate: "2026-09-30T12:00:00Z", parents: tip.parents, author: { name: "Late", email: "late@example.com", user: U("late") }, subject: "late work" };
+    const lm: ScCommit = { ...tip, oid: "2b8f".repeat(10), date: "2026-10-25T09:00:00Z", authorDate: "2026-10-25T09:00:00Z", parents: [sc.head, lc.oid], subject: "merge pushed after freeze" };
+    const later = buildScenario({ repo: sc.repo, head: lm.oid, window: sc.window, commits: [...sc.commits, lc, lm], prs: sc.prs });
+    const frozen = gitlab;
+    gitlab = fakeGitLab(later, { pageSize: 100 });
+    try {
+      // From the branch's current head the late commit is a direct push the manifest never had.
+      const p = new GitLabProvider({ base_url: GL_BASE, batch_size: 20 }, { cwd: ".", env: {}, log: () => {}, fetch: gitlab.fetch });
+      const unpinned = await p.listChanges({ repo: sc.repo, window: sc.window, kinds: ["direct_push"] });
+      expect(unpinned.headSha).toBe(lm.oid);
+      expect(unpinned.changes.map((c) => c.mergeSha)).toContain(lc.oid);
+      // verify asks for the manifest's head and passes.
+      const s = cloneScenario(honest);
+      const report = await runVerify(s.ctx, {});
+      const c5 = report.checks.find((c) => c.n === 5)!;
+      expect(c5.status).toBe("PASS");
+      expect(c5.summary).toBe("population 400/400 match");
+      expect(c5.details).toContain(`history walked from the frozen head ${sc.head.slice(0, 12)}…`);
+      expect(report.ok).toBe(true);
+    } finally {
+      gitlab = frozen;
+    }
   });
 });
