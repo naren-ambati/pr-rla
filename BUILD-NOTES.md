@@ -2190,7 +2190,7 @@ Merged after U9 and before U5, on the coordinator's instruction. U8 branched fro
 
 Round P3, on branch `fix/p3-pool-head` off `integrate/wave2` at `66e3f54` (U8, U9, the ledger and trusted-time rounds merged), after a second adversarial review of U8 at `ec073d7`. Its governing decision: **prove the frozen head from push-time evidence the SCM records itself, never from committer dates or graph shape, which the pusher sets.** U8's fix round had excused a window commit the frozen head does not reach when every first-parent commit after the head was dated after the window; the review showed that a fast-forward merge `[base, real tip]` pushed after the window turned a rewound head into PASS and VERIFIED, on single repos and on all four built-ins, and that the same rule made honest late pushes FAIL.
 
-Every reproduction is a committed test. `test/p3-pool-head.test.ts` (44 tests) uses only APIs that existed at `66e3f54`, so it was also run against that commit's `src` with this round's test helpers: **40 of the 44 fail there**; the 4 that pass are controls (honest shapes that leave no window commit unreached, with and without a push log), which both builds pass. The new modules' own tests are in `test/p3-head-proof.test.ts` (12).
+Every reproduction is a committed test. `test/p3-pool-head.test.ts` (44 tests) uses only APIs that existed at `66e3f54`, so it was also run against that commit's `src` with this round's test helpers: **40 of the 44 fail there**; the 4 that pass are controls (honest shapes that leave no window commit unreached, with and without a push log), which both builds pass. The new modules' own tests are in `test/p3-head-proof.test.ts` (13).
 
 ### Findings, fixes and evidence
 
@@ -2215,11 +2215,11 @@ Every reproduction is a committed test. `test/p3-pool-head.test.ts` (44 tests) u
 - **GitLab** (`GET /projects/:id/events?action=pushed`): `push_data.action` (`pushed`, `created`, `removed`), `ref_type`, `ref`, `commit_from`, `commit_to`, `commit_count`; `before`/`after` take dates only; offset pages. **GitLab removes project activity events older than three years** (its docs, "Project activity time period limit"). A push of more refs than the instance's push event activities limit is a bulk event with null refs and commits. GitLab does not say whether a push was forced, so every update is kind `unknown` and verify checks the window-close tip's ancestry whenever the branch moved after the close (the first-parent shortcut usually settles it in one request). The live log of `gitlab-org/cli` interleaves every branch's pushes; `main`'s updates chain (the 4 consecutive pairs among the 20 events read first).
 - **Bitbucket Cloud and Data Center** have no push log pr-rla can read with a token: a moved head there is INCOMPLETE wherever a window commit is not reachable from it, and the stopgap still FAILs a rewound head through merged pull requests.
 
-### Live reads (all read-only GETs, 2026-11-04, UTC; 21 requests)
+### Live reads (all read-only GETs, 2026-11-04, UTC; 22 requests)
 
 | When | What | Requests |
 |---|---|---|
-| 06:17–06:30, 07:34 | GitHub docs: REST repositories (the activity endpoint), the activity view (2 pages), REST organizations (`total_private_repos`, owner-only, `admin:org` for classic and OAuth tokens), the org audit log (API only on Enterprise Cloud) | 5 |
+| 06:17–06:30, 07:34, 07:52 | GitHub docs: REST repositories (the activity endpoint), the activity view (2 pages), REST organizations (`total_private_repos`, owner-only, `admin:org` for classic and OAuth tokens), the org audit log (API only on Enterprise Cloud), REST app installations (`GET /installation/repositories` for installation tokens; its response schema has `total_count`, `repositories`, `repository_selection`) | 6 |
 | 06:23 | `api.github.com`, no token: `github/gh-aw` activity (30 newest, and the 3 oldest), `torvalds/linux` and `octocat/Hello-World` (oldest), `github/gh-aw` (`created_at`) | 5 |
 | 06:24 | GitLab docs: events API, project activity retention, user activity retention | 3 |
 | 06:24 | `gitlab.com`, no token: `gitlab-org/cli` push events (20) | 1 |
@@ -2240,7 +2240,7 @@ Nothing was written anywhere; no scratch repository was used.
 8. **An OAuth App token needs the org's count.** GitHub sends `total_private_repos` only to owners, and to classic and OAuth tokens only with `admin:org` (its docs); the `gh` CLI's token is an OAuth App token (`gho_`, checked on this machine by its prefix alone), so without `admin:org` it cannot prove private completeness. That is the price of the review's OAuth App restriction case; a classic token, or adding `admin:org` to the token, restores it. A token's kind is read from its prefix in-process and never logged.
 9. **The rate-limit hints stay in-process.** The plugin host carries `maxRetries`, `maxBlindRateLimitRetries` and `acceptJson`; the two new hints are for built-ins (an isolated plugin keeps its own retries).
 10. **The fake org can follow the test's clock** (`control.now`), so a prospective test does not see commits dated after its freeze; it is off by default, which keeps every earlier test's fake unchanged.
-11. **Found while fixing:** a repo the freeze's listing records as a fork (or not the owner's) that is not one now, with window changes, is INCOMPLETE rather than skipped (the listing is the auditee's record); an update listed twice (GitLab's offset pages) is one update; the attribute WARN's quiet list is a count.
+11. **Found while fixing:** a repo the freeze's listing records as a fork (or not the owner's) that is not one now, with window changes, is INCOMPLETE rather than skipped (the listing is the auditee's record); an update listed twice (GitLab's offset pages) is one update; a bulk push as the last update before the window's close leaves the tip then unknown (no evidence); a proven head whose reach of the close's tip could not be shown gets no FR7.2 note (the check's own FAIL or INCOMPLETE stands); the attribute WARN's quiet list is a count.
 
 ### Single-repo behaviour changes (all deliberate)
 
@@ -2250,7 +2250,7 @@ Nothing was written anywhere; no scratch repository was used.
 
 ### Tests
 
-985 passed, 1 skipped (71 files) at `66e3f54`; 1042 passed, 1 skipped (73 files) now. New: `test/p3-pool-head.test.ts` (44), `test/p3-head-proof.test.ts` (12). Changed: `u8-review` (7 tests: five finding 3 tests for the new messages, one of them the backdated push now PASS; two WARN tests read `verbose`), `pooled-verify` (the repo after freeze is INCOMPLETE; a new FAIL test; the no-creation-time test omits it), `pool-integrity` (the FR7.2 test), `single-repo-anchor` (moved heads), `pooled-plugin` (`pushLog` over IPC, the estimate's extra requests), `list-repos` (the opt-in list). Helpers: `fake-org.ts` (push log, `forcePush`, `pushCommits(…, { at })`, `control.pushLog`, `control.now`, `control.orgTotalPrivate`, `viewer.installation`, `createdAt: null`), `fake-gitlab.ts` (push events, `merge_base`).
+985 passed, 1 skipped (71 files) at `66e3f54`; 1043 passed, 1 skipped (73 files) now. New: `test/p3-pool-head.test.ts` (44), `test/p3-head-proof.test.ts` (13). Changed: `u8-review` (7 tests: five finding 3 tests for the new messages, one of them the backdated push now PASS; two WARN tests read `verbose`), `pooled-verify` (the repo after freeze is INCOMPLETE; a new FAIL test; the no-creation-time test omits it), `pool-integrity` (the FR7.2 test), `single-repo-anchor` (moved heads), `pooled-plugin` (`pushLog` over IPC, the estimate's extra requests), `list-repos` (the opt-in list). Helpers: `fake-org.ts` (push log, `forcePush`, `pushCommits(…, { at })`, `control.pushLog`, `control.now`, `control.orgTotalPrivate`, `viewer.installation`, `createdAt: null`), `fake-gitlab.ts` (push events, `merge_base`).
 
 ### Files touched in this round
 
@@ -2274,4 +2274,8 @@ Nothing was written anywhere; no scratch repository was used.
 - Bitbucket Data Center's ancestry request (`commits?until=&since=&limit=1`), like the provider, against a live server; Bitbucket Cloud's `commits?include=&exclude=` was built from the documented API and tested on the fake only.
 - `GET /installation/repositories` and `total_private_repos` against live responses: no installation token or org-owner `admin:org` token was used (the only org the available token administers is not one pr-rla may use).
 - GitHub's activity log beyond what was read: its retention is undocumented, and the 100-page cap (10,000 updates since the window closed) means a verify of a very busy repository long after the window has no evidence for a moved head.
+
+### Verified (command → output)
+
+Each run is a fresh `git clone --branch fix/p3-pool-head` of this worktree into the scratch directory, then `npm ci && npm run build && npm run typecheck && npm test`, then `npm --prefix examples/providers/gitea ci && npm --prefix examples/providers/gitea test` and the same for `examples/ledgers/jira` (`packages/pr-rla-mcp` and `integrations/github-action` do not exist yet). The suite makes no network call (the network-deny harness).
 
