@@ -1599,3 +1599,20 @@ The ledger round's checkpoint coverage (check 7 WARNs unless a time-stamped chec
   - the index anchor is inside the time-stamped bytes: editing the newest line's `ledgerIndexSha256` FAILs both its tokens on rule 2 as well as giving the ledger round's "index changed since the latest checkpoint" WARN, and the edited line no longer covers the last verdict.
 
   Against the merged tree without the fix, the second and third fail (on the coverage assertion only) and the control passes.
+
+### Verified after merges 1 and 2 (command → output)
+
+From a fresh copy (`git archive`) of `0ed624f`, 2026-11-04T05:43Z, Node 22.23.2, load average 38 on 10 cores:
+
+```
+npm ci                                     → found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 53 passed (53) · Tests 638 passed | 1 skipped (639)
+npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → # pass 1 · # fail 0
+```
+
+- **The load flakes.** Earlier full runs, at load averages of 40–197, failed only plugin-host wall-clock tests: the heartbeat test, the Jira-through-host test and once the Gitea-through-host 30 s bound. Master `3059cfb`, from a scratch copy at the same load, failed the same two (heartbeat, Jira host), and the heartbeat test failed master's two-file run once too. They are the flakes the tracker assigns to the plugin and broker round; nothing in this integration touches the plugin host, and no test was changed for them.
