@@ -159,8 +159,8 @@ export default {
     const { createAuditContext } = await import("../src/api/context.js");
     const id = await pluginIdentity({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, "provider", s.dir, createAuditContext({ mode: "read-only" }));
     const old = { ...reg, record: { ...reg.record, plugins: { ...reg.record.plugins, provider: { ...reg.record.plugins.provider, populationOptionsSha256: optionsDigest({}) } } } };
-    const { createProvider } = await import("../src/registry.js");
-    const provider = await createProvider({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, { cwd: s.dir, env: {}, log: () => {}, fetch });
+    const { unsafeCreateProvider } = await import("../src/registry.js");
+    const provider = await unsafeCreateProvider({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, { cwd: s.dir, env: {}, log: () => {}, fetch });
     const manifest = readJ<ManifestV2>(s, `${W}.manifest.json`);
     const report = await verifyAudit({ registration: old, manifest, commitment: null, draws: null, currentProtocolSha256: null }, { provider, ledger: null, beacon: async () => null, logKey: async () => null, trustBundle: { version: "x", authorities: {} } as never, providerIdentity: id });
     expect(report.checks.find((c) => c.n === 5)!.details.some((d) => /provider options that change the population/.test(d))).toBe(false);

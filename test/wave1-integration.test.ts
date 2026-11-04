@@ -194,7 +194,8 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
   const fakeJira = async (): Promise<FakeJira> => new ((await import(pathToFileURL(join(EX, "test/fake-jira.mjs")).href)) as { FakeJira: new () => FakeJira }).FakeJira();
   const cases = async () => (await import(pathToFileURL(join(EX, "test/cases.mjs")).href)) as { jiraCases: (j: Pick<LedgerDefinition, "create">) => Promise<{ fixtures: LedgerFixture[]; factory: LedgerUnderTest }>; draw: (d: number, n: number) => DrawForLedger; PUB: PublishContext };
 
-  it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", async () => {
+  // About 67 children, each started in 0.2–0.6 s: measured from 13 s to 42 s for the same code on one loaded machine, so not the 60 s default.
+  it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", { timeout: 240_000 }, async () => {
     const plugin = resolvePlugin("./examples/ledgers/jira/index.mjs", ROOT);
     const hosts: PluginHost[] = [];
     // A definition whose create() starts the ledger in a host child: the kit's fake Jira and its

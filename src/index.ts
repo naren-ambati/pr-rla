@@ -34,5 +34,8 @@ export {
 export { BUDGET_FAMILIES, DEFAULT_HOSTS, defaultBudgets, parseRate, type HostBudgetDefault, type RateRule, type RateLimitOverrides } from "./net/rate-limits.js";
 export { createAuditContext, openProvider, openLedger, requireReadWrite, AuditApiError, type AuditContext, type AuditContextOptions, type AuditMode } from "./api/context.js";
 export { PR_RLA_VERSION } from "./version.js";
+// Built-ins only; an external plugin is opened with openProvider / openLedger (locked, consented, isolated).
 export { createProvider, createLedger, loadProviderDefinition, loadLedgerDefinition, BUILTIN_PROVIDERS, BUILTIN_LEDGERS } from "./registry.js";
+// UNLOCKED, for tests and plugin authors: these import any plugin in this process, with no lock, policy or isolation.
+export { unsafeCreateProvider, unsafeCreateLedger, unsafeLoadProviderDefinition, unsafeLoadLedgerDefinition } from "./registry.js";
 export { loadConfig, parseConfig } from "./config.js";

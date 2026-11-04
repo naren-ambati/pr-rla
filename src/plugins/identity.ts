@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PluginError } from "./errors.js";
 import { definitionTraits, describePlugin, startPluginHost, type DefinitionTraits } from "./host.js";
-import { readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type PluginRules, type ResolvedPlugin } from "./lock.js";
+import { assertLinksRunningPrRla, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type PluginRules, type ResolvedPlugin } from "./lock.js";
 import { consentOf, refuseFullTrustUnapproved } from "./approvals.js";
 import { PROVENANCE_LEVELS, type ProvenanceLevel } from "../sdk/ledger.js";
 
@@ -31,6 +31,7 @@ export async function externalPluginInfo(use: string, kind: "provider" | "ledger
   let known = memo.get(key);
   if (!known) {
     if (entry.trust === "full") {
+      assertLinksRunningPrRla(plugin);
       const mod = (await import(pathToFileURL(plugin.entry).href)) as Record<string, unknown>;
       const def = ((mod.default ?? mod[kind]) as Record<string, unknown> | undefined) ?? {};
       const p = def.provenance;

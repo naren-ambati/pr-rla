@@ -424,6 +424,24 @@ export function readGrants(p: ResolvedPlugin): string[] {
   return [...(p.rootIsFile ? [p.root] : children(p.root)), ...p.deps.flatMap((d) => children(d.dir))];
 }
 
+/** The running pr-rla's package directory (a real path): two levels above this module, in src/ or dist/. */
+export const RUNNING_PR_RLA = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
+
+/**
+ * For a plugin that runs in this process (`trust: full`, finding 14): every `pr-rla` it can resolve,
+ * from its own directory or any dependency's, must be the pr-rla running it. The tree hash leaves
+ * `pr-rla` out (a plugin links against the host's SDK), so another copy in its node_modules would
+ * be code nobody hashed. Refused before anything is imported. An isolated plugin needs no check:
+ * its child maps the SDK to the host's modules and cannot read another copy.
+ */
+export function assertLinksRunningPrRla(p: ResolvedPlugin): void {
+  for (const dir of [p.rootIsFile ? dirname(p.root) : p.root, ...p.deps.map((d) => d.dir)]) {
+    const found = findPackage("pr-rla", dir);
+    if (found && found.dir !== RUNNING_PR_RLA)
+      throw new PluginError(`plugin ${p.use} would load pr-rla from ${found.dir}, not the pr-rla running it (${RUNNING_PR_RLA}); that copy is not in its tree hash, so it is not run in this process`, "TREE_ESCAPE", `remove pr-rla from the plugin's node_modules (it links against the pr-rla that runs it), or run it isolated: pr-rla plugin lock ${p.use} --trust isolated`);
+  }
+}
+
 /** Install scripts declared by the plugin or a dependency (npm runs them at install; pr-rla plugins need none). */
 export function installScripts(p: ResolvedPlugin): { pkg: string; scripts: string[] }[] {
   const out: { pkg: string; scripts: string[] }[] = [];

@@ -21,7 +21,8 @@ import {
 import { sha256Hex, canonicalJson } from "./core/canonical.js";
 import type { PluginIdentity } from "./core/records.js";
 import { externalPluginInfo } from "./plugins/identity.js";
-import type { PluginPolicy, PluginRules } from "./plugins/lock.js";
+import { PluginError } from "./plugins/errors.js";
+import { readLock, type PluginPolicy, type PluginRules } from "./plugins/lock.js";
 import { PR_RLA_VERSION } from "./version.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
@@ -35,7 +36,9 @@ import gitlabIssues from "./ledgers/gitlab-issues/index.js";
 /**
  * The plugin registry: the only place that knows concrete providers/ledgers.
  * `.pr-rla.yml` names one by built-in name, by path (`./my-provider.mjs`) or by
- * package name (`pr-rla-provider-gitea`); external ones are loaded with import().
+ * package name (`pr-rla-provider-gitea`). External ones load through src/plugins/open.ts
+ * (locked, consented, isolated by default); the `unsafe*` loaders here import them unlocked,
+ * for tests and plugin authors only.
  */
 export interface PluginSpec {
   use: string;
@@ -99,7 +102,30 @@ function pickExport(mod: Record<string, unknown>, named: string): unknown {
   return mod.default ?? mod[named];
 }
 
+/**
+ * An external plugin runs only after its lock entry, files and your consent check out, through
+ * `openProvider` / `openLedger` (src/api/context.ts), isolated by default. These loaders refuse one
+ * (finding 14); the `unsafe*` ones below load anything in this process, unlocked.
+ */
+function externalRefused(kind: "provider" | "ledger", use: string): never {
+  const open = kind === "provider" ? "openProvider" : "openLedger";
+  throw new PluginError(`${kind} ${use} is an external plugin: ${open} loads it, after checking pr-rla.lock.json and your approval, and runs it isolated`, "NOT_LOCKED", `use ${open}, or unsafeLoad${kind === "provider" ? "Provider" : "Ledger"}Definition in a test of a plugin you wrote`);
+}
+
+/** A built-in provider's definition (aliases resolved). An external `use` is refused: see `openProvider`. */
 export async function loadProviderDefinition(use: string, baseDir: string): Promise<ProviderDefinition> {
+  const builtin = BUILTIN_PROVIDERS[PROVIDER_ALIASES[use] ?? use];
+  if (builtin) return builtin as ProviderDefinition;
+  void baseDir;
+  return externalRefused("provider", use);
+}
+
+/**
+ * UNLOCKED, for tests and plugin authors: imports any provider (built-in, path or package) in this
+ * process, with no lock, no policy and no isolation. Never call it on code you did not write; a
+ * command opens plugins with `openProvider`.
+ */
+export async function unsafeLoadProviderDefinition(use: string, baseDir: string): Promise<ProviderDefinition> {
   const name = PROVIDER_ALIASES[use] ?? use;
   const builtin = BUILTIN_PROVIDERS[name];
   if (builtin) return builtin as ProviderDefinition;
@@ -114,15 +140,33 @@ export async function loadProviderDefinition(use: string, baseDir: string): Prom
   return def;
 }
 
+/** Creates a built-in provider. An external `use` is refused: see `openProvider`. */
 export async function createProvider(spec: PluginSpec, ctx: ProviderContext): Promise<ScmProvider> {
-  const def = await loadProviderDefinition(spec.use, ctx.cwd);
+  return instantiateProvider(await loadProviderDefinition(spec.use, ctx.cwd), spec, ctx);
+}
+
+/** UNLOCKED, for tests and plugin authors: `unsafeLoadProviderDefinition`, then create. */
+export async function unsafeCreateProvider(spec: PluginSpec, ctx: ProviderContext): Promise<ScmProvider> {
+  return instantiateProvider(await unsafeLoadProviderDefinition(spec.use, ctx.cwd), spec, ctx);
+}
+
+async function instantiateProvider(def: ProviderDefinition, spec: PluginSpec, ctx: ProviderContext): Promise<ScmProvider> {
   const p = await def.create(spec.options as never, ctx);
   if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(p.apiVersion)) throw new ProviderApiVersionError(def.name, p.apiVersion);
   if (typeof p.listChanges !== "function") throw new Error(`provider "${def.name}" returned an object without listChanges()`);
   return p;
 }
 
+/** A built-in ledger's definition. An external `use` is refused: see `openLedger`. */
 export async function loadLedgerDefinition(use: string, baseDir: string): Promise<LedgerDefinition> {
+  const builtin = BUILTIN_LEDGERS[use];
+  if (builtin) return builtin as LedgerDefinition;
+  void baseDir;
+  return externalRefused("ledger", use);
+}
+
+/** UNLOCKED, for tests and plugin authors: imports any ledger in this process, with no lock, policy or isolation. */
+export async function unsafeLoadLedgerDefinition(use: string, baseDir: string): Promise<LedgerDefinition> {
   const builtin = BUILTIN_LEDGERS[use];
   if (builtin) return builtin as LedgerDefinition;
   let mod: Record<string, unknown>;
@@ -136,12 +180,32 @@ export async function loadLedgerDefinition(use: string, baseDir: string): Promis
   return def;
 }
 
+/** Creates a built-in ledger. An external `use` is refused: see `openLedger`. */
 export async function createLedger(spec: PluginSpec, ctx: LedgerContext): Promise<Ledger> {
-  const def = await loadLedgerDefinition(spec.use, ctx.cwd);
+  return instantiateLedger(await loadLedgerDefinition(spec.use, ctx.cwd), spec, ctx);
+}
+
+/** UNLOCKED, for tests and plugin authors: `unsafeLoadLedgerDefinition`, then create. */
+export async function unsafeCreateLedger(spec: PluginSpec, ctx: LedgerContext): Promise<Ledger> {
+  return instantiateLedger(await unsafeLoadLedgerDefinition(spec.use, ctx.cwd), spec, ctx);
+}
+
+async function instantiateLedger(def: LedgerDefinition, spec: PluginSpec, ctx: LedgerContext): Promise<Ledger> {
   const l = await def.create(spec.options as never, ctx);
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
   for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new Error(`ledger "${def.name}" has no ${m}()`);
   return l;
+}
+
+/**
+ * A configured provider's name without importing it (scripts/record-fixture.mjs --cli): a
+ * built-in's own name, or an external plugin's locked name; null when it is not locked.
+ */
+export function providerNameOf(spec: PluginSpec, auditDir: string): string | null {
+  const builtin = builtinProviderName(spec.use);
+  if (builtin) return BUILTIN_PROVIDERS[builtin]!.name;
+  const lock = readLock(auditDir);
+  return Object.hasOwn(lock.plugins, spec.use) ? lock.plugins[spec.use]!.name : null;
 }
 
 /** SHA-256 over the canonical JSON of `options` restricted to `keys`. */

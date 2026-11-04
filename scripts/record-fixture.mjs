@@ -3,7 +3,9 @@
 //   node scripts/record-fixture.mjs <provider|./path.mjs> <repo> <first-day> <last-day> <out.json> ['{"base_url":"…"}']
 //   node scripts/record-fixture.mjs --cli <audit-dir> <out.json>
 // --cli runs the CLI program itself (`pr-rla -C <audit-dir> freeze --dry-run`, the same commander
-// program dist/cli.js runs) with a recording fetch, so one live dry run also produces the fixture.
+// program dist/cli.js runs) with a recording fetch, so one live dry run also produces the fixture; it
+// imports no plugin itself. The first form imports the provider in this process, unlocked: use it on
+// a built-in or a provider you wrote.
 // Days are inclusive UTC days. Responses are trimmed to the fields pr-rla reads and scrubbed:
 // personal e-mail addresses become user-<hash>@example.invalid (bot addresses are kept, since bot
 // detection reads them), comment bodies become "(comment)", system-note bodies are cut to 120 chars.
@@ -16,7 +18,7 @@ import { buildProgram } from "../dist/cli.js";
 import { nodeContext } from "../dist/commands/context.js";
 import { loadConfig } from "../dist/config.js";
 import { createBroker } from "../dist/net/broker.js";
-import { loadProviderDefinition } from "../dist/registry.js";
+import { providerNameOf, unsafeLoadProviderDefinition } from "../dist/registry.js";
 
 const cliMode = process.argv[2] === "--cli";
 const [use, repo, first, last, out, optionsJson] = cliMode ? [] : process.argv.slice(2);
@@ -140,10 +142,13 @@ if (cliMode) {
   if (code !== 0) throw new Error(`freeze --dry-run exited ${code}`);
   const pop = JSON.parse(readFileSync(tmp, "utf8"));
   rmSync(tmp);
-  const def = await loadProviderDefinition(config.provider.use, cwd);
+  // The CLI above opened the provider as a command does (an external one locked and isolated). Its name
+  // comes from the built-ins or the lock: nothing is imported here, in this process, with your environment.
+  const def = { name: providerNameOf(config.provider, cwd) ?? config.provider.use };
   fixture = { out: cliOut, def, options: config.provider.options, repo: config.repo, window: { opensAt: config.window.opensAt, closesAt: config.window.closesAt }, label: `${config.window.start}..${config.window.end}`, changes: pop.listed, diagnostics: pop.diagnostics, defaultBranch: null };
 } else {
-  const def = await loadProviderDefinition(use, resolve("."));
+  // In process and unlocked, with your environment: run this form only on a provider you wrote (or a built-in).
+  const def = await unsafeLoadProviderDefinition(use, resolve("."));
   // Through the fetch broker, as in a real run: it retries (the built-ins make one attempt each) and paces.
   const fetchThroughBroker = createBroker({}, { fetch: recordingFetch, log: (m) => console.error(m) }).bind(`provider:${def.name}`);
   const provider = await def.create(options, { cwd: process.cwd(), env: process.env, log: (m) => console.error(m), fetch: fetchThroughBroker, now: () => recordedAt.getTime() });

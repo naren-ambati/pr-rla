@@ -7,7 +7,8 @@ import { createAuditContext, openLedger } from "../src/api/context.js";
 import { registerCommand } from "../src/commands/register.js";
 import { parseConfig } from "../src/config.js";
 import { CredentialHostMismatch } from "../src/net/contract.js";
-import { loadLedgerDefinition } from "../src/registry.js";
+// In process and unlocked, as a plugin's author tests it; the last two tests open it locked.
+import { unsafeLoadLedgerDefinition as loadLedgerDefinition } from "../src/registry.js";
 import type { DrawForLedger, LedgerDefinition, PublishContext } from "../src/sdk/ledger.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerUnderTest } from "../src/testing/index.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";

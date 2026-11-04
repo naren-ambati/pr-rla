@@ -293,6 +293,25 @@ describe("trust: full is an explicit opt-in, said on every command and repeated 
   });
 });
 
+describe("trust: full loads only the pr-rla running it (finding 14)", () => {
+  it("a copy of pr-rla in the plugin's node_modules, which the tree hash leaves out, is refused before the plugin is imported", async () => {
+    const marker = join(tmpdir(), `prrla-unhashed-${process.pid}-${Date.now()}.txt`);
+    const s = withPlugin({ source: `if (process.env.PR_RLA_HOST !== "1") await import("pr-rla");\n${PLUGIN_SOURCE}` });
+    const copy = join(s.dir, "plugins", "acme", "node_modules", "pr-rla");
+    mkdirSync(copy, { recursive: true });
+    writeFileSync(join(copy, "package.json"), JSON.stringify({ name: "pr-rla", version: "0.1.0", type: "module", exports: "./index.js" }));
+    writeFileSync(join(copy, "index.js"), `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "unhashed pr-rla ran in process");\n`);
+    expect((await cli(s, ["plugin", "add", USE, "--trust", "full", "--yes"])).code).toBe(0);
+    const before = readLock(s.dir).plugins[USE]!.treeSha256;
+    appendFileSync(join(copy, "index.js"), "// changed\n");
+    expect(treeSha256(resolvePlugin(USE, s.dir))).toBe(before);
+    const r = await cli(s, ["freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/plugin \.\/plugins\/acme\/index\.mjs would load pr-rla from .*plugins\/acme\/node_modules\/pr-rla, not the pr-rla running it \(.*\); that copy is not in its tree hash, so it is not run in this process/);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe("verify compares the provider it loads with the registered one (functional-design.md §U2b item 5)", () => {
   it("a plugin re-locked after registration rebuilds the population with a WARN naming the difference", async () => {
     const s = withPlugin();
