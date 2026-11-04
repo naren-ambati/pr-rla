@@ -297,7 +297,8 @@ describe("a change cannot decide which of its own files are dropped (H2)", () =>
     expect(nested.untrusted.files.map((f) => f.path)).toEqual(["src/a.ts", "gen/x.lock.yml"]);
     const unread = buildDrawContext(input({}, { attributes: { baseSha: "b".repeat(40), base: { "": GA }, head: { "": GA } } }));
     expect(unread.untrusted.files.map((f) => f.path)).toEqual(["src/a.ts", "gen/x.lock.yml"]);
-    expect(unread.notes.join("\n")).toMatch(/could not be decided/);
+    // Only the file the root marks is worth the note: src/a.ts, which nothing marks, is simply shown.
+    expect(unread.notes).toContain("1 file the root .gitattributes marks linguist-generated could not be decided (a .gitattributes below it not read, too large, or the matching budget spent): shown");
   });
 
   it("a ReDoS-shaped pattern is decided in milliseconds, and a spent budget shows the file", () => {

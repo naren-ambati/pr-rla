@@ -1,6 +1,6 @@
 import type { ProvenanceLevel, VerdictEvent } from "../sdk/ledger.js";
 import type { Actor, ChangeCheck, ChangeDescription, ChangeKind, ChangeRecord, ChangedFile, CheckState } from "../sdk/provider.js";
-import { attrBudget, attrFiles, isAttributesFile, linguistGenerated, type AttrBudget } from "./generated.js";
+import { attrBudget, attrFiles, attributeDirs, isAttributesFile, linguistGenerated, type AttrBudget, type AttrFile } from "./generated.js";
 import { escapeControls, escapeLine } from "./text.js";
 
 /**
@@ -236,18 +236,18 @@ export function generatedFlags(d: ChangeDescription | null, budget: AttrBudget =
   if (!d.attributes) return { ...none, notes: ["the provider gave no .gitattributes of the change's base commit, so no file is dropped as generated"] };
   const base = attrFiles(d.attributes.base);
   const head = attrFiles(d.attributes.head);
+  // The roots alone, every other directory taken as having no file: what could be dropped at most.
+  const rootsOnly = (m: Map<string, AttrFile | null>, p: string) => new Map<string, AttrFile | null>(attributeDirs(p).map((dir) => [dir, dir === "" ? (m.get("") ?? null) : null]));
   let undecided = 0;
   const flags = files.map((f) => {
-    let gen = true;
-    for (const p of f.previousPath !== undefined ? [f.path, f.previousPath] : [f.path])
-      for (const side of [base, head]) {
-        const g = linguistGenerated(side, p, budget);
-        if (g === null) undecided++;
-        if (g !== true) gen = false;
-      }
-    return gen;
+    const paths = f.previousPath !== undefined ? [f.path, f.previousPath] : [f.path];
+    const verdicts = paths.flatMap((p) => [base, head].map((side) => linguistGenerated(side, p, budget)));
+    if (verdicts.every((g) => g === true)) return true;
+    // Shown. Worth a note only when it might have been dropped: the roots mark it, but a file below them, or the budget, left it open.
+    if (verdicts.some((g) => g === null) && paths.every((p) => [base, head].every((side) => linguistGenerated(rootsOnly(side, p), p, budget) !== false))) undecided++;
+    return false;
   });
-  const notes = undecided ? [`${plural(undecided, "file check")} of linguist-generated could not be decided (a .gitattributes not read, too large, or the matching budget spent): those files are shown`] : [];
+  const notes = undecided ? [`${plural(undecided, "file")} the root .gitattributes marks linguist-generated could not be decided (a .gitattributes below it not read, too large, or the matching budget spent): shown`] : [];
   return { flags, notes };
 }
 
