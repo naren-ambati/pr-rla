@@ -1,91 +1,146 @@
 import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { freezeCommand } from "../src/commands/freeze.js";
-import { registerCommand } from "../src/commands/register.js";
-import { runVerify } from "../src/commands/verify.js";
-import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
-import { fakeOrg } from "./helpers/fake-org.js";
+import { loadOrCreateKey } from "../src/core/signing.js";
 
 /**
- * A single repo is a pool of one, and existing single-repo audits behave byte-identically (FR5.1; test-design U8).
+ * A single repo is a pool of one, and existing single-repo audits behave as master does (FR5.1; test-design U8; the
+ * review's anchor finding). This test builds the master build itself: `git archive` of the commit this branch left
+ * master at (`git merge-base HEAD master`), extracted into a temp dir with this checkout's node_modules, and runs the
+ * same scenarios on both builds in child vitest runs at a fixed clock with one signing key: register, status, freeze,
+ * verify (the report and verify's own output), sample, status. It compares every command's result and stdout, and the
+ * registration, manifest and commitment bodies (signatures aside: ECDSA signatures are randomised).
  *
- * The values below were produced by running the same two scenarios on the master build a360348 (before U8: the code in
- * git archive a360348), at the same fixed clock, and by this build: every section of the manifest and the commitment
- * record, the keys of every record in their order, and the registered `repos` field matched. They pin the population
- * (`changes`, `funnel`, `limitations`, `repos`) rather than whole-file hashes, so a later change to the registration
- * (which the manifest names by hash) or a version bump does not move them. Fixture kind: synthetic.
+ * The fakes (test/helpers/fake-org.ts, fake-github.ts) are this checkout's, copied into the master tree, so both builds
+ * read the same synthetic data. Fixture kind: synthetic. The intended differences for single repos are listed below.
  */
-const sha = (s: string) => createHash("sha256").update(s).digest("hex");
-const read = (s: Scenario, p: string) => readFileSync(join(s.dir, p), "utf8");
+const ROOT = join(__dirname, "..");
+const git = (...args: string[]) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
 
-async function freezeAt(s: Scenario) {
-  s.clock.now = T("2026-10-20T00:00:00Z");
-  await registerCommand(s.ctx, {});
-  s.clock.now = T("2026-10-20T12:00:00Z");
-  expect(await freezeCommand(s.ctx, {})).toBe(0);
-  const m = JSON.parse(read(s, "audit/2026-q3.manifest.json")) as Record<string, unknown> & { repos: unknown };
-  const part = (k: string) => sha(JSON.stringify(m[k]));
-  return {
-    m,
-    cm: (JSON.parse(read(s, "audit/2026-q3/manifest-commitment.json")) as { record: Record<string, unknown> }).record,
-    reg: (JSON.parse(read(s, "audit/2026-q3/registration.json")) as { record: Record<string, unknown> }).record,
-    sections: { changes: part("changes"), funnel: part("funnel"), limitations: part("limitations"), selector: part("selector"), parameters: part("parameters"), window: part("window") },
+const DUMP = String.raw`import { it } from "vitest";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const R = process.env.ANCHOR_ROOT, OUT = process.env.ANCHOR_OUT, KEY = process.env.ANCHOR_KEY;
+const strip = (v) => (Array.isArray(v) ? v.map(strip) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "signature").map(([k, x]) => [k, strip(x)])) : v);
+it("dump", async () => {
+  const { freezeCommand } = await import(R + "/src/commands/freeze.ts");
+  const { registerCommand } = await import(R + "/src/commands/register.ts");
+  const { runVerify, verifyCommand } = await import(R + "/src/commands/verify.ts");
+  const { sampleCommand } = await import(R + "/src/commands/sample.ts");
+  const { statusCommand } = await import(R + "/src/commands/status.ts");
+  const { makeChanges, setupAuditRepo, T } = await import(R + "/test/helpers/audit-scenario.ts");
+  const { fakeOrg } = await import(R + "/test/helpers/fake-org.ts");
+  const result = {};
+  const scenario = async (name, s, after) => {
+    const rec = { steps: {} };
+    mkdirSync(join(s.dir, ".pr-rla"), { recursive: true });
+    copyFileSync(KEY, join(s.dir, ".pr-rla/signing-key.pem"));
+    const step = async (label, f) => {
+      const from = s.out.length;
+      try {
+        rec.steps[label] = { value: await f() };
+      } catch (e) {
+        rec.steps[label] = { threw: e.message, exitCode: e.exitCode ?? null };
+      }
+      rec.steps[label].out = s.out.slice(from);
+    };
+    const report = async () => { const v = await runVerify(s.ctx, { offline: false }); return { ok: v.ok, mode: v.mode, checks: v.checks.map((c) => [c.n, c.status, c.summary, c.details.filter((d) => !/signature|by \d{4}-|written/.test(d))]) }; };
+    s.clock.now = T("2026-10-20T00:00:00Z");
+    await step("register", () => registerCommand(s.ctx, {}));
+    s.clock.now = T("2026-10-20T06:00:00Z");
+    await step("statusBeforeFreeze", () => statusCommand(s.ctx, {}));
+    s.clock.now = T("2026-10-20T12:00:00Z");
+    await step("freeze", () => freezeCommand(s.ctx, {}));
+    for (const f of ["audit/2026-q3/registration.json", "audit/2026-q3.manifest.json", "audit/2026-q3/manifest-commitment.json"]) rec[f] = existsSync(join(s.dir, f)) ? strip(JSON.parse(readFileSync(join(s.dir, f), "utf8"))) : null;
+    await step("verify", report);
+    await step("verifyCommand", () => verifyCommand(s.ctx, {}));
+    s.clock.now = T("2026-10-21T01:00:00Z");
+    await step("sample", () => sampleCommand(s.ctx, { through: 5 }));
+    await step("status", () => statusCommand(s.ctx, {}));
+    if (after) await step("after", () => after(s, report));
+    result[name] = rec;
   };
+  await scenario("json400", setupAuditRepo({ changes: makeChanges(400) }));
+  const org1 = fakeOrg({ owner: "acme", seed: 5, repos: [{ name: "widgets", prs: 120, pushes: 25, after: 3 }] });
+  await scenario("github1", setupAuditRepo({ changes: [], provider: "github", fetch: org1.fetch }), async (s, report) => {
+    org1.removeRepo("widgets");
+    return report();
+  });
+  const org2 = fakeOrg({ owner: "acme", seed: 5, repos: [{ name: "widgets", prs: 0, pushes: 0, empty: true }] });
+  await scenario("githubEmpty", setupAuditRepo({ changes: [], provider: "github", fetch: org2.fetch }));
+  writeFileSync(OUT, JSON.stringify(result).replace(/\/(private\/)?(var|tmp)\/[^"\s]*?prrla-audit-[A-Za-z0-9]+/g, "<DIR>"));
+});
+`;
+
+function dump(root: string, work: string, key: string, name: string): Record<string, Record<string, unknown>> {
+  const cfg = join(work, `${name}.config.mts`);
+  const test = join(work, `${name}.anchor.test.ts`);
+  const out = join(work, `${name}.json`);
+  writeFileSync(test, DUMP);
+  writeFileSync(
+    cfg,
+    `import { defineConfig } from "vitest/config";
+const R = ${JSON.stringify(root)};
+export default defineConfig({
+  resolve: { alias: { "pr-rla/provider": R + "/src/sdk/provider.ts", "pr-rla/ledger": R + "/src/sdk/ledger.ts", "pr-rla/testing": R + "/src/testing/index.ts" } },
+  server: { fs: { strict: false } },
+  test: { include: [${JSON.stringify(`${name}.anchor.test.ts`)}], setupFiles: [R + "/test/setup/network-deny.ts"], testTimeout: 120_000 },
+});
+`,
+  );
+  execFileSync(process.execPath, [join(ROOT, "node_modules", "vitest", "vitest.mjs"), "run", "--config", cfg, "--root", work], { cwd: work, env: { ...process.env, ANCHOR_ROOT: root, ANCHOR_OUT: out, ANCHOR_KEY: key }, stdio: "pipe", timeout: 170_000 });
+  return JSON.parse(readFileSync(out, "utf8")) as Record<string, Record<string, unknown>>;
 }
 
-const MANIFEST_KEYS = ["schema", "registrationSha256", "repos", "provider", "window", "frozenAt", "selector", "parameters", "protocolSha256", "funnel", "limitations", "N", "changes", "prRlaVersion", "sha256"];
-const COMMITMENT_KEYS = ["schema", "window", "manifestSha256", "N", "registrationSha256", "frozenAt", "seedRound", "seedRoundPublishesAt", "prRlaVersion"];
-const REGISTRATION_KEYS = ["schema", "repos", "window", "selector", "protocolSha256", "parameters", "beacon", "registeredAt", "timestamping", "plugins", "verdicts", "prRlaVersion"];
-const COMMON = {
-  selector: "e381d1db2c49bb41da0bc537d29e72608fbd7ff3fb2ad95d3341a41beff09b53",
-  parameters: "62b7dd0cb85dff956cf8f0e1da38d39736f76e34de89553b3f27e4d2e1abce69",
-  window: "003cc559ab6f9d44570e37728fb946ec49407458358531fcfebf537216b11e59",
-};
+describe("single-repo audits behave as master does (a pool of one), against the master build itself", () => {
+  it("json-file (400 changes), a GitHub repo, and an empty GitHub repo: every output, record and verify result is master's, but for the listed U8 changes", { timeout: 180_000 }, () => {
+    // master here, or origin/master in a fresh clone of this branch.
+    const commit = (name: string) => {
+      try {
+        return git("rev-parse", "--verify", "-q", `${name}^{commit}`);
+      } catch {
+        return "";
+      }
+    };
+    const master = commit("master") || commit("origin/master");
+    expect(master).toMatch(/^[0-9a-f]{40}$/);
+    const base = git("merge-base", "HEAD", master);
+    const work = mkdtempSync(join(tmpdir(), "prrla-anchor-"));
+    symlinkSync(join(ROOT, "node_modules"), join(work, "node_modules"));
+    try {
+      const baseRoot = join(work, "master");
+      mkdirSync(baseRoot);
+      execFileSync("sh", ["-c", `git -C ${JSON.stringify(ROOT)} archive ${base} | tar -x -C ${JSON.stringify(baseRoot)}`]);
+      symlinkSync(join(ROOT, "node_modules"), join(baseRoot, "node_modules"));
+      for (const f of ["test/helpers/fake-org.ts", "test/helpers/fake-github.ts"]) copyFileSync(join(ROOT, f), join(baseRoot, f));
+      const key = join(work, "signing-key.pem");
+      loadOrCreateKey(key);
+      const before = dump(baseRoot, work, key, "master");
+      const now = dump(ROOT, work, key, "branch");
 
-describe("single-repo audits are unchanged by U8 (a pool of one, byte for byte)", () => {
-  it("json-file provider, 400 changes: the manifest, commitment and registration are what master wrote", async () => {
-    const s = setupAuditRepo({ changes: makeChanges(400) });
-    const r = await freezeAt(s);
-    expect(Object.keys(r.m)).toEqual(MANIFEST_KEYS);
-    expect(Object.keys(r.cm)).toEqual(COMMITMENT_KEYS);
-    expect(Object.keys(r.reg)).toEqual(REGISTRATION_KEYS);
-    expect(r.reg.repos).toEqual({ kind: "repo", repo: "acme/widgets" });
-    expect(r.m.repos).toEqual([{ repo: "acme/widgets", repoId: null, defaultBranch: "main", headSha: null }]);
-    expect(r.m.N).toBe(400);
-    expect(r.m.frozenAt).toBe("2026-10-20T12:00:00Z");
-    expect(r.cm.frozenAt).toBe("2026-10-20T12:00:00Z");
-    expect(r.sections).toEqual({
-      ...COMMON,
-      changes: "66795f74c42f8c0a614d925893fd0dafa66e225fcbf1a6aac158c864b14e91e4",
-      funnel: "88be69a89a2d4b899a63df0c7947102cfdad9c037f922bf3395af06478c6d030",
-      limitations: "f06ae9dc6b24bf0c2d9789b8aa4e2387ff7d387c22e24360e94545b99059f3ff",
-    });
-    expect(s.out.join("\n")).not.toMatch(/freeze: /); // no pooled progress lines
-    expect(existsSyncCache(s)).toBe(false);
-    const v = await runVerify(s.ctx, { offline: false });
-    expect(v.checks.map((c) => [c.n, c.status])).toEqual([[1, "WARN"], [2, "WARN"], [3, "PASS"], [4, "SKIP"], [5, "PASS"], [6, "SKIP"], [7, "SKIP"]]);
-    expect(v.checks.find((c) => c.n === 5)!.summary).toBe("population 400/400 match");
-  });
-
-  it("GitHub provider, one repo of a synthetic org: the pinned head and every section are what master wrote", async () => {
-    const org = fakeOrg({ owner: "acme", seed: 5, repos: [{ name: "widgets", prs: 120, pushes: 25, after: 3 }] });
-    const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch });
-    const r = await freezeAt(s);
-    expect(Object.keys(r.m)).toEqual(MANIFEST_KEYS);
-    expect(r.m.repos).toEqual([{ repo: "acme/widgets", repoId: null, defaultBranch: "main", headSha: "29791b4e876b9ec17c0392c6208ab7f64bdcdbec" }]);
-    expect(r.m.N).toBe(104);
-    expect(r.sections).toEqual({
-      ...COMMON,
-      changes: "e73b1eb438126da16ce7896fb4d635f5cb5049de487d3bcfee7132c796e0600e",
-      funnel: "90332e104561708262a4fcba4991848bd56d7e51757964c67a114d39883f802a",
-      limitations: "d1460793ec0499e0569e079d51d62945213a1f5baf202a38394226a15c04edc0",
-    });
-    const v = await runVerify(s.ctx, { offline: false });
-    expect(v.checks.find((c) => c.n === 5)!.status).toBe("PASS");
-    expect(v.checks.find((c) => c.n === 5)!.details).toContain("history walked from the frozen head 29791b4e876b…");
+      // The intended single-repo changes of the U8 fix round, and nothing else:
+      // 1. a single repo deleted after freeze: master's verify threw the provider's error; it is now INCOMPLETE (exit 6);
+      const after = (now.github1!.steps as Record<string, { value?: { ok: boolean; checks: unknown[][] } }>).after!.value!;
+      expect((before.github1!.steps as Record<string, { threw?: string }>).after!.threw).toMatch(/^GitHub POST \/graphql: HTTP 404/);
+      expect(after.ok).toBe(false);
+      expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt"]);
+      delete (before.github1!.steps as Record<string, unknown>).after;
+      delete (now.github1!.steps as Record<string, unknown>).after;
+      // 2. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
+      expect(now).toEqual(before);
+      // And the scenarios really ran: master's own outputs, checked here so that an empty dump cannot pass.
+      const steps = (s: string) => now[s]!.steps as Record<string, { value?: unknown; threw?: string; out: string[] }>;
+      expect(steps("json400").freeze!.value).toBe(0);
+      expect((now.json400!["audit/2026-q3.manifest.json"] as { N: number }).N).toBe(400);
+      expect(steps("github1").verifyCommand!.out.at(-1)).toBe("VERIFIED");
+      expect((now.github1!["audit/2026-q3.manifest.json"] as { repos: unknown[] }).repos).toEqual([{ repo: "acme/widgets", repoId: null, defaultBranch: "main", headSha: "29791b4e876b9ec17c0392c6208ab7f64bdcdbec" }]);
+      expect(steps("githubEmpty").freeze!.threw).toBe("acme/widgets has no default branch");
+      expect(steps("githubEmpty").statusBeforeFreeze!.threw).toBe("acme/widgets has no default branch");
+      expect(now.githubEmpty!["audit/2026-q3.manifest.json"]).toBeNull();
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });
-
-const existsSyncCache = (s: Scenario) => existsSync(join(s.dir, ".pr-rla", "cache"));
