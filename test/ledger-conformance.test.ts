@@ -105,6 +105,10 @@ describe("the ledger kit fails ledgers that break the rules", () => {
     expect(ignored.message).toMatch(/no counted verdict is dated before/);
     const counted = await result(() => memory({ verdicts: [{ ...early, reviewer: "alice" }] }), f, "verdict-before-seed");
     expect(counted.ok, counted.message).toBe(true);
+    // An early event the core ignores for another reason (it names a change that was never drawn) is not a refusal either.
+    const notDrawn = await result(() => memory({ verdicts: [{ ...early, reviewer: "alice", changeId: "json:acme/widgets#999" }] }), f, "verdict-before-seed");
+    expect(notDrawn.ok).toBe(false);
+    expect(notDrawn.message).toMatch(/no counted verdict is dated before/);
   });
 
   it("checkpoint-round-trip: unstable history, a counted verdict missing from it, and an erasure that does not show", async () => {

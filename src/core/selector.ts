@@ -10,6 +10,13 @@ export interface Selector {
   authors: string[] | "any";
   /** A change must carry every listed label. Labels can change after freeze; avoid them for strata you need to re-verify. */
   labels: string[];
+  /**
+   * `no-human-review` (default): no APPROVED or CHANGES_REQUESTED review that counts, i.e. one by a non-bot
+   * account that is not the author, submitted at or before the change landed (`isHumanDecision`).
+   * Known semantic limit: an approval is not tied to the commit it approved, so an approval of an earlier
+   * head commit still counts; only a dismissed or reset approval (`DISMISSED`) stops counting.
+   * `no-review`: no review object at all as of freeze time. `any`: no filter.
+   */
   unreviewed: Unreviewed;
   merged_by: MergedBy;
   max_changed_lines: number | null;

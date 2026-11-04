@@ -98,10 +98,11 @@ export interface VerifyReport {
 const n = (x: number) => x.toLocaleString("en-US");
 
 /** Adds anchor findings (ledger index binding, checkpoint coverage) to a check: FAIL beats WARN beats whatever it was. */
-function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): void {
+function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): boolean {
   c.details.push(...f.fails.map((d) => `FAIL ${d}`), ...f.warns.map((d) => `WARN ${d}`), ...f.notes);
   if (f.fails.length) c.status = "FAIL";
   else if (f.warns.length && c.status === "PASS") c.status = "WARN";
+  return f.fails.length > 0;
 }
 
 /**
@@ -375,7 +376,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
     // The index file is local: its hash is checked even when the tracker is not read.
-    if (a.draws && a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
+    if (a.draws && a.ledgerIndex !== undefined) {
+      if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
+    }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
     const ledger = deps.ledger;

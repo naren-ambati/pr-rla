@@ -9,6 +9,7 @@ import { buildProgram } from "../dist/cli.js";
 import { nodeContext } from "../dist/commands/context.js";
 import { verifyQuicknetBeacon } from "../dist/beacon/drand.js";
 import githubIssues from "../dist/ledgers/github-issues/index.js";
+import { ledgerIndexSha256 } from "../dist/ledgers/issue-index.js";
 
 const fixture = (f) => JSON.parse(readFileSync(new URL(`../test/fixtures/ledgers/github/${f}`, import.meta.url), "utf8"));
 /** Serves the recorded exchanges; an unrecorded request throws, so the demo stays offline. */
@@ -73,7 +74,7 @@ await run(["register"], offline);
 clock = Date.parse("2026-10-20T12:00:00Z");
 await run(["freeze"], offline);
 clock = Date.parse("2026-10-21T01:00:00Z");
-await run(["sample"], offline);
+await run(["sample", "--through", "1"], offline); // one draw: the recorded tracker holds one issue
 console.log("  (a json-file audit of 200 changes, registered, frozen and sampled offline; its ledger is now github-issues over a recorded tracker)\n");
 for (const [f, ledger] of [
   ["relabel-same-nodejs-node-67038.json", "{ use: github-issues, options: { repo: nodejs/node, labels: { pass: commit-queue-squash, fail: commit-queue-rebase } } }"],
@@ -87,6 +88,8 @@ for (const [f, ledger] of [
   const reg = JSON.parse(readFileSync(join(dir, "audit/2026-q3/registration.json"), "utf8"));
   const index = { ...rec.index, protocolSha256: reg.record.protocolSha256, issues: [{ ...rec.index.issues[0], draw: 1, changeId: draws.draws[0].changeId }] };
   writeFileSync(join(dir, "audit/2026-q3/ledger-index.json"), JSON.stringify(index));
+  // What sample does after a ledger publishes: bind the index to the draws (verify compares this hash).
+  writeFileSync(join(dir, "audit/2026-q3/draws.json"), JSON.stringify({ ...draws, ledgerIndexSha256: ledgerIndexSha256(index) }, null, 2));
   console.log(`$ pr-rla verify     (ledger: ${f.replace(".json", "")}, recorded)`);
   const { code, out } = await run(["verify"], replay(rec));
   // Check 7 and the verdict line only: checks 1–6 are the json-file audit's own.
