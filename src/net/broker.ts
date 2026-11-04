@@ -26,8 +26,8 @@ import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
  * 1. host allowlist (each redirect hop re-checked; redirects are followed here, by hand);
  * 2. read-only guard (GET, HEAD, a GraphQL query; provider requests always; ledger
  *    writes only under their declared writePaths);
- * 3. credential swap (`prrla-cred:<ENV>`, `prrla-basic:<USER_ENV>:<TOKEN_ENV>`) for
- *    declared hosts only;
+ * 3. credential swap (`prrla-cred:<ENV>`, `prrla-basic:<USER_ENV>:<TOKEN_ENV>`) for the
+ *    granted https origins only (host and port exact), never after a redirect from https to http;
  * 4. rate governor: one budget per host, shared by every caller (./governor.ts);
  * 5. timeout by destination (SCM 30 s, authority 15 s, drand 15 s, Rekor 30 s);
  * 6. retry: the only retrier for callers wired to it (the phase-2 policy, src/sdk/http.ts);
@@ -52,6 +52,10 @@ export function roleOf(pluginId: string): CallerRole {
 
 export interface Credential {
   value: string;
+  /**
+   * The https origins it may go to, as URL hosts (`host`, or `host:port` for another port): the
+   * scheme is always https, and the port must match exactly (finding 4).
+   */
   hosts: Set<string>;
   /**
    * Locked but not approved by the person running the command (src/plugins/approvals.ts): never
@@ -217,13 +221,16 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     }
   }
 
-  // Step 3.
-  function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean): Headers {
+  // Step 3. `downgraded`: an earlier hop of this request redirected from https to http.
+  function swapCredentials(call: Call, url: URL, original: Headers, crossOrigin: boolean, downgraded: boolean): Headers {
     const creds = p.credentialsFor(call.pluginId);
     const secret = (env: string): string => {
       const c = creds.get(env);
       if (c?.withheld) throw new CredentialNotApproved(env, url.host, call.pluginId, c.withheld.approve);
-      if (!c || !(c.hosts.has(url.host) || c.hosts.has(url.hostname))) throw new CredentialHostMismatch(env, url.host, c ? [...c.hosts] : []);
+      const allowed = c ? [...c.hosts] : [];
+      if (url.protocol !== "https:") throw new CredentialHostMismatch(env, url.host, allowed, { name: url.origin, overHttps: true });
+      if (downgraded) throw new CredentialHostMismatch(env, url.host, allowed, { name: `${url.origin} after a redirect from https to http`, overHttps: true });
+      if (!c || !c.hosts.has(url.host)) throw new CredentialHostMismatch(env, url.host, allowed);
       return c.value;
     };
     const out = new Headers();
@@ -278,13 +285,15 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     let method = (call.req.method ?? "GET").toUpperCase();
     let body: Body | null = call.req.body ?? null;
     const original = new Headers(call.req.headers);
+    let downgraded = false;
     for (let hop = 0; ; hop++) {
       if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
       const graphql = method === "POST" && isGraphqlPath(url.pathname);
       checkReadOnly(call, url, method, graphql, text);
-      const headers = swapCredentials(call, url, original, url.origin !== call.url.origin);
+      // After a redirect from https to http, no credential is swapped and no raw secret header is sent, to the end of the chain.
+      const headers = swapCredentials(call, url, original, url.origin !== call.url.origin || downgraded, downgraded);
       const g: GovernedRequest = {
         host: url.hostname,
         path: url.pathname,
@@ -314,7 +323,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
           body = null;
           original.delete("content-type");
         }
-        url = new URL(location, url);
+        const next = new URL(location, url);
+        if (url.protocol === "https:" && next.protocol !== "https:") downgraded = true;
+        url = next;
         continue;
       }
       return withUrl(res, url.href);

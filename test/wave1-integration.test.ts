@@ -169,7 +169,7 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
     expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: [], hostFromOption: "base_url" }]);
     const gitea = recordingGitea();
     const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options: http }, dir);
-    await expect(provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] })).rejects.toThrow(/credential GITEA_TOKEN may be sent only to no host, not forge\.example\.com; nothing was sent/);
+    await expect(provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] })).rejects.toThrow(/credential GITEA_TOKEN may be sent only to no host over https, not http:\/\/forge\.example\.com; nothing was sent/);
     expect(gitea.seen).toEqual([]);
   });
 

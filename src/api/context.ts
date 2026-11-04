@@ -1,7 +1,7 @@
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
-import { localConsent, type LocalConsent } from "../plugins/approvals.js";
+import { httpsOrigin, localConsent, type LocalConsent } from "../plugins/approvals.js";
 import { builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
@@ -173,7 +173,9 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
       const credentials = new Map<string, Credential>();
       for (const c of g.credentials ?? []) {
         const value = env[c.env];
-        if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts: new Set(c.hosts), withheld: c.withheld } : { value, hosts: new Set(c.hosts) });
+        // As the broker compares them: URL hosts of https origins (lowercase, the default port left out).
+        const hosts = new Set(c.hosts.flatMap((h) => (httpsOrigin(h) ? [new URL(httpsOrigin(h)!).host] : [])));
+        if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts, withheld: c.withheld } : { value, hosts });
       }
       grants.set(pluginId, { trust: g.trust, hosts: new Set(g.hosts ?? []), writePaths: new Set(g.writePaths ?? []), credentials });
       if (g.budgetFamily) {

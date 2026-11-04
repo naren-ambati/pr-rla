@@ -176,6 +176,62 @@ describe("FR10.5: credentials are swapped in only for declared hosts", () => {
   });
 });
 
+describe("finding 4: a credential goes only to its exact https origin, never in clear text", () => {
+  const creds = new Map([
+    ["JIRA_TOKEN", { value: "tok-123", hosts: new Set(["acme.atlassian.net"]) }],
+    ["JIRA_EMAIL", { value: "me@acme.example", hosts: new Set(["acme.atlassian.net"]) }],
+    ["FORGE_TOKEN", { value: "forge-456", hosts: new Set(["forge.example.com:8443"]) }],
+  ]);
+  const setup = (respond?: (u: URL) => Response) => {
+    const t = transport(respond);
+    const b = createBroker({ credentialsFor: () => creds }, { fetch: t.f });
+    return { t, f: b.bind("ledger:jira"), raw: b.bind("provider:github") };
+  };
+  const bearer = { headers: { authorization: "Bearer prrla-cred:JIRA_TOKEN" } };
+
+  it("refuses http: for the granted host, and sends nothing (it used to send Basic auth in clear text)", async () => {
+    const { t, f } = setup();
+    await expect(f("http://acme.atlassian.net/rest/api/3/myself", { headers: { authorization: "prrla-basic:JIRA_EMAIL:JIRA_TOKEN" } })).rejects.toThrow("credential JIRA_EMAIL may be sent only to acme.atlassian.net over https, not http://acme.atlassian.net; nothing was sent");
+    await expect(f("http://acme.atlassian.net/x", bearer)).rejects.toMatchObject({ code: "CREDENTIAL_HOST_MISMATCH", next: "use the https URL of acme.atlassian.net; a credential is never sent in clear text" });
+    expect(t.seen).toEqual([]);
+  });
+
+  it("refuses another port of the granted host; a grant with a port matches only that port; the default port is the same origin", async () => {
+    const { t, f } = setup();
+    await expect(f("https://acme.atlassian.net:8443/x", bearer)).rejects.toThrow("credential JIRA_TOKEN may be sent only to acme.atlassian.net, not acme.atlassian.net:8443; nothing was sent");
+    await expect(f("https://forge.example.com/x", { headers: { authorization: "token prrla-cred:FORGE_TOKEN" } })).rejects.toThrow(/may be sent only to forge\.example\.com:8443, not forge\.example\.com;/);
+    await f("https://forge.example.com:8443/x", { headers: { authorization: "token prrla-cred:FORGE_TOKEN" } });
+    await f("https://ACME.atlassian.net:443/x", bearer);
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([
+      ["https://forge.example.com:8443/x", "token forge-456"],
+      ["https://acme.atlassian.net/x", "Bearer tok-123"],
+    ]);
+  });
+
+  it("never swaps on a hop after a redirect from https to http, even back on https; a raw secret header is dropped from then on too", async () => {
+    const hops = (u: URL) => (u.pathname === "/down" ? raw("", 302, { location: "http://acme.atlassian.net/landing" }) : u.pathname === "/landing" && u.protocol === "http:" ? raw("", 302, { location: "https://acme.atlassian.net/back" }) : ok());
+    const { t, f, raw: builtin } = setup(hops);
+    await expect(f("https://acme.atlassian.net/down", bearer)).rejects.toThrow("credential JIRA_TOKEN may be sent only to acme.atlassian.net over https, not http://acme.atlassian.net; nothing was sent");
+    // Before the fix the http hop carried "Bearer tok-123".
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([["https://acme.atlassian.net/down", "Bearer tok-123"]]);
+    t.seen.length = 0;
+    await builtin("https://acme.atlassian.net/down", { headers: { authorization: "Bearer raw-token" } });
+    expect(t.seen.map((s) => [s.url, s.headers.get("authorization")])).toEqual([
+      ["https://acme.atlassian.net/down", "Bearer raw-token"],
+      ["http://acme.atlassian.net/landing", null],
+      ["https://acme.atlassian.net/back", null],
+    ]);
+  });
+
+  it("a hostFromOption grant takes its port from the URL, and only an https URL grants anything", async () => {
+    const { credentialGrants } = await import("../src/plugins/host.js");
+    const declared = [{ env: "T", hosts: ["codeberg.org"], hostFromOption: "base_url" }];
+    expect(credentialGrants(declared, { base_url: "https://forge.example.com:8443/" })).toEqual([{ env: "T", hosts: ["forge.example.com:8443"], hostFromOption: "base_url" }]);
+    expect(credentialGrants(declared, { base_url: "https://forge.example.com:443" })).toEqual([{ env: "T", hosts: ["forge.example.com"], hostFromOption: "base_url" }]);
+    expect(credentialGrants(declared, { base_url: "http://forge.example.com" })).toEqual([{ env: "T", hosts: [], hostFromOption: "base_url" }]);
+  });
+});
+
 describe("FR10.2: the broker retries, with backoff and jitter, honouring rate-limit headers", () => {
   it("retries 503, 429 (Retry-After) and a truncated JSON body, then succeeds", async () => {
     const t = sequence(() => raw("unavailable", 503), () => raw("slow down", 429, { "retry-after": "9" }), () => raw('{"a":', 200), () => ok({ ok: true }));

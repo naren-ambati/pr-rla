@@ -120,14 +120,19 @@ export class WritePathNotAllowed extends BrokerError {
   }
 }
 
-/** Step 3: a credential placeholder addressed to a host outside that credential's hosts. Nothing was sent. */
+/**
+ * Step 3: a credential placeholder addressed to an origin outside that credential's grant: another
+ * host or port, a scheme other than https, or any hop after a redirect from https to http. Nothing
+ * was sent. `target` names the refused destination when the host alone does not say why.
+ */
 export class CredentialHostMismatch extends BrokerError {
   constructor(
     readonly env: string,
     host: string,
     readonly allowed: readonly string[],
+    target: { name: string; overHttps: true } | null = null,
   ) {
-    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}, not ${host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
+    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}${target ? " over https" : ""}, not ${target?.name ?? host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, target ? `use the https URL of ${host}; a credential is never sent in clear text` : `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
     this.name = "CredentialHostMismatch";
   }
 }
