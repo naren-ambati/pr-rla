@@ -7,6 +7,7 @@ import { fakeBitbucketCloud } from "./helpers/fake-bitbucket-cloud.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
 import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
 import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
+import { applySelector, normalizeSelector } from "../src/core/selector.js";
 
 /** Bitbucket Cloud's 429 carries no rate-limit headers at all (seen live), so only backoff applies. */
 const bot = (login: string) => ({ login: `${login}[bot]`, kind: "bot" as const });
@@ -91,6 +92,19 @@ describe("Bitbucket Cloud provider on a synthetic repository: every merge strate
     };
     expect(await listings(50)).toBe(1);
     expect(await listings(3)).toBeGreaterThan(4);
+  });
+
+  it("walks from request.head (FR7.2); account uuids are Actor.id (FR7.3)", async () => {
+    const late = scmScenario({ latePush: true });
+    const p = new BitbucketCloudProvider({}, { cwd: ".", env: {}, log: () => {}, fetch: fakeBitbucketCloud(late, { pageLen: 3 }).fetch, now: () => Date.parse("2026-08-05T00:00:00Z") });
+    const now = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["pull_request", "direct_push"] });
+    expect(now.headSha).toBe(OID("LM"));
+    expect(now.changes.map((c) => c.id)).toContain(x.late.id);
+    const frozen = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["pull_request", "direct_push"], head: late.frozenHead });
+    expect(frozen.headSha).toBe(late.frozenHead);
+    expect(frozen.changes.map((c) => c.id).sort()).toEqual([...x.all].sort());
+    const rebase = frozen.changes.find((c) => c.id === x.ids.rebase)!;
+    expect([rebase.author.id, rebase.mergedBy?.id, rebase.reviews[0]!.author.id]).toEqual(["{bob}", "{merge-bot}", "{dave}"]);
   });
 
   it("is registered as bitbucket-cloud, alias bitbucket", async () => {
@@ -197,5 +211,34 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
     expect(r.diagnostics).toEqual(rec.expected.diagnostics);
     expect(r.diagnostics).toContainEqual({ label: "default-branch commits in window", value: 14 });
     expect(r.diagnostics).toContainEqual({ label: "commits linked to a merged PR", value: 10 });
+  });
+});
+
+describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs, 2026-10-06 (a release branch merged by a push, FR7.6)", () => {
+  type Rec = Recording & { options: Record<string, unknown>; repo: string; window: { opensAt: string; closesAt: string }; expected: { ids: string[]; diagnostics: unknown[] } };
+  const rec = readJsonFixture<Rec>("bitbucket-cloud", "bamboo-specs-2026-10-06.json");
+  const push = (sha: string) => `bitbucket-cloud:atlassian/bamboo-specs@${sha}`;
+  // "[bamboo] Automated branch merge (from atlassian_bamboo_13_0_branch …)": Tardigrade's merge, pushed to master.
+  const merge = "a9f178ae03b65a3190e4eb98f9454c7fcad71c91";
+  // What its second parent brought in that day: #730's merge into the 13.0 branch, #729's into 12.1, and their branch merges.
+  const release = ["735553ca0c7a85165fc2b75e16e629c59f0023bf", "78611696c1bbd7fa102093499a515b3b09d6180c", "4f1f0c51735660b85d93d431c2fa859911972895", "9470b7304f0e9739e42461ad6435afb336bcb869"];
+  const make = (h?: ConformanceHarness) => {
+    const base = { cwd: ".", env: {}, log: () => {}, fetch: replayFetch(rec) as typeof fetch };
+    return new BitbucketCloudProvider(rec.options, { ...(h ? h.context(base) : base), now: () => Date.parse(rec.recordedAt) });
+  };
+
+  it("5 direct pushes: the pushed merge, and 4 release-branch commits whose landedVia is that merge", async () => {
+    const r = await make().listChanges({ repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] });
+    expect(r.diagnostics).toEqual(rec.expected.diagnostics);
+    expect(Object.fromEntries(r.changes.map((c) => [c.mergeSha, c.landedVia ?? null]))).toEqual({ [merge]: null, ...Object.fromEntries(release.map((s) => [s, merge])) });
+    expect(r.limitations.join(" ")).toMatch(/landedVia names the pushed merge commit/);
+  });
+
+  it("direct_push_via_merge: exclude removes the release-branch commits from the stratum; include (the default) keeps them", async () => {
+    const r = await make().listChanges({ repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] });
+    const sel = (direct_push_via_merge: "include" | "exclude") => applySelector(r.changes, normalizeSelector({ unreviewed: "no-human-review", direct_push_via_merge }), rec.recordedAt);
+    expect(sel("include").selected.map((c) => c.id).sort()).toEqual([merge, ...release].map(push).sort());
+    expect(sel("exclude").selected.map((c) => c.id)).toEqual([push(merge)]);
+    expect(sel("exclude").funnel.find((s) => s.step === "excluding direct pushes via a pushed merge")).toEqual({ step: "excluding direct pushes via a pushed merge", count: 1 });
   });
 });

@@ -70,9 +70,15 @@ export function normalizeUser(u: BbUser | null | undefined): Actor {
   return bot ? { login: name.endsWith(BOT_SUFFIX) ? name : `${name}${BOT_SUFFIX}`, kind: "bot" } : { login: name, kind: "human" };
 }
 
+/** `normalizeUser` plus the account's `uuid` as its stable id (Actor.id, U3): nicknames are neither unique nor permanent. */
+export function account(u: BbUser | null | undefined): Actor {
+  const a = normalizeUser(u);
+  return u?.uuid ? { ...a, id: u.uuid } : a;
+}
+
 /** A commit's author: the linked account if Bitbucket matched one, else the git identity. */
 export function normalizeCommitAuthor(c: Pick<BbCommit, "author">): Actor {
-  if (c.author?.user) return normalizeUser(c.author.user);
+  if (c.author?.user) return account(c.author.user);
   const raw = c.author?.raw ?? "";
   const m = /^(.*?)\s*<([^>]*)>\s*$/.exec(raw);
   const name = (m ? m[1] : raw) ?? "";
@@ -97,15 +103,15 @@ export function buildReviews(args: { author: BbUser | null; activity: readonly B
   for (const a of args.activity) {
     if ("approval" in a && a.approval) {
       const x = a.approval as { date: string; user: BbUser };
-      out.push({ author: normalizeUser(x.user), state: "APPROVED", submittedAt: isoUtcSeconds(x.date), key: userKey(x.user) });
+      out.push({ author: account(x.user), state: "APPROVED", submittedAt: isoUtcSeconds(x.date), key: userKey(x.user) });
     } else if ("changes_requested" in a && a.changes_requested) {
       const x = a.changes_requested as { date: string; user: BbUser };
-      out.push({ author: normalizeUser(x.user), state: "CHANGES_REQUESTED", submittedAt: isoUtcSeconds(x.date), key: userKey(x.user) });
+      out.push({ author: account(x.user), state: "CHANGES_REQUESTED", submittedAt: isoUtcSeconds(x.date), key: userKey(x.user) });
     } else if ("comment" in a && a.comment) {
       const x = a.comment as { created_on: string; user: BbUser | null };
       const k = userKey(x.user);
       if (!x.user || k === authorKey) continue;
-      out.push({ author: normalizeUser(x.user), state: "COMMENTED", submittedAt: isoUtcSeconds(x.created_on), key: k });
+      out.push({ author: account(x.user), state: "COMMENTED", submittedAt: isoUtcSeconds(x.created_on), key: k });
     }
   }
   // Keep only each user's FIRST comment (activity is newest first).
@@ -119,8 +125,8 @@ export function buildReviews(args: { author: BbUser | null; activity: readonly B
   for (const p of args.participants) {
     const k = userKey(p.user);
     const at = isoUtcSeconds(p.participated_on ?? args.mergedAt);
-    if (p.state === "approved" && !reviews.some((r) => r.key === k && r.state === "APPROVED")) reviews.push({ author: normalizeUser(p.user), state: "APPROVED", submittedAt: at, key: k });
-    if (p.state === "changes_requested" && !reviews.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) reviews.push({ author: normalizeUser(p.user), state: "CHANGES_REQUESTED", submittedAt: at, key: k });
+    if (p.state === "approved" && !reviews.some((r) => r.key === k && r.state === "APPROVED")) reviews.push({ author: account(p.user), state: "APPROVED", submittedAt: at, key: k });
+    if (p.state === "changes_requested" && !reviews.some((r) => r.key === k && r.state === "CHANGES_REQUESTED")) reviews.push({ author: account(p.user), state: "CHANGES_REQUESTED", submittedAt: at, key: k });
   }
   return reviews
     .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0))
@@ -153,15 +159,15 @@ export function normalizePullRequest(repo: string, pr: BbPullRequest, args: { me
     url: pr.links?.html?.href ?? `${args.webBase}/${repo}/pull-requests/${pr.id}`,
     mergeSha: args.mergeSha.toLowerCase(),
     mergedAt: isoUtcSeconds(args.mergedAt),
-    author: normalizeUser(pr.author),
-    mergedBy: args.mergedBy ? normalizeUser(args.mergedBy) : null,
+    author: account(pr.author),
+    mergedBy: args.mergedBy ? account(args.mergedBy) : null,
     reviews: args.reviews,
     changedLines: args.changedLines,
     labels: [],
   };
 }
 
-export function normalizeDirectPush(repo: string, c: BbCommit, changedLines: number, webBase: string): ChangeRecord {
+export function normalizeDirectPush(repo: string, c: BbCommit, changedLines: number, webBase: string, landedVia?: string): ChangeRecord {
   const sha = c.hash.toLowerCase();
   return {
     id: `bitbucket-cloud:${repo}@${sha}`,
@@ -175,5 +181,6 @@ export function normalizeDirectPush(repo: string, c: BbCommit, changedLines: num
     reviews: [],
     changedLines,
     labels: [],
+    ...(landedVia ? { landedVia } : {}),
   };
 }
