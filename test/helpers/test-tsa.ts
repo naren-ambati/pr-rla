@@ -107,6 +107,10 @@ export interface MintOptions {
   status?: number;
   /** Name this certificate in ESSCertIDv2 instead of the signer (a mismatch fixture). */
   essFor?: pkijs.Certificate;
+  /** Identify the signer by a SubjectKeyIdentifier (SHA-1 of its key) instead of issuer and serial (RFC 5652 §5.3 allows both). */
+  sidSki?: boolean;
+  /** More certificates to carry after the signer's. */
+  extraCerts?: pkijs.Certificate[];
 }
 
 /** A DER TimeStampResp over `digestHex`, signed by the authority's test signer. */
@@ -141,8 +145,16 @@ export async function mintResponse(a: TestAuthority, o: MintOptions): Promise<Ui
   const sd = new pkijs.SignedData({
     version: 3,
     encapContentInfo: new pkijs.EncapsulatedContentInfo({ eContentType: "1.2.840.113549.1.9.16.1.4", eContent: new asn1js.OctetString({ valueHex: ab(tstDer) }) }),
-    signerInfos: [new pkijs.SignerInfo({ version: 1, sid: new pkijs.IssuerAndSerialNumber({ issuer: a.signer.issuer, serialNumber: a.signer.serialNumber }), signedAttrs: new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: attrs }) })],
-    ...(o.includeCerts === false ? {} : { certificates: [a.signer] }),
+    signerInfos: [
+      new pkijs.SignerInfo({
+        version: o.sidSki ? 3 : 1,
+        sid: o.sidSki
+          ? new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 0 }, valueHex: ab(new Uint8Array(createHash("sha1").update(a.signer.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView).digest())) })
+          : new pkijs.IssuerAndSerialNumber({ issuer: a.signer.issuer, serialNumber: a.signer.serialNumber }),
+        signedAttrs: new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: attrs }),
+      }),
+    ],
+    ...(o.includeCerts === false ? {} : { certificates: [a.signer, ...(o.extraCerts ?? [])] }),
   });
   await sd.sign(a.signerKey, 0, a.hash);
   const token = new pkijs.ContentInfo({ contentType: "1.2.840.113549.1.7.2", content: sd.toSchema(true) });
