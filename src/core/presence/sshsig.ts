@@ -30,7 +30,7 @@ export interface SecurityKeySignature {
   flags: number;
   /** The authenticator's signature counter, as signed. */
   counter: number;
-  /** UP: the flags say a person was present (typically a touch). */
+  /** UP: the authenticator set its user-presence flag (after a touch, on a hardware key; a software-emulated authenticator sets it at will, T16). */
   userPresent: boolean;
   /** UV: the flags say the user was verified (PIN or biometric). */
   userVerified: boolean;

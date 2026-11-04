@@ -277,7 +277,7 @@ export class GitFileLedger implements Ledger {
 export default defineLedger<GitFileLedgerOptions>({
   ledgerApiVersion: LEDGER_API_VERSION,
   name: "git-file",
-  description: "verdicts.jsonl in the audit repo; git history is the tamper trail, and verdicts signed one by one with registered SSH keys give account or presence provenance",
+  description: "verdicts.jsonl in the audit repo; git history is the tamper trail, and verdicts signed one by one with registered SSH keys give account or presence (user-presence flag verified; key hardware not attested) provenance",
   create: (options: GitFileLedgerOptions, ctx: LedgerContext) => {
     if (options?.require_signed !== undefined && typeof options.require_signed !== "boolean") throw new Error("option require_signed must be true or false");
     if (options?.file !== undefined && typeof options.file !== "string") throw new Error("option file must be a file name");

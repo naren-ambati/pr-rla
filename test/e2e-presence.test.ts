@@ -20,7 +20,7 @@ import { recordedBeacon } from "./helpers/fixtures.js";
 import { commitAll } from "./helpers/signed-commits.js";
 import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
 import { NAMESPACE, bindingOf, signedLine } from "./helpers/verdict-lines.js";
-import { claimsIn, jsonSentences, unlabelledPresence } from "./helpers/wording.js";
+import { claimsIn, claimsInText, jsonSentences, markdownSentences, uncoveredSentences, unlabelledPresence, vettedSet, type VettedList } from "./helpers/wording.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
 /**
@@ -268,6 +268,11 @@ describe("finding 9: every printed level is labelled, and no output claims hardw
     expect(all).toContain(PRESENCE_LABEL);
     expect(unlabelledPresence(all)).toEqual([]);
     expect(claimsIn(all)).toEqual([]);
+    // P4 (finding 7): the allow-list over every printed line and every --json sentence, as over the docs.
+    const vetted = vettedSet(JSON.parse(readFileSync(new URL("./fixtures/wording/vetted.json", import.meta.url), "utf8")) as VettedList);
+    const printed = [...all.split("\n").flatMap(markdownSentences), ...jsons.flatMap(jsonSentences).flatMap(markdownSentences)];
+    expect(uncoveredSentences(printed, vetted)).toEqual([]);
+    expect(claimsInText(printed.join("\n"))).toEqual([]);
     const sentences = jsons.flatMap(jsonSentences);
     expect(sentences.some((x) => x.includes(PRESENCE_LABEL))).toBe(true);
     expect(unlabelledPresence(sentences.join("\n"))).toEqual([]);
