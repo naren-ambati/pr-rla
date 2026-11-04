@@ -5,9 +5,11 @@ import {
   checkCommitSignature,
   dearmorSshsig,
   isAllowedSignerEntry,
+  isSmallOrderEd25519,
   lineProvenance,
   matchPatternList,
   parseAllowedSigner,
+  parsePublicKeyBlob,
   parsePublicKeyText,
   parseSshsig,
   provenanceLabel,
@@ -310,5 +312,52 @@ describe("the verdict rules a registration fixes (FR3.8, FR9.1, FR9.3, FR9.4)", 
     expect(() => registeredVerdicts({ ...issues, reviewers: [sk] })).toThrow(/lists SSH keys \(bob \(sk-ssh-ed25519@openssh.com SHA256:.*\)\), but ledger github-issues reads accounts, not signed commits/);
     // require_signed is a git-file option: another ledger ignores it.
     expect(registeredVerdicts({ ...issues, requireSigned: true })).toEqual({ minProvenance: "account", reviewers: null });
+  });
+});
+
+describe("hardening after review (findings 6 and 12)", () => {
+  /** An RSA public-key blob with this exponent and the 2048-bit test key's modulus. */
+  function rsaBlob(e: number[]): Uint8Array {
+    const str = (b: Uint8Array) => Buffer.concat([Buffer.from([(b.length >>> 24) & 0xff, (b.length >>> 16) & 0xff, (b.length >>> 8) & 0xff, b.length & 0xff]), Buffer.from(b)]);
+    const n = Buffer.from(keys["ssh-rsa"].blob).subarray(-257); // mpint n: 0x00, then 256 bytes
+    return new Uint8Array(Buffer.concat([str(Buffer.from("ssh-rsa")), str(Uint8Array.from(e)), str(n)]));
+  }
+
+  it("finding 6: a non-empty reserved field is refused, whatever the signature covers (OpenSSH signs and verifies over an empty one)", () => {
+    const k = keys["ssh-ed25519"];
+    expect(verifySshsig(k.sign(msg, { reservedBlob: "X", reservedSigned: "X" }), msg, "git")).toMatchObject({ ok: false, problem: "the SSHSIG reserved field is not empty (1 bytes)" });
+    expect(verifySshsig(k.sign(msg, { reservedBlob: "X", reservedSigned: "" }), msg, "git")).toMatchObject({ ok: false, problem: "the SSHSIG reserved field is not empty (1 bytes)" });
+    expect(verifySshsig(k.sign(msg), msg, "git").ok).toBe(true);
+  });
+
+  it("a signature algorithm that does not match the key (or its curve) is refused", () => {
+    expect(verifySshsig(keys["ecdsa-sha2-nistp256"].sign(msg, { algorithm: "ecdsa-sha2-nistp384" }), msg, "git")).toMatchObject({ ok: false, problem: 'a ecdsa-sha2-nistp256 key cannot make a "ecdsa-sha2-nistp384" signature' });
+  });
+
+  it("finding 12: an RSA public exponent of 1 or an even one is refused; 3 and 65537 are accepted", () => {
+    expect(() => parsePublicKeyBlob(rsaBlob([1]))).toThrow(/public exponent is 1 or even/);
+    expect(() => parsePublicKeyBlob(rsaBlob([2]))).toThrow(/public exponent is 1 or even/);
+    expect(() => parsePublicKeyBlob(rsaBlob([1, 0, 0]))).toThrow(/public exponent is 1 or even/);
+    expect(parsePublicKeyBlob(rsaBlob([3])).bits).toBe(2048);
+    expect(parsePublicKeyBlob(rsaBlob([1, 0, 1])).bits).toBe(2048);
+  });
+
+  it("finding 12: small-order Ed25519 public keys are refused, with either sign bit", () => {
+    for (const h of ["0100000000000000000000000000000000000000000000000000000000000000", "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa", "0000000000000000000000000000000000000000000000000000000000000080"]) {
+      expect(isSmallOrderEd25519(Uint8Array.from(Buffer.from(h, "hex"))), h).toBe(true);
+      const blob = Buffer.concat([Buffer.from([0, 0, 0, 11]), Buffer.from("ssh-ed25519"), Buffer.from([0, 0, 0, 32]), Buffer.from(h, "hex")]);
+      expect(() => parsePublicKeyBlob(new Uint8Array(blob))).toThrow(/is a point of small order/);
+    }
+    expect(isSmallOrderEd25519(new Uint8Array(Buffer.from(keys["ssh-ed25519"].blob).subarray(-32)))).toBe(false);
+  });
+
+  it("finding 12: a security key's application must start with ssh:", () => {
+    for (const t of ["sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com"] as const)
+      expect(() => parsePublicKeyText(t, makeTestKey(t, { application: "https://example.org" }).publicText.split(" ")[1]!)).toThrow(/application "https:\/\/example.org" does not start with "ssh:"/);
+  });
+
+  it("a webauthn signature made by the emulated authenticator is refused", () => {
+    const sig = keys["sk-ecdsa-sha2-nistp256@openssh.com"].sign(msg, { webauthn: { origin: "https://example.org" } });
+    expect(verifySshsig(sig, msg, "git")).toMatchObject({ ok: false, problem: expect.stringMatching(/web authentication\) signatures are not supported/) });
   });
 });

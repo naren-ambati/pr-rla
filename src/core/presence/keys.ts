@@ -56,6 +56,37 @@ export interface SshPublicKey {
 
 const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 
+/**
+ * Ed25519 public keys of small order (the identity, the points of order 2, 4 and 8, and the
+ * non-canonical encodings of the same values: p-1, p and p+1), as libsodium's blocklist lists them.
+ * A signature by such a key can verify for many messages, so pr-rla refuses the key. The sign bit
+ * (the top bit of the last byte) is ignored, as libsodium does.
+ */
+const ED25519_SMALL_ORDER = [
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+].map((h) => Uint8Array.from(Buffer.from(h, "hex")));
+
+/** True for an Ed25519 public key of small order (see ED25519_SMALL_ORDER). */
+export function isSmallOrderEd25519(pk: Uint8Array): boolean {
+  if (pk.length !== 32) return false;
+  return ED25519_SMALL_ORDER.some((bad) => bad.every((b, i) => (i === 31 ? (pk[i]! & 0x7f) === b : pk[i] === b)));
+}
+
+/** FIDO application strings OpenSSH makes start with `ssh:`; another origin is a WebAuthn credential, not an SSH key. */
+export const SK_APPLICATION_PREFIX = "ssh:";
+
+function skApplication(r: SshReader, type: string): string {
+  const application = r.text();
+  if (!application.startsWith(SK_APPLICATION_PREFIX)) throw new SshFormatError(`the ${type} key's application ${JSON.stringify(application)} does not start with "${SK_APPLICATION_PREFIX}"`);
+  return application;
+}
+
 /** `SHA256:` and the unpadded base64 of the blob's SHA-256, as OpenSSH prints fingerprints. */
 export function sshFingerprint(blob: Uint8Array): string {
   return `SHA256:${createHash("sha256").update(blob).digest("base64").replace(/=+$/, "")}`;
@@ -85,7 +116,8 @@ export function parsePublicKeyBlob(blob: Uint8Array): SshPublicKey {
     case "sk-ssh-ed25519@openssh.com": {
       const pk = r.string();
       if (pk.length !== 32) throw new SshFormatError(`the ${type} public key is ${pk.length} bytes, not 32`);
-      const application = type === "sk-ssh-ed25519@openssh.com" ? r.text() : undefined;
+      if (isSmallOrderEd25519(pk)) throw new SshFormatError(`the ${type} public key is a point of small order`);
+      const application = type === "sk-ssh-ed25519@openssh.com" ? skApplication(r, type) : undefined;
       r.end();
       return { ...base, ...(application !== undefined ? { application } : {}), keyObject: keyObject({ kty: "OKP", crv: "Ed25519", x: b64url(pk) }, type) };
     }
@@ -98,7 +130,7 @@ export function parsePublicKeyBlob(blob: Uint8Array): SshPublicKey {
       if (curveName !== expected) throw new SshFormatError(`a ${type} key names curve ${JSON.stringify(curveName)}`);
       const curve = CURVES[expected];
       const { x, y } = ecPoint(r.string(), curve);
-      const application = type === "sk-ecdsa-sha2-nistp256@openssh.com" ? r.text() : undefined;
+      const application = type === "sk-ecdsa-sha2-nistp256@openssh.com" ? skApplication(r, type) : undefined;
       r.end();
       return { ...base, curve, ...(application !== undefined ? { application } : {}), keyObject: keyObject({ kty: "EC", crv: curve.jwk, x: b64url(x), y: b64url(y) }, type) };
     }
@@ -108,6 +140,8 @@ export function parsePublicKeyBlob(blob: Uint8Array): SshPublicKey {
       r.end();
       const bits = n.length === 0 ? 0 : (n.length - 1) * 8 + (32 - Math.clz32(n[0]!));
       if (bits < MIN_RSA_BITS) throw new SshFormatError(`the ssh-rsa key has ${bits} bits; pr-rla accepts ${MIN_RSA_BITS} or more`);
+      // e = 1 makes every message its own signature; an even e is not a valid RSA exponent.
+      if (e.length === 0 || (e.length === 1 && e[0]! <= 1) || (e[e.length - 1]! & 1) === 0) throw new SshFormatError("the ssh-rsa key's public exponent is 1 or even");
       return { ...base, bits, keyObject: keyObject({ kty: "RSA", n: b64url(n), e: b64url(e) }, type) };
     }
   }

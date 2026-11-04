@@ -8,6 +8,11 @@ import { SshFormatError, SshReader, concatBytes, fixedWidth, sshString, u32be } 
  * signed (OpenSSH PROTOCOL.u2f): SHA256(application) ‖ flags ‖ counter ‖ SHA256(signed data),
  * and returns the flags byte, so the caller can check the user-presence (UP) flag itself:
  * OpenSSH's `ssh-keygen -Y verify` accepts a signature whether or not UP is set.
+ *
+ * Where pr-rla is deliberately stricter than ssh-keygen (test/presence-oracle.test.ts shows each):
+ * a non-empty reserved field, RSA keys under 2048 bits or with a public exponent of 1 or an even
+ * one, small-order Ed25519 keys, security keys whose application does not start with `ssh:`, and
+ * `webauthn-sk-*` signatures are refused.
  */
 
 export const SSHSIG_BEGIN = "-----BEGIN SSH SIGNATURE-----";
@@ -72,6 +77,9 @@ export function parseSshsig(blob: Uint8Array): ParsedSshsig {
   const publicKey = parsePublicKeyBlob(r.string());
   const namespace = r.text();
   const reserved = r.string();
+  // OpenSSH always signs and verifies over an empty reserved field, whatever the blob holds; a blob
+  // that carries one is refused, so pr-rla never accepts what ssh-keygen would not.
+  if (reserved.length !== 0) throw new SshFormatError(`the SSHSIG reserved field is not empty (${reserved.length} bytes)`);
   const hashAlgorithm = r.text();
   const signature = r.string();
   r.end();
@@ -152,21 +160,33 @@ export function verifySshSignature(key: SshPublicKey, sigBlob: Uint8Array, data:
 }
 
 /**
- * Verifies an armored SSHSIG over `message` in `namespace` (git signs commits in namespace "git").
- * Checks the preamble and version, the namespace, a sha256 or sha512 message hash, and the
- * signature by the key the blob names. Whether that key is allowed is the caller's question.
+ * Verifies an armored SSHSIG over `message` in `namespace` (pr-rla verdicts: `pr-rla-verdict@v1`).
+ * Checks the preamble and version, an empty reserved field, the namespace, a sha256 or sha512
+ * message hash, and the signature by the key the blob names. Whether that key is allowed is the
+ * caller's question.
  */
 export function verifySshsig(armored: string, message: Uint8Array, namespace: string): SshsigCheck {
+  let blob: Uint8Array;
+  try {
+    blob = dearmorSshsig(armored);
+  } catch (e) {
+    return { ok: false, problem: (e as Error).message };
+  }
+  return verifySshsigBlob(blob, message, namespace);
+}
+
+/** As verifySshsig, for the binary blob (a verdict line carries it base64-encoded, without the armor). */
+export function verifySshsigBlob(blob: Uint8Array, message: Uint8Array, namespace: string): SshsigCheck {
   let parsed: ParsedSshsig;
   try {
-    parsed = parseSshsig(dearmorSshsig(armored));
+    parsed = parseSshsig(blob);
   } catch (e) {
     return { ok: false, problem: (e as Error).message };
   }
   const base = { key: parsed.publicKey, namespace: parsed.namespace, hashAlgorithm: parsed.hashAlgorithm };
   if (parsed.namespace !== namespace) return { ...base, ok: false, problem: `the signature is for namespace ${JSON.stringify(parsed.namespace)}, not ${JSON.stringify(namespace)}` };
   if (!(HASHES as readonly string[]).includes(parsed.hashAlgorithm)) return { ...base, ok: false, problem: `message hash ${JSON.stringify(parsed.hashAlgorithm)} is not sha256 or sha512` };
-  const data = sshsigSignedData(parsed.namespace, parsed.reserved, parsed.hashAlgorithm as "sha256" | "sha512", message);
+  const data = sshsigSignedData(parsed.namespace, new Uint8Array(0), parsed.hashAlgorithm as "sha256" | "sha512", message);
   try {
     const v = verifySshSignature(parsed.publicKey, parsed.signature, data);
     return { ...base, ok: v.valid, ...(v.problem ? { problem: v.problem } : {}), ...(v.sk ? { sk: v.sk } : {}) };
