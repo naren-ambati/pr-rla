@@ -1,0 +1,30 @@
+{
+  "name": "pr-rla-ledger-jira",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Example external pr-rla ledger for Jira Cloud: one issue per draw, the verdict as a single-select custom field read from the changelog",
+  "type": "module",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs"
+  ],
+  "keywords": [
+    "pr-rla",
+    "pr-rla-ledger"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/ledger-kit.test.mjs"
+  },
+  "peerDependencies": {
+    "pr-rla": "~0.1.0"
+  },
+  "devDependencies": {
+    "pr-rla": "file:../../.."
+  }
+}
