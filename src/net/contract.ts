@@ -131,3 +131,19 @@ export class CredentialHostMismatch extends BrokerError {
     this.name = "CredentialHostMismatch";
   }
 }
+
+/**
+ * Step 3: the credential is locked for this host, but the person running the command has not
+ * approved the grant on this machine (src/plugins/approvals.ts), so it is withheld. Nothing was sent.
+ */
+export class CredentialNotApproved extends BrokerError {
+  constructor(
+    readonly env: string,
+    host: string,
+    readonly pluginId: string,
+    readonly approve: string,
+  ) {
+    super(`credential ${env} is withheld from ${pluginId}: you have not approved sending it to ${host} on this machine; nothing was sent`, "CREDENTIAL_NOT_APPROVED", host, `review the plugin, then: ${approve}`);
+    this.name = "CredentialNotApproved";
+  }
+}

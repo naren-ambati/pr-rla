@@ -37,6 +37,8 @@ export interface CommandContext {
   confirm?: (question: string) => Promise<boolean>;
   /** `--plugins builtin-only` (PR_RLA_PLUGINS=builtin-only in env does the same): refuse every external plugin. */
   plugins?: string;
+  /** `--accept-lock-grants` (PR_RLA_ACCEPT_LOCK_GRANTS=1 does the same): take the repo's grants and trust for this run (src/plugins/approvals.ts). */
+  acceptLockGrants?: boolean;
 }
 
 export class CommandError extends Error {
@@ -91,6 +93,7 @@ export function auditContextFor(ctx: CommandContext): AuditContext {
       log: (l) => ctx.err(l),
       fetch: ((input, init) => ctx.fetch(input, init)) as typeof fetch,
       plugins: pluginPolicy(ctx.plugins, ctx.env),
+      ...(ctx.acceptLockGrants ? { acceptLockGrants: true } : {}),
     });
     auditContexts.set(ctx, a);
   }

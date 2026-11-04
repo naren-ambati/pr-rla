@@ -5,6 +5,7 @@ import {
   BrokerRetriesExhausted,
   BrokerTimeout,
   CredentialHostMismatch,
+  CredentialNotApproved,
   DESTINATION_TIMEOUT_MS,
   HostNotAllowed,
   ReadOnlyViolation,
@@ -52,6 +53,11 @@ export function roleOf(pluginId: string): CallerRole {
 export interface Credential {
   value: string;
   hosts: Set<string>;
+  /**
+   * Locked but not approved by the person running the command (src/plugins/approvals.ts): never
+   * swapped; a placeholder for it is refused with CREDENTIAL_NOT_APPROVED, naming `approve`.
+   */
+  withheld?: { approve: string };
 }
 
 /** One recorded request and response, scrubbed (step 7). */
@@ -216,6 +222,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const creds = p.credentialsFor(call.pluginId);
     const secret = (env: string): string => {
       const c = creds.get(env);
+      if (c?.withheld) throw new CredentialNotApproved(env, url.host, call.pluginId, c.withheld.approve);
       if (!c || !(c.hosts.has(url.host) || c.hosts.has(url.hostname))) throw new CredentialHostMismatch(env, url.host, c ? [...c.hosts] : []);
       return c.value;
     };

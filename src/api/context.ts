@@ -1,6 +1,7 @@
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
+import { localConsent, type LocalConsent } from "../plugins/approvals.js";
 import { credentialGrants } from "../plugins/host.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
@@ -28,12 +29,17 @@ import type { PluginCredential, ScmProvider } from "../sdk/provider.js";
 
 export type AuditMode = BrokerMode;
 
+/** A credential a plugin is granted; `withheld` when the person running the command has not approved it (src/plugins/approvals.ts). */
+export interface GrantedCredential extends PluginCredential {
+  withheld?: { approve: string };
+}
+
 export interface PluginGrant {
   /** `builtin` and `full` run in-process with any host; `isolated` (U2b) is held to `hosts`. */
   trust: "builtin" | "full" | "isolated";
   hosts?: readonly string[];
   writePaths?: readonly string[];
-  credentials?: readonly PluginCredential[];
+  credentials?: readonly GrantedCredential[];
   /** The default rate budget to give the plugin's hosts (built-in providers). */
   budgetFamily?: BudgetFamily;
 }
@@ -48,6 +54,12 @@ export interface AuditContext {
   readonly broker: Broker;
   /** `builtin-only` refuses every external plugin before it is imported (U2b, FR2.6). */
   readonly plugins: PluginPolicy;
+  /**
+   * The local consent of the person running the command (src/plugins/approvals.ts): a repo's
+   * credential grants and `trust: full` take effect only when approved here, or with
+   * `--accept-lock-grants` for this run.
+   */
+  readonly consent: LocalConsent;
   /** A plain fetch for a built-in component (`pr-rla/drand`, `pr-rla/rekor`) on its destination. */
   componentFetch(componentId: `pr-rla/${string}`, destination: Destination): typeof fetch;
   /** Records what a plugin may reach, send and write, and gives its hosts their default budget. */
@@ -74,6 +86,10 @@ export interface AuditContextOptions {
   recorder?: (exchange: RecordedExchange) => void;
   /** Default: `builtin-only` when PR_RLA_PLUGINS=builtin-only is in `env`, else external plugins load if locked. */
   plugins?: PluginPolicy;
+  /** Where approvals are read (default: PR_RLA_APPROVALS_FILE, XDG_CONFIG_HOME or ~/.config; src/plugins/approvals.ts). */
+  approvalsFile?: string;
+  /** Take the repo's lock grants and trust for this run without a local approval (`--accept-lock-grants`; also PR_RLA_ACCEPT_LOCK_GRANTS=1 in `env`). */
+  acceptLockGrants?: boolean;
 }
 
 /** An isolated plugin that declares no hosts may contact none (an empty set would mean "any" to the broker). */
@@ -151,12 +167,13 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     log,
     broker,
     plugins: o.plugins ?? pluginPolicy(undefined, env),
+    consent: localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) }),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
       for (const c of g.credentials ?? []) {
         const value = env[c.env];
-        if (value !== undefined) credentials.set(c.env, { value, hosts: new Set(c.hosts) });
+        if (value !== undefined) credentials.set(c.env, c.withheld ? { value: "", hosts: new Set(c.hosts), withheld: c.withheld } : { value, hosts: new Set(c.hosts) });
       }
       grants.set(pluginId, { trust: g.trust, hosts: new Set(g.hosts ?? []), writePaths: new Set(g.writePaths ?? []), credentials });
       if (g.budgetFamily) {

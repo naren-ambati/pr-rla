@@ -21,7 +21,7 @@ import {
 import { sha256Hex, canonicalJson } from "./core/canonical.js";
 import type { PluginIdentity } from "./core/records.js";
 import { externalPluginInfo } from "./plugins/identity.js";
-import type { PluginPolicy } from "./plugins/lock.js";
+import type { PluginPolicy, PluginRules } from "./plugins/lock.js";
 import { PR_RLA_VERSION } from "./version.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
@@ -165,9 +165,10 @@ function packageVersion(use: string, baseDir: string): string | null {
  * Built-ins carry the pr-rla version. An external plugin's identity comes from its
  * pr-rla.lock.json entry after its files are re-hashed (FR2.1): `integrity` is the locked
  * treeSha256 and `trust` the locked trust. An unlocked or changed plugin is refused, and
- * `builtin-only` refuses every external one (src/plugins/identity.ts).
+ * `builtin-only` refuses every external one (src/plugins/identity.ts). Pass the AuditContext as
+ * `policy` so a `trust: full` plugin you approved can be read (a bare policy carries no consent).
  */
-export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string, policy: PluginPolicy = "locked"): Promise<PluginIdentity> {
+export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<PluginIdentity> {
   if (!(kind === "provider" ? builtinProviderName(spec.use) : builtinLedgerName(spec.use))) {
     const { entry, traits } = await externalPluginInfo(spec.use, kind, baseDir, policy, spec.options);
     return {

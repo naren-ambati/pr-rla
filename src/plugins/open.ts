@@ -7,6 +7,7 @@ import { INDEX_FILE } from "../ledgers/issue-index.js";
 import type { PluginSpec } from "../registry.js";
 import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerDefinition, type LedgerIndexStore, type ProvenanceLevel } from "../sdk/ledger.js";
 import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
+import { approveCommand, grantsOf, grantText, refuseFullTrustUnapproved, type ConsentSource } from "./approvals.js";
 import { PluginError } from "./errors.js";
 import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
 import { placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
@@ -20,6 +21,11 @@ import { placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type Loc
  * 3. `trust: full` loads it in this process with the real environment, and says so on every
  *    command (FR2.5); otherwise it runs in the plugin host, held to the locked hosts, write
  *    paths and credentials (FR2.4).
+ *
+ * The lock is the repo's; what it lets a plugin send is yours (./approvals.ts). Without your
+ * approval of this plugin, as locked, a `trust: full` plugin is refused before it is imported, and
+ * an isolated one runs with its credentials withheld: no placeholder reaches it and the broker
+ * swaps none (CREDENTIAL_NOT_APPROVED), so it works anonymously. One line names the command.
  */
 
 export function fullTrustLine(entry: LockEntry): string {
@@ -30,11 +36,29 @@ function secretsFor(ctx: AuditContext, entry: LockEntry): { env: string; value: 
   return entry.credentials.flatMap((c) => (typeof ctx.env[c.env] === "string" && ctx.env[c.env] ? [{ env: c.env, value: ctx.env[c.env]! }] : []));
 }
 
+/** The credentials a lock entry grants that are set in this environment: what consent decides. */
+const setCredentials = (ctx: Pick<AuditContext, "env">, entry: LockEntry) => entry.credentials.filter((c) => !!ctx.env[c.env]);
+
+/**
+ * Your consent to `use` as `entry` locks it, from the approvals file or `--accept-lock-grants`, and
+ * the one line a command prints when it matters: credentials withheld, or the repo's grants accepted.
+ */
+export function pluginConsent(ctx: Pick<AuditContext, "consent" | "env" | "log">, use: string, entry: LockEntry): ConsentSource | null {
+  const consent = ctx.consent.plugin(use, entry);
+  const set = setCredentials(ctx, entry);
+  if (entry.trust === "isolated" && set.length === 0) return consent;
+  const what = [...(entry.trust === "full" ? ["trust: full"] : []), ...grantsOf(set).map(grantText)].join("; ");
+  if (consent === null && entry.trust === "isolated") ctx.log(`plugin ${use}: not approved on this machine, so its credentials are withheld (${what}) and it runs without them; to grant them: ${approveCommand(use)}`);
+  if (consent === "accepted") ctx.log(`plugin ${use}: accepting its lock's grants for this run, not approved on this machine (${what}); --accept-lock-grants is only for a repo you control`);
+  return consent;
+}
+
 const within = (asked: readonly string[], granted: readonly string[]) => asked.filter((x) => !granted.includes(x));
 
 /** Starts the host and refuses when the plugin now asks for more than its lock entry grants (options or code changed). */
-async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", spec: PluginSpec, entry: LockEntry, plugin: ResolvedPlugin): Promise<PluginHost> {
-  const host = await startPluginHost({ kind, entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(entry.credentials, ctx.env), label: spec.use, secrets: secretsFor(ctx, entry) });
+async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", spec: PluginSpec, entry: LockEntry, plugin: ResolvedPlugin, granted: boolean): Promise<PluginHost> {
+  // Withheld credentials never reach the child, not even as placeholders: it runs as if they were unset.
+  const host = await startPluginHost({ kind, entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(granted ? entry.credentials : [], ctx.env), label: spec.use, secrets: granted ? secretsFor(ctx, entry) : [] });
   try {
     const lockAgain = `review it, then: pr-rla plugin lock ${spec.use}`;
     if (host.ready.name !== entry.name) throw new PluginError(`plugin ${spec.use} now reports the name ${JSON.stringify(host.ready.name)}; it was locked as ${entry.name}`, "LOCK_MISMATCH", lockAgain);
@@ -64,11 +88,16 @@ async function importInProcess(kind: "provider" | "ledger", spec: PluginSpec, en
   return def;
 }
 
+/** The locked credentials as the broker holds them: withheld (CREDENTIAL_NOT_APPROVED) without your consent. */
+const brokerCredentials = (use: string, entry: LockEntry, granted: boolean) => (granted ? entry.credentials : entry.credentials.map((c) => ({ ...c, withheld: { approve: approveCommand(use) } })));
+
 export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {
   refuseIfBuiltinOnly(ctx.plugins, "provider", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
   const id = `provider:${entry.name}`;
+  const consent = pluginConsent(ctx, spec.use, entry);
   if (entry.trust === "full") {
+    refuseFullTrustUnapproved(spec.use, entry, consent);
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("provider", spec, entry, plugin)) as ProviderDefinition;
     ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
@@ -77,8 +106,8 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
     if (typeof p.listChanges !== "function") throw new PluginError(`provider "${def.name}" returned an object without listChanges()`, "PLUGIN_INVALID");
     return p;
   }
-  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: entry.credentials });
-  const host = await startLockedHost(ctx, "provider", spec, entry, plugin);
+  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: brokerCredentials(spec.use, entry, consent !== null) });
+  const host = await startLockedHost(ctx, "provider", spec, entry, plugin, consent !== null);
   try {
     const p = await hostedProvider(host, spec.options, { cwd, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log });
     ctx.log(isolationLine(host, entry.name, entry.version));
@@ -112,7 +141,9 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
   const id = `ledger:${entry.name}`;
+  const consent = pluginConsent(ctx, spec.use, entry);
   if (entry.trust === "full") {
+    refuseFullTrustUnapproved(spec.use, entry, consent);
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
     ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], writePaths: def.writePaths?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
@@ -121,8 +152,8 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");
     return l;
   }
-  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: entry.credentials });
-  const host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
+  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: brokerCredentials(spec.use, entry, consent !== null) });
+  const host = await startLockedHost(ctx, "ledger", spec, entry, plugin, consent !== null);
   try {
     const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log, index, ...reviewers });
     ctx.log(isolationLine(host, entry.name, entry.version));
@@ -144,7 +175,9 @@ export async function preflightExternalLedger(ctx: AuditContext, spec: PluginSpe
   refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
   const base = { cwd, windowDir, log: () => {}, fetch: refuse, index: ledgerIndexStore({ mode: "read-only" }, windowDir) };
+  const consent = ctx.consent.plugin(spec.use, entry);
   if (entry.trust === "full") {
+    refuseFullTrustUnapproved(spec.use, entry, consent);
     const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
     const provenance = def.provenance ?? "self-asserted";
     try {
@@ -158,7 +191,8 @@ export async function preflightExternalLedger(ctx: AuditContext, spec: PluginSpe
   }
   let host: PluginHost;
   try {
-    host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
+    // The preflight's fetch refuses everything, so placeholders are safe here; withheld ones still never reach it.
+    host = await startLockedHost(ctx, "ledger", spec, entry, plugin, consent !== null);
   } catch (e) {
     // pr-rla's refusals (the lock, the definition) stay what they are; what hosts() or writePaths() threw is the ledger's.
     if (e instanceof PluginError) throw e;

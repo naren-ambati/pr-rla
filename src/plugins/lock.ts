@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../io/atomic.js";
+import type { LocalConsent } from "./approvals.js";
 import { PluginError } from "./errors.js";
 
 /**
@@ -25,9 +26,14 @@ export type PluginTrust = "isolated" | "full";
 
 export interface LockedCredential {
   env: string;
+  /** Hosts (`host` or `host:port`) of the https origins it may be sent to. */
   hosts: string[];
   /** The option whose URL gave `hosts` (the definition's `hostFromOption`), when it did. */
   hostFromOption?: string;
+  /** Header names, besides `authorization`, its placeholder may be swapped into (the definition's `headers`). */
+  headers?: string[];
+  /** `false`: an identity such as a Basic username (the definition's `secret: false`). */
+  secret?: false;
 }
 
 export interface LockEntry {
@@ -84,7 +90,8 @@ function entryProblem(e: unknown): string | null {
   if (typeof x.treeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(x.treeSha256)) return "treeSha256 must be 64 hex characters";
   if (x.trust !== "isolated" && x.trust !== "full") return 'trust must be "isolated" or "full"';
   if (!isStrings(x.hosts) || !isStrings(x.writePaths)) return "hosts and writePaths must be lists of strings";
-  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts) && (c.hostFromOption === undefined || typeof c.hostFromOption === "string"))) return "credentials must be a list of { env, hosts, hostFromOption? }";
+  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts) && (c.hostFromOption === undefined || typeof c.hostFromOption === "string") && (c.headers === undefined || isStrings(c.headers)) && (c.secret === undefined || c.secret === false)))
+    return "credentials must be a list of { env, hosts, hostFromOption?, headers?, secret? }";
   return null;
 }
 
@@ -124,7 +131,9 @@ function normalizedEntry(e: LockEntry): LockEntry {
     trust: e.trust,
     hosts: sorted(e.hosts),
     writePaths: sorted(e.writePaths),
-    credentials: [...e.credentials].map((c) => ({ env: c.env, hosts: sorted(c.hosts), ...(c.hostFromOption !== undefined ? { hostFromOption: c.hostFromOption } : {}) })).sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
+    credentials: [...e.credentials]
+      .map((c) => ({ env: c.env, hosts: sorted(c.hosts), ...(c.hostFromOption !== undefined ? { hostFromOption: c.hostFromOption } : {}), ...(c.headers?.length ? { headers: sorted(c.headers.map((h) => h.toLowerCase())) } : {}), ...(c.secret === false ? { secret: false as const } : {}) }))
+      .sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
   };
 }
 
@@ -409,6 +418,18 @@ export function installScripts(p: ResolvedPlugin): { pkg: string; scripts: strin
 
 export type PluginPolicy = "locked" | "builtin-only";
 
+/**
+ * What decides whether an external plugin may load and what it may send: the policy, and the local
+ * consent of the person running the command (./approvals.ts). An AuditContext is one. A bare policy
+ * carries no consent, so a `trust: full` plugin is refused with it and credentials are withheld.
+ */
+export interface PluginRules {
+  readonly plugins: PluginPolicy;
+  readonly consent?: LocalConsent;
+}
+
+export const policyOf = (r: PluginPolicy | PluginRules): PluginPolicy => (typeof r === "string" ? r : r.plugins);
+
 /** `--plugins builtin-only` or `PR_RLA_PLUGINS=builtin-only` (FR2.6). Any other value is refused, so a typo never allows external code. */
 export function pluginPolicy(flag: string | undefined, env: Readonly<Record<string, string | undefined>>): PluginPolicy {
   for (const [what, v] of [["--plugins", flag], ["PR_RLA_PLUGINS", env.PR_RLA_PLUGINS]] as const) {
@@ -420,8 +441,8 @@ export function pluginPolicy(flag: string | undefined, env: Readonly<Record<stri
 }
 
 /** Refuses an external plugin under builtin-only, before anything resolves or imports it. */
-export function refuseIfBuiltinOnly(policy: PluginPolicy, kind: "provider" | "ledger", use: string): void {
-  if (policy === "builtin-only")
+export function refuseIfBuiltinOnly(policy: PluginPolicy | PluginRules, kind: "provider" | "ledger", use: string): void {
+  if (policyOf(policy) === "builtin-only")
     throw new PluginError(`${kind} ${use} is an external plugin, and --plugins builtin-only (or PR_RLA_PLUGINS=builtin-only) refuses all external code`, "BUILTIN_ONLY", `use a built-in ${kind}, or run without builtin-only`);
 }
 

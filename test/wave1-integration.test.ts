@@ -134,7 +134,7 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
 
   it("plugin add records the base_url host for GITEA_TOKEN, and the broker swaps the placeholder there", async () => {
     const dir = giteaAudit();
-    await lockPlugin(dir, USE, { options });
+    await lockPlugin(dir, USE, { options, approve: true });
     expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: ["forge.example.com"], hostFromOption: "base_url" }]);
     const gitea = recordingGitea();
     const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options }, dir);
@@ -165,7 +165,7 @@ describe("credentials for a self-hosted isolated plugin (hostFromOption, provide
   it("an http:// base_url grants the token no host: the request carrying it is refused unsent", async () => {
     const dir = giteaAudit();
     const http = { ...options, base_url: "http://forge.example.com" };
-    await lockPlugin(dir, USE, { options: http });
+    await lockPlugin(dir, USE, { options: http, approve: true });
     expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: [], hostFromOption: "base_url" }]);
     const gitea = recordingGitea();
     const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options: http }, dir);
@@ -221,7 +221,7 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
 
   it("isolated, the Jira ledger gets placeholders, the broker builds Basic auth for the base_url host only, and pr-rla writes its index", async () => {
     const audit = jiraAudit();
-    await lockPlugin(audit, JIRA_USE, { kind: "ledger", options: JIRA_OPTIONS });
+    await lockPlugin(audit, JIRA_USE, { kind: "ledger", options: JIRA_OPTIONS, approve: true });
     expect(readLock(audit).plugins[JIRA_USE]).toMatchObject({
       trust: "isolated",
       hosts: ["acme.atlassian.net"],

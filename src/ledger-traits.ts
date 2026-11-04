@@ -1,5 +1,5 @@
 import { externalPluginInfo } from "./plugins/identity.js";
-import type { PluginPolicy } from "./plugins/lock.js";
+import type { PluginPolicy, PluginRules } from "./plugins/lock.js";
 import { builtinLedgerName, loadLedgerDefinition, type PluginSpec } from "./registry.js";
 import type { ProvenanceLevel } from "./sdk/ledger.js";
 
@@ -18,7 +18,7 @@ export interface LedgerTraits {
  * comes through its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only`
  * refuses an external ledger before anything is resolved.
  */
-export async function ledgerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy = "locked"): Promise<LedgerTraits> {
+export async function ledgerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<LedgerTraits> {
   if (!builtinLedgerName(spec.use)) {
     const { entry, provenance } = await externalPluginInfo(spec.use, "ledger", baseDir, policy, spec.options);
     return { name: entry.name, provenance: provenance ?? "self-asserted", hosts: [...entry.hosts] };

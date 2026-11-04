@@ -1,6 +1,6 @@
 import { definitionTraits, type DefinitionTraits } from "./plugins/host.js";
 import { externalPluginInfo } from "./plugins/identity.js";
-import type { PluginPolicy } from "./plugins/lock.js";
+import type { PluginPolicy, PluginRules } from "./plugins/lock.js";
 import { builtinProviderName, loadProviderDefinition, type PluginSpec } from "./registry.js";
 
 /** What a provider definition declares about the population it builds (the U3 definition fields). */
@@ -14,7 +14,7 @@ export interface ProviderTraits extends DefinitionTraits {
  * its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only` refuses an
  * external plugin before anything is resolved.
  */
-export async function providerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy = "locked"): Promise<ProviderTraits> {
+export async function providerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<ProviderTraits> {
   if (!builtinProviderName(spec.use)) {
     const { entry, traits } = await externalPluginInfo(spec.use, "provider", baseDir, policy, spec.options);
     return { name: entry.name, ...traits };

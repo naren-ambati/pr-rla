@@ -8,13 +8,16 @@ import { CORRECTNESS_NOT_SAFETY, fixtureName, hostedProviderConformance, readRec
 import { inspectPlugin as inspect, lockEntryFor as entryFor } from "../plugins/entry.js";
 import { NETWORK_DENIED_FROM_NODE } from "../plugins/host.js";
 import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, verifyLocked, writeLock, type LockedCredential, type LockEntry, type PluginTrust, type ResolvedPlugin } from "../plugins/lock.js";
-import { auditContextFor, CommandError, type CommandContext } from "./context.js";
+import { planPluginApproval, recordLockApproval } from "../plugins/approve.js";
+import { auditContextFor, CommandError, isoNow, type CommandContext } from "./context.js";
 
 /**
  * `pr-rla plugin add | lock | check` (functional-design.md §U2b; FR2.2, FR2.3, FR2.7).
  *
  * `add` and `lock` are the only writers of pr-rla.lock.json. Both print everything they are
- * about to trust and ask first (or take --yes). `check` writes nothing.
+ * about to trust and ask first (or take --yes), and record your approval on this machine
+ * (src/plugins/approvals.ts). `approve` records an approval for a plugin someone else locked.
+ * `check` writes nothing.
  */
 
 type Kind = "provider" | "ledger";
@@ -123,6 +126,7 @@ export async function pluginAddCommand(ctx: CommandContext, use: string, opts: P
   }
   writeLock(config.dir, { ...lock, plugins: { ...lock.plugins, [use]: entry } });
   ctx.out(`added ${use} to ${lockPath(config.dir)}; commit it with the audit`);
+  ctx.out(recordLockApproval(auditContextFor(ctx).consent, use, entry, isoNow(ctx)));
   return 0;
 }
 
@@ -150,6 +154,34 @@ export async function pluginLockCommand(ctx: CommandContext, use: string, opts: 
   }
   writeLock(config.dir, { ...lock, plugins: { ...lock.plugins, [use]: entry } });
   ctx.out(`updated ${use} in ${lockPath(config.dir)}; commit it with the audit`);
+  ctx.out(recordLockApproval(auditContextFor(ctx).consent, use, entry, isoNow(ctx)));
+  return 0;
+}
+
+export interface PluginApproveOptions {
+  yes?: boolean;
+}
+
+/**
+ * `pr-rla plugin approve <use>`: shows what the plugin, as the audit's lock pins it, would be granted
+ * on this machine (its trust, each credential and the origins it may go to), asks (or takes --yes),
+ * and records the approval in your approvals file. Nothing in the audit repo changes.
+ */
+export async function pluginApproveCommand(ctx: CommandContext, use: string | undefined, opts: PluginApproveOptions): Promise<number> {
+  const consent = auditContextFor(ctx).consent;
+  if (!use) throw new CommandError("plugin approve needs the plugin's use (as in .pr-rla.yml)");
+  const config = configIn(ctx);
+  const plan = planPluginApproval(consent, config?.dir ?? ctx.cwd, use);
+  for (const l of plan.lines) ctx.out(l);
+  if (plan.nothing) {
+    ctx.out(plan.nothing);
+    return 0;
+  }
+  if (!(await confirm(ctx, opts.yes, plan.question, "plugin approve"))) {
+    ctx.out("not approved");
+    return 1;
+  }
+  ctx.out(plan.record(isoNow(ctx)));
   return 0;
 }
 

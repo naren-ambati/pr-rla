@@ -58,7 +58,8 @@ describe("RK-02: IPC under --permission without --allow-net, on Node 25 or later
 /** The hostile fixture, locked in a temp audit repo and opened as a command would: through the broker. */
 async function setupHostile() {
   const dir = auditDirWith({ "plugins/hostile": HOSTILE });
-  await lockPlugin(dir, USE);
+  // Approved here, as the person who locks it: the credentials below are granted to it.
+  await lockPlugin(dir, USE, { approve: true });
   const secretFile = join(tmpdir(), `prrla-secret-${process.pid}.txt`);
   writeFileSync(secretFile, "top secret");
   const server: { requests: { url: string; method: string; authorization: string | null }[] } = { requests: [] };

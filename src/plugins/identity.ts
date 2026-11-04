@@ -1,7 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PluginError } from "./errors.js";
 import { definitionTraits, describePlugin, startPluginHost, type DefinitionTraits } from "./host.js";
-import { readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type ResolvedPlugin } from "./lock.js";
+import { readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type PluginRules, type ResolvedPlugin } from "./lock.js";
+import { consentOf, refuseFullTrustUnapproved } from "./approvals.js";
 import { PROVENANCE_LEVELS, type ProvenanceLevel } from "../sdk/ledger.js";
 
 /**
@@ -9,7 +10,8 @@ import { PROVENANCE_LEVELS, type ProvenanceLevel } from "../sdk/ledger.js";
  * entry after the installed files are re-hashed. An isolated plugin is never imported in
  * this process: its definition's traits (`populationOptions`, `reviewGranularity`,
  * `reportsLandedVia`, and a ledger's `provenance`) are read through `describe` in a host child,
- * which is stopped straight away.
+ * which is stopped straight away. A `trust: full` plugin is imported only with your local
+ * approval (./approvals.ts); `rules` without consent (a bare policy) refuse it.
  */
 export interface ExternalPluginInfo {
   entry: LockEntry;
@@ -21,9 +23,10 @@ export interface ExternalPluginInfo {
 
 const memo = new Map<string, { traits: DefinitionTraits; provenance: ProvenanceLevel | null }>();
 
-export async function externalPluginInfo(use: string, kind: "provider" | "ledger", auditDir: string, policy: PluginPolicy, options: Record<string, unknown> = {}): Promise<ExternalPluginInfo> {
-  refuseIfBuiltinOnly(policy, kind, use);
+export async function externalPluginInfo(use: string, kind: "provider" | "ledger", auditDir: string, rules: PluginPolicy | PluginRules, options: Record<string, unknown> = {}): Promise<ExternalPluginInfo> {
+  refuseIfBuiltinOnly(rules, kind, use);
   const { entry, plugin } = verifyLocked(use, auditDir);
+  if (entry.trust === "full") refuseFullTrustUnapproved(use, entry, consentOf(rules, use, entry));
   const key = `${kind}\u0000${plugin.entry}\u0000${entry.treeSha256}\u0000${entry.trust}`;
   let known = memo.get(key);
   if (!known) {
