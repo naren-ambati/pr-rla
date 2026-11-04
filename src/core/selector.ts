@@ -123,15 +123,38 @@ export function reviewsAsOf(change: ChangeRecord, cutoffIso: string): Review[] {
   return change.reviews.filter((r) => Date.parse(r.submittedAt) <= cutoff);
 }
 
-export function hasHumanDecision(reviews: readonly Review[]): boolean {
-  return reviews.some((r) => r.author.kind === "human" && (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"));
+/** Whether two accounts are the same one: by `Actor.id` where both have one, by login (case-insensitive) otherwise. */
+export function sameAccount(a: Actor, b: Actor): boolean {
+  if (a.id !== undefined && b.id !== undefined) return a.id === b.id;
+  return normalizeLogin(a.login) === normalizeLogin(b.login);
+}
+
+/**
+ * Whether a review is a human decision on this change (docs/design/spec.md: "reviewer differs from
+ * author; approval precedes merge"). It must be an APPROVED or CHANGES_REQUESTED review that
+ *  - a non-bot account submitted,
+ *  - was submitted at or before the change landed (`mergedAt`): a later approval is not a review
+ *    of what landed, and
+ *  - was not submitted by the change's author (compared by `Actor.id` where both have one, by
+ *    login otherwise): an author's own approval is not a second pair of eyes.
+ * A review that does not count stays in the manifest's record of the change; it just does not hide
+ * the change from the population.
+ */
+export function isHumanDecision(change: Pick<ChangeRecord, "author" | "mergedAt">, review: Review): boolean {
+  if (review.author.kind !== "human" || (review.state !== "APPROVED" && review.state !== "CHANGES_REQUESTED")) return false;
+  if (Date.parse(review.submittedAt) > Date.parse(change.mergedAt)) return false;
+  return !sameAccount(review.author, change.author);
+}
+
+export function hasHumanDecision(change: Pick<ChangeRecord, "author" | "mergedAt">, reviews: readonly Review[]): boolean {
+  return reviews.some((r) => isHumanDecision(change, r));
 }
 
 export function matchesUnreviewed(change: ChangeRecord, mode: Unreviewed, cutoffIso: string): boolean {
   if (mode === "any") return true;
   const reviews = reviewsAsOf(change, cutoffIso);
   if (mode === "no-review") return reviews.length === 0;
-  return !hasHumanDecision(reviews);
+  return !hasHumanDecision(change, reviews);
 }
 
 export function matchesAuthor(change: ChangeRecord, authors: Selector["authors"], aliases?: ActorAliases): boolean {

@@ -55,7 +55,7 @@ The real demo population is in [`examples/gh-aw-q3/.pr-rla.yml`](examples/gh-aw-
 GITHUB_TOKEN=$(gh auth token) pr-rla -C examples/gh-aw-q3 freeze --dry-run
 ```
 
-On 2026-11-03 it printed `2,947 landed · 2,717 no recorded human review (merged by: 2,717 human accounts, 0 bot) · 1,589 ≤ 200 changed lines`, next to GitHub search's `review:none` figure of 2,311. It also found 61 direct pushes to `main` in the window. [`BUILD-NOTES.md`](BUILD-NOTES.md) accounts for the two PRs that GitHub search counts and pr-rla does not: both were merged into other branches.
+On 2026-11-03 it printed `2,947 landed · 2,717 no recorded human review (merged by: 2,717 human accounts, 0 bot) · 1,589 ≤ 200 changed lines`, next to GitHub search's `review:none` figure of 2,311. That run predates the review rules below; the same recorded listing under them gives `2,947 landed · 2,718 no recorded human review · 1,589 ≤ 200 changed lines` (one PR, #51168, had a human approval submitted 14 minutes after it merged; it is over 200 lines, so N stays 1,589). It also found 61 direct pushes to `main` in the window. [`BUILD-NOTES.md`](BUILD-NOTES.md) accounts for the two PRs that GitHub search counts and pr-rla does not: both were merged into other branches.
 
 ## How an audit stays honest
 
