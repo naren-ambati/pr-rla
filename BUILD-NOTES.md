@@ -1416,4 +1416,17 @@ One PR moved: #51168 (221 lines) had a human APPROVED review 14 minutes after it
 
 ### Verified (command → output)
 
-See the last lines of this section, written after the final run from a fresh clone.
+From a fresh `git clone -b fix/ledgers-selector` at `8bb807e` (the last commit before this section; only this file changes after it), three runs in a row, 2026-11-04T04:18–04:19Z, Node 22 (`node --version` v22.x on PATH):
+
+```
+npm ci                                     → found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 48 passed (48) · Tests 552 passed | 1 skipped (553)
+npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → # pass 1 · # fail 0
+```
+
+Each of the three runs printed the same lines. `node scripts/demo-ledgers.mjs`, `demo-sdk-carry-overs.mjs`, `demo-plugin-host.mjs` and `demo-broker.mjs` exit 0; the ledger demo's second part now shows the recorded relabel VERIFIED with check 7 WARN (the foreignIssues flag and the missing checkpoint) and the deleted issue FAILED, as before. `npm test` makes no network call. Not verified: see "Deviations and declined items" (the GitHub GraphQL queries and the Jira `editmeta` route were not run live).
