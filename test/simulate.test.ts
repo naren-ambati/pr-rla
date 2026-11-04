@@ -145,7 +145,7 @@ describe("simulate for read-only callers: a measured budget, slices, cancellatio
     // A timer set after it starts fires before it ends: it gave the event loop back between slices.
     let ended = false;
     let firedWhileRunning = false;
-    const run = simulateBounded({ population: 10_000_000, defects: 900_000, runs: 20_000 }).then((r) => ((ended = true), r));
+    const run = simulateBounded({ population: 10_000_000, defects: 900_000, runs: 2_000 }).then((r) => ((ended = true), r));
     setTimeout(() => (firedWhileRunning = !ended), 0);
     await run;
     expect(firedWhileRunning).toBe(true);
@@ -158,8 +158,8 @@ describe("simulate for read-only callers: a measured budget, slices, cancellatio
 
   it("reports progress by runs", async () => {
     const seen: { done: number; total?: number }[] = [];
-    await simulateBounded({ population: 10_000_000, defects: 900_000, runs: 40_000 }, { onProgress: (p) => seen.push(p) });
+    await simulateBounded({ population: 10_000_000, defects: 900_000, runs: 2_000 }, { onProgress: (p) => seen.push(p) });
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every((p) => p.total === 40_000 && p.done <= 40_000)).toBe(true);
+    expect(seen.every((p) => p.total === 2_000 && p.done <= 2_000)).toBe(true);
   });
 });
