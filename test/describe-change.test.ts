@@ -75,6 +75,40 @@ describe("GitHub describeChange on recorded gh-aw draws (github/gh-aw, read-only
   });
 });
 
+describe("GitLab and Bitbucket Cloud describeChange on recorded public changes (anonymous, read-only, 2026-11-04)", () => {
+  for (const [scm, file] of [["gitlab", "describe-gitlab-org-cli-4191-2026-11-04.json"], ["bitbucket-cloud", "describe-bamboo-specs-745-2026-11-04.json"]] as const) {
+    it(`${scm}: the recorded responses replay, through the read-only broker (redirects followed by hand), to the recorded description`, async () => {
+      const rec = readJsonFixture<Recording & { source: string; provider: string; options: Record<string, unknown>; change: ChangeRecord; expected: ChangeDescription }>(scm, file);
+      expect(rec.source).toBe("recorded");
+      const replay = replayFetch(rec);
+      const actx = createAuditContext({ mode: "read-only", fetch: replay });
+      const p = await openProvider(actx, { use: rec.provider, options: rec.options }, process.cwd());
+      const d = await p.describeChange!(rec.change);
+      valid(d, rec.change.id);
+      expect(d).toEqual(rec.expected);
+      expect(replay.unused()).toEqual([]);
+      expect(rec.exchanges.every((e) => e.method === "GET")).toBe(true);
+    });
+  }
+
+  it("what the recordings show: GitLab's MR diffs and its pipeline at the head; Bitbucket's 302s to the diffstat and diff, and four statuses", () => {
+    const gl = readJsonFixture<{ expected: ChangeDescription }>("gitlab", "describe-gitlab-org-cli-4191-2026-11-04.json").expected;
+    expect(gl.files.map((f) => [f.path, f.additions, f.deletions])).toEqual([
+      ["internal/api/default.go", 3, 0],
+      ["internal/commands/issue/issueutils/utils.go", 4, 2],
+      ["internal/commands/issue/issueutils/utils_test.go", 50, 0],
+      ["internal/commands/mr/mrutils/mrutils.go", 1, 0],
+      ["internal/commands/mr/mrutils/mrutils_test.go", 49, 0],
+    ]);
+    expect(gl.gitattributes).toBeNull();
+    expect(gl.checks).toEqual([{ name: "pipeline #2997205784 (duo_workflow)", state: "success", url: expect.stringMatching(/^https:\/\/gitlab\.com\//) }]);
+    const bb = readJsonFixture<Recording & { expected: ChangeDescription }>("bitbucket-cloud", "describe-bamboo-specs-745-2026-11-04.json");
+    expect(bb.exchanges.filter((e) => e.status === 302).map((e) => new URL(e.url).pathname)).toEqual(["/2.0/repositories/atlassian/bamboo-specs/pullrequests/745/diffstat", "/2.0/repositories/atlassian/bamboo-specs/pullrequests/745/diff"]);
+    expect(bb.expected.files).toEqual([{ path: "bamboo-specs-java-agent/pom.xml", status: "modified", additions: 1, deletions: 1, patch: expect.stringMatching(/^@@ /) }]);
+    expect(bb.expected.checks.map((c) => c.state)).toEqual(["success", "success", "success", "success"]);
+  });
+});
+
 describe("GitHub describeChange, synthetic", () => {
   const change = (kind: ChangeRecord["kind"]): ChangeRecord =>
     kind === "pull_request"

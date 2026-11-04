@@ -85,3 +85,7 @@ Accounts of `type: "app_user"` are bots: workspace, project and repository acces
   - 14 commits on `master` in the window: 4 PR merge commits, 6 commits brought in by PR #738 (a merge of the 13.0 release branch), and 4 direct pushes (Maven release-plugin commits by `bamboo_hg_user`, git author `bambooagent`, 24 lines each).
 - Recorded fixture of that run: `test/fixtures/bitbucket-cloud/bamboo-specs-2026-10-27.json`.
 - Synthetic repository: every merge strategy, including a rebase whose PR lists only its original commits; app-user bots; activity pagination past 100 comments; a PR merged 2 s after the window opened.
+
+## Draw context (`describeChange`)
+
+`pr-rla draw-context <n>` and the MCP `draw_context` tool read, with GETs only: the pull request, its `diffstat` (paginated) and its `diff` (one unified diff, split per file; both answer with a 302 that the fetch broker follows), `src/<landed commit>/.gitattributes` (as text; 404 means none), and the commit statuses at the PR's source commit (`STOPPED` counts as a failure). A direct push reads `commit/<sha>`, `diffstat/<sha>` and `diff/<sha>`. Recorded anonymously from atlassian/bamboo-specs #745 on 2026-11-04 (`test/fixtures/bitbucket-cloud/describe-bamboo-specs-745-2026-11-04.json`).

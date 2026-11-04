@@ -72,3 +72,7 @@ Retries 5xx, 429, secondary rate limits (403 with `Retry-After` or `x-ratelimit-
 - **Pusher identity.** GitHub's commit APIs do not expose who pushed; `author` is the commit author and the window uses `committedDate`.
 - **Accounts that are bots but report as users.** The `Copilot` commit-author account is a `User` to GitHub, so a commit it authors directly is classified human.
 - **Review states at freeze time.** Labels can change afterwards, so a label-based stratum may not re-verify.
+
+## Draw context (`describeChange`)
+
+`pr-rla draw-context <n>` and the MCP `draw_context` tool read, with GETs only: `pulls/{n}` (title, body, head commit) and `pulls/{n}/files` (paginated, 100 a page; GitHub lists at most 3,000 files, so a larger PR is marked truncated); `contents/.gitattributes?ref=<landed commit>` (404 means none); and at the PR's head commit, what the merger saw, `check-runs` and the combined `status`. A direct push reads `commits/{sha}` (its files paginated) and the checks at that commit. Check runs map to `pending` until complete, then by conclusion (`cancelled`, `timed_out` and `startup_failure` are failures; `action_required` is pending). Recorded read-only from github/gh-aw on 2026-11-04 for the 36 issued draws of `test/fixtures/audits/gh-aw-q3-recorded`, and run live once (draw #13, 3.4 s through the MCP server).

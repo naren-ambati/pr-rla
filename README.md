@@ -41,6 +41,7 @@ pr-rla freeze --dry-run                       # see the population before fixing
 pr-rla register                               # fixes selector + window + parameters + protocol hash; time-stamped by 4 TSAs (hash only)
 pr-rla freeze                                 # after the window closes: writes audit/<window>.manifest.json
 pr-rla sample                                 # after seed round R publishes: BLS-verifies R, writes the draws
+pr-rla draw-context 1                         # what to review for draw 1: diff (generated files dropped), description, CI, checklist
 pr-rla record 1 pass --reviewer you           # one verdict per draw, in draw order; commit after each
 pr-rla status                                 # CERTIFIED / n more passing draws needed / ESCALATE
 pr-rla verify                                 # anyone can re-check the seven properties
@@ -106,6 +107,7 @@ Package exports:
 - `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected; and, for the optional phase-3 fields, the pinned head, account ids, review granularity and revoked approvals.
 - `pr-rla/testing` also has `runLedgerConformance()` / `assertLedgerConformance()` for ledgers: the first eligible verdict counts, relabels warn, a removal after counting, a deleted or moved issue and a deleted or renamed verdict label fail, bots, apps and unregistered reviewers are ignored, verdicts carry the tracker's time, history pages and round-trips through a checkpoint, publishing is idempotent, and reads survive injected faults. Each fixture says whether it is `recorded` or `synthetic`.
 - `pr-rla/http`: `createJsonClient()`, the built-ins' retrying JSON client, under its own `HTTP_HELPER_VERSION` (1).
+- `pr-rla/api/read`: the read-only audit API, `auditList`, `status`, `draws`, `drawContext`, `verify`, `freezePreview` and `simulate`. Each call runs read-only: the fetch broker refuses any request that is not a read, and no write function is reachable from this subpath (a test walks its import graph). Every CLI command is a formatter over the audit API in `src/api`, and its `--json` output is the API's result object.
 
 Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
@@ -136,6 +138,20 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 3. Record real API responses (`scripts/record-fixture.mjs`) and run `assertProviderConformance((fixture, harness) => …, fixtures)` from `pr-rla/testing`.
 4. Reference it from `.pr-rla.yml`: `provider: { use: ./my-provider.mjs, options: {...} }` or `provider: { use: pr-rla-provider-gitlab }`. A provider declaring another API version is refused with a clear error.
 5. Lock it: `pr-rla plugin add <use>` prints what it trusts and writes `pr-rla.lock.json`, the only way an external plugin gets in. It then runs out of process with placeholder credentials ([`docs/security-model.md`](docs/security-model.md)); `pr-rla plugin check <use>` runs the kit through that host.
+
+## For assistants: `draw-context` and the read-only MCP server
+
+`pr-rla draw-context <n>` shows what a reviewer reads for an issued draw: the change's files and patches with `linguist-generated` files dropped (when the registration's `exclude_generated` is on, from the `.gitattributes` at the landed commit), its description, its CI results, the protocol's "FAILS if" checklist (with a FAIL if the protocol's hash is not the registered one), the draw's verdict state, and how to record a verdict. Every built-in provider implements `describeChange` for it; a provider without it gets the manifest's fields and the URL. Text the change's author wrote is fenced as untrusted data:
+
+```
+<<<UNTRUSTED-CHANGE-CONTENT 7f3a9c…>>>
+… title, description, patches, CI check names …
+<<<END 7f3a9c…>>>
+```
+
+with a fresh 128-bit id on every call. The fence lowers the risk of prompt injection; it cannot rule it out, which is one more reason the verdict stays with a person.
+
+[`packages/pr-rla-mcp`](packages/pr-rla-mcp) is a separate package: an MCP server over stdio with eight read-only tools, `audit_list`, `status`, `draws`, `draw_context`, `verify`, `simulate`, `freeze_preview` and `job_status`. It imports only `pr-rla/api/read`. It records no verdict, issues no draw, submits to no log and writes no file; its jobs and caches live in memory. Tools open only directories under its `--root`s. A call still running after 25 s returns `{ jobId }` for `job_status`. See its [README](packages/pr-rla-mcp/README.md) and [`docs/security-model.md`](docs/security-model.md) for what this does and does not guarantee.
 
 ## Limitations (v0.1)
 

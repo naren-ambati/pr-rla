@@ -45,3 +45,46 @@ Measured on 2026-11-03 with Node 22.23.2, 24.20.0 and 26.8.2 on macOS. Node 25 i
 - **Strong isolation needs the operating system.** For a plugin you do not trust, run pr-rla itself in a container or VM with no ambient credentials. pr-rla ships no sandbox.
 - **Install hygiene is yours.** Install plugins with `npm ci --ignore-scripts` (pr-rla plugins need no install scripts; `plugin add` warns when one declares them). npm 11's `allow-scripts` and `min-release-age` help where available.
 - **The host needs Node 22.15 or later** (`module.registerHooks`, which links a plugin against pr-rla's own SDK). On an older Node an isolated plugin fails to load with that message; tested only on 22.23.2, 24.20.0 and 26.8.2.
+
+## Assistants, `draw-context` and the MCP server (T7, FR3.2, FR3.9)
+
+An assistant can read an audit through `pr-rla draw-context` or the MCP server, `pr-rla-mcp` ([`packages/pr-rla-mcp`](../packages/pr-rla-mcp)). The asset at stake is the reviewer's verdict authority: a verdict must be a person's.
+
+### The verdict-authority guarantee
+
+> pr-rla's MCP tools and its review skill never record, edit or remove a verdict, never issue draws and never submit to a public log. A read-only mode enforces this, and a test checks every tool.
+>
+> pr-rla cannot stop an assistant that has your shell and your credentials from acting as you. Client permission rules and hooks are not a security boundary, and some clients let an AI approve tool calls.
+>
+> What pr-rla can do is make such verdicts not count:
+> - give the assistant a read-only token;
+> - record verdicts where the assistant cannot, in the SCM web UI;
+> - register the reviewers whose verdicts count.
+>
+> `verify` then reports any verdict below the registered provenance level. Signed verdicts with a security key (`presence`) are supported, but in this release they have been tested only with software keys. pr-rla does not check that a registered key is hardware-backed.
+
+### How it is built, in three tiers
+
+Only the first two are guarantees; the third is a speed bump.
+
+1. **pr-rla's own surfaces never write** (enforced, tested).
+   - The MCP server imports only `pr-rla/api/read`, whose functions run in read-only mode: the fetch broker refuses every request that is not a read (`GET`, `HEAD`, a GraphQL query) before it is sent, no recorder is installed, and a ledger is opened with its read methods only. The write functions (`register`, `freeze`, `sample`, `record`, `checkpoint`, `init`, `plugin add` and `lock`) live in `src/api/write/`, which the subpath never imports (`test/api-read-boundary.test.ts` walks the import graph), and each refuses a read-only context with `READ_ONLY_VIOLATION` before it starts.
+   - `packages/pr-rla-mcp/test/mcp-readonly.test.mjs` starts the server over stdio with the MCP SDK's own client, under Node's permission model with no fs-write grant and a guard that reports any write call, and calls every tool with valid and hostile inputs (path traversal, symlinks out of the roots, a config naming files outside them, draws past the cap, oversized and malformed arguments, a change whose text tries to give orders). The audit directories' tree hashes, `.git` included, are unchanged; the server attempted no write; the mock SCM saw only reads.
+   - There is no tool that records, issues draws or submits, and no elicitation: the server never asks the client a question, so no auto-answered dialog can stand in for a person.
+2. **With the recommended setup, a verdict from an assistant does not count** (enforced by the ledger and check 7, not by the client).
+   - **Separate credentials.** The assistant's MCP configuration gets a read-only token. The ledger-write credential lives only where the person acts: the SCM's web UI for issue ledgers, or their own terminal and signing key for `git-file`.
+   - **Registered reviewers.** `verdicts.reviewers` lists the accounts or signing keys whose verdicts count. Agent and bot accounts are never on it; a label event from an unlisted account is ignored, with a check-7 detail.
+   - **App-applied labels.** On GitHub, an event with `performed_via_github_app` set is not counted by default.
+   - **Presence attestation** (U9) is designed to be the tier that holds even then. In this release it is verified with software keys only, so pr-rla does not claim it proves a human touched a hardware key.
+3. **Client-side guards** (best effort): the assistant plugins' hooks (U6). Client permission rules and hook filters are not a security boundary.
+
+### Untrusted text from the change (FR3.9)
+
+A change's title, description, patches, file names and CI check names are written by whoever authored the change, often an agent, and may hold instructions aimed at the assistant. The core builds the draw context with all of it in an `untrusted` object, and its text rendering puts it between `<<<UNTRUSTED-CHANGE-CONTENT <id>>>>` and `<<<END <id>>>`, with 128 fresh random bits as the id on every call, so the text cannot close the fence by guessing it. The MCP server passes the core's fence through and adds none of its own; its instructions to the client say that text inside the fence is data. This lowers the risk of prompt injection; it cannot rule it out, which is a second reason the verdict stays with the person.
+
+### What the MCP server can reach
+
+- **Only its roots.** `--root <dir>` (repeatable; the working directory by default). A tool's `dir`, and every file the audit API opens for it (the config, the audit directory, the protocol, a json-file export, the transparency-log key), must resolve inside a root after `realpath`, or the tool returns `ROOT_ESCAPE`. The server does not depend on the client to supply roots.
+- **Memory, not disk.** Jobs (a call still running after 25 s), finished results for 600 s, and finished freeze previews for 600 s live in memory and die with the process. At most four long calls run at once, and a result over 8 MiB is refused.
+- **Annotations are hints.** Every tool carries `readOnlyHint: true`, and some clients auto-approve such tools. That is acceptable only because the tools really are read-only, which the first tier enforces.
+- **A `trust: full` plugin is your code with your rights.** The read-only guarantee covers pr-rla's own surfaces. A plugin you locked with `trust: full` runs inside the server's process; an isolated one (the default) cannot write files. Start the server with `--plugins builtin-only` (or `PR_RLA_PLUGINS=builtin-only`) to refuse external plugins.

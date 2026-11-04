@@ -69,6 +69,28 @@ These three definition fields are data. When the provider runs isolated (section
 
 A `DISMISSED` review is a decision that no longer stands: a dismissed review, a withdrawn approval, an approval reset by a push. A revoked approval must never come back as `APPROVED`.
 
+**`describeChange` (optional, phase 3, same API version 1).** `pr-rla draw-context <n>` and the MCP `draw_context` tool show a reviewer one drawn change. Without this method they show the manifest's fields and the URL. With it:
+
+```ts
+describeChange(change: ChangeRecord): Promise<ChangeDescription>;
+
+interface ChangeDescription {
+  changeId: string;                   // change.id
+  title: string;
+  body: string;                       // a direct push: the commit message after its first line
+  files: { path: string; previousPath?: string; status: "added" | "modified" | "removed" | "renamed";
+           additions: number; deletions: number; patch: string | null }[];   // patch: the unified hunks, null when the SCM has none
+  gitattributes: string | null;       // .gitattributes at change.mergeSha, or null when there is none
+  checks: { name: string; state: "success" | "failure" | "neutral" | "pending" | "skipped" | "unknown"; url: string | null }[];
+  truncated: boolean;                 // the SCM listed fewer files than the change has
+}
+```
+
+- Read only, through `ctx.fetch`, like every other request; behind the broker in read-only mode anything else is refused. For a PR, report the CI results at its head commit (what the merger saw); for a direct push, at the commit.
+- Return every file, generated or not, with the raw `.gitattributes`: the core drops the `linguist-generated` ones itself, when the registration's `exclude_generated` is on, and caps the patches. A body or a patch is never trusted: the core fences all of it as untrusted text before an assistant sees it.
+- The core validates the result with `changeDescriptionProblems` (exported from `pr-rla/provider`), so a malformed description fails `draw-context` with the problem named, whatever process it came from.
+- The built-ins show the calls per SCM (`src/providers/*/describe.ts`): GitHub `pulls/{n}` and `/files`, `contents/.gitattributes?ref=`, `check-runs` and `status`; GitLab `merge_requests/:iid/diffs`, `repository/files/.gitattributes/raw`, `pipelines?sha=`; Bitbucket Cloud `diffstat` and `diff`, `src/{sha}/.gitattributes`, `commit/{sha}/statuses`; Data Center `changes` and `diff`, `raw/.gitattributes?at=`, build status. `pr-rla/http`'s client has `getText()` for a body that is not JSON (a raw file, a diff), returning null on 404.
+
 ## 2. Step by step: the Gitea provider
 
 The numbers below match the comments in [`index.mjs`](../examples/providers/gitea/index.mjs).
