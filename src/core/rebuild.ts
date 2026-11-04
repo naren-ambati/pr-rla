@@ -458,7 +458,15 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
       }
       // What kept it out of the pool at freeze: what the freeze's listing recorded, else what excludes it now.
       const excl = atFreeze ? atFreeze.excludedBy : exclNow;
-      if (excl.some((c) => !isMutableExclusion(c))) return null; // excluded by what it is (a fork, another owner)
+      const fixed = excl.filter((c) => !isMutableExclusion(c));
+      if (fixed.length && fixed.every((c) => exclNow.includes(c))) return null; // excluded by what it is (a fork, another owner)
+      if (fixed.length) {
+        // The freeze's listing says it was a fork (or not the owner's) then, and it is not now: what a repo is does not
+        // change that way, so the record is wrong or the SCM changed it; its window changes are then unaccounted for.
+        const c = await countNow(provider, r.repo, i);
+        if ("error" in c) return { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)}, which it is not now; its window changes could not be counted (${c.error})` };
+        return c.count === 0 ? null : { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)} (the manifest's listing records it so), which it is not now, and ${n(c.count)} of its changes landed in the window: the record is wrong, or the SCM changed what the repo is` };
+      }
       const created = r.createdAt ? Date.parse(r.createdAt) : NaN;
       if (Number.isFinite(created) && created >= closes) return exclNow.length === 0 ? { line: `repo ${r.repo} matches the registered rule but is not in the manifest; it was created ${r.createdAt}, after the window closed, so it cannot hold a window landing` } : null;
       const seen = atFreeze ? (excl.length ? `was excluded at freeze (${describeExclusions(excl)})` : "matched the rule in the freeze's own listing") : "was not in the freeze's listing";

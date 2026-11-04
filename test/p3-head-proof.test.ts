@@ -140,3 +140,18 @@ describe("kit: push-log is an opt-in check (P3)", () => {
     expect(only(await runProviderConformance(swallow as never, [fixture(org)]))[0]!.message).toMatch(/with every request answered 403, pushLog returned 0 update\(s\) instead of throwing/);
   });
 });
+
+describe("checkPool: an exclusion by what a repo is that no longer holds", () => {
+  it("recorded as a fork at freeze but not one now, with window changes: INCOMPLETE; still a fork: nothing", async () => {
+    const { checkPool } = await import("../src/core/rebuild.js");
+    const WIN = { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" };
+    const sel = normalizeSelector({ kinds: ["pull_request", "direct_push"], unreviewed: "any" });
+    const ref = (repo: string, fork: boolean) => ({ repo, id: `id-${repo}`, defaultBranch: "main", archived: false, fork, visibility: "public" as const, createdAt: "2020-01-01T00:00:00Z" });
+    const pr = (repo: string): ChangeRecord => ({ id: `x:${repo}#1`, kind: "pull_request", repo, url: "u", mergeSha: sha1(repo), mergedAt: "2026-08-01T00:00:00Z", author: { login: "bob", kind: "human" }, mergedBy: { login: "m", kind: "human" }, reviews: [], changedLines: 1, labels: [] });
+    const provider = (forkNow: boolean) => ({ apiVersion: 1, name: "stub", listRepos: async () => [ref("acme/a", false), ref("acme/x", forkNow)], listChanges: async (req: { repo: string }) => ({ changes: [pr(req.repo)], defaultBranch: "main", limitations: [] }) });
+    const listing = { owner: "acme", identity: null, visibility: { public: { listed: 2, complete: true, reason: "" }, private: { listed: 0, complete: null, reason: "" }, internal: { listed: 0, complete: null, reason: "" } }, repos: [{ repo: "acme/a", repoId: "id-acme/a", defaultBranch: "main", archived: false, fork: false, visibility: "public" as const, createdAt: null, excludedBy: [] }, { repo: "acme/x", repoId: "id-acme/x", defaultBranch: "main", archived: false, fork: true, visibility: "public" as const, createdAt: null, excludedBy: ["fork"] }] };
+    const input = { set: { kind: "rule" as const, owner: "acme", include: ["*"], exclude: [], archived: false, forks: false, visibility: ["public" as const] }, registered: [{ repo: "acme/a", repoId: "id-acme/a" }], mode: "RETROSPECTIVE" as const, repos: [{ repo: "acme/a", repoId: "id-acme/a", defaultBranch: "main", headSha: null }], listing, gone: [], window: WIN, selector: sel };
+    expect((await checkPool(provider(false) as never, input)).lines.join("\n")).toMatch(/INCOMPLETE repo acme\/x was excluded at freeze as fork \(the manifest's listing records it so\), which it is not now, and 1 of its changes landed in the window/);
+    expect((await checkPool(provider(true) as never, input)).lines.join("\n")).not.toMatch(/acme\/x/);
+  });
+});
