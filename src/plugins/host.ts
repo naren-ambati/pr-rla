@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -123,10 +124,29 @@ export interface PluginHost {
 }
 
 const live = new Set<PluginHost>();
+/** The hosts started inside a scope (withPluginHostScope), by async context. */
+const scoped = new AsyncLocalStorage<Set<PluginHost>>();
+
+/** How many plugin hosts are running in this process. */
+export const livePluginHosts = (): number => live.size;
 
 /** Stops every plugin host this process started (the CLI calls it when a command ends). */
 export function closeAllPluginHosts(): void {
   for (const h of [...live]) h.close();
+}
+
+/**
+ * Runs `fn` and then stops the plugin hosts started inside it, and only those: a long-running
+ * process (the MCP server, through pr-rla/api/read) keeps no child per call, and calls running at
+ * the same time do not stop each other's hosts.
+ */
+export async function withPluginHostScope<T>(fn: () => Promise<T>): Promise<T> {
+  const started = new Set<PluginHost>();
+  try {
+    return await scoped.run(started, fn);
+  } finally {
+    for (const h of started) h.close();
+  }
 }
 
 type Refable = { ref?: () => void; unref?: () => void };
@@ -407,6 +427,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     stderrTail,
   };
   live.add(host);
+  scoped.getStore()?.add(host);
   busy();
   const readyMessage = await ready;
   validateReady(readyMessage, o);

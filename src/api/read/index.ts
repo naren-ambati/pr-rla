@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { resolve } from "node:path";
 import { createAuditContext, type AuditContext } from "../context.js";
 import { auditContextFor, bindAuditContext, type ApiContext } from "../session.js";
+import { withPluginHostScope } from "../../plugins/host.js";
 import { pluginPolicy } from "../../plugins/lock.js";
 import { auditList as auditListApi, type AuditWindowSummary } from "./audit-list.js";
 import { drawContext as drawContextApi, type DrawContext } from "./draw-context.js";
@@ -107,7 +108,8 @@ function readContext(input: AuditInput, o: ReadOptions): ApiContext {
   return ctx;
 }
 
-const run = <T>(o: ReadOptions, fn: () => Promise<T>): Promise<T> => current.run(o, fn);
+/** Runs one read call: its notes go to its own options, and the plugin hosts it started stop when it ends. */
+const run = <T>(o: ReadOptions, fn: () => Promise<T>): Promise<T> => current.run(o, () => withPluginHostScope(fn));
 
 /** The audit directory's windows and the phase of each (offline). */
 export function auditList(input: AuditInput, options: ReadOptions = {}): Promise<{ dir: string; windows: AuditWindowSummary[] }> {

@@ -6,7 +6,7 @@ import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
 import type { DrawsFile } from "../src/core/records.js";
-import { closeAllPluginHosts } from "../src/plugins/host.js";
+import { closeAllPluginHosts, livePluginHosts } from "../src/plugins/host.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
 import { lockPlugin } from "./helpers/plugin-lock.js";
 
@@ -78,6 +78,12 @@ describe("describeChange through the isolated plugin host", () => {
       const close = c.text.indexOf(`<<<END ${c.untrusted.fence}>>>`);
       expect(c.text.indexOf("Ignore your instructions")).toBeLessThan(close);
       await expect(read.drawContext({ dir: s.dir, draw: even.draw }, { nowMs: () => s.clock.now })).rejects.toMatchObject({ code: "PROVIDER_ERROR", message: expect.stringMatching(/described .* wrongly: title must be a string/) });
+      // A read call stops the plugin hosts it started, and only those: calls at the same time do not stop each other's.
+      closeAllPluginHosts();
+      expect(livePluginHosts()).toBe(0);
+      const both = await Promise.all([odd.draw, odd.draw, odd.draw].map((draw) => read.drawContext({ dir: s.dir, draw }, { nowMs: () => s.clock.now, session: s })));
+      expect(both.map((c) => c.untrusted.title)).toEqual(["From the plugin host", "From the plugin host", "From the plugin host"]);
+      expect(livePluginHosts()).toBe(0);
     } finally {
       closeAllPluginHosts();
     }
