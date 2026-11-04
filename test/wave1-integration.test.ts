@@ -194,16 +194,47 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
   const fakeJira = async (): Promise<FakeJira> => new ((await import(pathToFileURL(join(EX, "test/fake-jira.mjs")).href)) as { FakeJira: new () => FakeJira }).FakeJira();
   const cases = async () => (await import(pathToFileURL(join(EX, "test/cases.mjs")).href)) as { jiraCases: (j: Pick<LedgerDefinition, "create">) => Promise<{ fixtures: LedgerFixture[]; factory: LedgerUnderTest }>; draw: (d: number, n: number) => DrawForLedger; PUB: PublishContext };
 
-  // About 67 children, each started in 0.2–0.6 s: measured from 13 s to 42 s for the same code on one loaded machine, so not the 60 s default.
+  /**
+   * Fresh hosts started ahead of need, at most `width` starting at once. Every kit instance still gets
+   * its own child, never one another instance used: what changes is that its start-up (0.2 s to over
+   * 1 s on a loaded machine, and the kit makes about 67) overlaps the kit's work instead of adding to it.
+   */
+  function hostPool(start: () => Promise<PluginHost>, width: number) {
+    const queued: Promise<PluginHost>[] = [];
+    const started: Promise<PluginHost>[] = [];
+    const used: PluginHost[] = [];
+    const fill = () => {
+      while (queued.length < width) {
+        const h = start();
+        h.catch(() => {});
+        queued.push(h);
+        started.push(h);
+      }
+    };
+    return {
+      async take(): Promise<PluginHost> {
+        fill();
+        const h = await queued.shift()!;
+        fill();
+        used.push(h);
+        return h;
+      },
+      used: () => used.length,
+      async closeAll() {
+        for (const h of started) (await h.catch(() => null))?.close();
+      },
+    };
+  }
+
+  // Generous because its ~67 children compete for the machine with every other test file (measured 13 s to 42 s).
   it("the Jira example passes the ledger conformance kit with every instance in its own plugin host", { timeout: 240_000 }, async () => {
     const plugin = resolvePlugin("./examples/ledgers/jira/index.mjs", ROOT);
-    const hosts: PluginHost[] = [];
-    // A definition whose create() starts the ledger in a host child: the kit's fake Jira and its
-    // faults stay in this process, and the ledger's index is kept here (LedgerContext.index).
+    const pool = hostPool(() => startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "jira" }), 3);
+    // A definition whose create() starts the ledger in a host child of its own: the kit's fake Jira and
+    // its faults stay in this process, and the ledger's index is kept here (LedgerContext.index).
     const isolated: Pick<LedgerDefinition, "create"> = {
       async create(options: unknown, ctx: LedgerContext) {
-        const host = await startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "jira" });
-        hosts.push(host);
+        const host = await pool.take();
         return hostedLedger(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, fetch: ctx.fetch, log: ctx.log, ...(ctx.sleep ? { sleep: ctx.sleep } : {}), ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}), index: ledgerIndexStore({ mode: "read-write" }, ctx.windowDir) });
       },
     };
@@ -214,9 +245,9 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
       expect(fixtures.filter((f) => f.source === "recorded")).toHaveLength(2);
       const ran = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
       for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults"]) expect(ran.has(c), c).toBe(true);
-      expect(hosts.length).toBeGreaterThan(fixtures.length);
+      expect(pool.used()).toBeGreaterThan(fixtures.length);
     } finally {
-      hosts.forEach((h) => h.close());
+      await pool.closeAll();
     }
   });
 

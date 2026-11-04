@@ -111,8 +111,11 @@ export interface HostOptions {
   /** Secrets the broker may swap in; stripped from every response before the child sees it (identities, `secret: false`, are left alone). */
   secrets?: readonly SecretValue[];
   execPath?: string;
+  /** Silence that stops the child while a call is in flight, counted from `ready` (default HEARTBEAT_TIMEOUT_MS). */
   heartbeatTimeoutMs?: number;
   heartbeatIntervalMs?: number;
+  /** How long the child may take to start and report `ready` (default HEARTBEAT_TIMEOUT_MS). */
+  loadTimeoutMs?: number;
   maxMessageBytes?: number;
   /** Arms the heartbeat watchdog (tests use a recording one). */
   setTimer?: (fire: () => void, ms: number) => () => void;
@@ -224,6 +227,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   const execPath = o.execPath ?? process.execPath;
   const major = nodeMajor(execPath);
   const timeoutMs = o.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+  const loadMs = o.loadTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
   const maxBytes = o.maxMessageBytes ?? MAX_MESSAGE_BYTES;
   const setTimer = o.setTimer ?? realTimer;
   const scrub = scrubber(o.secrets ?? []);
@@ -279,10 +283,15 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     disarm?.();
     disarm = null;
     if (dead || closed || (!loading && pending.size === 0)) return;
+    // Until `ready` the child is starting (a process, then the plugin's imports): that has its own limit.
+    // The heartbeat timeout counts from `ready`, while a call is in flight.
+    const starting = loading;
     disarm = setTimer(() => {
-      die(new PluginError(withTail(`plugin ${o.label} sent no heartbeat for ${Math.round(timeoutMs / 1000)} s and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
+      const secs = (ms: number) => (ms < 10_000 ? String(ms / 1000) : String(Math.round(ms / 1000)));
+      const why = starting ? `did not finish loading within ${secs(loadMs)} s` : `sent no heartbeat for ${secs(timeoutMs)} s`;
+      die(new PluginError(withTail(`plugin ${o.label} ${why} and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
       child.kill("SIGKILL");
-    }, timeoutMs);
+    }, starting ? loadMs : timeoutMs);
   };
   /** The plugin's waits being served; each ends early when its controller aborts. */
   const sleeps = new Set<AbortController>();

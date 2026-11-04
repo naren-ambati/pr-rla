@@ -348,31 +348,54 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
     await expect(list(p)).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT" });
   });
 
+  /**
+   * The contract's ratio, kept at a test's pace: the parent waits HEARTBEAT_TIMEOUT_MS / HEARTBEAT_INTERVAL_MS
+   * = 6 intervals, so it tolerates five missed heartbeats. At a 250 ms interval that is 1.5 s of silence,
+   * counted from the child's `ready` (its start-up has its own limit), so a loaded machine that is slow to
+   * start a child, or late with one heartbeat, does not trip it.
+   */
+  const INTERVAL = 250;
+  const TIMEOUT = INTERVAL * (HEARTBEAT_TIMEOUT_MS / HEARTBEAT_INTERVAL_MS);
+
   it("a call that waits sends heartbeats, which the parent receives (test gap: it used to check the constants only)", async () => {
-    const host = await hostileHost({ heartbeatIntervalMs: 100 });
+    const host = await hostileHost({ heartbeatIntervalMs: INTERVAL });
     try {
-      const p = await hostedProvider(host, { slowMs: 1_500, bigResultBytes: 10 }, ctx);
+      const p = await hostedProvider(host, { slowMs: 8 * INTERVAL, bigResultBytes: 10 }, ctx);
       expect(host.stats().heartbeats).toBe(0);
       await list(p);
-      // About 15 in 1.5 s; at least 5 even on a loaded machine.
-      expect(host.stats().heartbeats).toBeGreaterThanOrEqual(5);
+      // About 8; at least 2 however late the child's timer runs.
+      expect(host.stats().heartbeats).toBeGreaterThanOrEqual(2);
     } finally {
       host.close();
     }
   });
 
   it("a slow call that keeps sending heartbeats outlives the watchdog; a silent one is stopped by the real timer", async () => {
-    const host = await hostileHost({ heartbeatTimeoutMs: 1_500, heartbeatIntervalMs: 100 });
+    expect(TIMEOUT).toBe(1_500);
+    const host = await hostileHost({ heartbeatTimeoutMs: TIMEOUT, heartbeatIntervalMs: INTERVAL });
     try {
-      const p = await hostedProvider(host, { slowMs: 4_000, bigResultBytes: 10 }, ctx);
+      const p = await hostedProvider(host, { slowMs: 2 * TIMEOUT, bigResultBytes: 10 }, ctx);
       expect((await list(p)).defaultBranch).toBe("main");
     } finally {
       host.close();
     }
-    const silent = await hostileHost({ heartbeatTimeoutMs: 1_500 });
+    const silent = await hostileHost({ heartbeatTimeoutMs: TIMEOUT, heartbeatIntervalMs: INTERVAL });
     const started = Date.now();
-    await expect(list(await hostedProvider(silent, { hang: true }, ctx))).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT" });
-    expect(Date.now() - started).toBeLessThan(20_000);
+    await expect(list(await hostedProvider(silent, { hang: true }, ctx))).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT", message: expect.stringMatching(/sent no heartbeat for 1\.5 s and was stopped/) });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(TIMEOUT - 50);
+  });
+
+  it("the heartbeat timeout counts from ready: start-up has its own limit, loadTimeoutMs", async () => {
+    const dir = auditDirWith({});
+    writeFileSync(join(dir, "slow-start.mjs"), 'await new Promise((r) => setTimeout(r, 1000));\nexport default { providerApiVersion: 1, name: "slow-start", create() { return { apiVersion: 1, name: "slow-start", async listChanges() { return { changes: [], defaultBranch: "main" }; } }; } };\n');
+    const start = (o: Partial<HostOptions>) => {
+      const plugin = resolvePlugin("./slow-start.mjs", dir);
+      return startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "slow-start", ...o });
+    };
+    // A heartbeat timeout far shorter than the start-up does not stop it.
+    const host = await start({ heartbeatTimeoutMs: 100 });
+    host.close();
+    await expect(start({ loadTimeoutMs: 300 })).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT", message: expect.stringMatching(/^plugin slow-start did not finish loading within 0\.3 s and was stopped/) });
   });
 
   it("a message over the limit (64 MiB by default) is refused by its length, before its body is buffered (finding 11)", async () => {
