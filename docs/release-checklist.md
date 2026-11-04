@@ -129,7 +129,7 @@ Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/
 
 **Owner: maintainer.** U7's "Re-pinning at release" ([`ci/github.md`](ci/github.md#re-pinning-at-release)), exactly, with X = 0.1.0:
 
-1. In `integrations/github-action/package.json` set `"pr-rla": "X"` (the exact version, no `^`).
+1. After the founder publishes `pr-rla@X`, in `integrations/github-action/package.json` set `"pr-rla": "X"` (the exact version, no `^`).
 2. Delete `integrations/github-action/package-lock.json`, `node_modules/` and `vendor/`, then run `npm install --package-lock-only --ignore-scripts` there. The lockfile now records `resolved: https://registry.npmjs.org/pr-rla/-/pr-rla-X.tgz` and the registry's `integrity`.
 3. Check that entry: `resolved` starts with `https://registry.npmjs.org/`, and its `integrity` equals `npm view pr-rla@X dist.integrity`.
 4. Delete `scripts/pack-action-tarball.mjs` and the `!integrations/github-action/vendor/…` exception in `.gitignore`.

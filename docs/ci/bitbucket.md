@@ -196,7 +196,7 @@ pipelines:
             - pr-rla.json
 ```
 
-- **Pinned.** `PRRLA_VERSION` is one exact version. The script refuses a range or a tag, and refuses an installed `pr-rla` whose `--version` is not that exact version. `PRRLA_INTEGRITY` (the `sha512-…` that `npm view pr-rla@<version> dist.integrity` reports, copied from the release notes) makes the step stop unless npm reports the same value. Packages install with `--ignore-scripts`. Transitive dependencies are whatever npm resolves on the day, because there is no lockfile here: the Action has one, and a release that ships `npm-shrinkwrap.json` would close this gap (open for the release checklist).
+- **Pinned.** `PRRLA_VERSION` is one exact version. The script refuses a range or a tag, and refuses an installed `pr-rla` whose `--version` is not that exact version. `PRRLA_INTEGRITY` (the `sha512-…` that `npm view pr-rla@<version> dist.integrity` reports, copied from the release notes) makes the step stop unless npm reports the same value. Packages install with `--ignore-scripts`. Transitive dependencies are whatever npm resolves on the day, because there is no lockfile here: the Action has one, and a release that ships `npm-shrinkwrap.json` would close this gap (the founder's decision: [`../release-checklist.md`](../release-checklist.md), step 4).
 - **Built-ins only.** The step runs `pr-rla --plugins builtin-only …`. `PRRLA_PLUGINS=allow` is the opt-in.
 - **Image.** `node:24`, pinned by the digest of the tag on 2026-11-04. Re-pin it when you update Node.
 - **Artifact.** `pr-rla.json` is the command's `--json` output. The step prints the certificate line.

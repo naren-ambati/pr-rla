@@ -135,7 +135,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
     .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable), as verify's: a certificate needs its times proven", collect)
-    .addHelpText("after", "\nExit codes: 0 · 1 not registered · 2 ESCALATE · 3 population below the registered minimum · 6 the SPRT target is reached but the certificate is withheld (the registration or commitment time is not proven by k operators)")
+    .addHelpText("after", "\nExit codes: 0 · 1 not registered, or a check verify would FAIL withholds the certificate · 2 ESCALATE · 3 population below the registered minimum · 6 the SPRT target is reached but the certificate is withheld (the registration or commitment time is not proven by k operators), or the verdicts could not be read")
     .action(function (this: Command) {
       return run((ctx) => statusCommand(ctx, this.opts()), !!this.opts().json)();
     });

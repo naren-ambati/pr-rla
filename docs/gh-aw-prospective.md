@@ -58,12 +58,24 @@ Signed into `audits/gh-aw-prospective/audit/gh-aw-prospective/registration.json`
 pr-rla -C audits/gh-aw-prospective register
 ```
 
-It signs the record, sends each of the four authorities one request holding only the record's SHA-256 digest and a nonce, and writes the record with the tokens it got. Expect:
+It signs the record, sends each of the four authorities one request holding only the record's SHA-256 digest and a nonce, and writes the record with the tokens it got. A successful run ends like bolt 1's live `register` of the demo audit (`test/fixtures/audits/tsa-demo`, through `node scripts/record-tsa-fixtures.mjs`), recorded 2026-11-03 (its last two lines; BUILD-NOTES, "Bolt 1 (U1)"):
 
-```
-  PROSPECTIVE · registration existed by <time> (U_k)
+```output
+  PROSPECTIVE · registration existed by 2026-11-03T22:32:28Z (U_k)
   timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN
 ```
+
+Since the trusted-time round, `register` also prints how each counted authority's anchor is trusted, as the replay of that recording shows, recorded 2026-11-04 (BUILD-NOTES, "Trusted-time fix round A"):
+
+```output
+  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN
+    sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true)
+    digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1)
+    globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025)
+    microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)
+```
+
+The Microsoft line is the one trust-on-first-use anchor among the defaults; confirming it from a second source is step 5 of the [release checklist](release-checklist.md).
 
 - **Exit 5** (`TIMESTAMP NOT TAMPER-PROOF (n of 2)`): fewer than two operators answered. Run `pr-rla -C audits/gh-aw-prospective register --force` before showing the registration to anyone. Tokens cannot be added to a written record.
 - **Exit 1 with `local clock differs from timestamp authority time`**: fix the clock; nothing was written.
@@ -75,5 +87,7 @@ It signs the record, sends each of the four authorities one request holding only
 2. Give the auditors the registration's SHA-256 (printed first) before the window opens. `verify` cannot prove that no other registration exists, so this hand-over is the control.
 3. **Freeze with a build that includes bolt 5** (U3, the pinned history head), after the window closes and before seed round R publishes (24 h after the close), so the population is reproducible.
 4. **Sample, then review.** `GITHUB_TOKEN=$(gh auth token) pr-rla -C audits/gh-aw-prospective sample` opens one issue per drawn change in the audit repo, in draw order, and writes `audit/gh-aw-prospective/ledger-index.json`; commit it with `draws.json`. The token needs Issues: write on the audit repo. Record each verdict by applying `pr-rla:pass` or `pr-rla:fail` on the draw's issue in GitHub's web UI (or `pr-rla record <draw> pass|fail`, which applies the label as the token's account). The first label a registered reviewer applies counts.
+
+   <!-- pending P1: the P1 round has sample also write a time-stamped ledger-index publication record (ledger-publication.json); add the file to what this step commits once that round merges. -->
 5. **Checkpoint the verdict history** once the audit certifies: `GITHUB_TOKEN=$(gh auth token) pr-rla -C audits/gh-aw-prospective checkpoint --push`. A repo admin can delete issues; a time-stamped checkpoint committed to the audit repo makes that visible to `verify`.
 6. `verify` prints the registering and freezing pr-rla versions. Any later change to the selector or population semantics needs a new registration, never a silent change. Verifying the issue ledger reads every draw issue's events, which needs a token (any token: the 60-an-hour anonymous budget is too small for 36 issues).
