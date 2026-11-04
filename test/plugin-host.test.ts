@@ -253,9 +253,11 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
   });
 
   it("a slow call that keeps sending heartbeats is not stopped", async () => {
-    const host = await hostileHost({ heartbeatTimeoutMs: 500, heartbeatIntervalMs: 100 });
+    // The call outlasts the silence timeout, so only its heartbeats keep it alive. The timeout leaves room for a loaded
+    // machine to delay the child's timers (500 ms stopped it with two suites running at once, U8 fix round).
+    const host = await hostileHost({ heartbeatTimeoutMs: 5_000, heartbeatIntervalMs: 100 });
     try {
-      const p = await hostedProvider(host, { slowMs: 1_500, bigResultBytes: 10 }, ctx);
+      const p = await hostedProvider(host, { slowMs: 6_500, bigResultBytes: 10 }, ctx);
       expect((await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).defaultBranch).toBe("main");
     } finally {
       host.close();
