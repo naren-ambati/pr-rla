@@ -161,11 +161,176 @@ export interface ProviderContext {
   sleep?: (ms: number) => Promise<void>;
 }
 
+export type RepoVisibility = "public" | "private" | "internal";
+export const REPO_VISIBILITIES: readonly RepoVisibility[] = ["public", "private", "internal"];
+
+/**
+ * A repository set rule (U8, FR5.1): every repository under `owner` (a GitHub org or user, a GitLab group,
+ * a Bitbucket workspace or project) whose path matches `include` and not `exclude`, filtered by the flags.
+ * It is registered as written and resolved once, at freeze.
+ */
+export interface RepoSetRule {
+  kind: "rule";
+  owner: string;
+  /** Globs over the repo path (`*` within a segment, `**` across segments). A pattern with no `/` matches the repo's last segment. Sorted; default `["*"]`. */
+  include: string[];
+  exclude: string[];
+  /** true includes archived repositories (default false: excluded). */
+  archived: boolean;
+  /** true includes forks (default false: excluded). */
+  forks: boolean;
+  /** Which visibilities count. Sorted; default all three. */
+  visibility: RepoVisibility[];
+}
+
+/** One repository `listRepos` found. `id` is the SCM's stable repository id. */
+export interface RepoRef {
+  /** Provider-scoped repository path, as `ListChangesRequest.repo` takes it (for example `navikt/pdfgenrs`). */
+  repo: string;
+  id: string;
+  defaultBranch: string;
+  archived: boolean;
+  fork: boolean;
+  visibility: RepoVisibility;
+  /**
+   * Optional (U8): when the SCM created the repository, ISO 8601 UTC, where the SCM reports it. `verify` uses it to
+   * excuse a repo that matches the rule but was created after the window closed: it cannot hold a window landing.
+   */
+  createdAt?: string;
+}
+
+/** Whether a listing provably shows every repository of one visibility, and why (or why not). */
+export interface VisibilityProof {
+  complete: boolean;
+  /** One line a reader can check, e.g. "org owner (admin) with a classic token holding the repo scope". */
+  reason: string;
+}
+
+/**
+ * Optional (U8): what `listRepos` can see under an owner. `identity` is the account the token acts as, when the SCM
+ * says (null otherwise). For each visibility, whether the listing provably holds every repository of that visibility
+ * under the owner, with the reason. A pooled freeze records it; `verify` needs `complete` for every visibility the
+ * rule admits other than `public` (an SCM lists public repositories to anyone), or check 5 is INCOMPLETE.
+ */
+export interface ListingVisibility {
+  identity: string | null;
+  visibilities: Record<RepoVisibility, VisibilityProof>;
+}
+
+/** Optional (U8): one commit on the default branch's first-parent chain. */
+export interface FirstParentCommit {
+  sha: string;
+  /** The commit's committer date, ISO 8601 UTC (the date the provider's window applies to direct pushes). */
+  committedAt: string;
+}
+
+/**
+ * Optional (U8): the requests one `listChanges` for this request would make, predicted from a cheap
+ * probe (the first page of what it would read). `freeze --dry-run --estimate` sums these.
+ */
+export interface RequestEstimate {
+  /** Every request, GraphQL queries included. */
+  requests: number;
+  /** How many of `requests` are GraphQL queries (they have their own budget on GitHub). Default 0. */
+  graphql?: number;
+  /** The requests the probe itself made (already spent; part of `requests`). */
+  probed?: number;
+}
+
+/**
+ * Thrown by a provider's `describeRepo` when the repository itself does not exist: HTTP 404, or 403 only where the
+ * SCM documents a 403 as hiding a repository from the caller. The core decides a repo is gone only on this answer to
+ * one repo-level probe, never on an error from `listChanges` (a 404 there can be a missing commit or sub-resource).
+ * `verify` then reports the repo's changes as not rebuilt (INCOMPLETE); `freeze` records a registered repo as gone.
+ * Across the plugin host the `code` carries it.
+ */
+export const REPO_UNAVAILABLE = "REPO_UNAVAILABLE";
+export class RepoUnavailableError extends Error {
+  // No parameter properties or field initialisers: src/sdk is erasable TypeScript (tsconfig.sdk.json), because this
+  // module also runs under Node's type stripping (the plugin host).
+  readonly code: string;
+  readonly repo: string;
+  readonly status: 403 | 404;
+  constructor(repo: string, status: 403 | 404, detail = "") {
+    super(`${repo}: HTTP ${status}${detail ? ` ${detail}` : ""}`);
+    this.name = "RepoUnavailableError";
+    this.code = REPO_UNAVAILABLE;
+    this.repo = repo;
+    this.status = status;
+  }
+}
+
+/** The broker's give-up codes (src/sdk/http.ts): a rate limit or a timeout, never a missing repository. */
+const GIVE_UP_CODES: readonly string[] = ["BROKER_RETRIES_EXHAUSTED", "BROKER_TIMEOUT"];
+
+/**
+ * True for a RepoUnavailableError, one that crossed the plugin host (its `code`), or a provider's own 404 or 403.
+ * Never for a rate limit or a give-up: an error with a broker give-up code, `rateLimited: true` or status 0 is
+ * transient, whatever status it carries (a GitHub secondary rate limit is a 403).
+ */
+export function isRepoUnavailable(e: unknown): boolean {
+  const x = e as { code?: unknown; status?: unknown; rateLimited?: unknown } | null;
+  if (!x || typeof x !== "object") return false;
+  if (x.code === REPO_UNAVAILABLE) return true;
+  if (x.rateLimited === true || (typeof x.code === "string" && GIVE_UP_CODES.includes(x.code))) return false;
+  return x.status === 404 || x.status === 403;
+}
+
+/**
+ * Thrown by `listChanges` for a repository with no commits, so no default branch (`<repo> has no default branch`).
+ * A single-repo audit stops on it, as it always has; a pooled freeze or verify counts the repo as empty: nothing
+ * landed in it in any window. Across the plugin host the `code` carries it.
+ */
+export const REPO_EMPTY = "REPO_EMPTY";
+export class RepoEmptyError extends Error {
+  readonly code: string;
+  readonly repo: string;
+  constructor(repo: string, message = `${repo} has no default branch`) {
+    super(message);
+    this.name = "RepoEmptyError";
+    this.code = REPO_EMPTY;
+    this.repo = repo;
+  }
+}
+
+/** True for a RepoEmptyError, or one that crossed the plugin host (its `code`). */
+export function isRepoEmpty(e: unknown): boolean {
+  return !!e && typeof e === "object" && (e as { code?: unknown }).code === REPO_EMPTY;
+}
+
 export interface ScmProvider {
   readonly apiVersion: number;
   /** Short scheme, used as the `id` prefix. e.g. `github`. */
   readonly name: string;
   listChanges(request: ListChangesRequest): Promise<ListChangesResult>;
+  /**
+   * Optional (U8, same API version): the repositories under `set.owner` the token can see. A provider may
+   * skip archived repositories, forks or visibilities the rule excludes, but need not: the core applies the
+   * rule's globs and flags itself, sorts, and refuses a result outside `set.owner`. Required to register a
+   * `rule` repo set; absent, `register` refuses and names the provider.
+   */
+  listRepos?(set: RepoSetRule): Promise<RepoRef[]>;
+  /** Optional (U8): predicts `listChanges` request counts for `freeze --dry-run --estimate`. Absent: no estimate for this provider. */
+  estimateRequests?(request: ListChangesRequest): Promise<RequestEstimate>;
+  /**
+   * Optional (U8): one repo-level metadata read, by stable `id` where the SCM can resolve one (it then finds a renamed
+   * or transferred repository), else by path. Returns the repository as it is now, or throws `RepoUnavailableError`
+   * (404, or 403 where the SCM documents 403 as hiding a repository) when it does not exist. Any other failure is
+   * thrown as it is. Without it, the core cannot tell a gone repository from a missing commit, and says so.
+   */
+  describeRepo?(ref: { repo: string; id?: string }): Promise<RepoRef>;
+  /**
+   * Optional (U8): who the token is and whether `listRepos(set)` provably sees every repository of each visibility
+   * under `set.owner`. Without it, `verify` cannot establish that a pool's private or internal repositories are
+   * complete, and check 5 is INCOMPLETE for them.
+   */
+  listingVisibility?(set: RepoSetRule): Promise<ListingVisibility>;
+  /**
+   * Optional (U8): the default branch's first-parent commits from `head` back to, and not including, `base`, newest
+   * first; null when `base` is not on `head`'s first-parent chain. `verify` uses it to tell a commit dated in the window
+   * but merged after freeze (FR7.2: it is not in the population) from a window landing the frozen head left out.
+   */
+  firstParentPath?(request: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null>;
   /**
    * Optional: provider-native counts for a selector (e.g. a search-API figure)
    * printed next to pr-rla's own population so readers see the difference.

@@ -12,6 +12,13 @@ import type { TrustBundleExtra } from "../../src/timestamp/bundle.js";
 import type { MockTsaServer } from "./test-tsa.js";
 
 export const REPO = "acme/widgets";
+
+/**
+ * git options for the test repos. `maintenance.auto=false` (and `gc.auto=0` for older git) stop `git commit` from
+ * starting `git maintenance run --auto --detach` in the background (git 2.55 does): its `objects/maintenance.lock`
+ * could vanish under `cloneScenario`'s copy, which then failed with ENOENT on `.git/objects` on a loaded machine.
+ */
+const GIT_TEST_CONFIG = ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0"];
 export const T = (iso: string) => Date.parse(iso);
 
 /** N deterministic changes in Q3 2026; the first `bad` carry the label known-bad (narrative for tamper fixture 1). */
@@ -63,7 +70,7 @@ export interface Scenario {
  */
 export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; provider?: string; fetch?: typeof fetch; tsa?: { ids: string[]; k?: number; server?: MockTsaServer } }): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "prrla-audit-"));
-  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const git = (...args: string[]) => execFileSync("git", [...GIT_TEST_CONFIG, ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   git("init", "-q");
   writeFileSync(join(dir, "changes.json"), JSON.stringify({ schema: "pr-rla/changes/v1", repo: REPO, defaultBranch: "main", changes: opts.changes }, null, 1));
   writeFileSync(join(dir, "review-protocol.md"), "# Protocol\nA change fails if it introduces a user-visible bug or a security weakness.\n");
@@ -122,7 +129,7 @@ export function cloneScenario(s: Scenario): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "prrla-tamper-"));
   cpSync(s.dir, dir, { recursive: true });
   const out: string[] = [];
-  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const git = (...args: string[]) => execFileSync("git", [...GIT_TEST_CONFIG, ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const clock = { ...s.clock };
   return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, logKeyFile: s.logKeyFile, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
 }

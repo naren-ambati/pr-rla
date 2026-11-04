@@ -233,8 +233,9 @@ describe("the Gitea example passes the conformance kit through the host", () => 
       );
       expect(report.ok, formatConformanceReport(report)).toBe(true);
       expect(report.results.filter((r) => r.skipped)).toEqual([]);
-      // The 45 s wait ran on the kit's clock in the parent, not in real time in the child.
-      expect(Date.now() - started).toBeLessThan(30_000);
+      // The 45 s wait ran on the kit's clock in the parent, not in real time in the child: the whole run took less than
+      // the wait itself (30 s was the bound until two suites at load ~150 took 30.3 s, U8 fix round).
+      expect(Date.now() - started).toBeLessThan(45_000);
     } finally {
       hosts.forEach((h) => h.close());
     }
@@ -264,10 +265,11 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
   });
 
   it("a slow call that keeps sending heartbeats is not stopped", async () => {
-    // The watchdog also covers the child's start, which takes longer than 500 ms under a loaded parallel run: 2 s, and a call twice as long.
-    const host = await hostileHost({ heartbeatTimeoutMs: 2_000, heartbeatIntervalMs: 100 });
+    // The call outlasts the silence timeout, so only its heartbeats keep it alive. The timeout leaves room for a loaded
+    // machine to delay the child's timers (500 ms stopped it with two suites running at once, U8 fix round).
+    const host = await hostileHost({ heartbeatTimeoutMs: 5_000, heartbeatIntervalMs: 100 });
     try {
-      const p = await hostedProvider(host, { slowMs: 4_000, bigResultBytes: 10 }, ctx);
+      const p = await hostedProvider(host, { slowMs: 6_500, bigResultBytes: 10 }, ctx);
       expect((await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] })).defaultBranch).toBe("main");
     } finally {
       host.close();

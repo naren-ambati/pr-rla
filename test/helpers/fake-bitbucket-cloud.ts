@@ -90,7 +90,13 @@ export function fakeBitbucketCloud(sc: ScmScenario, opts: { pageLen?: number } =
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const path = url.pathname;
     let m: RegExpExecArray | null;
-    if (path === base) return json({ mainbranch: { name: sc.defaultBranch } });
+    // Repository metadata (U8, describeRepo), by slug or by its {uuid}; the listing reads only mainbranch from it.
+    if (path === base || path === `${base.slice(0, base.lastIndexOf("/"))}/${encodeURIComponent("{fake-uuid}")}`) return json({ mainbranch: { name: sc.defaultBranch }, full_name: sc.repo, uuid: "{fake-uuid}", is_private: false, created_on: "2020-01-01T00:00:00.000000+00:00" });
+    // include/exclude (U8, firstParentPath): commits reachable from include and not from exclude.
+    if (path === `${base}/commits` && url.searchParams.get("include")) {
+      const behind = new Set(sc.reachable(url.searchParams.get("exclude")!).map((c) => c.oid));
+      return page(url, sc.reachable(url.searchParams.get("include")!).filter((c) => !behind.has(c.oid)).map(commitJson), 4);
+    }
     if (path === `${base}/pullrequests`) {
       const q = url.searchParams.get("q") ?? "";
       const after = Date.parse(/updated_on >= (\S+)/.exec(q)?.[1] ?? "1970-01-01T00:00:00Z");

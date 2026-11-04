@@ -2,7 +2,7 @@
 
 Risk-limiting audits for code changes that landed on a default branch with no recorded human review, such as agent PRs merged on a bare click or direct pushes. pr-rla freezes the list of changes for a window, draws a publicly seeded random sample that anyone can re-derive, and runs a sequential test on your deep-review verdicts. It then certifies a bounded defect-rate claim, says how many more reviews it needs, or tells you to review everything.
 
-Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. Phase 3, bolt 1: trusted time (RFC 3161 tokens from k-of-n timestamp authorities, record schema v2). The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
+Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. Phase 3, bolt 1: trusted time (RFC 3161 tokens from k-of-n timestamp authorities, record schema v2). Bolt 9: org-pooled audits (`repos:`, resumable `freeze`, `freeze --estimate`). The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
 
 ## Supported source-control systems
 
@@ -75,6 +75,23 @@ Every token rule judges one certificate: the single certificate in the token tha
 
 Transparency log: pr-rla builds and verifies Rekor v1 `hashedrekord` entries (SET and RFC 6962 inclusion proof) and Rekor v2 entries (inclusion proof and signed checkpoint; v2 carries no time). It never submits anywhere unless you pass `--submit --rekor-url <url>`, because entries in a public log are public and permanent; `--rekor-api v2` also prints that the v2 client is unverified against the production log and needs `--yes`. No entry has ever been written to a real log. `verify` and `status` trust a log's key only if it is pinned in the package (Sigstore's production Rekor v1 and v2 logs, from Sigstore's TUF `trusted_root.json`) or passed with `verify --log-key <file>`: never the audit repo's `transparency_log.public_key_file`, any file in the audit repo, or the `/publicKey` of the URL a record names. An entry under any other key is reported as unverified and gives no time evidence. So a v1 audit logged to any other log verifies 7/7 only with the log's key passed as `--log-key`; without it, checks 1 and 2 WARN `time unproven`.
 
+## Org-pooled audits
+
+One registration, freeze and certificate for every repo of an org, group or workspace. A rule is registered and resolved once, at freeze; the population is the union of the repos' populations under one selector.
+
+```yaml
+repos: { owner: my-org, exclude: ["*-sandbox"] }   # archived repos and forks are out by default; or a list: repos: [my-org/api, my-org/web]
+```
+
+```sh
+pr-rla freeze --dry-run --estimate    # predicts the requests and wall time from the first page of each repo; reads only
+pr-rla freeze                         # 4 repos at a time, all-or-nothing; if it stops (exit 4) it prints `pr-rla freeze --resume <runId>`
+```
+
+A killed or rate-limited freeze resumes to a byte-identical manifest. There is no `--skip-repo`: a repo the token cannot read is excluded in the registered rule, before the seed. `register` signs the repos the rule matches, by id, so archiving, renaming or hiding one later cannot take it out of the pool. `verify` fails a repo that matches the rule (or was registered) but is missing from the manifest, and a frozen head that hides window landings; it is **INCOMPLETE** (exit 6) for a repo that is gone or unreadable, and when it cannot establish that its token sees every private or internal repo. One provider per pool. Details, the output of a read-only run on the public `navikt` org (2026-11-04) and the limits, including what a retrospective pooled audit cannot detect: [`docs/org-pooled-audits.md`](docs/org-pooled-audits.md).
+
+`verify` exits 0 when VERIFIED, 1 when a check FAILed, and 6 when INCOMPLETE: nothing failed, but part of the population could not be rebuilt or its completeness established, so it is not a verification (`--json` has `verdict`; `ok` is true only for VERIFIED). The other exit codes are in [`contracts.md` §7](docs/design/phase-3-4/contracts.md).
+
 ## Architecture: bring-your-own providers and ledgers
 
 ```
@@ -105,7 +122,7 @@ Package exports:
 
 - `pr-rla/provider`: `ScmProvider`, `ChangeRecord` and related types, `PROVIDER_API_VERSION` (1), `defineProvider()`.
 - `pr-rla/ledger`: `Ledger`, `VerdictEvent`, `LEDGER_API_VERSION` (1), `defineLedger()`.
-- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected; and, for the optional phase-3 fields, the pinned head, account ids, review granularity and revoked approvals.
+- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected; and, for the optional phase-3 fields, the pinned head, account ids, review granularity and revoked approvals; fixtures can opt in to `list-repos` and `estimate-requests` for org-pooled audits.
 - Both kits fail an empty fixture list and report a check as skipped when the fixture declares nothing for it (the provider kit's `window-and-kinds` asserts completeness against `expect.ids`; the ledger kit needs a fixture per case or a reason in `skipCases`): see [`docs/writing-a-provider.md`](docs/writing-a-provider.md).
 - `pr-rla/testing` also has `runLedgerConformance()` / `assertLedgerConformance()` for ledgers: the first eligible verdict counts, relabels warn, a removal after counting, a deleted or moved issue and a deleted or renamed verdict label fail, bots, apps and unregistered reviewers are ignored, verdicts carry the tracker's time, history pages and round-trips through a checkpoint, publishing is idempotent, and reads survive injected faults. Each fixture says whether it is `recorded` or `synthetic`.
 - `pr-rla/http`: `createJsonClient()`, the built-ins' retrying JSON client, under its own `HTTP_HELPER_VERSION` (1).
@@ -189,7 +206,7 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
   - GitHub reports the `Copilot` commit-author account as a `User`, so a commit it authors directly is classified `human`.
   - A direct-push merge commit (e.g. a `git pull` merge pushed to main) is its own change, and its size is GitHub's diff against its first parent.
 - **GitHub review states are read at freeze time.** Labels can change later, so a label-based stratum may not re-verify.
-- **One repo per audit.** There is no org-pooled freeze yet.
+- **Org-pooled audits are young.** They are verified on a synthetic 40-repo org and on a read-only 223-repo run of `navikt`; a full freeze of a real org with timestamp tokens has not been run. One provider per pool.
 - **Timestamps** are tamper-evident only when k = 2 timestamp-authority operators agree; with fewer (or none configured) they are the signer's clock, and every output says so. Three of the eight bundled anchors (Microsoft's, pinned at its intermediate, SwissSign's and FreeTSA's) were taken from the authorities' own responses (trust on first use), and every output that counts one of them says `anchor pinned on first use … independent: false`: see BUILD-NOTES, bolt 1 and trusted-time fix round A.
 - **One registration per audit is a procedural control.** `verify` cannot prove that no other registration exists: hand your auditor the registration before the window opens.
 - **`presence` is not hardware-attested.** It means the verdict's own signature carries the user-presence flag from a registered security key. A software-emulated authenticator sets the same flag, pr-rla does not check that a key is hardware-backed, and the presence path has been tested with software keys only.

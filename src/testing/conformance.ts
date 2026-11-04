@@ -2,7 +2,9 @@ import { canonicalJson } from "../core/canonical.js";
 import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   DEFAULT_REVIEW_GRANULARITY,
+  REPO_UNAVAILABLE,
   SUPPORTED_PROVIDER_API_VERSIONS,
+  isRepoUnavailable,
   changeRecordProblems,
   normalizeLogin,
   type Actor,
@@ -12,6 +14,7 @@ import {
   type ListChangesResult,
   type ProviderContext,
   type ProviderDefinition,
+  type RepoSetRule,
   type ReviewGranularity,
   type ReviewState,
   type ScmProvider,
@@ -64,6 +67,25 @@ export interface ConformanceFixture {
    * `request.head = head` it must report `headSha: head`, leave them out and change nothing else.
    */
   pinnedHead?: { head: string; late: string[] };
+  /**
+   * U8 (`list-repos`): a repo rule and what the provider's `listRepos` must find for it. The provider may return more
+   * than `includes` (the core applies the rule's globs and flags itself), but never fewer, and every entry must be
+   * well formed, under the rule's owner and listed once, with the same answer on a second call. `ids` pins stable
+   * repository ids by repo path.
+   */
+  listRepos?: { rule: RepoSetRule; includes: string[]; ids?: Record<string, string> };
+  /**
+   * U8 (`estimate-requests`): the transport also serves what `estimateRequests` probes for this request, and the
+   * provider implements it. Off by default, so a fixture that cannot answer the probes is not failed for it.
+   */
+  estimate?: boolean;
+  /**
+   * U8 (`repo-unavailable`): `gone` names a repository the fixture's transport answers 404 for, as for a deleted one.
+   * `describeRepo` must describe `request.repo` and throw a `RepoUnavailableError` (status 404) for `gone`. Then, for a
+   * provider given as a factory, the kit answers every request with a rate-limited 403: whatever the provider throws
+   * must not count as a gone repository (`isRepoUnavailable` false), because a rate limit never is one.
+   */
+  repoUnavailable?: { gone: string };
   /** How many requests/pages the fixture transport has served (pagination check). Defaults to the harness's request count. */
   pagesServed?: () => number;
   /**
@@ -141,7 +163,11 @@ export const CONFORMANCE_CHECKS = [
   "review-granularity",
   "revoked-approval",
 ] as const;
+/** The checks every fixture runs. Unchanged by the opt-in checks, so an exhaustive switch over it still compiles. */
 export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
+/** Checks that run only for a fixture that opts in (`listRepos`, `estimate`, `repoUnavailable`): a fixture without them adds no result. */
+export const OPT_IN_CONFORMANCE_CHECKS = ["list-repos", "estimate-requests", "repo-unavailable"] as const;
+export type OptInConformanceCheck = (typeof OPT_IN_CONFORMANCE_CHECKS)[number];
 
 /** The Retry-After the kit sends with its injected 429, in seconds. */
 export const INJECTED_RETRY_AFTER_SECONDS = 7;
@@ -288,7 +314,7 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
   // A kit given nothing to check has checked nothing: that is a failure, not a pass.
   if (fixtures.length === 0) return { ok: false, results: [{ fixture: "(no fixtures)", check: "normalization", ok: false, message: "the kit was given no fixtures, so it checked nothing: pass at least one fixture (recorded or synthetic SCM data and what it must normalize to)" }] };
   for (const f of fixtures) {
-    const push = (check: ConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
+    const push = (check: ConformanceCheck | OptInConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
     const skip = (check: ConformanceCheck, message: string) => results.push({ fixture: f.name, check, ok: true, skipped: true, message });
     const h1 = makeHarness();
     const p1 = await instantiate(provider, f, h1);
@@ -505,8 +531,122 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       }
       push("revoked-approval", ra.length === 0, ra.join("; "));
     }
+
+    // --- U8 checks -------------------------------------------------------------------------------
+    // Both are opt-in per fixture (a fixture without them adds no result), because they need transport the older fixtures lack.
+    if (f.listRepos) {
+      const lr = await listReposCheck(provider, f, f.listRepos);
+      push("list-repos", lr.length === 0, lr.join("; "));
+    }
+    if (f.estimate) {
+      const est = await estimateCheck(provider, f);
+      push("estimate-requests", est.length === 0, est.join("; "));
+    }
+    if (f.repoUnavailable) {
+      const ru = await repoUnavailableCheck(provider, f, f.repoUnavailable);
+      push("repo-unavailable", ru.length === 0, ru.join("; "));
+    }
   }
   return { ok: results.every((r) => r.ok), results };
+}
+
+/**
+ * `list-repos` (U8): `listRepos(rule)` finds the fixture's repos, each entry is a well-formed RepoRef under the
+ * rule's owner, listed once, and a second call answers the same.
+ */
+async function listReposCheck(provider: ProviderUnderTest, f: ConformanceFixture, want: NonNullable<ConformanceFixture["listRepos"]>): Promise<string[]> {
+  const p = await instantiate(provider, f, makeHarness());
+  if (typeof p.listRepos !== "function") return ["the fixture expects listRepos, but the provider implements none"];
+  const { rule, includes, ids } = want;
+  const problems: string[] = [];
+  let first: Awaited<ReturnType<NonNullable<ScmProvider["listRepos"]>>>;
+  try {
+    first = await p.listRepos(rule);
+  } catch (e) {
+    return [`listRepos threw: ${(e as Error).message}`];
+  }
+  if (!Array.isArray(first)) return [`listRepos returned ${typeof first}, not a list`];
+  const seen = new Set<string>();
+  for (const r of first) {
+    const where = `entry ${JSON.stringify((r as { repo?: unknown })?.repo)}`;
+    if (!r || typeof r !== "object" || typeof r.repo !== "string" || !r.repo.toLowerCase().startsWith(`${rule.owner.toLowerCase()}/`)) problems.push(`${where} is not a repo path under ${rule.owner}`);
+    else if (seen.has(r.repo.toLowerCase())) problems.push(`${r.repo} is listed twice`);
+    else seen.add(r.repo.toLowerCase());
+    if (typeof r?.id !== "string" || r.id === "") problems.push(`${where} has no stable id`);
+    if (typeof r?.defaultBranch !== "string") problems.push(`${where} has no defaultBranch`);
+    if (typeof r?.archived !== "boolean" || typeof r?.fork !== "boolean") problems.push(`${where} must say archived and fork as true or false`);
+    if (!["public", "private", "internal"].includes(r?.visibility as string)) problems.push(`${where} has visibility ${JSON.stringify(r?.visibility)}`);
+  }
+  const missing = includes.filter((x) => !seen.has(x.toLowerCase()));
+  if (missing.length) problems.push(`${missing.length} expected repo(s) not found (e.g. ${missing.slice(0, 3).join(", ")})`);
+  for (const [repo, id] of Object.entries(ids ?? {})) {
+    const got = first.find((r) => r?.repo?.toLowerCase() === repo.toLowerCase())?.id;
+    if (got !== id) problems.push(`${repo}: id ${got ?? "missing"} ≠ ${id}`);
+  }
+  try {
+    const again = await (await instantiate(provider, f, makeHarness())).listRepos!(rule);
+    const key = (xs: readonly { repo: string; id: string }[]) => canonicalJson(xs.map((x) => [x.repo, x.id]).sort());
+    if (key(first) !== key(again)) problems.push("two identical calls listed different repos or ids");
+  } catch (e) {
+    problems.push(`second listRepos threw: ${(e as Error).message}`);
+  }
+  return problems;
+}
+
+/** `estimate-requests` (U8): an optional `estimateRequests` answers whole, non-negative request counts that add up. */
+async function estimateCheck(provider: ProviderUnderTest, f: ConformanceFixture): Promise<string[]> {
+  const p = await instantiate(provider, f, makeHarness());
+  if (typeof p.estimateRequests !== "function") return ["the fixture expects estimateRequests, but the provider implements none"];
+  let e: Awaited<ReturnType<NonNullable<ScmProvider["estimateRequests"]>>>;
+  try {
+    e = await p.estimateRequests(f.request);
+  } catch (err) {
+    return [`estimateRequests threw: ${(err as Error).message}`];
+  }
+  const whole = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n >= 0;
+  const problems: string[] = [];
+  if (!e || !whole(e.requests) || e.requests < 1) problems.push(`requests must be a whole number of at least 1 (got ${JSON.stringify(e?.requests)})`);
+  if (e?.graphql !== undefined && (!whole(e.graphql) || e.graphql > e.requests)) problems.push(`graphql must be a whole number of at most requests (got ${JSON.stringify(e.graphql)})`);
+  if (e?.probed !== undefined && (!whole(e.probed) || e.probed > e.requests)) problems.push(`probed must be a whole number of at most requests (got ${JSON.stringify(e.probed)})`);
+  return problems;
+}
+
+/**
+ * `repo-unavailable` (U8): `describeRepo` describes a repository that exists, throws a RepoUnavailableError (404) for a
+ * deleted one, and a rate limit is never reported as a gone repository, from `describeRepo` or from `listChanges`.
+ */
+async function repoUnavailableCheck(provider: ProviderUnderTest, f: ConformanceFixture, want: NonNullable<ConformanceFixture["repoUnavailable"]>): Promise<string[]> {
+  const p = await instantiate(provider, f, makeHarness());
+  if (typeof p.describeRepo !== "function") return ["the fixture expects describeRepo, but the provider implements none"];
+  const problems: string[] = [];
+  const msg = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 200);
+  try {
+    const r = await p.describeRepo({ repo: f.request.repo });
+    if (!r || typeof r.repo !== "string" || r.repo.toLowerCase() !== f.request.repo.toLowerCase() || typeof r.id !== "string" || r.id === "") problems.push(`describeRepo(${f.request.repo}) returned ${JSON.stringify(r)?.slice(0, 120)}, not that repository with its id`);
+  } catch (e) {
+    problems.push(`describeRepo(${f.request.repo}) threw ${msg(e)}`);
+  }
+  try {
+    await p.describeRepo({ repo: want.gone });
+    problems.push(`describeRepo(${want.gone}) resolved, but the transport answers 404 for it: a deleted repository must throw RepoUnavailableError`);
+  } catch (e) {
+    const x = e as { code?: unknown; status?: unknown };
+    if (x?.code !== REPO_UNAVAILABLE) problems.push(`describeRepo(${want.gone}) threw ${msg(e)}, not a RepoUnavailableError (code ${REPO_UNAVAILABLE})`);
+    else if (x.status !== 404) problems.push(`describeRepo(${want.gone}) threw a RepoUnavailableError with status ${String(x.status)}, not 404`);
+  }
+  if (typeof provider === "function") {
+    const limited = (): Response => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403, headers: { "content-type": "application/json", "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 60), "retry-after": "60" } });
+    const faults = Array.from({ length: 200 }, (_, i): Fault => ({ call: i + 1, response: limited, minWaitMs: 0, label: "rate-limited 403" }));
+    const q = await instantiate(provider, f, makeHarness(faults));
+    for (const [what, call] of [["describeRepo", () => q.describeRepo!({ repo: f.request.repo })], ["listChanges", () => q.listChanges(f.request)]] as const) {
+      try {
+        await call();
+      } catch (e) {
+        if (isRepoUnavailable(e)) problems.push(`under a rate-limited 403, ${what} threw ${msg(e)}, which counts as a gone repository (isRepoUnavailable): a rate limit never is one`);
+      }
+    }
+  }
+  return problems;
 }
 
 /**

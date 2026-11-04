@@ -1,13 +1,20 @@
 import {
   PROVIDER_API_VERSION,
+  RepoEmptyError,
+  RepoUnavailableError,
   defineProvider,
   type Actor,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type FirstParentCommit,
+  type RepoRef,
+  type RepoSetRule,
+  type RepoVisibility,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { firstParentChain } from "../first-parent.js";
 import { attributeCommits } from "../attribution.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError, isoUtcSeconds, nextLink } from "../http.js";
@@ -54,6 +61,30 @@ export const GITLAB_LIMITATIONS = [
 
 const enc = (s: string) => encodeURIComponent(s);
 const TRANSIENT_GRAPHQL = /timeout|timed out|internal server error|try again|too many requests|rate limit/i;
+
+interface GlProject {
+  id: number;
+  path_with_namespace: string;
+  default_branch?: string | null;
+  archived?: boolean;
+  forked_from_project?: unknown;
+  visibility?: string;
+  created_at?: string | null;
+}
+
+/** A GitLab project as a RepoRef. */
+function projectRef(p: GlProject): RepoRef {
+  const created = p.created_at ? Date.parse(p.created_at) : NaN;
+  return {
+    repo: p.path_with_namespace,
+    id: String(p.id),
+    defaultBranch: p.default_branch ?? "",
+    archived: p.archived === true,
+    fork: p.forked_from_project !== undefined && p.forked_from_project !== null,
+    visibility: (p.visibility === "public" || p.visibility === "internal" ? p.visibility : "private") satisfies RepoVisibility,
+    ...(Number.isFinite(created) ? { createdAt: new Date(created).toISOString().replace(".000Z", "Z") } : {}),
+  };
+}
 
 export class GitLabProvider implements ScmProvider {
   readonly apiVersion = PROVIDER_API_VERSION;
@@ -115,10 +146,51 @@ export class GitLabProvider implements ScmProvider {
     return out;
   }
 
+  /**
+   * The projects under a group, subgroups included (U8): `GET /groups/:path/projects`. A personal namespace answers
+   * 404 there, so the user's own projects are read instead. A GitLab fork carries `forked_from_project`.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    const q = `per_page=${this.pageSize}&order_by=path&sort=asc`;
+    const groups = `/groups/${enc(set.owner)}/projects?include_subgroups=true&with_shared=false&${q}`;
+    let projects: GlProject[];
+    try {
+      projects = await this.paged<GlProject>(groups);
+    } catch (e) {
+      if (!(e instanceof HttpError) || e.status !== 404) throw e;
+      projects = await this.paged<GlProject>(`/users/${enc(set.owner)}/projects?${q}`);
+    }
+    return projects.map(projectRef);
+  }
+
+  /**
+   * One project's metadata (U8): `GET /projects/:id` by its numeric id where known (it survives a rename or a
+   * transfer), else by its path. GitLab answers 404 for a project that does not exist and for a private one the token
+   * cannot see; that is a RepoUnavailableError(404).
+   */
+  async describeRepo(ref: { repo: string; id?: string }): Promise<RepoRef> {
+    try {
+      return projectRef((await this.http.get<GlProject>(`/projects/${ref.id ? enc(ref.id) : enc(ref.repo)}`)).data);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) throw new RepoUnavailableError(ref.repo, 404, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * The default branch's first-parent commits from `head` back to `base` (U8): `GET /projects/:id/repository/commits`
+   * with the revision range `base..head` and `first_parent=true`, newest first. Null when `base` is not on the chain.
+   */
+  async firstParentPath(req: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null> {
+    if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
+    const commits = await this.paged<GlCommit>(`/projects/${enc(req.repo)}/repository/commits?ref_name=${enc(`${req.base}..${req.head}`)}&first_parent=true&per_page=${this.pageSize}`, req.signal);
+    return firstParentChain(commits.map((c) => ({ sha: c.id, parents: c.parent_ids, committedAt: c.committed_date })), req.base, req.head);
+  }
+
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {
     const { data: project } = await this.http.get<{ id: number; default_branch: string | null }>(`/projects/${enc(req.repo)}`, req.signal);
     const branch = project.default_branch;
-    if (!branch) throw new Error(`gitlab: ${req.repo} has no default branch`);
+    if (!branch) throw new RepoEmptyError(req.repo, `gitlab: ${req.repo} has no default branch`);
     const pid = project.id;
     const opens = Date.parse(req.window.opensAt);
     const closes = Date.parse(req.window.closesAt);

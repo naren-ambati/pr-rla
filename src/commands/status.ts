@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { buildPopulation } from "../core/population.js";
-import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
+import { perRepoLines, perRepoRows } from "../core/pooled-report.js";
+import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
+import { describeRepoSet } from "../core/repo-set.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
 import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
@@ -97,11 +99,14 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     const closes = Date.parse(w.closesAt) / 1000;
     const phase = now < opens ? "window not yet open" : now < closes ? `window open, day ${Math.floor((now - opens) / 86400) + 1} of ${windowDays(w)}` : "window closed, not frozen";
     let soFar = "";
-    if (!opts.offline && now >= opens) {
+    const set = registrationRepoSet(reg);
+    if (!opts.offline && now >= opens && set.kind === "repo") {
       const provider = await providerFor(ctx, config);
-      const pop = await buildPopulation(provider, { repo: registrationRepo(reg), window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
+      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
       soFar = ` · N so far ${fmt(pop.entries.length)}`;
-    }
+    } else if (!opts.offline && now >= opens)
+      // A pool's N needs a listing of every repo (about what a freeze costs), so plain status does not spend it.
+      soFar = ` · N so far: not computed for a pool (${describeRepoSet(set)}): it lists every repo, about as many requests as the freeze; "pr-rla freeze --dry-run --estimate" predicts them and "pr-rla freeze --dry-run" counts N`;
     ctx.out(`${mode} · ${phase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${tsNote}`);
     if (anchors) ctx.out(anchors);
     return 0;
@@ -131,8 +136,9 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   });
   const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
   const requireSigned = isRegistrationV2(reg) && reg.record.verdicts.require_signed === true;
+  const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
   if (opts.json) {
-    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report }, null, 2));
+    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report, ...(perRepo ? { perRepo } : {}) }, null, 2));
   } else if (report.refusal) {
     ctx.out(report.refusal);
     return 3;
@@ -156,6 +162,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
       const cp = latestCheckpointAt(paths.windowDir);
       if (cp === null || Date.parse(cp) < Date.parse(lastVerdict)) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
     }
+    if (perRepo) for (const l of perRepoLines(perRepo)) ctx.out(l);
     ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
   }
   return report.sequence.state === "ESCALATE" ? 2 : 0;

@@ -45,8 +45,8 @@ describe("atomic writes (NFR15) and the exit-code contract", () => {
     expect(existsSync(join(dir, "x"))).toBe(true);
   });
 
-  it("codes 0–5 keep their meaning; 5 is a record written without enough timestamps", () => {
-    expect(EXIT).toEqual({ OK: 0, FAIL: 1, ESCALATE: 2, BELOW_MINIMUM: 3, STOPPED: 4, TIMESTAMPS_SHORT: 5 });
+  it("codes 0–5 keep their meaning; 5 is a record written without enough timestamps; 6 is verify INCOMPLETE (U8)", () => {
+    expect(EXIT).toEqual({ OK: 0, FAIL: 1, ESCALATE: 2, BELOW_MINIMUM: 3, STOPPED: 4, TIMESTAMPS_SHORT: 5, INCOMPLETE: 6 });
   });
 
   it("the version constant matches package.json", () => {

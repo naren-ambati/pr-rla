@@ -217,7 +217,7 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
     } finally {
       hosts.forEach((h) => h.close());
     }
-  }, 180_000); // one plugin-host child per kit instance: over 60 s on a loaded machine (54 s alone at load average 55)
+  }, 240_000); // one plugin-host child per kit instance: a loaded machine needs more than the default 60 s (U8 fix round)
 
   it("isolated, the Jira ledger gets placeholders, the broker builds Basic auth for the base_url host only, and pr-rla writes its index", async () => {
     const audit = jiraAudit();

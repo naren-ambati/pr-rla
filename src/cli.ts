@@ -76,6 +76,8 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .command("freeze")
     .description("list every change that landed in the window, apply the registered selector, write the manifest")
     .option("--dry-run", "print the population (with the config selector if unregistered); write nothing")
+    .option("--estimate", "predict the requests and wall time of a pooled freeze from the first page of each repo; implies --dry-run")
+    .option("--resume <runId>", "continue a pooled freeze that stopped (exit 4); refused if its inputs differ")
     .option("--submit", "submit the manifest commitment to a Rekor log (requires --rekor-url)")
     .option("--rekor-url <url>", "Rekor log URL")
     .option("--rekor-api <v1|v2>", "Rekor API for --submit (v2: unverified against the production log; needs --yes)")
@@ -138,6 +140,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")
+    .addHelpText("after", "\nExit codes: 0 VERIFIED · 1 FAILED (a check failed) · 6 INCOMPLETE (nothing failed, but part of the population could not be rebuilt, or its completeness could not be established; --json has the verdict)")
     .action(function (this: Command) {
       return run((ctx) => verifyCommand(ctx, this.opts()))();
     });

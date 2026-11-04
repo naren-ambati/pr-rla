@@ -1,12 +1,21 @@
 import {
   PROVIDER_API_VERSION,
+  RepoEmptyError,
+  RepoUnavailableError,
   defineProvider,
   type ChangeRecord,
+  type FirstParentCommit,
   type ListChangesRequest,
   type ListChangesResult,
+  type ListingVisibility,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
+  type RepoVisibility,
+  type RequestEstimate,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { classifyHistory, type HistoryNode } from "./history.js";
 import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
@@ -36,6 +45,24 @@ interface RestPull {
   updated_at: string;
   merge_commit_sha: string | null;
   base: { ref: string };
+}
+
+interface RestRepo {
+  full_name: string;
+  id: number;
+  default_branch?: string | null;
+  archived?: boolean;
+  fork?: boolean;
+  private?: boolean;
+  visibility?: string;
+  created_at?: string | null;
+}
+
+/** A REST repository as a RepoRef: `visibility` when GitHub sends it (internal included), else from `private`. */
+function repoRef(r: RestRepo): RepoRef {
+  const visibility: RepoVisibility = r.visibility === "public" || r.visibility === "private" || r.visibility === "internal" ? r.visibility : r.private ? "private" : "public";
+  const created = r.created_at ? Date.parse(r.created_at) : NaN;
+  return { repo: r.full_name, id: String(r.id), defaultBranch: r.default_branch ?? "", archived: r.archived === true, fork: r.fork === true, visibility, ...(Number.isFinite(created) ? { createdAt: new Date(created).toISOString().replace(".000Z", "Z") } : {}) };
 }
 
 /**
@@ -86,7 +113,9 @@ export class GitHubProvider implements ScmProvider {
     const { owner, name } = this.split(req.repo);
     const head = await this.http.graphql<{ repository: { defaultBranchRef: { name: string; target: { oid: string } } | null } }>(HEAD_QUERY, { owner, name });
     const ref = head.repository.defaultBranchRef;
-    if (!ref) throw new Error(`${req.repo} has no default branch`);
+    // An empty repository (no commits) has no default branch. A single-repo audit stops here, as it always has; a pool
+    // counts the repo as empty (the core catches the code).
+    if (!ref) throw new RepoEmptyError(req.repo);
     // The pinned head (U3): verify walks the history freeze walked, from the manifest's headSha.
     const headSha = (req.head ?? ref.target.oid).toLowerCase();
     const changes: ChangeRecord[] = [];
@@ -199,7 +228,8 @@ export class GitHubProvider implements ScmProvider {
         throw e;
       }
       const h = data.repository.object?.history;
-      if (!h) throw new Error(`github: cannot read history of ${headOid}`);
+      // A head the repository does not have (GitHub answers object: null): a 404 on a commit, not on the repository.
+      if (!h) throw new GitHubHttpError(`github: commit ${headOid} not found in ${owner}/${name} (cannot read its history)`, 404);
       for (const c of h.nodes) nodes.set(c.oid, c);
       pages++;
       if (pages % 10 === 0) this.ctx.log(`github: walked ${nodes.size} commits of ${defaultBranch}`);
@@ -253,6 +283,221 @@ export class GitHubProvider implements ScmProvider {
       }
       c.associatedPullRequests = { ...c.associatedPullRequests, nodes: all, pageInfo: { hasNextPage: false, endCursor: null } };
     }
+  }
+
+  /**
+   * The repositories under an org, or under a user account, with the stable id, default branch, archived and fork flags,
+   * visibility and creation time the core filters on (U8). `GET /orgs/{owner}/repos?type=all` shows every repository of
+   * the org the token can see. A user account answers 404 there: when it is the token's own account,
+   * `GET /user/repos?affiliation=owner` lists its private repositories too; for another user GitHub lists only the public
+   * ones (`/users/{owner}/repos`), and `listingVisibility` says so.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    const owner = encodeURIComponent(set.owner);
+    let url: string | null = `/orgs/${owner}/repos?type=all&per_page=${this.pageSize}`;
+    const out: RepoRef[] = [];
+    let pages = 0;
+    let fellBack = false;
+    while (url) {
+      let page: { data: RestRepo[]; next: string | null };
+      try {
+        page = await this.http.rest<RestRepo[]>(url);
+      } catch (e) {
+        if (!fellBack && pages === 0 && e instanceof GitHubHttpError && e.status === 404) {
+          fellBack = true;
+          url = (await this.ownAccount(set.owner)) ? `/user/repos?affiliation=owner&per_page=${this.pageSize}` : `/users/${owner}/repos?type=owner&per_page=${this.pageSize}`;
+          continue;
+        }
+        throw e;
+      }
+      pages++;
+      if (pages % 20 === 0) this.ctx.log(`github: listed ${pages} pages of ${set.owner} repositories`);
+      for (const r of page.data) out.push(repoRef(r));
+      url = page.next;
+    }
+    return out;
+  }
+
+  /** True when `owner` is the account the token belongs to (`GET /user`); false without a token, or for a token that cannot read /user. */
+  private async ownAccount(owner: string): Promise<boolean> {
+    if (!this.http.authenticated) return false;
+    try {
+      const { data } = await this.http.rest<{ login: string }>("/user");
+      return data.login.toLowerCase() === owner.toLowerCase();
+    } catch (e) {
+      // A GitHub App installation token (GITHUB_TOKEN in Actions) is not a user: it cannot read /user.
+      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) return false;
+      throw e;
+    }
+  }
+
+  /**
+   * One repository's metadata (U8): `GET /repositories/{id}` by its stable id (GitHub resolves a renamed or transferred
+   * repository by id), else `GET /repos/{owner}/{name}`. GitHub answers 404 both for a repository that does not exist
+   * and for a private one the token cannot see ("to prevent the accidental leakage of private repositories"); that is
+   * a RepoUnavailableError(404). A 403 (SSO not authorised, an IP allow list) is an access problem and is thrown as it is.
+   */
+  async describeRepo(ref: { repo: string; id?: string }): Promise<RepoRef> {
+    try {
+      const { data } = await this.http.rest<RestRepo>(ref.id ? `/repositories/${encodeURIComponent(ref.id)}` : `/repos/${ref.repo}`);
+      return repoRef(data);
+    } catch (e) {
+      if (e instanceof GitHubHttpError && e.status === 404) throw new RepoUnavailableError(ref.repo, 404, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * What the token sees under an owner (U8; finding 2 of the U8 review). GitHub lists public repositories to anyone. For
+   * private and internal repositories pr-rla accepts a listing as complete only when all of these hold, each from a
+   * documented response:
+   * - the token is a classic personal access token or an OAuth token: its responses carry `X-OAuth-Scopes` (fine-grained
+   *   and GitHub App tokens carry none, and can be limited to selected repositories with no API that says so);
+   * - its scopes include `repo` (without it GitHub shows the token no private repository);
+   * - for an org, `GET /user/memberships/orgs/{org}` says `state: active`, `role: admin`: an org owner can see every
+   *   repository of the org, whereas a member sees only the private repositories they were granted. For a user account,
+   *   it is the token's own account (`GET /user`), listed through `/user/repos`.
+   */
+  async listingVisibility(set: RepoSetRule): Promise<ListingVisibility> {
+    let identity: string | null = null;
+    const publicProof = { complete: true, reason: "GitHub lists every public repository to anyone" };
+    const none = (reason: string): ListingVisibility => ({ identity, visibilities: { public: publicProof, private: { complete: false, reason }, internal: { complete: false, reason } } });
+    if (!this.http.authenticated) return none("no token: GitHub shows only public repositories");
+    let user: { data: { login: string }; headers: Headers };
+    try {
+      user = await this.http.rest<{ login: string }>("/user");
+    } catch (e) {
+      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) return none(`the token cannot read /user (HTTP ${e.status}), as a GitHub App installation token (GITHUB_TOKEN in Actions) cannot: it sees only the repositories it was granted`);
+      throw e;
+    }
+    identity = user.data.login;
+    const scopes = user.headers.get("x-oauth-scopes");
+    if (scopes === null) return none("the token sends no X-OAuth-Scopes header, so it is a fine-grained personal access token or a GitHub App token: it shows only the repositories it was granted, and GitHub has no API that says it was granted all of them");
+    const list = scopes.split(",").map((x) => x.trim()).filter(Boolean);
+    if (!list.includes("repo")) return none(`the classic token's scopes (${list.join(", ") || "none"}) do not include repo, so GitHub shows it no private repository`);
+    let isOrg = true;
+    try {
+      await this.http.rest(`/orgs/${encodeURIComponent(set.owner)}`);
+    } catch (e) {
+      if (!(e instanceof GitHubHttpError && e.status === 404)) throw e;
+      isOrg = false;
+    }
+    if (!isOrg) {
+      if (identity.toLowerCase() !== set.owner.toLowerCase()) return none(`${set.owner} is another user's account: GitHub lists only its public repositories`);
+      const own = { complete: true, reason: `${set.owner} is the token's own account, listed through /user/repos with the repo scope` };
+      return { identity, visibilities: { public: publicProof, private: own, internal: { complete: true, reason: "a user account has no internal repositories" } } };
+    }
+    let m: { state?: string; role?: string };
+    try {
+      m = (await this.http.rest<{ state?: string; role?: string }>(`/user/memberships/orgs/${encodeURIComponent(set.owner)}`)).data;
+    } catch (e) {
+      if (e instanceof GitHubHttpError && (e.status === 404 || e.status === 403)) return none(`${identity} is not a member of ${set.owner} (or the token lacks read:org): HTTP ${e.status} on /user/memberships/orgs/${set.owner}`);
+      throw e;
+    }
+    if (m.state === "active" && m.role === "admin") {
+      const owner = { complete: true, reason: `${identity} is an owner (admin) of ${set.owner}, with a classic token holding the repo scope: GitHub shows org owners every repository of the org` };
+      return { identity, visibilities: { public: publicProof, private: owner, internal: owner } };
+    }
+    return none(`${identity} is ${m.state === "active" ? `a ${m.role ?? "member"}` : `a ${m.state ?? "non-active"} member`} of ${set.owner}, not an owner: GitHub shows a member only the private repositories they were granted, so only an owner's listing is complete`);
+  }
+
+  /**
+   * The default branch's first-parent commits from `head` back to `base` (U8), from the compare API
+   * (`GET /repos/{owner}/{name}/compare/{base}...{head}`, paged): `status: ahead` means `base` is an ancestor of `head`,
+   * and `commits` are those reachable from `head` and not from `base`, each with its parents. Null when `base` is not
+   * an ancestor, or not on the first-parent chain.
+   */
+  async firstParentPath(req: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null> {
+    if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
+    interface Compare {
+      status: "ahead" | "behind" | "diverged" | "identical";
+      total_commits: number;
+      commits: { sha: string; parents: { sha: string }[]; commit: { committer: { date: string } | null } }[];
+    }
+    const byOid = new Map<string, Compare["commits"][number]>();
+    let status: Compare["status"] = "identical";
+    for (let page = 1; ; page++) {
+      req.signal?.throwIfAborted();
+      const { data } = await this.http.rest<Compare>(`/repos/${req.repo}/compare/${req.base}...${req.head}?per_page=100&page=${page}`);
+      status = data.status;
+      if (status !== "ahead") break;
+      for (const c of data.commits) byOid.set(c.sha.toLowerCase(), c);
+      if (data.commits.length === 0 || byOid.size >= data.total_commits) break;
+    }
+    if (status === "identical") return [];
+    if (status !== "ahead") return null;
+    return firstParentChain([...byOid.values()].map((c) => ({ sha: c.sha, parents: c.parents.map((x) => x.sha), committedAt: c.commit.committer?.date ?? "" })), req.base, req.head);
+  }
+
+  /**
+   * What `listChanges` would ask for, from a probe (U8, `freeze --dry-run --estimate`): the default-branch head, the
+   * newest page of closed PRs (and, when the list is longer, a page from its middle for the density and the share merged
+   * in the window), and one page of history. Everything else is arithmetic on those pages.
+   */
+  async estimateRequests(req: ListChangesRequest): Promise<RequestEstimate> {
+    const { owner, name } = this.split(req.repo);
+    const opens = Date.parse(req.window.opensAt);
+    const closes = Date.parse(req.window.closesAt);
+    const wantPrs = req.kinds.includes("pull_request");
+    const wantPushes = req.kinds.includes("direct_push");
+    let probed = 1;
+    const head = await this.http.graphql<{ repository: { defaultBranchRef: { name: string; target: { oid: string } } | null } }>(HEAD_QUERY, { owner, name });
+    const ref = head.repository.defaultBranchRef;
+    if (!ref) return { requests: 1, graphql: 1, probed };
+    const headOid = (req.head ?? ref.target.oid).toLowerCase();
+
+    // Closed PRs, newest update first: pages until one ends before the window opened (listMergedPullNumbers), and the shares in the window.
+    const url = (page: number) => `/repos/${req.repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${this.pageSize}${page > 1 ? `&page=${page}` : ""}`;
+    const a = await this.http.rest<RestPull[]>(url(1));
+    probed++;
+    const span = (p: RestPull[]) => Math.max(1, Date.parse(p[0]!.updated_at) - Date.parse(p.at(-1)!.updated_at));
+    const intoWindow = (p: readonly RestPull[]) => p.filter((x) => x.merged_at && x.base.ref === ref.name && Date.parse(x.merged_at) >= opens && Date.parse(x.merged_at) < closes).length;
+    let updatedSinceOpens: number;
+    let merged: number;
+    let pullPages: number | null = null;
+    if (a.data.length === 0 || !a.next || Date.parse(a.data.at(-1)!.updated_at) < opens) {
+      // The whole list since the window opened is on this page: exact.
+      updatedSinceOpens = a.data.filter((x) => Date.parse(x.updated_at) >= opens).length;
+      merged = intoWindow(a.data);
+      pullPages = 1;
+    } else {
+      // Density from the newest page projects the length; a page from the middle gives the density there and what share merged in the window.
+      const dA = a.data.length / span(a.data);
+      const firstProjection = a.data.length + dA * (Date.parse(a.data.at(-1)!.updated_at) - opens);
+      const middle = Math.floor(firstProjection / this.pageSize / 2) + 1;
+      let b: RestPull[] | null = null;
+      if (middle > 1) {
+        b = (await this.http.rest<RestPull[]>(url(middle))).data;
+        probed++;
+      }
+      if (b && b.length > 0) {
+        const dB = b.length / span(b);
+        updatedSinceOpens = a.data.length + dB * Math.max(0, Date.parse(a.data.at(-1)!.updated_at) - opens);
+        merged = updatedSinceOpens * (intoWindow(b) / b.length);
+      } else {
+        updatedSinceOpens = firstProjection;
+        merged = updatedSinceOpens * (intoWindow(a.data) / a.data.length);
+      }
+    }
+    // The newest page is read once more (the re-scan for PRs updated during the walk).
+    const restPages = (pullPages ?? Math.max(2, Math.ceil(updatedSinceOpens / this.pageSize))) + 1;
+    let graphql = 1;
+    graphql += wantPrs ? Math.ceil(merged / this.batchSize) : 0;
+
+    if (wantPushes) {
+      type Page = { repository: { object: { history: { pageInfo: { hasNextPage: boolean }; nodes: { committedDate: string }[] } } | null } };
+      const h = await this.http.graphql<Page>(historyQuery(this.historyPageSize), { owner, name, head: headOid, since: req.window.opensAt, after: null });
+      probed++;
+      const nodes = h.repository.object?.history.nodes ?? [];
+      let commits = nodes.length;
+      if (h.repository.object?.history.pageInfo.hasNextPage && nodes.length > 1) {
+        const dates = nodes.map((n) => Date.parse(n.committedDate)).sort((x, y) => y - x);
+        const density = nodes.length / Math.max(1, dates[0]! - dates.at(-1)!);
+        commits = nodes.length + density * Math.max(0, dates.at(-1)! - opens);
+      }
+      graphql += Math.max(1, Math.ceil(commits / this.historyPageSize));
+    }
+    return { requests: Math.round(restPages + graphql), graphql: Math.round(graphql), probed };
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */

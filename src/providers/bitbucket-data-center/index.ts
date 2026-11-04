@@ -1,13 +1,18 @@
 import {
   PROVIDER_API_VERSION,
+  RepoUnavailableError,
   defineProvider,
   type ChangeRecord,
+  type FirstParentCommit,
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
+import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError } from "../http.js";
 import {
@@ -46,6 +51,20 @@ interface DcPage<T> {
   values: T[];
   isLastPage: boolean;
   nextPageStart?: number;
+}
+
+interface DcRepo {
+  id: number;
+  slug: string;
+  project?: { key?: string };
+  public?: boolean;
+  archived?: boolean;
+  origin?: unknown;
+}
+
+/** A Data Center repository as a RepoRef (the default branch is not in it). */
+function dcRepoRef(r: DcRepo, owner: string): RepoRef {
+  return { repo: `${r.project?.key ?? owner}/${r.slug}`, id: String(r.id), defaultBranch: "", archived: r.archived === true, fork: r.origin !== undefined && r.origin !== null, visibility: r.public === true ? "public" : "private" };
 }
 
 export class BitbucketDataCenterProvider implements ScmProvider {
@@ -100,6 +119,37 @@ export class BitbucketDataCenterProvider implements ScmProvider {
       if (!(e instanceof HttpError) || e.status !== 404) throw e;
       return (await this.http.get<{ id: string; displayId: string; latestCommit: string }>(`${path}/branches/default`, signal)).data; // before 7.6
     }
+  }
+
+  /**
+   * The repositories of a project (U8): `GET /projects/{KEY}/repos`, paged by `start`. `origin` marks a fork. The list
+   * does not carry the default branch (one more request per repository), so it is left empty: `freeze` records the
+   * branch `listChanges` walked.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    const repos = await this.paged<DcRepo>(`/projects/${encodeURIComponent(set.owner)}/repos`);
+    return repos.map((r) => dcRepoRef(r, set.owner));
+  }
+
+  /** One repository's metadata (U8): `GET /projects/{KEY}/repos/{slug}`. A 404 is a RepoUnavailableError(404). UNVERIFIED against a live server. */
+  async describeRepo(ref: { repo: string; id?: string }): Promise<RepoRef> {
+    try {
+      return dcRepoRef((await this.http.get<DcRepo>(this.split(ref.repo).path)).data, ref.repo.split("/")[0]!);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) throw new RepoUnavailableError(ref.repo, 404, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * The default branch's first-parent commits from `head` back to `base` (U8): `GET …/commits?until=head&since=base`
+   * lists the commits reachable from `head` and not from `base`, with their parents. Null when `base` is not on the
+   * chain. UNVERIFIED against a live server.
+   */
+  async firstParentPath(req: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null> {
+    if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
+    const commits = await this.paged<DcCommit>(`${this.split(req.repo).path}/commits?until=${req.head}&since=${req.base}`, req.signal);
+    return firstParentChain(commits.map((c) => ({ sha: c.id, parents: c.parents.map((x) => x.id), committedAt: new Date(c.committerTimestamp).toISOString() })), req.base, req.head);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

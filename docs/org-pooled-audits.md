@@ -1,0 +1,113 @@
+# Org-pooled audits
+
+One registration, one freeze and one certificate for every repository of an org, GitLab group or Bitbucket workspace. The population is the union of the repos' populations under one selector, so the sample, the sequential test and the risk limit are those of a single repo with a larger N. A single repo is a pool of one: it runs through the same code and its records are unchanged.
+
+The claim is about the pool. Per-repo counts are descriptive: `status` prints a table of where the draws fell, and says `per-repo counts are descriptive; the risk limit applies to the pool`.
+
+## Registering a pool
+
+`.pr-rla.yml` takes `repos:` where a single-repo audit takes `repo:` (not both):
+
+```yaml
+provider: github
+repos:                           # a rule, resolved once, at freeze
+  owner: my-org                  # a GitHub org or user, GitLab group, Bitbucket workspace or Data Center project key
+  include: ["svc-*", "web"]      # globs over the repo path; default ["*"]
+  exclude: ["*-sandbox"]
+  archived: false                # default: archived repos are out
+  forks: false                   # default: forks are out
+  visibility: [public, private, internal]   # default: every visibility the token can see
+freeze:
+  concurrency: 4                 # repos listed at once; default 4. Not registered: it changes speed, never the result
+```
+
+or an explicit list, `repos: [my-org/api, my-org/web]`.
+
+- **Globs.** A pattern with no `/` matches the repo's last segment; a pattern with a `/` matches the whole path (`my-org/team/**` for a GitLab subgroup). `*` stays inside a segment, `**` crosses segments, `?` is one character, and matching ignores case.
+- **What is signed** is the rule as written, with the defaults filled in and the lists sorted, so two spellings of one rule register the same bytes, and, for a rule, the repos it matches at that moment, by the SCM's stable repository id (`registeredRepos`). Those repos stay in the pool whatever happens to them after registration: archived, renamed out of a glob, made private under a public-only rule, transferred to another owner. Freeze includes every one that still exists, and `verify` FAILs a manifest that leaves one out. Repos created later join the pool if the rule matches them at freeze.
+- **`register` checks the pool before signing it.** It resolves the rule once (reads only) and refuses a rule that matches nothing. It refuses a rule for a provider that cannot list repositories, and names the provider. It refuses a pool that mixes providers (`github:acme/a` next to `gitlab:acme/b`): review counts mean different things on different providers, so there is one provider per registration. The refusal is a population rule in the core (`validateRepoSet`), so every caller gets it, not only the CLI.
+- **Providers that list repositories** (`listRepos`): `github` (an org, else the user's own repositories), `gitlab` (a group with its subgroups, else a user), `bitbucket-cloud` (a workspace) and `bitbucket-data-center` (a project, unverified against a live server). An external plugin may implement it too ([`writing-a-provider.md`](writing-a-provider.md)). The core applies the globs and flags itself, so providers behave alike.
+
+## Freezing a pool
+
+`pr-rla freeze` resolves the rule at that moment, lists each repo's changes through the provider and the fetch broker (one per-host rate budget shared by every repo and every plugin), and writes one manifest and one signed, time-stamped commitment.
+
+- **Records.** `repos` in the manifest lists every repo of the pool, sorted, with the SCM's stable repository id (from `listRepos`; `null` for a list), its default branch and the head the population was walked from. Change ids already carry their repo, so the sorted manifest, the draw formula and N need nothing else. For a rule, `repoListing` records the owner's whole listing as the freeze saw it: every repository with its id, flags, creation time and the rule clauses that exclude it (`archived`, `fork`, `visibility:private`, `include`, `exclude:<glob>`), the identity the token acts as and, per visibility, how many it listed and whether the provider could prove the listing complete. `goneRepos` records registered repos that are gone.
+- **What the token can see.** For a rule that admits private or internal repositories, the provider's `listingVisibility` says whether the listing is provably complete. On GitHub that holds for an org owner (`/user/memberships/orgs/{org}` says `role: admin`) with a classic token holding the `repo` scope (its responses carry `X-OAuth-Scopes`), or for the token's own user account: an owner sees every repository of the org, while a member sees only the private repositories they were granted, and a fine-grained or GitHub App token can be limited to selected repositories with no API that says so. A freeze that cannot prove it prints a note; a verifier that can see more will FAIL a repo it missed.
+- **All-or-nothing.** A manifest missing a repo would be a pruned population, the attack check 5 exists to catch. So a repo in the listing that cannot be read (403, 404) fails the run and names the repo, and there is no `--skip-repo`. A repo the team cannot read must be excluded in the registered rule, before the seed.
+- **Gone repos.** A repo counts as gone only after one repo-level probe (`describeRepo`, by id) answers 404: a 404 on a commit or a page of a repo that exists is a failure, and a rate limit is never "gone". A registered repo found gone is recorded in `goneRepos` with the probe's status, message and time, and the freeze completes; `verify` then reports it as INCOMPLETE, and FAILs if it comes back holding window changes. A provider without `describeRepo` cannot tell, so a registered repo missing from the listing stops the freeze.
+- **Empty repos.** A repository with no commits holds nothing in any window: inside a pool it is listed with an empty default branch and no head. A single-repo audit of an empty repo stops with `<repo> has no default branch`, as before.
+- **Parallelism.** 4 repos at a time by default (`freeze.concurrency`). The broker's per-host budget is the real limiter; the concurrency only bounds memory and open connections. An external provider runs the same way inside the isolated plugin host.
+- **Stopping and resuming.** If the rate budget, a timeout or the service gives out after the broker's retries, freeze stops scheduling, lets the repos in flight finish, keeps every finished repo's checkpoint and exits 4 with the command that finishes the job:
+
+  ```
+  pr-rla: stopped after 17 of 40 repos: …. The 17 repos listed are checkpointed; no manifest was written. Continue with: pr-rla freeze --resume <runId>
+  ```
+
+  The same holds when the process is killed: checkpoints are written atomically, one file per finished repo, so a repo that was mid-listing simply starts again. Checkpoints live in `.pr-rla/cache/<window>/<runId>/` of the audit directory (not committed; `verify` never reads them).
+- **The run id** is the SHA-256 of the registration, the resolved repo list (with ids), the registered repos found gone, the pr-rla version and the provider's identity, together with the run's start time and the listing it recorded then. `--resume <runId>` (a prefix of 8 or more digits is enough) refuses if any input differs, and says which, or if the run's header was edited. Running `freeze` again with the same inputs continues the newest such run too. `--force` starts over; `--force --resume <runId>` continues a stopped re-freeze.
+- **Byte-identical.** The run keeps the time it started. That is the manifest's `frozenAt`, the instant reviews are read as of, so a killed and resumed freeze writes the same manifest as an uninterrupted one. The commitment is signed when the run finishes, because its timestamp tokens must agree with its signed time within 10 minutes and a pooled freeze can take hours; `verify` accepts a commitment dated at or after the manifest's `frozenAt` and checks both against the window and the seed round.
+- **Before R.** Freeze refuses to start once seed round R has published, or when R is less than the timestamp authorities' 5-minute retry deadline away (the commitment's tokens could then be issued after R). It checks again when the listing ends (a single repo too) and right before it writes, so nothing is written after R; the checkpoints are kept.
+- **Checkpoints are checked again.** A resumed run re-checks each checkpoint against the provider contract (in the window, from that repo, well formed) and against the digest it was written with; one that fails is listed again. The run id covers the run's start time and what it recorded at the start, so an edited `run.json` is not resumed. A re-freeze with `--force` that stops prints `pr-rla freeze --force --resume <runId>`.
+- **Not computed for a pool:** the provider-native counts `freeze` prints next to a single repo (a search figure per author), because they cost requests per repo and carry no claim.
+
+## Predicting the cost: `--estimate`
+
+```sh
+pr-rla freeze --dry-run --estimate
+```
+
+(`--estimate` implies `--dry-run`; it works before anything is registered.) Each repo is probed with the first page of what `listChanges` reads, and the provider extrapolates: for GitHub, the head, the newest page of closed PRs plus one from the middle of the list when it is longer, and one page of history. At most 200 repos are probed (every k-th, in repo order) and the rest are scaled. The predicted requests are then replayed through a fresh rate governor with the broker's budgets: the published-limit defaults, any `rate_limits:` override, and any limit the server reported while probing. Output from a real run on the public GitHub org `navikt` (a 223-repo subset, 2026-11-04):
+
+```
+estimate: 223 repos (probed 200 of them, every 1.1th, and scaled)
+  requests: ~1,102 = 33 listing + ~1,069 for the repos (~446 REST, ~623 GraphQL); the probes already spent 600
+  wall time: ~3 min at 4 repos at a time (bound by request latency, 656 ms each: 3 min; the rate budget alone needs 0 s)
+  budget api.github.com: the server reports 5,000 requests per window (4,502 left); the estimate paces to that
+  ...
+```
+
+and the freeze it predicted printed `freeze: 223 repos · 223 listed now, 0 from checkpoints · 1102 requests (623 GraphQL) · 3 min 43 s`.
+
+On the synthetic 40-repo org of the test suite the estimate lands within ±5% of the actual request count and within ±30% of the actual wall time over 18 orgs (6 seeds at 3 sizes, 2026-11-04); the bounds the design asks for are ±20% and ±50%, and the tests assert them on 4 of those orgs. It also warns when the predicted wall time exceeds the time left before R publishes. A provider without `estimateRequests` prints no figures and says so. The estimate is a prediction from first pages: how evenly a window's activity is spread decides how close it is, and a retried request counts again.
+
+## What `verify` does with a pool
+
+Check 2 holds the manifest to the registered set without any network: the registered repo, exactly the registered list (a listed repo may be recorded gone instead), or only repos inside the registered rule or registered by id; every registered repo either in the manifest or recorded gone; a listing that agrees with itself (its exclusions follow from the attributes it records, every repo it shows the rule matching is in the pool); sorted and unique; and every change from a listed repo. Check 5 re-lists the owner, matches each repo by id first and by path second, rebuilds each from its recorded head, compares that with the window as the branch's current head shows it, and diffs.
+
+`verify` prints **VERIFIED** only when every check passed or warned. It prints **INCOMPLETE** and exits **6** when nothing failed but part of the population could not be rebuilt, or its completeness could not be established; `--json` has `verdict: "INCOMPLETE"` and `ok: false`.
+
+| Situation | Check 5 |
+|---|---|
+| A repo that matches the registered rule now but is not in the manifest, with changes in the window | **FAIL** `repo X matches the registered rule but is not in the manifest (n changes landed in the window)` |
+| The same repo, but the SCM says it was created after the window closed | PASS, with a line saying it cannot hold a window landing |
+| The same repo, no creation time given, and no change in the window now | PASS, with a line saying so |
+| A registered repo missing from the manifest, or recorded gone but there, with changes in the window | **FAIL** |
+| A repo renamed (or transferred) after freeze | PASS: it is matched by its id and rebuilt under its new name |
+| A repo excluded at freeze or now only by an attribute its owners can change (archived, visibility, name), not registered, with changes in the window | **WARN** with the count. A retrospective audit cannot tell whether the change came before registration |
+| A manifest repo that is gone (its metadata answers 404) | **INCOMPLETE** `X: gone: … HTTP 404 (deleted, or hidden from this token): its n changes in the manifest were not rebuilt` |
+| A manifest repo the token cannot read (403 on its metadata) | **INCOMPLETE** `X: no access: …`, worded differently from gone |
+| A rate limit or an outage while listing a repo | **INCOMPLETE** `X: could not be listed (…): a rate limit or an outage, not a missing repository; run verify again` |
+| The rule admits private or internal repos and the provider cannot prove this token sees them all (a fine-grained token, a member who is not an owner, a provider without `listingVisibility`) | **INCOMPLETE** `cannot establish that this token sees every private repository under X: <reason> (the freeze listed n)` |
+| The owner cannot be re-listed | **INCOMPLETE** `cannot re-list the repositories under X` |
+| A window landing reachable from the current head that the frozen head's history lacks: a pull request, or a direct push when a first-parent commit after the frozen head is dated before the window closed | **FAIL** (the frozen head hides window landings) |
+| Work dated in the window that arrived after it closed, through first-parent commits all dated after the window (a merge pushed after freeze) | PASS, with a line: it is not in the population (FR7.2) |
+| The same, but the provider cannot report first-parent history | **INCOMPLETE** |
+| A frozen head the repository does not have (404 on the commit) | **FAIL** `frozen head X not found …; the repository itself exists` |
+| A repo's changes differ from the manifest's | **FAIL**, as for a single repo |
+
+Single repositories get the same per-repo rules: a frozen head that hides window landings FAILs, and a repo that is gone or unreadable is INCOMPLETE (exit 6) where `verify` used to stop with the provider's error.
+
+## Limits
+
+- **What a retrospective pooled audit cannot detect: attribute changes made before registration.** The registered repos are the ones the rule matched when it was registered. In a retrospective audit (registered after the window opened) a repo archived, made private or renamed out of the rule during the window, before registration, is not among them; `verify` WARNs with its change count but cannot tell when the change was made. A prospective audit (registered before the window opens) has no such gap: every repo the rule matched before the window is in the pool, whatever happens to it later.
+- **What the verifier sees.** Without the provider's proof that the token sees every private and internal repository, `verify` is INCOMPLETE for them: a hidden repo is indistinguishable from no repo. Only the GitHub built-in can give that proof, and only for an org owner with a classic `repo`-scoped token (or the token's own account).
+- **Direct pushes are dated by their committer date.** The window is applied to it, and it is what `verify` reads to tell a merge after freeze from a landing the frozen head left out. Committer dates are the pusher's to set: a direct push given a date outside the window is outside the population, and a merge pushed during the window with a date after it could hide the work it brings in. The audit cannot see push times. A merge pushed after freeze whose first parent is not the branch's previous head (a `git pull` merge) is read the same way.
+- `verify` of a pool lists every repo again (4 at a time), lists a repo twice when its branch moved since freeze (from the frozen head and from the current one), lists every repo excluded only by an attribute its owners can change (archived, private, renamed) to count its window changes, and is not resumable: it takes about as long as the freeze did, or longer for an org with many archived repos, and a rate limit that stops it makes it INCOMPLETE until it is run again.
+- **Status before freeze** does not compute N for a pool: it would list every repo, about as many requests as the freeze. `pr-rla freeze --dry-run --estimate` predicts the cost and `pr-rla freeze --dry-run` counts N.
+- **The estimate's sampling.** Probing every k-th repo of an org with heavy-tailed activity can miss its largest repos: on six synthetic 40-repo orgs, probing every 4th repo was off by up to 34% in requests and every 2nd by up to 10% (and up to 57% in wall time when the rate budget binds), 2026-11-04. With every repo probed (any org up to 200 repos) the same orgs stayed within ±5.2% of requests and ±29% of wall time (±11% when request latency binds); 200 of 240 repos probed stayed within ±3.1% and ±13.2%. The tests assert ±20% and ±50% on those cases.
+
+- The estimate and `--resume` are verified on a synthetic org and on one public org (`navikt`, a 223-repo subset, read-only); a full `freeze` of a real org, with timestamp tokens, has not been run.
+- `listRepos` for `bitbucket-data-center` is unverified against a live server, as that provider is. GitLab and Bitbucket Cloud `listRepos` are tested on hand-made responses only.
+- A repo list carries no repository ids: the SCM is not asked. Only a rule records them.
+- Bitbucket Data Center's repository list does not carry the default branch, so `listRepos` leaves it empty; the manifest records the branch `listChanges` walked.

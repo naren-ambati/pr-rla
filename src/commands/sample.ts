@@ -1,5 +1,5 @@
 import { RoundNotYetPublished } from "../beacon/drand.js";
-import { manifestSha256, manifestRepo, derivedRoundFor } from "../core/records.js";
+import { manifestSha256, repoLabel, derivedRoundFor } from "../core/records.js";
 import { computeDraws, QUICKNET, unixToIso } from "../core/seed.js";
 import { effectiveCap, zeroFailureStop } from "../core/sprt.js";
 import { existsSync } from "node:fs";
@@ -61,7 +61,7 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   });
   const file: DrawsFile = {
     schema: "pr-rla/draws/v1",
-    repo: manifestRepo(manifest),
+    repo: repoLabel(manifest),
     window: manifest.window.name,
     manifestSha256: manifest.sha256,
     N: manifest.N,
@@ -74,7 +74,7 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   };
   writeJson(paths.draws, file);
   const ledger = await ledgerFor(ctx, config, paths);
-  await ledger.publishDraws?.(draws.slice(0, issued), { window: config.window.name, protocolSha256: reg.record.protocolSha256, registrationSha256: reg.sha256, repo: manifestRepo(manifest) });
+  await ledger.publishDraws?.(draws.slice(0, issued), { window: config.window.name, protocolSha256: reg.record.protocolSha256, registrationSha256: reg.sha256, repo: repoLabel(manifest) });
   // The ledger's draw → issue index now exists: bind it to the draws (verify compares this hash with the file).
   const index = readIndexDocument(paths.windowDir);
   if (index) writeJson(paths.draws, { ...file, ledgerIndexSha256: index.sha256 });

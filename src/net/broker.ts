@@ -106,10 +106,23 @@ export interface BrokerDeps {
   onAttempt?: (a: AttemptReport) => void;
 }
 
+/**
+ * What went over the wire (U8: `freeze` reports its request count, and `--estimate` its request mix and latency).
+ * Every attempt counts, retries and redirect hops included; a request refused before it was sent does not.
+ */
+export interface BrokerStats {
+  requests: number;
+  /** Time spent inside the transport (the command's clock), summed over attempts. */
+  busyMs: number;
+  /** Per host: attempts, how many carried credentials, and how many were GraphQL. */
+  byHost: Map<string, { requests: number; authenticated: number; graphql: number }>;
+}
+
 export interface Broker {
   readonly fetch: BrokerFetch;
   readonly policy: Readonly<BrokerPolicy>;
   readonly governor: RateGovernor;
+  readonly stats: Readonly<BrokerStats>;
   /**
    * A plain `fetch` for one plugin or component: the pluginId is fixed (a plugin cannot
    * speak as another), and providers and ledgers always use the SCM destination.
@@ -190,6 +203,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   const log = deps.log ?? (() => {});
   const deadline = deps.tsaDeadlineMs ?? TSA_RETRY_DEADLINE_MS;
   const governor = new RateGovernor(p.budgets, now);
+  const stats: BrokerStats = { requests: 0, busyMs: 0, byHost: new Map() };
 
   // Step 1.
   function checkHost(call: Call, url: URL): void {
@@ -293,9 +307,17 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       }
       const release = await governor.slot(url.hostname);
       let res: Response;
+      const sentAt = now();
+      stats.requests++;
+      const host = stats.byHost.get(url.hostname) ?? { requests: 0, authenticated: 0, graphql: 0 };
+      host.requests++;
+      if (g.authenticated) host.authenticated++;
+      if (g.graphql) host.graphql++;
+      stats.byHost.set(url.hostname, host);
       try {
         res = await send(call, url, method, headers, body);
       } finally {
+        stats.busyMs += now() - sentAt;
         release();
       }
       governor.observe(g, res);
@@ -411,6 +433,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     fetch: brokerFetch,
     policy: p,
     governor,
+    stats,
     bind(pluginId, destination = "scm") {
       const role = roleOf(pluginId);
       return (async (input: string | URL | Request, init?: RequestInit & Partial<BrokerInit>) => {

@@ -151,7 +151,7 @@ export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
       return json({ errors: [{ message: "unknown query" }] });
     }
     const base = `/api/v4/projects/${pid}`;
-    if (path === `/api/v4/projects/${encodeURIComponent(sc.repo)}` || path === `/api/v4/projects/${sc.repo}`) return json({ id: pid, default_branch: sc.defaultBranch, path_with_namespace: sc.repo });
+    if (path === `/api/v4/projects/${encodeURIComponent(sc.repo)}` || path === `/api/v4/projects/${sc.repo}` || path === `/api/v4/projects/${pid}`) return json({ id: pid, default_branch: sc.defaultBranch, path_with_namespace: sc.repo, visibility: "public", archived: false, created_at: "2020-01-01T00:00:00.000Z" });
     if (path === `${base}/merge_requests`) {
       const after = Date.parse(url.searchParams.get("updated_after") ?? "1970-01-01T00:00:00Z");
       const items = sc.prs.filter((p) => merged(p) && Date.parse(p.updatedAt) >= after).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).map(mrJson);
@@ -166,6 +166,14 @@ export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
       return page(url, [...Array.from({ length: p.additions }, () => ({ diff: "@@ -1 +1 @@\n-old\n+new\n" })), ...(opts.tooLarge?.includes(p.number) ? [{ diff: "", too_large: true, collapsed: false }] : [])]);
     }
     if (path === `${base}/repository/branches/${sc.defaultBranch}`) return json({ name: sc.defaultBranch, commit: { id: sc.head } });
+    // A revision range with first_parent (U8, firstParentPath): first parents from the tip until a commit reachable from the base.
+    const range = /^([0-9a-f]{40})\.\.([0-9a-f]{40})$/.exec(url.searchParams.get("ref_name") ?? "");
+    if ((path === `${base}/repository/commits` || path === `/api/v4/projects/${encodeURIComponent(sc.repo)}/repository/commits`) && range && url.searchParams.get("first_parent") === "true") {
+      const behind = new Set(sc.reachable(range[1]!).map((c) => c.oid));
+      const items: ScCommit[] = [];
+      for (let c = sc.byOid.get(range[2]!); c && !behind.has(c.oid); c = c.parents[0] ? sc.byOid.get(c.parents[0]) : undefined) items.push(c);
+      return page(url, items.map(commitJson), 4);
+    }
     if (path === `${base}/repository/commits`) {
       const since = Date.parse(url.searchParams.get("since")!);
       const until = Date.parse(url.searchParams.get("until")!);

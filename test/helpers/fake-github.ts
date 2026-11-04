@@ -137,6 +137,20 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
       }
       return json({ data: { repository: repoData } });
     }
+    // The compare API (U8, firstParentPath): commits reachable from head and not from base, oldest first, paged.
+    const cmpMatch = new RegExp(`^${prefix}/repos/${repo}/compare/([0-9a-f]+)\\.\\.\\.([0-9a-f]+)$`).exec(url.pathname);
+    if (cmpMatch) {
+      const [base, tip] = [cmpMatch[1]!, cmpMatch[2]!];
+      if (!byOid.has(base) || !byOid.has(tip)) return new Response(JSON.stringify({ message: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });
+      const fromTip = reachableFrom(tip);
+      const fromBase = new Set(reachableFrom(base).map((c) => c.oid));
+      const status = base === tip ? "identical" : fromBase.has(tip) ? "behind" : fromTip.some((c) => c.oid === base) ? "ahead" : "diverged";
+      const ahead = fromTip.filter((c) => !fromBase.has(c.oid)).reverse();
+      const per = Math.min(100, Number(url.searchParams.get("per_page") ?? 250));
+      const page = Number(url.searchParams.get("page") ?? 1);
+      const commits = ahead.slice((page - 1) * per, page * per).map((c) => ({ sha: c.oid, parents: c.parents.map((sha) => ({ sha })), commit: { committer: { date: c.date } } }));
+      return json({ status, ahead_by: ahead.length, total_commits: ahead.length, commits });
+    }
     if (url.pathname === `${prefix}/search/issues`) return json({ total_count: 0 });
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
