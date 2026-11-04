@@ -144,3 +144,35 @@ describe("git-file options and registered reviewers", () => {
     expect(levels(await (await ledgerIn(dir, {}, ["bob", "id:42"])).readVerdicts())).toEqual([[1, "self-asserted"]]);
   });
 });
+
+const hasSshKeygen = execFileSyncOk("ssh-keygen", ["-?"]);
+function execFileSyncOk(cmd: string, args: string[]): boolean {
+  try {
+    execFileSync(cmd, args, { stdio: "ignore" });
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ENOENT";
+  }
+}
+
+describe.skipIf(!hasSshKeygen)("git-file in a SHA-256 repository, signed by git commit -S (gpgsig-sha256)", () => {
+  it("a software ed25519 key's signature is read from gpgsig-sha256 and gives account", async () => {
+    const keys = mkdtempSync(join(tmpdir(), "prrla-keys-"));
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", HOME: keys };
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "dana", "-f", join(keys, "dana")], { stdio: "ignore", env });
+    const pub = execFileSync("ssh-keygen", ["-y", "-f", join(keys, "dana")], { encoding: "utf8", env }).trim();
+    const d = mkdtempSync(join(tmpdir(), "prrla-sha256-"));
+    const g = (...args: string[]) => execFileSync("git", ["-c", "user.name=dana", "-c", "user.email=user-d4e5f6a7@example.invalid", ...args], { cwd: d, encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }).trim();
+    g("init", "-q", "--object-format=sha256");
+    mkdirSync(join(d, "audit/w"), { recursive: true });
+    writeFileSync(join(d, "audit/w/verdicts.jsonl"), line(1, "dana"));
+    g("add", "-A");
+    g("-c", "gpg.format=ssh", "-c", `user.signingkey=${join(keys, "dana")}`, "commit", "-S", "-qm", "draw 1");
+    const head = g("rev-parse", "HEAD");
+    expect(head).toMatch(/^[0-9a-f]{64}$/);
+    expect(g("cat-file", "commit", head)).toMatch(/^gpgsig-sha256 -----BEGIN SSH SIGNATURE-----$/m);
+    const l = await ledgerIn(d, {}, [`dana ${pub}`]);
+    expect((await l.readVerdicts())[0]!.provenance).toMatchObject({ level: "account", source: "git-signed-commit", signer: "dana", eventId: head });
+    expect((await l.verifyIntegrity!()).warnings).toEqual([]);
+  });
+});
