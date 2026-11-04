@@ -85,7 +85,8 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   }
 }
 
-export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string): Promise<Ledger> {
+export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } = {}): Promise<Ledger> {
+  const reviewers = opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {};
   refuseIfBuiltinOnly(ctx.plugins, "ledger", spec.use);
   const { entry, plugin } = verifyLocked(spec.use, cwd);
   const id = `ledger:${entry.name}`;
@@ -93,7 +94,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
     ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], writePaths: def.writePaths?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
-    const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id) });
+    const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...reviewers });
     if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");
     return l;
@@ -101,7 +102,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: entry.credentials });
   const host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
   try {
-    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log });
+    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: ctx.broker.bind(id), sleep: ctx.sleep, log: ctx.log, ...reviewers });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return l;
   } catch (e) {

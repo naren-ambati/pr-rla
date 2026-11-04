@@ -1,4 +1,4 @@
-import type { VerdictEvent } from "../sdk/ledger.js";
+import { PROVENANCE_LEVELS, verdictIneligibility, type ProvenanceLevel, type VerdictEvent } from "../sdk/ledger.js";
 import { evaluateSequence, type SequenceResult, type SprtParams } from "./sprt.js";
 
 export interface DrawnChange {
@@ -30,6 +30,18 @@ export interface StatusReport {
   ignored: IgnoredVerdict[];
   /** Later verdicts on a change that disagree with its first verdict (first one counts). */
   relabels: { changeId: string; first: VerdictEvent; later: VerdictEvent }[];
+  /** The first eligible verdict of every drawn change that has one, in draw order of the change's first draw. */
+  firstVerdicts: VerdictEvent[];
+  /** Provenance of the counted verdicts (the first `sequence.draws` draws), lowest level first. */
+  provenance: { level: ProvenanceLevel; count: number }[];
+}
+
+/** A verdict's provenance level; a ledger that says nothing is `self-asserted`. */
+export const provenanceOf = (v: VerdictEvent): ProvenanceLevel => v.provenance?.level ?? "self-asserted";
+
+/** `VERDICT PROVENANCE: account (12) · presence (24)`, the line every certificate prints (FR3.8, NFR4). */
+export function provenanceLine(p: StatusReport["provenance"]): string {
+  return `VERDICT PROVENANCE: ${p.length ? p.map((x) => `${x.level} (${x.count})`).join(" · ") : "none counted"}`;
 }
 
 /**
@@ -46,6 +58,8 @@ export function computeStatus(input: {
   verdicts: readonly VerdictEvent[];
   protocolSha256: string;
   params: SprtParams;
+  /** The registration's `verdicts.reviewers`: only their verdicts count. null/absent: any account that is not a bot or an app. */
+  reviewers?: readonly string[] | null;
 }): StatusReport {
   const { N, minPopulation, draws, verdicts, params } = input;
   const refusal = N < minPopulation ? `population ${N} < ${minPopulation}: review all ${N} instead` : null;
@@ -68,6 +82,11 @@ export function computeStatus(input: {
       ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
       continue;
     }
+    const ineligible = verdictIneligibility(ev, input.reviewers);
+    if (ineligible) {
+      ignored.push({ event: ev, reason: ineligible });
+      continue;
+    }
     const prior = first.get(ev.changeId);
     if (!prior) first.set(ev.changeId, ev);
     else if (prior.verdict !== ev.verdict) relabels.push({ changeId: ev.changeId, first: prior, later: ev });
@@ -86,6 +105,13 @@ export function computeStatus(input: {
   if (!blockingDraw && input.drawsIssued < ordered.length) blockingDraw = ordered[input.drawsIssued] ?? null;
   const sequence = evaluateSequence(seq, params);
   const counted = ordered.slice(0, sequence.draws);
+  const levels = new Map<ProvenanceLevel, number>();
+  for (const id of new Set(counted.map((d) => d.changeId))) {
+    const v = first.get(id);
+    if (v) levels.set(provenanceOf(v), (levels.get(provenanceOf(v)) ?? 0) + 1);
+  }
+  const firstDrawOf = new Map<string, number>();
+  for (const d of ordered) if (!firstDrawOf.has(d.changeId)) firstDrawOf.set(d.changeId, d.draw);
   return {
     N,
     minPopulation,
@@ -98,5 +124,7 @@ export function computeStatus(input: {
     beyondStop: Math.max(0, seq.length - sequence.draws),
     ignored,
     relabels,
+    firstVerdicts: [...first.values()].sort((a, b) => (firstDrawOf.get(a.changeId) ?? 0) - (firstDrawOf.get(b.changeId) ?? 0)),
+    provenance: PROVENANCE_LEVELS.filter((l) => levels.has(l)).map((level) => ({ level, count: levels.get(level)! })),
   };
 }

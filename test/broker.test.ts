@@ -390,6 +390,8 @@ describe("NFR12: default budgets equal the published limits", () => {
    * - GitHub GraphQL is 1,000 points/h, not 5,000: GITHUB_TOKEN gets 1,000 per repository
    *   (GitHub Docs, GraphQL rate limits), and NFR12 takes the smallest published limit.
    * - GitLab.com anonymous is 500 requests/min per IP (GitLab Docs; the live header said 500).
+   * Bolt 3 added GitLab.com's content-creation limits for gitlab-issues (same page, read 2026-11-03):
+   * issue creation 200/min (per project and user), note creation 60/min (per user).
    */
   const TABLE: [family: string, rule: string, auth: string, count: number, perMs: number, burst: number, source: string][] = [
     ["github", "rest", "authenticated", 1_000, H, 1_000, "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"],
@@ -401,6 +403,8 @@ describe("NFR12: default budgets equal the published limits", () => {
     ["github", "writes_per_hour", "any", 500, H, 500, "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"],
     ["gitlab", "api", "authenticated", 2_000, MIN, 2_000, "https://docs.gitlab.com/user/gitlab_com/rate_limits/"],
     ["gitlab", "api_anonymous", "anonymous", 500, MIN, 500, "https://docs.gitlab.com/user/gitlab_com/rate_limits/"],
+    ["gitlab", "issue_create", "any", 200, MIN, 200, "https://docs.gitlab.com/user/gitlab_com/rate_limits/"],
+    ["gitlab", "note_create", "any", 60, MIN, 60, "https://docs.gitlab.com/user/gitlab_com/rate_limits/"],
     ["bitbucket-cloud", "repositories", "authenticated", 1_000, H, 1_000, "https://support.atlassian.com/bitbucket-cloud/docs/api-request-limits/"],
     ["bitbucket-cloud", "anonymous", "anonymous", 60, H, 60, "https://support.atlassian.com/bitbucket-cloud/docs/api-request-limits/"],
     ["bitbucket-data-center", "api", "authenticated", 5, 1_000, 60, "https://confluence.atlassian.com/bitbucketserver/improving-instance-stability-with-rate-limiting-976171954.html"],

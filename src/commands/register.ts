@@ -5,7 +5,9 @@ import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
 import { stoppingTable, effectiveCap } from "../core/sprt.js";
 import { providerTraits } from "../provider-traits.js";
-import { pluginIdentity } from "../registry.js";
+import { loadLedgerDefinition, pluginIdentity } from "../registry.js";
+import { provenanceRank, type ProvenanceLevel } from "../sdk/ledger.js";
+import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
 import { auditContextFor, CommandError, configFor, isoNow, pct, protocolSha256, trustFor, writeJson, type CommandContext } from "./context.js";
@@ -27,11 +29,36 @@ export interface RegisterOptions {
 
 export const REREGISTER_COMMAND = "pr-rla register --force";
 
+/**
+ * The ledger part of register's preflight: the ledger loads, its options are valid (hosts,
+ * writePaths and create() all check them), and nothing is contacted. Returns the verdict rules
+ * the registration fixes (FR3.8): `min_provenance` from .pr-rla.yml, else the ledger's own level.
+ */
+export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<{ minProvenance: ProvenanceLevel; reviewers: string[] | null }> {
+  const def = await loadLedgerDefinition(config.ledger.use, config.dir);
+  const offline = (async () => {
+    throw new CommandError("register's preflight contacts no tracker");
+  }) as unknown as typeof fetch;
+  try {
+    def.hosts?.(config.ledger.options);
+    def.writePaths?.(config.ledger.options);
+    await def.create(config.ledger.options, { cwd: config.dir, windowDir: paths.windowDir, env: ctx.env, log: () => {}, fetch: offline });
+  } catch (e) {
+    throw new CommandError(`ledger ${config.ledger.use}: ${(e as Error).message}`);
+  }
+  const level = def.provenance ?? "self-asserted";
+  const minProvenance = config.verdicts.minProvenance ?? level;
+  if (provenanceRank(minProvenance) > provenanceRank(level))
+    throw new CommandError(`verdicts.min_provenance is ${minProvenance}, but ledger ${def.name} records ${level} verdicts, so no verdict could count; use an issue ledger (github-issues, gitlab-issues) for account provenance`);
+  return { minProvenance, reviewers: config.verdicts.reviewers };
+}
+
 export async function registerCommand(ctx: CommandContext, opts: RegisterOptions): Promise<number> {
   const { config, paths } = configFor(ctx);
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = timestampingFor(config, bundle);
   const api = rekorApi(opts.rekorApi);
+  const verdicts = await preflightLedger(ctx, config, paths);
   const record: RegistrationRecordV2 = {
     schema: "pr-rla/registration/v2",
     repos: { kind: "repo", repo: config.repo },
@@ -43,8 +70,8 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     registeredAt: isoNow(ctx),
     timestamping,
     plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins), ledger: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins) },
-    // Bolt 1 has only the git-file ledger (and external ledgers), so verdicts are self-asserted. Issue ledgers (bolt 3) default to "account".
-    verdicts: { minProvenance: "self-asserted", reviewers: null },
+    // FR3.8: `account` by default with an issue ledger, `self-asserted` with git-file.
+    verdicts,
     prRlaVersion: PR_RLA_VERSION,
   };
   if (!opts.dryRun && existsSync(paths.registration) && !opts.force)
@@ -64,7 +91,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     if (!traits.reportsLandedVia) ctx.out(`  warning: provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`);
   }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
-  ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}`);
+  ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}${record.verdicts.reviewers ? ` · reviewers ${record.verdicts.reviewers.join(", ")}` : ""}`);
   for (const id of [record.plugins.provider, record.plugins.ledger]) {
     if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);
     if (id.trust === "full") ctx.out(`  PLUGIN TRUST: full (${id.name}@${id.version ?? "unversioned"} runs with your environment and files)`);

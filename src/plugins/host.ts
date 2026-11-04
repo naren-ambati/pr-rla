@@ -478,7 +478,7 @@ export function declaredCredentials(host: PluginHost, options: unknown): LockedC
   return Array.isArray(c) ? credentialGrants(c as PluginCredential[], options) : [];
 }
 
-async function createInstance(host: PluginHost, options: unknown, base: { cwd: string; windowDir?: string }): Promise<CreateResult> {
+async function createInstance(host: PluginHost, options: unknown, base: { cwd: string; windowDir?: string; reviewers?: readonly string[] | null }): Promise<CreateResult> {
   const c = (await host.call("create", [options, base])) as CreateResult;
   if (!c || typeof c.name !== "string" || !Array.isArray(c.methods)) throw new PluginError(`plugin ${host.label}: create() returned no instance`, "PLUGIN_INVALID");
   return c;
@@ -507,9 +507,9 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
 }
 
 /** A Ledger whose methods run in the host. */
-export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void> }): Promise<Ledger> {
+export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number) => Promise<void>; reviewers?: readonly string[] | null }): Promise<Ledger> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log });
-  const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir });
+  const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}) });
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(c.apiVersion as number)) throw new LedgerApiVersionError(String(host.ready.name), c.apiVersion);
   const has = new Set(c.methods);
   for (const m of ["readVerdicts", "appendVerdict"]) if (!has.has(m)) throw new PluginError(`ledger "${host.label}" has no ${m}()`, "PLUGIN_INVALID");

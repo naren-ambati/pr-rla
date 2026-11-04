@@ -161,10 +161,11 @@ async function describe(options: unknown): Promise<DescribeResult> {
   return out;
 }
 
-async function create(options: unknown, base: { cwd?: unknown; windowDir?: unknown }): Promise<CreateResult> {
+async function create(options: unknown, base: { cwd?: unknown; windowDir?: unknown; reviewers?: unknown }): Promise<CreateResult> {
   const context = {
     cwd: base.cwd,
     ...(base.windowDir !== undefined ? { windowDir: base.windowDir } : {}),
+    ...(base.reviewers !== undefined ? { reviewers: base.reviewers } : {}),
     env: { ...process.env },
     log: (line: unknown) => send({ type: "log", line: String(line) }),
     fetch: hostFetch,
@@ -182,7 +183,7 @@ async function run(m: CallMessage): Promise<void> {
   try {
     let value: unknown;
     if (m.method === "describe") value = await describe(m.args[0]);
-    else if (m.method === "create") value = await create(m.args[0], (m.args[1] ?? {}) as { cwd?: unknown; windowDir?: unknown });
+    else if (m.method === "create") value = await create(m.args[0], (m.args[1] ?? {}) as { cwd?: unknown; windowDir?: unknown; reviewers?: unknown });
     else {
       const fn = instance?.[m.method];
       if (!METHODS[boot.kind].includes(m.method) || typeof fn !== "function") throw new Error(`the plugin has no ${m.method}()`);

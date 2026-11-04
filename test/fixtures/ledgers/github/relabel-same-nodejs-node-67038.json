@@ -1,0 +1,133 @@
+{
+ "description": "Public nodejs/node issue timeline(s) #67038, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. A maintainer applied commit-queue-squash, removed it, and applied it again: mapped to pass, the remove and re-add is a WARN relabel (same verdict), and the first event counts.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "relabel-same",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "nodejs/node",
+  "labels": {
+   "pass": "commit-queue-squash",
+   "fail": "commit-queue-rebase"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/nodejs/node",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "commit-queue-squash",
+    "id": "3544225714"
+   },
+   "fail": {
+    "name": "commit-queue-rebase",
+    "id": "3544275174"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:nodejs/node#67038",
+    "number": 67038,
+    "id": "PR_kwDOAZ7xs88AAAABK2D-Og",
+    "url": "https://github.com/nodejs/node/pull/67038",
+    "createdAt": "2026-10-26T18:36:56Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 1,
+    "changeId": "github:nodejs/node#67038",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "RafaelGSS",
+    "recordedAt": "2026-11-03T14:06:04Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "26234614",
+     "viaApp": null,
+     "eventId": "35026589137"
+    }
+   },
+   {
+    "draw": 1,
+    "changeId": "github:nodejs/node#67038",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "RafaelGSS",
+    "recordedAt": "2026-11-03T20:12:24Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "26234614",
+     "viaApp": null,
+     "eventId": "35060730080"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "findings": [],
+   "warnings": [
+    "draw #1: commit-queue-squash removed and added again (relabel, same verdict); the first event (2026-11-03T14:06:04Z) counts"
+   ],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "35026589137",
+    "at": "2026-11-03T14:06:04Z",
+    "actor": {
+     "login": "RafaelGSS",
+     "kind": "human",
+     "id": "26234614"
+    },
+    "action": "add",
+    "label": "commit-queue-squash",
+    "draw": 1
+   },
+   {
+    "id": "35030378986",
+    "at": "2026-11-03T14:42:47Z",
+    "actor": {
+     "login": "RafaelGSS",
+     "kind": "human",
+     "id": "26234614"
+    },
+    "action": "remove",
+    "label": "commit-queue-squash",
+    "draw": 1
+   },
+   {
+    "id": "35060730080",
+    "at": "2026-11-03T20:12:24Z",
+    "actor": {
+     "login": "RafaelGSS",
+     "kind": "human",
+     "id": "26234614"
+    },
+    "action": "add",
+    "label": "commit-queue-squash",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/nodejs/node/labels/commit-queue-squash","bodySha256":null,"status":200,"headers":{},"response":{"id":3544225714,"node_id":"LA_kwDOAZ7xs87TQJey","name":"commit-queue-squash"}},
+{"method":"GET","url":"https://api.github.com/repos/nodejs/node/labels/commit-queue-rebase","bodySha256":null,"status":200,"headers":{},"response":{"id":3544275174,"node_id":"LA_kwDOAZ7xs87TQVjm","name":"commit-queue-rebase"}},
+{"method":"GET","url":"https://api.github.com/repos/nodejs/node/issues/67038","bodySha256":null,"status":200,"headers":{},"response":{"number":67038,"node_id":"PR_kwDOAZ7xs88AAAABK2D-Og","html_url":"https://github.com/nodejs/node/pull/67038","created_at":"2026-10-26T18:36:56Z","repository_url":"https://api.github.com/repos/nodejs/node","state":"closed","labels":[{"name":"doc"},{"name":"author ready"},{"name":"commit-queue-squash"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/nodejs/node/issues/67038/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":34292597158,"event":"subscribed","created_at":"2026-10-26T18:37:05Z","actor":{"login":"dgonzalez","id":123962,"type":"User"},"performed_via_github_app":null},{"id":34292597827,"event":"subscribed","created_at":"2026-10-26T18:37:05Z","actor":{"login":"pxlpnk","id":164718,"type":"User"},"performed_via_github_app":null},{"id":34292598014,"event":"subscribed","created_at":"2026-10-26T18:37:05Z","actor":{"login":"fraxken","id":4438263,"type":"User"},"performed_via_github_app":null},{"id":34292598355,"event":"subscribed","created_at":"2026-10-26T18:37:06Z","actor":{"login":"ChALkeR","id":291301,"type":"User"},"performed_via_github_app":null},{"id":34292598666,"event":"subscribed","created_at":"2026-10-26T18:37:06Z","actor":{"login":"UlisesGascon","id":5110813,"type":"User"},"performed_via_github_app":null},{"id":34292598875,"event":"subscribed","created_at":"2026-10-26T18:37:06Z","actor":{"login":"lirantal","id":316371,"type":"User"},"performed_via_github_app":null},{"id":34292599184,"event":"subscribed","created_at":"2026-10-26T18:37:06Z","actor":{"login":"vdeturckheim","id":7135896,"type":"User"},"performed_via_github_app":null},{"id":34292599405,"event":"subscribed","created_at":"2026-10-26T18:37:06Z","actor":{"login":"deian","id":374012,"type":"User"},"performed_via_github_app":null},{"id":34292599688,"event":"subscribed","created_at":"2026-10-26T18:37:07Z","actor":{"login":"mhdawson","id":9373002,"type":"User"},"performed_via_github_app":null},{"id":34292599918,"event":"subscribed","created_at":"2026-10-26T18:37:07Z","actor":{"login":"MarcinHoppe","id":475629,"type":"User"},"performed_via_github_app":null},{"id":34292600464,"event":"subscribed","created_at":"2026-10-26T18:37:07Z","actor":{"login":"esarafianou","id":17114347,"type":"User"},"performed_via_github_app":null},{"id":34292600495,"event":"subscribed","created_at":"2026-10-26T18:37:07Z","actor":{"login":"mgalexander","id":582234,"type":"User"},"performed_via_github_app":null},{"id":34292601020,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"SomeoneWeird","id":665754,"type":"User"},"performed_via_github_app":null},{"id":34292601047,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"karenyavine","id":22000159,"type":"User"},"performed_via_github_app":null},{"id":34292601555,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"ronperris","id":963451,"type":"User"},"performed_via_github_app":null},{"id":34292601612,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"performed_via_github_app":null},{"id":34292602101,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"marco-ippolito","id":36735501,"type":"User"},"performed_via_github_app":null},{"id":34292602123,"event":"subscribed","created_at":"2026-10-26T18:37:08Z","actor":{"login":"cjihrig","id":2512748,"type":"User"},"performed_via_github_app":null},{"id":34292602616,"event":"subscribed","created_at":"2026-10-26T18:37:09Z","actor":{"login":"ashishkurmi","id":100655670,"type":"User"},"performed_via_github_app":null},{"id":34292606503,"event":"labeled","created_at":"2026-10-26T18:37:12Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"doc"},"performed_via_github_app":null},{"id":34794199750,"event":"labeled","created_at":"2026-10-31T19:36:33Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"author ready"},"performed_via_github_app":null},{"id":35024380545,"event":"labeled","created_at":"2026-11-03T13:44:12Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null},{"id":35024743631,"event":"labeled","created_at":"2026-11-03T13:47:45Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"commit-queue-failed"},"performed_via_github_app":null},{"id":35024743639,"event":"unlabeled","created_at":"2026-11-03T13:47:45Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null},{"id":35026588813,"event":"unlabeled","created_at":"2026-11-03T14:06:04Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue-failed"},"performed_via_github_app":null},{"id":35026589003,"event":"labeled","created_at":"2026-11-03T14:06:04Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null},{"id":35026589137,"event":"labeled","created_at":"2026-11-03T14:06:04Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue-squash"},"performed_via_github_app":null},{"id":35027233801,"event":"labeled","created_at":"2026-11-03T14:12:41Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"commit-queue-failed"},"performed_via_github_app":null},{"id":35027233840,"event":"unlabeled","created_at":"2026-11-03T14:12:41Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null},{"id":35030378934,"event":"unlabeled","created_at":"2026-11-03T14:42:47Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue-failed"},"performed_via_github_app":null},{"id":35030378986,"event":"unlabeled","created_at":"2026-11-03T14:42:47Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue-squash"},"performed_via_github_app":null},{"id":35060730000,"event":"labeled","created_at":"2026-11-03T20:12:24Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null},{"id":35060730080,"event":"labeled","created_at":"2026-11-03T20:12:24Z","actor":{"login":"RafaelGSS","id":26234614,"type":"User"},"label":{"name":"commit-queue-squash"},"performed_via_github_app":null},{"id":35061872325,"event":"merged","created_at":"2026-11-03T20:26:20Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"performed_via_github_app":null},{"id":35061872454,"event":"closed","created_at":"2026-11-03T20:26:20Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"performed_via_github_app":null},{"id":35061877533,"event":"unlabeled","created_at":"2026-11-03T20:26:24Z","actor":{"login":"nodejs-github-bot","id":18269663,"type":"User"},"label":{"name":"commit-queue"},"performed_via_github_app":null}]}
+ ]
+}

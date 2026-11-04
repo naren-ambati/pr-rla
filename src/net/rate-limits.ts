@@ -80,6 +80,9 @@ export const BUDGET_FAMILIES = {
     rules: [
       rule({ id: "api", scope: "all", cost: "requests", auth: "authenticated", count: 2_000, perMs: MIN, primary: true, published: "authenticated API traffic for a user: 2,000 requests each minute", source: GITLAB }),
       rule({ id: "api_anonymous", scope: "all", cost: "requests", auth: "anonymous", count: 500, perMs: MIN, primary: true, published: "unauthenticated traffic from an IP address: 500 requests each minute", source: GITLAB }),
+      // Content-creation limits (bolt 3, for gitlab-issues): issue creation per project and user, note creation per user.
+      rule({ id: "issue_create", scope: "writes", cost: "requests", auth: "any", count: 200, perMs: MIN, primary: false, keyPattern: /\/api\/v4\/projects\/([^/]+)\/issues$/, published: "issue creation: 200 requests each minute (applied per project and per user)", source: GITLAB }),
+      rule({ id: "note_create", scope: "writes", cost: "requests", auth: "any", count: 60, perMs: MIN, primary: false, keyPattern: /\/api\/v4\/projects\/[^/]+\/(?:issues|merge_requests)\/\d+\/notes$/, published: "note creation on issues and merge requests: 60 requests each minute (applied per user)", source: GITLAB }),
     ],
     concurrency: null,
   },
@@ -131,6 +134,12 @@ export const DEFAULT_HOSTS: Readonly<Record<string, BudgetFamily>> = {
   "*.atlassian.net": "jira-cloud",
   "timestamp.sectigo.com": "sectigo",
   "freetsa.org": "freetsa",
+};
+
+/** The family of each built-in issue ledger, applied to the hosts it declares (GHES, GitLab self-managed). */
+export const LEDGER_BUDGET_FAMILY: Readonly<Record<string, BudgetFamily>> = {
+  "github-issues": "github",
+  "gitlab-issues": "gitlab",
 };
 
 /** The family of each built-in provider, applied to the hosts it declares. */

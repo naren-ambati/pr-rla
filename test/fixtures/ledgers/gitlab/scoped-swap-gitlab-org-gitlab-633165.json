@@ -1,0 +1,58 @@
+{
+ "description": "GitLab's own rendering of gitlab-org/gitlab#633165's label history (the web discussions.json, read anonymously): each 'added … label and removed … label' system note is synthesized from resource_label_events that share one user and one instant, so a scoped-label swap is one add and one remove at the same time. The REST resource_label_events themselves answered HTTP 401 without a token, so their exact JSON stays unverified.",
+ "source": "recorded",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "url": "https://gitlab.com/gitlab-org/gitlab/-/issues/633165/discussions.json",
+ "resourceLabelEventsAnonymousStatus": 401,
+ "notes": [
+  {
+   "id": "9f3239508bb87612e1eab99055fa4af38bcf343d",
+   "created_at": "2026-10-09T16:15:57.708Z",
+   "author": "ifrenkel",
+   "system": true,
+   "note": "added ~29914314 ~3207279 ~29914344 ~2492649 ~4116714 ~10690742 ~15589663 ~10230929 ~14420475 labels",
+   "labels": {
+    "added": [
+     "Category:Software Composition Analysis",
+     "GitLab Ultimate",
+     "SCA:Dependency Scanning",
+     "backend",
+     "devops::application security testing",
+     "group::composition analysis",
+     "section::sec",
+     "type::feature",
+     "workflow::refinement"
+    ],
+    "removed": []
+   }
+  },
+  {
+   "id": "7b1ef447604f24e88b6357b645e43d7d8043c9c9",
+   "created_at": "2026-10-09T17:12:04.783Z",
+   "author": "gitlab-bot",
+   "system": true,
+   "note": "added ~52843142 label",
+   "labels": {
+    "added": [
+     "automation:quick-win-judged"
+    ],
+    "removed": []
+   }
+  },
+  {
+   "id": "9b478166c0b0e28280436d33365735b9e136b749",
+   "created_at": "2026-10-09T17:42:45.113Z",
+   "author": "ifrenkel",
+   "system": true,
+   "note": "added ~2526320 label and removed ~14420475 label",
+   "labels": {
+    "added": [
+     "workflow::in dev"
+    ],
+    "removed": [
+     "workflow::refinement"
+    ]
+   }
+  }
+ ]
+}

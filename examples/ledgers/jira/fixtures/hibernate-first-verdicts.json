@@ -1,0 +1,116 @@
+{
+ "description": "Public Jira Cloud changelogs (https://hibernate.atlassian.net, HHH-17005, HHH-16971), recorded read-only and anonymously through the example ledger. HHH-17005: backportDecision set to Approved once (pass); HHH-16971: set to Rejected once (fail). A single-select change is one changelog item with fieldtype custom, the field's id, option ids in from/to and the values in fromString/toString, and a created time with a local offset.",
+ "source": "recorded",
+ "tracker": "jira-cloud",
+ "case": "first-label",
+ "recordedAt": "2026-11-04T00:32:45.000Z",
+ "options": {
+  "base_url": "https://hibernate.atlassian.net",
+  "project": "HHH",
+  "field": "customfield_11702",
+  "values": {
+   "pass": "Approved",
+   "fail": "Rejected"
+  }
+ },
+ "index": {
+  "schema": "pr-rla-ledger-jira/index/v1",
+  "ledger": "jira",
+  "tracker": "https://hibernate.atlassian.net/projects/HHH",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "field": "customfield_11702",
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "jira:hibernate#HHH-17005",
+    "key": "HHH-17005",
+    "id": "74736",
+    "url": "https://hibernate.atlassian.net/browse/HHH-17005",
+    "createdAt": "2023-07-27T00:13:43.716-0700"
+   },
+   {
+    "draw": 2,
+    "changeId": "jira:hibernate#HHH-16971",
+    "key": "HHH-16971",
+    "id": "74690",
+    "url": "https://hibernate.atlassian.net/browse/HHH-16971",
+    "createdAt": "2023-07-21T10:56:18.761-0700"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 2,
+    "changeId": "jira:hibernate#HHH-16971",
+    "verdict": "fail",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "557058:db1a3420-e3e5-4207-9989-5d434a8152e9",
+    "recordedAt": "2023-07-24T19:23:03.408Z",
+    "provenance": {
+     "level": "account",
+     "source": "jira-field-change",
+     "actorId": "557058:db1a3420-e3e5-4207-9989-5d434a8152e9",
+     "viaApp": null,
+     "eventId": "250831:0:add"
+    }
+   },
+   {
+    "draw": 1,
+    "changeId": "jira:hibernate#HHH-17005",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "557058:99e61e65-956b-4a21-b29c-06057642e9ea",
+    "recordedAt": "2023-07-28T10:43:22.045Z",
+    "provenance": {
+     "level": "account",
+     "source": "jira-field-change",
+     "actorId": "557058:99e61e65-956b-4a21-b29c-06057642e9ea",
+     "viaApp": null,
+     "eventId": "250989:0:add"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "findings": [],
+   "warnings": [],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "250831:0:add",
+    "at": "2023-07-24T19:23:03.408Z",
+    "actor": {
+     "login": "557058:db1a3420-e3e5-4207-9989-5d434a8152e9",
+     "kind": "human",
+     "id": "557058:db1a3420-e3e5-4207-9989-5d434a8152e9"
+    },
+    "action": "add",
+    "label": "Rejected",
+    "draw": 2
+   },
+   {
+    "id": "250989:0:add",
+    "at": "2023-07-28T10:43:22.045Z",
+    "actor": {
+     "login": "557058:99e61e65-956b-4a21-b29c-06057642e9ea",
+     "kind": "human",
+     "id": "557058:99e61e65-956b-4a21-b29c-06057642e9ea"
+    },
+    "action": "add",
+    "label": "Approved",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/field","bodySha256":null,"status":200,"headers":{},"response":[{"id":"customfield_11702","name":"backportDecision","custom":true,"schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select","customId":11702}}]},
+{"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-17005?fields=project","bodySha256":null,"status":200,"headers":{},"response":{"id":"74736","key":"HHH-17005","fields":{"project":{"key":"HHH"}}}},
+{"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-17005/changelog?startAt=0&maxResults=100","bodySha256":null,"status":200,"headers":{},"response":{"startAt":0,"maxResults":100,"total":10,"isLast":true,"values":[{"id":"250958","created":"2023-07-27T00:32:58.114-0700","author":{"accountId":"557058:b6aaa645-f0e3-4567-8a66-25ce4120fb08","accountType":"atlassian"},"items":[{"field":"assignee","fieldtype":"jira","fieldId":"assignee","from":null,"fromString":null,"to":"557058:b6aaa645-f0e3-4567-8a66-25ce4120fb08","toString":"clement escoffier"}]},{"id":"250964","created":"2023-07-27T02:40:13.578-0700","author":{"accountId":"557058:b6aaa645-f0e3-4567-8a66-25ce4120fb08","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":null,"fromString":null,"to":"[10200]","toString":"Backport?"}]},{"id":"250965","created":"2023-07-27T02:40:17.962-0700","author":{"accountId":"557058:b6aaa645-f0e3-4567-8a66-25ce4120fb08","accountType":"atlassian"},"items":[{"field":"Pull Request","fieldtype":"custom","fieldId":"customfield_10780","from":null,"fromString":null,"to":null,"toString":"https://github.com/hibernate/hibernate-orm/pull/7085"}]},{"id":"250988","created":"2023-07-28T03:43:08.193-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"Fix Version","fieldtype":"jira","fieldId":"fixVersions","from":null,"fromString":null,"to":"32177","toString":"6.3.0"}]},{"id":"250989","created":"2023-07-28T03:43:22.045-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"backportDecision","fieldtype":"custom","fieldId":"customfield_11702","from":null,"fromString":null,"to":"10202","toString":"Approved"}]},{"id":"251287","created":"2023-08-02T07:41:30.866-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"summary","fieldtype":"jira","fieldId":"summary","from":null,"fromString":"Remove pinning in PooledLoOptimizer","to":null,"toString":"Loom: remove pinning in Id generation optimizers"}]},{"id":"252181","created":"2023-08-22T03:03:19.805-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"Fix Version","fieldtype":"jira","fieldId":"fixVersions","from":null,"fromString":null,"to":"32178","toString":"6.2.8"}]},{"id":"252224","created":"2023-08-23T01:21:00.092-0700","author":{"accountId":"557058:f58131cb-b67d-43c7-b30d-6b58d40bd077","accountType":"app"},"items":[{"field":"status","fieldtype":"jira","fieldId":"status","from":"1","fromString":"Open","to":"10002","toString":"Waiting for review"}]},{"id":"252454","created":"2023-08-28T08:46:14.126-0700","author":{"accountId":"557058:0222998d-a0c8-4789-91ec-6a92d10dfb9a","accountType":"atlassian"},"items":[{"field":"resolution","fieldtype":"jira","fieldId":"resolution","from":null,"fromString":null,"to":"1","toString":"Fixed"},{"field":"status","fieldtype":"jira","fieldId":"status","from":"10002","fromString":"Waiting for review","to":"5","toString":"Resolved"}]},{"id":"252693","created":"2023-08-31T10:28:15.110-0700","author":{"accountId":"557058:aafa2e9a-7a21-4c62-bf4a-050acb31276c","accountType":"atlassian"},"items":[{"field":"status","fieldtype":"jira","fieldId":"status","from":"5","fromString":"Resolved","to":"6","toString":"Closed"}]}]}},
+{"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-16971?fields=project","bodySha256":null,"status":200,"headers":{},"response":{"id":"74690","key":"HHH-16971","fields":{"project":{"key":"HHH"}}}},
+{"method":"GET","url":"https://hibernate.atlassian.net/rest/api/3/issue/HHH-16971/changelog?startAt=0&maxResults=100","bodySha256":null,"status":200,"headers":{},"response":{"startAt":0,"maxResults":100,"total":10,"isLast":true,"values":[{"id":"250723","created":"2023-07-21T11:00:48.500-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"description","fieldtype":"jira","fieldId":"description","from":null,"fromString":null,"to":null,"toString":"Upgrade to ByteBuddy 1.12.23.\n\n[https://github.com/raphw/byte-buddy/compare/byte-buddy-1.12.18...byte-buddy-1.12.23|https://github.com/raphw/byte-buddy/compare/byte-buddy-1.12.18...byte-buddy-1.12.23|smart-link] "}]},{"id":"250724","created":"2023-07-21T11:00:51.361-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"assignee","fieldtype":"jira","fieldId":"assignee","from":null,"fromString":null,"to":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","toString":"Scott Marlow"}]},{"id":"250784","created":"2023-07-24T05:01:44.871-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":null,"fromString":null,"to":"[10200]","toString":"Backport?"},{"field":"resolution","fieldtype":"jira","fieldId":"resolution","from":null,"fromString":null,"to":"1","toString":"Fixed"},{"field":"status","fieldtype":"jira","fieldId":"status","from":"1","fromString":"Open","to":"5","toString":"Resolved"}]},{"id":"250827","created":"2023-07-24T11:13:09.128-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":"[10200]","fromString":"Backport?","to":"","toString":""}]},{"id":"250828","created":"2023-07-24T11:13:17.746-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":null,"fromString":null,"to":"[10200]","toString":"Backport?"}]},{"id":"250829","created":"2023-07-24T12:22:48.049-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":"[10200]","fromString":"Backport?","to":"","toString":""}]},{"id":"250830","created":"2023-07-24T12:22:58.861-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"backPortable","fieldtype":"custom","fieldId":"customfield_11701","from":null,"fromString":null,"to":"[10200]","toString":"Backport?"}]},{"id":"250831","created":"2023-07-24T12:23:03.408-0700","author":{"accountId":"557058:db1a3420-e3e5-4207-9989-5d434a8152e9","accountType":"atlassian"},"items":[{"field":"backportDecision","fieldtype":"custom","fieldId":"customfield_11702","from":null,"fromString":null,"to":"10203","toString":"Rejected"}]},{"id":"251523","created":"2023-08-08T08:43:46.195-0700","author":{"accountId":"557058:99e61e65-956b-4a21-b29c-06057642e9ea","accountType":"atlassian"},"items":[{"field":"summary","fieldtype":"jira","fieldId":"summary","from":null,"fromString":"Upgrade ByteBuddy to 1.12.23","to":null,"toString":"Upgrade ByteBuddy to 1.14.5"}]},{"id":"252696","created":"2023-08-31T10:28:15.536-0700","author":{"accountId":"557058:aafa2e9a-7a21-4c62-bf4a-050acb31276c","accountType":"atlassian"},"items":[{"field":"status","fieldtype":"jira","fieldId":"status","from":"5","fromString":"Resolved","to":"6","toString":"Closed"}]}]}}
+ ]
+}

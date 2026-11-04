@@ -1,6 +1,6 @@
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
-import { PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
+import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
@@ -202,9 +202,10 @@ const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const
 /**
  * Opens the configured ledger with its fetch bound as `ledger:<name>`. In read-only mode the
  * ledger comes back with its read methods only; a write method refuses with READ_ONLY_VIOLATION.
+ * `reviewers` (the registration's `verdicts.reviewers`) feeds the ledger's integrity analysis.
  */
-export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string): Promise<Ledger> {
-  const ledger = builtinLedgerName(spec.use) ? await openBuiltinLedger(ctx, spec, cwd, windowDir) : await openExternalLedger(ctx, spec, cwd, windowDir);
+export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } = {}): Promise<Ledger> {
+  const ledger = builtinLedgerName(spec.use) ? await openBuiltinLedger(ctx, spec, cwd, windowDir, opts) : await openExternalLedger(ctx, spec, cwd, windowDir, opts);
   if (ctx.mode === "read-write") return ledger;
   const refuse = (m: string) => async () => {
     throw new AuditApiError(`ledger ${ledger.name}: ${m} writes, and this audit context is read-only`, "READ_ONLY_VIOLATION", "record verdicts and publish draws from the CLI or the tracker's web UI");
@@ -218,10 +219,18 @@ export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   return view;
 }
 
-async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string): Promise<Ledger> {
+async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null }): Promise<Ledger> {
   const def = await loadLedgerDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
   const id = `ledger:${def.name}`;
-  ctx.grant(id, { trust: builtin ? "builtin" : "full", hosts: def.hosts?.(spec.options as never) ?? [], writePaths: def.writePaths?.(spec.options as never) ?? [], credentials: def.credentials ?? [] });
-  return createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id) });
+  const hosts = def.hosts?.(spec.options as never) ?? [];
+  ctx.grant(id, {
+    trust: builtin ? "builtin" : "full",
+    hosts,
+    writePaths: def.writePaths?.(spec.options as never) ?? [],
+    // A credential declared with no hosts goes only to the hosts the ledger declares for these options.
+    credentials: (def.credentials ?? []).map((c) => (c.hosts.length ? c : { ...c, hosts: [...hosts] })),
+    ...(builtin && LEDGER_BUDGET_FAMILY[def.name] ? { budgetFamily: LEDGER_BUDGET_FAMILY[def.name] } : {}),
+  });
+  return createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });
 }

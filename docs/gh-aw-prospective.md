@@ -1,6 +1,6 @@
 # The prospective gh-aw audit: registration hand-off
 
-**To be run after bolt 3 (U4, issue ledgers), by the founder personally.** Bolt 1 prepared the configuration and this command, and stopped. Nothing in the build registers anything, and no registration has been made.
+**To be run by the founder personally, now that bolt 3 (U4, issue ledgers) is built.** Bolt 1 prepared the configuration and this command; bolt 3 added the `github-issues` ledger and made the configuration pass `register`'s preflight once its placeholders are filled in (`test/gh-aw-prospective.test.ts` runs that preflight on a filled-in copy, with `--dry-run`). Nothing in the build registers anything, and no registration has been made.
 
 The audit is the launch artifact of `docs/design/spec.md` (the validation gate): the same stratum as the retrospective Q3 demonstration, registered *before* its window opens, so its certificate is evidence rather than a demonstration.
 
@@ -35,20 +35,21 @@ Signed into `audits/gh-aw-prospective/audit/gh-aw-prospective/registration.json`
 
 ## Before registering
 
-1. **Use a build that includes bolt 3**, so the `github-issues` ledger exists. With the bolt-1 build, `register` refuses this configuration: `cannot load ledger "github-issues"`.
+1. **Use a build that includes bolt 3**, so the `github-issues` ledger exists. (The bolt-1 build refused this configuration with `cannot load ledger "github-issues"`.)
 2. **Finalize `audits/gh-aw-prospective/review-protocol.md`.** Its hash is registered; changing it later fails check 1. It is a copy of `docs/design/review-protocol.example.md`, with the recording section rewritten for labels.
-3. **Fill in `audits/gh-aw-prospective/.pr-rla.yml`:**
-   - `window.start`: the UTC day after the day you register; `window.end`: start + 41 days (42 inclusive days). Until both are set, the file does not load.
-   - `ledger.options.repo`: the audit repo you own (draw issues and labels live there; gh-aw itself is only read).
-   - `verdicts.reviewers`: your GitHub login.
-   - Bolt 3 confirms the ledger's option names and the `verdicts` keys; adjust them to what it ships.
-4. **Check without writing anything:**
+3. **Create the audit repo** on GitHub (public, so auditors can read it), with issues enabled. `sample` opens the draw issues there and creates the labels `pr-rla:pass`, `pr-rla:fail` and `pr-rla:draw`; nothing is written before `sample`.
+4. **Fill in the four placeholders (marked `EDIT`) in `audits/gh-aw-prospective/.pr-rla.yml`.** Until each is replaced, `register` refuses and names it.
+   - `window.start`: the UTC day after the day you register; `window.end`: start + 41 days (42 inclusive days).
+   - `ledger.options.repo`: the audit repo, as `owner/name` (draw issues and labels live there; gh-aw itself is only read). Bolt 3 confirmed this option name.
+   - `verdicts.reviewers`: your GitHub login (the account `gh` is logged in as, if that is the one you review with). Only label events by listed accounts count; events by bots, apps and anyone else are ignored and reported.
+   - `verdicts.min_provenance: account` is already set; it is also the default with an issue ledger.
+5. **Check without writing anything:**
 
    ```sh
    pr-rla -C audits/gh-aw-prospective register --dry-run
    ```
 
-   It must say `PROSPECTIVE`, show `ledger github-issues · verdict provenance account`, and `timestamps: not requested (dry run) · authorities sigstore, digicert, globalsign, microsoft · k = 2`. A dry run contacts no authority.
+   It must say `PROSPECTIVE`, show `ledger github-issues · verdict provenance account · reviewers <your login>`, and `timestamps: not requested (dry run) · authorities sigstore, digicert, globalsign, microsoft · k = 2`. A dry run contacts no authority and no tracker.
 
 ## The command
 
@@ -72,4 +73,6 @@ It signs the record, sends each of the four authorities one request holding only
 1. Commit `audits/gh-aw-prospective/audit/gh-aw-prospective/registration.json` and push the audit repo.
 2. Give the auditors the registration's SHA-256 (printed first) before the window opens. `verify` cannot prove that no other registration exists, so this hand-over is the control.
 3. **Freeze with a build that includes bolt 5** (U3, the pinned history head), after the window closes and before seed round R publishes (24 h after the close), so the population is reproducible.
-4. `verify` prints the registering and freezing pr-rla versions. Any later change to the selector or population semantics needs a new registration, never a silent change.
+4. **Sample, then review.** `GITHUB_TOKEN=$(gh auth token) pr-rla -C audits/gh-aw-prospective sample` opens one issue per drawn change in the audit repo, in draw order, and writes `audit/gh-aw-prospective/ledger-index.json`; commit it with `draws.json`. The token needs Issues: write on the audit repo. Record each verdict by applying `pr-rla:pass` or `pr-rla:fail` on the draw's issue in GitHub's web UI (or `pr-rla record <draw> pass|fail`, which applies the label as the token's account). The first label a registered reviewer applies counts.
+5. **Checkpoint the verdict history** once the audit certifies: `GITHUB_TOKEN=$(gh auth token) pr-rla -C audits/gh-aw-prospective checkpoint --push`. A repo admin can delete issues; a time-stamped checkpoint committed to the audit repo makes that visible to `verify`.
+6. `verify` prints the registering and freezing pr-rla versions. Any later change to the selector or population semantics needs a new registration, never a silent change. Verifying the issue ledger reads every draw issue's events, which needs a token (any token: the 60-an-hour anonymous budget is too small for 36 issues).

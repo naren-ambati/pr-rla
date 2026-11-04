@@ -2,7 +2,10 @@ import { existsSync } from "node:fs";
 import { buildPopulation } from "../core/population.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, registrationRepo, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { unixToIso } from "../core/seed.js";
-import { computeStatus, type StatusReport } from "../core/status.js";
+import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
+import { latestCheckpointAt } from "../api/checkpoint.js";
+import { provenanceRank } from "../sdk/ledger.js";
+import { checkpointCommand } from "./checkpoint.js";
 import { windowDays } from "../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import type { Selector } from "../core/selector.js";
@@ -34,6 +37,8 @@ export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, pat
 export interface StatusOptions {
   json?: boolean;
   offline?: boolean;
+  /** Also append a ledger checkpoint (FR4.4); plain status never does. */
+  checkpoint?: boolean;
 }
 
 /**
@@ -60,6 +65,13 @@ export function statusLine(r: StatusReport, info: { p0: number; alpha: number; p
 }
 
 export async function statusCommand(ctx: CommandContext, opts: StatusOptions): Promise<number> {
+  const code = await statusOnly(ctx, opts);
+  if (!opts.checkpoint) return code;
+  const cp = await checkpointCommand(ctx, {});
+  return code !== 0 ? code : cp;
+}
+
+async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<number> {
   const { config, paths } = configFor(ctx);
   if (!existsSync(paths.registration)) {
     ctx.out(`not registered: window ${config.window.name} (${config.window.start}..${config.window.end}). Run "pr-rla register".`);
@@ -98,7 +110,9 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     verdicts: await ledger.readVerdicts(),
     protocolSha256: reg.record.protocolSha256,
     params: reg.record.parameters,
+    reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
   });
+  const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
   if (opts.json) {
     ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report }, null, 2));
   } else if (report.refusal) {
@@ -110,6 +124,15 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
     for (const r of report.relabels) ctx.out(`  relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
+    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${minProvenance}`);
+    const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
+    const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
+    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${minProvenance} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
+    if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
+      const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
+      const cp = latestCheckpointAt(paths.windowDir);
+      if (cp === null || Date.parse(cp) < Date.parse(lastVerdict)) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
+    }
     ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
   }
   return report.sequence.state === "ESCALATE" ? 2 : 0;

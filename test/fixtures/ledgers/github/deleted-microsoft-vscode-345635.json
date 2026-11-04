@@ -1,0 +1,64 @@
+{
+ "description": "Public microsoft/vscode issue timeline(s) #345635, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. Issue number 345635 lies between #345634 (2026-11-02T19:45:30Z) and #345636 (20:00:15Z); discussions are disabled; REST, GraphQL and the web all answer not found. A deleted issue: GitHub answers 404 (not 410) for it. Its own creation time cannot be read; the index carries its predecessor's.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "deletion",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "microsoft/vscode",
+  "labels": {
+   "pass": "bug",
+   "fail": "feature-request"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/microsoft/vscode",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "bug",
+    "id": "256129993"
+   },
+   "fail": {
+    "name": "feature-request",
+    "id": "272689392"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:microsoft/vscode#345635",
+    "number": 345635,
+    "id": "unknown (deleted)",
+    "url": "https://github.com/microsoft/vscode/issues/345635",
+    "createdAt": "2026-11-02T19:45:30Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [],
+  "integrity": {
+   "ok": false,
+   "findings": [
+    "draw #1 issue https://github.com/microsoft/vscode/issues/345635 deleted (HTTP 404); its history is gone"
+   ],
+   "warnings": [],
+   "tamperTrail": true
+  },
+  "history": []
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/bug","bodySha256":null,"status":200,"headers":{},"response":{"id":256129993,"node_id":"MDU6TGFiZWwyNTYxMjk5OTM=","name":"bug"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/feature-request","bodySha256":null,"status":200,"headers":{},"response":{"id":272689392,"node_id":"MDU6TGFiZWwyNzI2ODkzOTI=","name":"feature-request"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345635","bodySha256":null,"status":404,"headers":{},"response":{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/issues#get-an-issue","status":"404"}}
+ ]
+}

@@ -73,9 +73,11 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   };
   writeJson(paths.draws, file);
   const ledger = await ledgerFor(ctx, config, paths);
-  await ledger.publishDraws?.(draws.slice(0, issued));
+  await ledger.publishDraws?.(draws.slice(0, issued), { window: config.window.name, protocolSha256: reg.record.protocolSha256, registrationSha256: reg.sha256, repo: manifestRepo(manifest) });
   ctx.out(`round ${round} verified (BLS, drand quicknet) · randomness ${beacon.randomness.slice(0, 16)}… · N ${fmt(manifest.N)} · issued ${issued} of cap ${cap}`);
   for (const d of draws.slice(0, issued)) ctx.out(`  #${String(d.draw).padStart(3)}  ${d.changeId}  ${d.url}${d.firstOccurrence ? "" : "  (drawn before: reuses its verdict)"}`);
-  ctx.out(`review in draw order under ${config.protocol}; record each with "pr-rla record <draw> pass|fail --reviewer <you>" and commit`);
+  if (ledger.publishDraws)
+    ctx.out(`ledger ${ledger.name}: one issue per drawn change (audit/${config.window.name}/ledger-index.json); review in draw order under ${config.protocol} and apply the verdict label on each issue; commit draws.json and ledger-index.json`);
+  else ctx.out(`review in draw order under ${config.protocol}; record each with "pr-rla record <draw> pass|fail --reviewer <you>" and commit`);
   return 0;
 }

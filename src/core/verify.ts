@@ -1,4 +1,5 @@
-import type { Ledger } from "../sdk/ledger.js";
+import { provenanceRank, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
+import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -31,7 +32,7 @@ import {
 import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
-import { computeStatus, type StatusReport } from "./status.js";
+import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "./status.js";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL" | "SKIP";
 
@@ -51,12 +52,18 @@ export interface VerifyArtifacts {
   draws: DrawsFile | null;
   /** SHA-256 of the protocol file as it is now (null if the file is missing). */
   currentProtocolSha256: string | null;
+  /** Ledger checkpoints committed in the audit repo (de-duplicated), with their stored event lists. */
+  checkpoints?: CheckpointArtifact[];
+  /** Lines of ledger-checkpoints.jsonl that are not checkpoints (check 7 FAILs: the file is append-only). */
+  checkpointProblems?: string[];
 }
 
 export interface VerifyDeps {
   /** null = offline: check 5 is skipped. */
   provider: ScmProvider | null;
   ledger: Ledger | null;
+  /** Why the ledger was not read (an offline verify of a ledger that lives in a tracker); check 7 then SKIPs saying so. */
+  ledgerSkipped?: string;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL, or null if none is available. */
@@ -354,41 +361,88 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   let status: StatusReport | null = null;
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
-    c7.summary = "no verified draws to check labels against";
+    c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
   } else {
-    const verdicts = await deps.ledger.readVerdicts();
-    status = computeStatus({
-      N: m.N,
-      minPopulation: reg.record.parameters.minPopulation,
-      draws: recomputed,
-      drawsIssued: a.draws.issued,
-      verdicts,
-      protocolSha256: reg.record.protocolSha256,
-      params: reg.record.parameters,
-    });
-    const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
-    const firstFor = new Map<string, (typeof verdicts)[number]>();
-    for (const v of verdicts) if (v.protocolSha256 === reg.record.protocolSha256 && !firstFor.has(v.changeId)) firstFor.set(v.changeId, v);
-    for (const id of countedIds) {
-      const v = firstFor.get(id);
-      if (v && Date.parse(v.recordedAt) / 1000 < derived.publishesAt) {
+    // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
+    const ledger = deps.ledger;
+    const attempt = async <T>(what: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch (e) {
         c7.status = "FAIL";
-        c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
+        c7.details.push(`ledger ${ledger.name}: ${what} failed: ${(e as Error).message}`);
+        return null;
       }
+    };
+    const verdicts = await attempt("readVerdicts", () => ledger.readVerdicts());
+    const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
+    const minProvenance: ProvenanceLevel = regVerdicts?.minProvenance ?? "self-asserted";
+    if (verdicts) {
+      status = computeStatus({
+        N: m.N,
+        minPopulation: reg.record.parameters.minPopulation,
+        draws: recomputed,
+        drawsIssued: a.draws.issued,
+        verdicts,
+        protocolSha256: reg.record.protocolSha256,
+        params: reg.record.parameters,
+        reviewers: regVerdicts?.reviewers ?? null,
+      });
+      const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
+      const firstFor = new Map(status.firstVerdicts.map((v) => [v.changeId, v]));
+      for (const id of countedIds) {
+        const v = firstFor.get(id);
+        if (v && Date.parse(v.recordedAt) / 1000 < derived.publishesAt) {
+          c7.status = "FAIL";
+          c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
+        }
+        // FR3.8: a counted verdict below the registered minimum provenance FAILs.
+        if (v && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance)) {
+          c7.status = "FAIL";
+          c7.details.push(`verdict on draw #${v.draw} (${id}) is ${provenanceOf(v)}; the registration requires ${minProvenance}`);
+        }
+      }
+      c7.details.push(`${provenanceLine(status.provenance)} (registered minimum: ${minProvenance})`);
+      for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
+      for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
+      if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";
     }
-    for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
-    for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
-    if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";
-    if (deps.ledger.verifyIntegrity) {
-      const integ = await deps.ledger.verifyIntegrity();
-      c7.details.push(...integ.findings);
-      if (!integ.ok) c7.status = "FAIL";
-      else if (!integ.tamperTrail && c7.status === "PASS") c7.status = "WARN";
+    if (ledger.verifyIntegrity) {
+      const integ = await attempt("verifyIntegrity", () => ledger.verifyIntegrity!());
+      if (integ) {
+        c7.details.push(...integ.findings, ...(integ.warnings ?? []));
+        if (!integ.ok) c7.status = "FAIL";
+        else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
+      }
     } else {
-      c7.details.push(`ledger ${deps.ledger.name} has no integrity check`);
+      c7.details.push(`ledger ${ledger.name} has no integrity check`);
       if (c7.status === "PASS") c7.status = "WARN";
     }
-    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status.labelledPrefix}, ${verdicts.length} events)`;
+    const checkpoints = a.checkpoints ?? [];
+    for (const p of a.checkpointProblems ?? []) {
+      c7.status = "FAIL";
+      c7.details.push(`FAIL checkpoint file: ${p}`);
+    }
+    if (checkpoints.length && !ledger.readHistory) {
+      c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
+      if (c7.status === "PASS") c7.status = "WARN";
+    } else if (checkpoints.length) {
+      const current = await attempt("readHistory", () => ledger.readHistory!());
+      if (current) {
+        for (const cp of checkpoints) {
+          const problems = compareWithCheckpoint(cp, current, status?.firstVerdicts ?? []);
+          if (problems.length) {
+            c7.status = "FAIL";
+            c7.details.push(...problems.map((p) => `FAIL ${p}`));
+          }
+          if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
+          // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
+          if (cp.line.timestamps.length && isRegistrationV2(reg))
+            await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7);
+        }
+      }
+    }
+    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
   }
   checks.push(c7);
 

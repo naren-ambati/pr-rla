@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fetchQuicknetBeacon, verifyQuicknetBeacon, type Beacon } from "../beacon/drand.js";
 import { sha256Hex } from "../core/canonical.js";
-import type { AnyCommitment, AnyManifest, AnyRegistration, DrawsFile, SignedRecord } from "../core/records.js";
+import { isRegistrationV2, type AnyCommitment, type AnyManifest, type AnyRegistration, type DrawsFile, type SignedRecord } from "../core/records.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../api/context.js";
 import type { BrokerFetch } from "../net/contract.js";
@@ -119,9 +119,11 @@ export async function providerFor(ctx: CommandContext, config: PrRlaConfig): Pro
   return openProvider(auditContextFor(ctx), config.provider, config.dir);
 }
 
-/** The configured ledger, its requests through the command's broker. */
+/** The configured ledger, its requests through the command's broker, told the registered reviewers once a registration exists. */
 export async function ledgerFor(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths): Promise<Ledger> {
-  return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir);
+  const reg = existsSync(paths.registration) ? readRegistration(paths) : null;
+  const reviewers = reg && isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
+  return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, { reviewers });
 }
 
 export function readJson<T>(path: string, what: string): T {
