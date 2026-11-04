@@ -219,6 +219,12 @@ function allActors(c: ChangeRecord): Actor[] {
   return [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)];
 }
 
+/** An expected actor matches on login and kind, and on id when the expectation names one. */
+function sameActor(got: Actor | null | undefined, want: Actor | null): boolean {
+  if (want === null || !got) return (got ?? null) === want;
+  return got.login === want.login && got.kind === want.kind && (want.id === undefined || got.id === want.id);
+}
+
 export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[]): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
   for (const f of fixtures) {
@@ -300,7 +306,7 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     for (const [id, actors] of Object.entries(f.expect.reviewers ?? {})) {
       const c = first.find((x) => x.id === id);
       const got = c?.reviews.map((r) => r.author) ?? null;
-      if (canonicalJson(got) !== canonicalJson(actors)) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
+      if (!got || got.length !== actors.length || got.some((a, i) => !sameActor(a, actors[i]!))) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
     }
     push("review-state-mapping", rs.length === 0, rs.join("; "));
 
@@ -309,8 +315,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const c = first.find((x) => x.id === id);
       if (!c) ac.push(`${id} missing`);
       else {
-        if (exp.author && canonicalJson(c.author) !== canonicalJson(exp.author)) ac.push(`${id} author ${canonicalJson(c.author)}`);
-        if (exp.mergedBy !== undefined && canonicalJson(c.mergedBy) !== canonicalJson(exp.mergedBy)) ac.push(`${id} mergedBy ${canonicalJson(c.mergedBy)}`);
+        if (exp.author && !sameActor(c.author, exp.author)) ac.push(`${id} author ${canonicalJson(c.author)}`);
+        if (exp.mergedBy !== undefined && !sameActor(c.mergedBy, exp.mergedBy)) ac.push(`${id} mergedBy ${canonicalJson(c.mergedBy)}`);
       }
     }
     for (const [id, n] of Object.entries(f.expect.changedLines ?? {})) {
