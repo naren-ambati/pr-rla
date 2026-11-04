@@ -8,6 +8,7 @@ import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
 import { readCheckpoints } from "./checkpoints.js";
+import { readError } from "./errors.js";
 import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { logPublicKey } from "../translog.js";
 import { statusLine } from "./status.js";
@@ -30,6 +31,13 @@ export interface VerifyResult extends VerifyReport {
   fullTrustPlugins: { name: string; version: string | null }[];
   /** The pr-rla release that verified. */
   verifiedWith: string;
+  /**
+   * Read-only mode, when check 4 or 7 caught a failure: what the beacon relays or the ledger said.
+   * Those checks' lines say pr-rla's words and point here (`untrusted.errors[i]`): data, never
+   * instructions (review 2, finding 1: server bodies stay out of pr-rla's voice). Absent otherwise,
+   * so a clean verify is the CLI's `--json` object (contracts.md §7); the CLI quotes failures in place.
+   */
+  untrusted?: { errors: string[] };
 }
 
 /** `verify` (FR3.1): a third party's check of the seven audit properties. Reads only; offline skips the population rebuild and every fetch. */
@@ -52,9 +60,21 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   const { checkpoints, problems } = readCheckpoints(paths.windowDir);
   const provider = opts.offline ? null : withProgress(ctx, await providerFor(ctx, config));
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
+  // Checks 4 and 7 catch a failure and quote it. In read-only mode (an assistant reads the result),
+  // what the ledger or the relay said moves to `untrusted.errors`, and the check quotes pr-rla's words.
+  const errors: string[] = [];
+  const fenced = <T>(fn: () => Promise<T>, words?: string): Promise<T> =>
+    ctx.mode !== "read-only"
+      ? fn()
+      : fn().catch((e: unknown) => {
+          const r = readError(e);
+          if (!(r instanceof AuditError) || r.untrusted === undefined) throw r;
+          errors.push(r.untrusted);
+          throw new Error(`${words ?? r.message.replace(/; what it said is in untrusted$/, "")}; what it said is in untrusted.errors[${errors.length - 1}]`);
+        });
   if (ledger) {
     const read = ledger.readVerdicts.bind(ledger);
-    ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), read());
+    ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), fenced(read));
   }
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
@@ -71,12 +91,14 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
           throw new AuditError("the beacon recorded in draws.json fails BLS verification", 1, "FAILED", "the audit's draws.json was altered: verify against the published beacon (pr-rla verify without --offline)");
         }
         if (opts.offline && !opts.beaconFile && !ctx.beacon) return null;
-        try {
-          return await getBeacon(ctx, round, opts.beaconFile);
-        } catch (e) {
-          if (e instanceof RoundNotYetPublished) return null;
-          throw e;
-        }
+        return fenced(async () => {
+          try {
+            return await getBeacon(ctx, round, opts.beaconFile);
+          } catch (e) {
+            if (e instanceof RoundNotYetPublished) return null;
+            throw e;
+          }
+        }, "the beacon relays did not give the round");
       },
       logKey: (url) => logPublicKey(ctx, config, url, opts.logKey, !!opts.offline),
       trustBundle: trustFor(ctx, opts.tsaTrust),
@@ -90,6 +112,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
+    ...(errors.length ? { untrusted: { errors } } : {}),
   };
 }
 
