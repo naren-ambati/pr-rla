@@ -60,7 +60,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   ctx.out(`  claim D: detected-defect rate <= ${pct(config.parameters.p0)} (p1 ${pct(config.parameters.p1)}, risk ${pct(config.parameters.alpha)}) · certify after ${table} draws with 0/1/2 fails · cap ${effectiveCap(config.parameters)}`);
   ctx.out(`  selector ${JSON.stringify(config.selector)}`);
   if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {
-    const traits = await providerTraits(config.provider, config.dir);
+    const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx).plugins);
     if (!traits.reportsLandedVia) ctx.out(`  warning: provider ${traits.name} does not report landedVia; direct_push_via_merge has no effect`);
   }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);

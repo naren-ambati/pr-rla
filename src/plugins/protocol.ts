@@ -53,10 +53,18 @@ export interface ReadyMessage {
   node: string;
 }
 
-/** What `describe` returns: what the definition asks for with these options. */
+/**
+ * What `describe` returns: what the definition asks for with these options, and (added within v1
+ * for U3) the definition's population traits, so the parent never imports an isolated plugin to
+ * read them. The parent validates every field with the SDK's own checks.
+ */
 export interface DescribeResult {
   hosts: unknown;
   writePaths: unknown;
+  /** The definition's `reviewGranularity`, `populationOptions` and `reportsLandedVia`, when it declares them. */
+  reviewGranularity?: unknown;
+  populationOptions?: unknown;
+  reportsLandedVia?: unknown;
 }
 
 /** What `create` returns: the instance's identity and which of its kind's methods it has. */

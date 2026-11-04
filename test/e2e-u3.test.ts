@@ -8,6 +8,7 @@ import type { ManifestV2 } from "../src/core/records.js";
 import type { ChangeRecord } from "../src/sdk/provider.js";
 import { optionsDigest } from "../src/registry.js";
 import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
+import { lockPlugin } from "./helpers/plugin-lock.js";
 
 /**
  * U3 end to end on the json-file provider (and a path-loaded plugin), offline: the registered selector
@@ -119,19 +120,26 @@ export default {
   }),
 };
 `;
-  const setup = () => {
+  // An external plugin loads only when locked (U2b). It reads changes.json from the audit directory, which an
+  // isolated plugin cannot, so it is locked with trust: full, as "pr-rla plugin add --trust full" would.
+  const setup = async () => {
     const s = setupAuditRepo({ changes: makeChanges(400), provider: "{ use: ./scoped.mjs, options: { scope: all, page_size: 10 } }" });
     writeFileSync(join(s.dir, "scoped.mjs"), PLUGIN);
+    await lockPlugin(s.dir, "./scoped.mjs", { options: { scope: "all", page_size: 10 }, trust: "full" });
     return s;
   };
 
   it("a verifier whose population options differ FAILs check 5; other options do not", async () => {
-    const s = setup();
+    const s = await setup();
     await registerAndFreeze(s);
     const cfg = join(s.dir, ".pr-rla.yml");
     const original = readFileSync(cfg, "utf8");
     writeFileSync(cfg, original.replace("page_size: 10", "page_size: 50"));
-    expect((await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!.status).toBe("PASS");
+    // Not a FAIL. For an external plugin, other options are a WARN naming optionsSha256 (draft 02 Q3; U2b's identity note).
+    const other = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
+    expect(other.status).toBe("WARN");
+    expect(other.details.filter((d) => d.startsWith("FAIL "))).toEqual([]);
+    expect(other.details.some((d) => /^WARN the provider verify loaded is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/.test(d))).toBe(true);
     writeFileSync(cfg, original.replace("scope: all", "scope: prs"));
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("FAIL");
@@ -139,7 +147,7 @@ export default {
   });
 
   it("a registration made before U3 (population options not hashed) still verifies with the same options", async () => {
-    const s = setup();
+    const s = await setup();
     await registerAndFreeze(s);
     // What a bolt-1/2 registration recorded: a hash over no option keys at all.
     const regPath = join(s.dir, W, "registration.json");
@@ -157,7 +165,7 @@ export default {
   });
 
   it("freeze refuses population options that differ from the registered ones", async () => {
-    const s = setup();
+    const s = await setup();
     at(s, "2026-10-20T00:00:00Z");
     expect(await registerCommand(s.ctx, {})).toBe(0);
     const cfg = join(s.dir, ".pr-rla.yml");

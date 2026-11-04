@@ -3,7 +3,17 @@ import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEFAULT_MAX_RETRIES } from "../sdk/http.js";
 import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger } from "../sdk/ledger.js";
-import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ListChangesRequest, type PluginCredential, type ScmProvider } from "../sdk/provider.js";
+import {
+  assertProviderDefinition,
+  DEFAULT_REVIEW_GRANULARITY,
+  ProviderApiVersionError,
+  providerTraitProblems,
+  SUPPORTED_PROVIDER_API_VERSIONS,
+  type ListChangesRequest,
+  type PluginCredential,
+  type ReviewGranularity,
+  type ScmProvider,
+} from "../sdk/provider.js";
 import { PluginError } from "./errors.js";
 import {
   HEARTBEAT_INTERVAL_MS,
@@ -49,6 +59,7 @@ export const CHILD_SCRIPT = resolveSibling("./child");
 export const SDK_MODULES: Readonly<Record<string, string>> = {
   "pr-rla/provider": resolveSibling("../sdk/provider"),
   "pr-rla/ledger": resolveSibling("../sdk/ledger"),
+  "pr-rla/http": resolveSibling("../sdk/http"),
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -394,7 +405,7 @@ function validateReady(m: ReadyMessage, o: HostOptions): void {
   if (m.protocol !== IPC_PROTOCOL) throw new PluginError(`plugin ${o.label}: its host speaks ${String(m.protocol)}, not ${IPC_PROTOCOL}`, "PLUGIN_INVALID");
   if (m.kind !== o.kind) throw new PluginError(`plugin ${o.label}: loaded as a ${String(m.kind)}, expected a ${o.kind}`, "PLUGIN_INVALID");
   const fn = (t: string) => (t === "function" ? () => [] : t === "undefined" ? undefined : t);
-  const stub: Record<string, unknown> = { name: m.name, create: m.shape.create === "function" ? () => ({}) : undefined, hosts: fn(m.shape.hosts), writePaths: fn(m.shape.writePaths), credentials: m.credentials };
+  const stub: Record<string, unknown> = { name: m.name, create: m.shape.create === "function" ? () => ({}) : undefined, hosts: fn(m.shape.hosts), writePaths: fn(m.shape.writePaths), credentials: m.credentials, reviewGranularity: m.reviewGranularity, populationOptions: m.populationOptions };
   try {
     if (o.kind === "provider") assertProviderDefinition({ ...stub, providerApiVersion: m.apiVersion }, `provider "${o.label}"`);
     else assertLedgerDefinition({ ...stub, ledgerApiVersion: m.apiVersion }, `ledger "${o.label}"`);
@@ -403,14 +414,38 @@ function validateReady(m: ReadyMessage, o: HostOptions): void {
   }
 }
 
-/** The definition's request for these options, evaluated in the child. */
-export async function describePlugin(host: PluginHost, options: unknown): Promise<{ hosts: string[]; writePaths: string[] }> {
+/**
+ * What a provider definition declares about the population it builds (U3), read in process for a
+ * built-in or a `trust: full` plugin, and from `describe` for an isolated one.
+ */
+export interface DefinitionTraits {
+  /** Absent in the definition means "submission". */
+  reviewGranularity: ReviewGranularity;
+  /** Whether the provider sets ChangeRecord.landedVia. */
+  reportsLandedVia: boolean;
+  /** Option keys whose values `populationOptionsSha256` hashes. */
+  populationOptions: string[];
+}
+
+/** The U3 traits of a definition (or of what a child reported), validated with the SDK's own check, defaults applied. */
+export function definitionTraits(raw: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown }, label: string): DefinitionTraits {
+  const problem = providerTraitProblems(raw);
+  if (problem) throw new PluginError(`plugin ${label}: ${problem}`, "PLUGIN_INVALID");
+  return {
+    reviewGranularity: (raw.reviewGranularity as ReviewGranularity | undefined) ?? DEFAULT_REVIEW_GRANULARITY,
+    reportsLandedVia: raw.reportsLandedVia === true,
+    populationOptions: [...((raw.populationOptions as string[] | undefined) ?? [])],
+  };
+}
+
+/** The definition's request for these options and its U3 traits, evaluated in the child. */
+export async function describePlugin(host: PluginHost, options: unknown): Promise<{ hosts: string[]; writePaths: string[]; traits: DefinitionTraits }> {
   const d = (await host.call("describe", [options])) as DescribeResult;
   const list = (v: unknown, what: string): string[] => {
     if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.length > 0)) throw new PluginError(`plugin ${host.label}: ${what}(options) must return a list of host names`, "PLUGIN_INVALID");
     return [...new Set(v as string[])].sort();
   };
-  return { hosts: list(d.hosts, "hosts"), writePaths: list(d.writePaths, "writePaths") };
+  return { hosts: list(d.hosts, "hosts"), writePaths: list(d.writePaths, "writePaths"), traits: definitionTraits(d, host.label) };
 }
 
 /** The credentials the definition declares (validated in validateReady). */

@@ -95,7 +95,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const repo = reg ? registrationRepo(reg) : config.repo;
   if (reg && isRegistrationV2(reg)) {
     // Options that change the population are part of the stratum (populationOptions, check 5).
-    const now = await pluginIdentity(config.provider, "provider", config.dir);
+    const now = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
     const reg0 = reg.record.plugins.provider;
     if (now.optionsSha256 !== reg0.optionsSha256 && now.populationOptionsSha256 !== reg0.populationOptionsSha256) {
       const why = `the provider options that change the population (populationOptions) differ from the registration (${now.populationOptionsSha256.slice(0, 12)}… ≠ registered ${reg0.populationOptionsSha256.slice(0, 12)}…)`;
@@ -182,7 +182,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
 
   const v2reg = reg as SignedRecord<RegistrationRecordV2>;
   const providerId = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
-  const traits = await providerTraits(config.provider, config.dir);
+  const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx).plugins);
   const registered = v2reg.record.plugins.provider;
   if (providerId.name !== registered.name || providerId.optionsSha256 !== registered.optionsSha256)
     ctx.err(`note: the provider in .pr-rla.yml (${providerId.name}) differs from the registered one (${registered.name}, options ${registered.optionsSha256.slice(0, 8)}…); verify rebuilds the population with the provider it is given`);

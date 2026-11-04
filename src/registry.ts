@@ -165,14 +165,14 @@ function packageVersion(use: string, baseDir: string): string | null {
  */
 export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string, policy: PluginPolicy = "locked"): Promise<PluginIdentity> {
   if (!(kind === "provider" ? builtinProviderName(spec.use) : builtinLedgerName(spec.use))) {
-    const { entry, populationOptions } = await externalPluginInfo(spec.use, kind, baseDir, policy);
+    const { entry, traits } = await externalPluginInfo(spec.use, kind, baseDir, policy, spec.options);
     return {
       name: entry.name,
       source: entry.source,
       version: entry.version,
       integrity: entry.treeSha256,
       optionsSha256: optionsDigest(spec.options),
-      populationOptionsSha256: optionsDigest(spec.options, populationOptions),
+      populationOptionsSha256: optionsDigest(spec.options, traits.populationOptions),
       trust: entry.trust,
     };
   }

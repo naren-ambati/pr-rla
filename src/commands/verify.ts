@@ -43,11 +43,15 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   } catch {
     currentProtocol = null;
   }
+  const provider = opts.offline ? null : await providerFor(ctx, config);
+  const ledger = await ledgerFor(ctx, config, paths);
+  // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
+  const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
   const report = await verifyAudit(
     { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol },
     {
-      provider: opts.offline ? null : await providerFor(ctx, config),
-      ledger: await ledgerFor(ctx, config, paths),
+      provider,
+      ledger,
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
@@ -64,10 +68,10 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
       },
       logKey: (url) => logPublicKey(ctx, config, url, opts.logKey, !!opts.offline),
       trustBundle: trustFor(ctx, opts.tsaTrust),
-      ...(opts.offline ? {} : { providerIdentity: await pluginIdentity(config.provider, "provider", config.dir) }),
+      ...(loaded ? { providerIdentity: loaded } : {}),
     },
   );
-  if (!opts.offline && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins));
+  if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);
   return report;
 }
 

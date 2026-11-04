@@ -27,13 +27,14 @@ export interface RecordedFixture {
 
 /** The kit's expectations, by shape: a recording's other keys (or a count where the kit wants a list) are not expectations. */
 const EXPECT_LISTS = ["ids", "pullRequests", "directPushes", "bots", "humans"] as const;
-const EXPECT_MAPS = ["reviewStates", "reviewers", "actors", "changedLines", "prCommits", "mergeShas"] as const;
+const EXPECT_MAPS = ["reviewStates", "reviewers", "actors", "changedLines", "prCommits", "mergeShas", "actorIds", "revokedApprovals"] as const;
 
 function expectations(expected: Record<string, unknown>): ConformanceFixture["expect"] {
   const out: Record<string, unknown> = {};
   for (const k of EXPECT_LISTS) if (Array.isArray(expected[k])) out[k] = expected[k];
   for (const k of EXPECT_MAPS) if (expected[k] && typeof expected[k] === "object" && !Array.isArray(expected[k])) out[k] = expected[k];
   if (typeof expected.minPages === "number") out.minPages = expected.minPages;
+  if (typeof expected.reviewGranularity === "string") out.reviewGranularity = expected.reviewGranularity;
   return out as ConformanceFixture["expect"];
 }
 
@@ -62,10 +63,18 @@ export function readRecordedFixture(path: string): RecordedFixture {
   return rec as RecordedFixture;
 }
 
-/** Runs the provider kit through the host on recorded fixtures. Requests to hosts the plugin did not declare are refused, as the broker would. */
+/**
+ * Runs the provider kit through the host on recorded fixtures. Requests to hosts the plugin did not
+ * declare are refused, as the broker would. The definition's traits (U3's `review-granularity`
+ * check reads `reviewGranularity`) come from the child's `describe`, never from an import here.
+ */
 export async function hostedProviderConformance(plugin: ResolvedPlugin, label: string, fixtures: { name: string; rec: RecordedFixture }[], host: Partial<HostOptions> = {}): Promise<ConformanceReport> {
   const started: PluginHost[] = [];
   try {
+    const first = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label, ...host });
+    started.push(first);
+    const { traits } = await describePlugin(first, fixtures[0]?.rec.options ?? {});
+    first.close();
     const recs = new Map(fixtures.map((f) => [f.name, f.rec]));
     let last: ReturnType<typeof replayFetch> | null = null;
     const kit: ConformanceFixture[] = fixtures.map(({ name, rec }) => ({
@@ -87,7 +96,7 @@ export async function hostedProviderConformance(plugin: ResolvedPlugin, label: s
         return replay(input, init);
       }) as typeof fetch;
       return hostedProvider(h, rec.options ?? {}, harness.context({ fetch: guarded, cwd: "." }));
-    }, kit);
+    }, kit, { definition: { reviewGranularity: traits.reviewGranularity } });
   } finally {
     for (const h of started) h.close();
   }

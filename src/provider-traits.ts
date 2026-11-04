@@ -1,24 +1,24 @@
-import { loadProviderDefinition, type PluginSpec } from "./registry.js";
-import { DEFAULT_REVIEW_GRANULARITY, type ReviewGranularity } from "./sdk/provider.js";
+import { definitionTraits, type DefinitionTraits } from "./plugins/host.js";
+import { externalPluginInfo } from "./plugins/identity.js";
+import type { PluginPolicy } from "./plugins/lock.js";
+import { builtinProviderName, loadProviderDefinition, type PluginSpec } from "./registry.js";
 
 /** What a provider definition declares about the population it builds (the U3 definition fields). */
-export interface ProviderTraits {
+export interface ProviderTraits extends DefinitionTraits {
   name: string;
-  /** Recorded in the manifest; absent in the definition means "submission". */
-  reviewGranularity: ReviewGranularity;
-  /** Whether the provider sets ChangeRecord.landedVia (else `direct_push_via_merge: exclude` has no effect). */
-  reportsLandedVia: boolean;
-  /** Option keys whose values `populationOptionsSha256` hashes. */
-  populationOptions: string[];
 }
 
-/** Reads the U3 traits from the configured provider's definition (in-process). */
-export async function providerTraits(spec: PluginSpec, baseDir: string): Promise<ProviderTraits> {
+/**
+ * Reads the U3 traits from the configured provider's definition. A built-in is read in process;
+ * an external plugin only after its lock entry and files check out, and an isolated one through
+ * its host's `describe` (pr-rla/ipc/v1), never by importing it here. `builtin-only` refuses an
+ * external plugin before anything is resolved.
+ */
+export async function providerTraits(spec: PluginSpec, baseDir: string, policy: PluginPolicy = "locked"): Promise<ProviderTraits> {
+  if (!builtinProviderName(spec.use)) {
+    const { entry, traits } = await externalPluginInfo(spec.use, "provider", baseDir, policy, spec.options);
+    return { name: entry.name, ...traits };
+  }
   const def = await loadProviderDefinition(spec.use, baseDir);
-  return {
-    name: def.name,
-    reviewGranularity: def.reviewGranularity ?? DEFAULT_REVIEW_GRANULARITY,
-    reportsLandedVia: def.reportsLandedVia === true,
-    populationOptions: [...(def.populationOptions ?? [])],
-  };
+  return { name: def.name, ...definitionTraits(def, spec.use) };
 }

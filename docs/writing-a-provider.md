@@ -65,6 +65,8 @@ Each `ChangeRecord` (validated by `assertChangeRecord`):
 | definition `populationOptions` | the option keys that change the population, e.g. `["base_url", "bots"]`. The registration hashes them; a verifier with other values FAILs check 5 |
 | definition `reportsLandedVia` | `true` if you set `landedVia`; otherwise `register` warns that `exclude` has no effect |
 
+These three definition fields are data. When the provider runs isolated (section 7), pr-rla reads them from the plugin host's `describe` message, never by importing the plugin in its own process.
+
 A `DISMISSED` review is a decision that no longer stands: a dismissed review, a withdrawn approval, an approval reset by a push. A revoked approval must never come back as `APPROVED`.
 
 ## 2. Step by step: the Gitea provider

@@ -23,6 +23,7 @@ interface Definition {
   description?: unknown;
   credentials?: unknown;
   populationOptions?: unknown;
+  reportsLandedVia?: unknown;
   hosts?: unknown;
   writePaths?: unknown;
   create?: unknown;
@@ -152,10 +153,12 @@ function track(): void {
 }
 
 async function describe(options: unknown): Promise<DescribeResult> {
-  return {
+  const out: DescribeResult = {
     hosts: typeof def.hosts === "function" ? await (def.hosts as Fn)(options) : [],
     writePaths: typeof def.writePaths === "function" ? await (def.writePaths as Fn)(options) : [],
   };
+  for (const k of ["reviewGranularity", "populationOptions", "reportsLandedVia"] as const) if (def[k] !== undefined) out[k] = def[k];
+  return out;
 }
 
 async function create(options: unknown, base: { cwd?: unknown; windowDir?: unknown }): Promise<CreateResult> {

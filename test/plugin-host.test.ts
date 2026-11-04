@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../src/api/context.js";
 import { hostedProviderConformance, readRecordedFixture } from "../src/plugins/check.js";
-import { closeAllPluginHosts, hostedProvider, isolationLine, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
+import { closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
 import { placeholderEnv, readGrants, resolvePlugin, verifyLocked } from "../src/plugins/lock.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS, IPC_PROTOCOL, MAX_MESSAGE_BYTES } from "../src/plugins/protocol.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
-import { formatConformanceReport, runProviderConformance } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture } from "../src/testing/index.js";
 import { fakeGitea } from "./helpers/fake-gitea.js";
 import { auditDirWith, lockPlugin } from "./helpers/plugin-lock.js";
 import { scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
@@ -166,43 +166,57 @@ describe("the Gitea example passes the conformance kit through the host", () => 
     const file = join(ROOT, "examples", "providers", "gitea", "fixtures", "codeberg-forgejo-docs-2026-10-01.json");
     const report = await hostedProviderConformance(plugin, "gitea", [{ name: "codeberg forgejo/docs", rec: readRecordedFixture(file) }]);
     expect(report.ok, formatConformanceReport(report)).toBe(true);
-    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["bot-detection"]);
+    // U3's revoked-approval check has nothing to check here: the recording lists no revoked approval
+    // (its one stale Codeberg approval still counts). review-granularity runs on the traits the child describes.
+    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["bot-detection", "revoked-approval"]);
+    expect(report.results.find((r) => r.check === "review-granularity")).toMatchObject({ ok: true });
+    expect(report.results.find((r) => r.check === "review-granularity")?.skipped).toBeFalsy();
   });
 
   it("on the synthetic Forgejo (every merge strategy, a 45 s rate-limit wait proxied to the parent's clock)", async () => {
     const sc = scmScenario();
+    const late = scmScenario({ latePush: true });
     const x = scenarioExpectations("gitea");
     const plugin = resolvePlugin("./examples/providers/gitea/index.mjs", ROOT);
     const hosts: PluginHost[] = [];
     let fake = fakeGitea(sc, { limit: 3 });
+    const options = { base_url: "https://forge.example.com", page_size: 3, bots: ["agent-bot", "review-bot", "merge-bot"] };
     const started = Date.now();
     try {
+      // U3's definition fields, read from the child (describe), never by importing the plugin here.
+      const probe = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "gitea" });
+      hosts.push(probe);
+      const { traits } = await describePlugin(probe, options);
+      const base: ConformanceFixture = {
+        name: "synthetic gitea acme/widgets 2026-08-01, through the host",
+        request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
+        expect: {
+          ids: x.all,
+          pullRequests: x.pullRequests,
+          directPushes: x.directPushes,
+          prCommits: x.prCommits,
+          mergeShas: x.mergeShas,
+          changedLines: x.changedLines,
+          bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "forgejo-actions[bot]"],
+          humans: ["maint", "bob", "dave", "erin", "carol", "alice"],
+          minPages: 40,
+          reviewGranularity: "submission",
+          revokedApprovals: x.revokedApprovals,
+        },
+        pagesServed: () => fake.served(),
+        http: true,
+        rateLimitFault: { status: 429, headers: () => ({ ratelimit: '"baseline";r=0;t=45', "ratelimit-policy": '"baseline";q=2000;w=600' }), minWaitMs: 45_000 },
+      };
+      // U3's pinned head crosses IPC as data: a merge pushed after freeze is left out when the request names the frozen head.
+      const pushedLater: ConformanceFixture = { ...base, name: "synthetic gitea, a merge pushed after freeze, through the host", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
       const report = await runProviderConformance(
-        async (_f, h) => {
+        async (f, h) => {
           const host = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "gitea" });
           hosts.push(host);
-          return hostedProvider(host, { base_url: "https://forge.example.com", page_size: 3, bots: ["agent-bot", "review-bot", "merge-bot"] }, h.context({ fetch: (fake = fakeGitea(sc, { limit: 3 })).fetch, cwd: ROOT }));
+          return hostedProvider(host, options, h.context({ fetch: (fake = fakeGitea(f.pinnedHead ? late : sc, { limit: 3 })).fetch, cwd: ROOT }));
         },
-        [
-          {
-            name: "synthetic gitea acme/widgets 2026-08-01, through the host",
-            request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
-            expect: {
-              ids: x.all,
-              pullRequests: x.pullRequests,
-              directPushes: x.directPushes,
-              prCommits: x.prCommits,
-              mergeShas: x.mergeShas,
-              changedLines: x.changedLines,
-              bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "forgejo-actions[bot]"],
-              humans: ["maint", "bob", "dave", "erin", "carol", "alice"],
-              minPages: 40,
-            },
-            pagesServed: () => fake.served(),
-            http: true,
-            rateLimitFault: { status: 429, headers: () => ({ ratelimit: '"baseline";r=0;t=45', "ratelimit-policy": '"baseline";q=2000;w=600' }), minWaitMs: 45_000 },
-          },
-        ],
+        [base, pushedLater],
+        { definition: traits },
       );
       expect(report.ok, formatConformanceReport(report)).toBe(true);
       expect(report.results.filter((r) => r.skipped)).toEqual([]);
