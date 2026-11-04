@@ -4,6 +4,7 @@ export {
   assertProviderConformance,
   formatConformanceReport,
   CONFORMANCE_CHECKS,
+  OPT_IN_CONFORMANCE_CHECKS,
   INJECTED_RETRY_AFTER_SECONDS,
   type ConformanceCheck,
   type ConformanceFixture,
