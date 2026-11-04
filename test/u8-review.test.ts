@@ -57,6 +57,17 @@ function resign(s: { dir: string }, edit: (m: ManifestV2) => ManifestV2) {
   const cm = JSON.parse(readFileSync(join(s.dir, CM), "utf8")) as SignedRecord<CommitmentRecordV2>;
   writeFileSync(join(s.dir, CM), JSON.stringify(signRecord({ ...cm.record, manifestSha256: sha, N: m.N }, loadOrCreateKey(join(s.dir, ".pr-rla/signing-key.pem"))), null, 2));
 }
+/**
+ * What U8 asserted as VERIFIED for an honest frozen pool: since time round B a frozen, unsampled audit on self-asserted
+ * times is never VERIFIED. The honest one FAILs nothing and is INCOMPLETE only for that: checks 1–3 (times nobody
+ * proves) and 4, 6 and 7 (not sampled), never check 5, the pool's own check.
+ */
+function honestButUnsampled(r: { verdict: string; checks: { n: number; status: string }[] }): void {
+  expect(r.checks.filter((c) => c.status === "FAIL")).toEqual([]);
+  expect(r.verdict).toBe("INCOMPLETE");
+  expect(r.checks.filter((c) => c.status === "INCOMPLETE" || c.status === "SKIP").map((c) => c.n)).toEqual([1, 2, 3, 4, 6, 7]);
+}
+
 const dropRepos = (gone: Set<string>) => (m: ManifestV2): ManifestV2 => {
   const changes = m.changes.filter((x) => !gone.has(x.repo));
   return { ...m, repos: m.repos.filter((r) => !gone.has(r.repo)), changes, N: changes.length };
@@ -73,7 +84,7 @@ describe("finding 1: an attribute changed after registration cannot take a repo 
     expect(m.repoListing!.repos.find((r) => r.repo === victim)).toMatchObject({ archived: true, excludedBy: ["archived"] });
     const honest = await verify(s);
     expect(check(honest, 5).status).toBe("PASS");
-    expect(honest.verdict).toBe("VERIFIED");
+    honestButUnsampled(honest);
     resign(s, dropRepos(new Set([victim])));
     const pruned = await verify(s);
     expect(check(pruned, 2).status).toBe("FAIL");
@@ -98,7 +109,7 @@ describe("finding 1: an attribute changed after registration cannot take a repo 
     expect(repos).toEqual(expect.arrayContaining([`${ORG}/legacy-01`, `${ORG}/svc-02`, "elsewhere/svc-04"]));
     const r = await verify(s);
     expect(check(r, 2).status).not.toBe("FAIL");
-    expect(r.verdict).toBe("VERIFIED");
+    honestButUnsampled(r);
     // The three are rebuilt; the only warnings are for the repos that were never public, so the public-only rule never had
     // them: one summary line (P3, pass 2 finding 10), each repo behind it in `verbose`.
     expect(check(r, 5).details.filter((d) => d.startsWith("WARN "))).toHaveLength(1);
@@ -136,7 +147,7 @@ describe("finding 8: a rename after freeze is matched by repo id", () => {
     const r = await verify(s);
     expect(check(r, 5).status).toBe("PASS");
     expect(lines(r, 5)).toContain("acme-org/svc-05 is named acme-org/renamed-05 now (matched by repo id): rebuilt under its new name");
-    expect(r.verdict).toBe("VERIFIED");
+    honestButUnsampled(r);
   });
 });
 
@@ -242,7 +253,8 @@ describe("finding 3: the pinned head cannot hide window landings", () => {
     org.pushCommits("svc-03", [{ oid: sha1("backdated"), date: "2026-09-30T20:00:00Z", parents: [h.head] }], { at: "2026-10-20T15:00:00Z" });
     const r = await verify(s);
     expect(check(r, 5).status).toBe("PASS");
-    expect(r.verdict).toBe("VERIFIED");
+    // Frozen, not sampled, no timestamp authority: nothing FAILs, and time round B makes it INCOMPLETE, not VERIFIED.
+    honestButUnsampled(r);
   });
 
   it("an edited checkpoint is listed again, one that breaks the contract is refused, and one re-hashed to rewind a head is caught by verify", async () => {
@@ -352,7 +364,7 @@ describe("finding 5: anything that could not be rebuilt is INCOMPLETE, exit 6", 
     expect(JSON.parse(s.out.join("\n"))).toMatchObject({ ok: false, verdict: "INCOMPLETE" });
     s.out.length = 0;
     expect(await s.clock.run(verifyCommand(ctx, {}))).toBe(6);
-    expect(s.out.at(-1)).toBe("INCOMPLETE: check 5 (population) could not be completed; nothing failed, but this is not a verification (exit 6)");
+    expect(s.out.at(-1)).toBe("INCOMPLETE: check 1 (registration), check 2 (manifest before seed), check 3 (seed round), check 5 (population) could not be established; check 4 (BLS), check 6 (draws), check 7 (labels) skipped; nothing failed, but this is not a verification (exit 6)");
   });
 });
 

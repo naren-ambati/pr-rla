@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { gitFileAudit, gitlabIssuesAudit, labelGitlab, workspace, type TrackerAudit } from "./helpers/ci-fixtures.js";
+import { gitFileAudit, gitlabIssuesAudit, labelGitlab, workspace, type GitFileAudit, type TrackerAudit } from "./helpers/ci-fixtures.js";
 import { MockApi, ROOT, cannedShim, cliShim, codeBlocks, deniedConnections, fakeTracker, newIsolation, renderGitLabTemplate, ruleApplies, runScript, writeBin, type MockHandler } from "./helpers/ci-harness.js";
 import type { FakeGitLabIssues } from "./helpers/fake-issue-trackers.js";
 
@@ -44,8 +44,22 @@ function bitbucketStep(): Target {
 }
 const targets: Target[] = [gitlabComponent(), gitlabSnippet(), bitbucketStep()];
 
+/** The labelled prefix once the first `n` drawn changes are labelled: a change drawn twice reuses its verdict, so it can pass n. */
+function labelledPrefix(audit: TrackerAudit<unknown>, n: number): number {
+  const labelled = new Set(audit.firstDraws.slice(0, n));
+  const first = new Map<string, number>();
+  for (const d of audit.draws.draws) if (!first.has(d.changeId)) first.set(d.changeId, d.draw);
+  let prefix = 0;
+  for (const d of audit.draws.draws.slice(0, audit.draws.issued)) {
+    if (!labelled.has(first.get(d.changeId)!)) break;
+    prefix++;
+  }
+  return prefix;
+}
+
 const opened: MockApi[] = [];
-afterAll(async () => void (await Promise.all(opened.map((a) => a.stop()))));
+const servers: { stop(): Promise<void> }[] = [];
+afterAll(async () => void (await Promise.all([...opened, ...servers].map((a) => a.stop()))));
 
 interface Job {
   code: number | null;
@@ -55,11 +69,15 @@ interface Job {
   home: string;
   denied: string[];
   api: MockApi | null;
-  json: () => { sequence?: { state: string }; error?: { code: string }; verdict?: string };
+  json: () => { sequence?: { state: string }; certified?: boolean; certificate?: { state: string; withheld: { verdict: string; reason: string }[] }; error?: { code: string }; verdict?: string };
   argv: () => string;
 }
 
-async function job(t: Target, o: { dir: string; override?: Record<string, string>; env?: Record<string, string>; bin?: (dir: string) => string; handlers?: Record<string, MockHandler>; path?: string; edit?: (dir: string) => void }): Promise<Job> {
+/**
+ * One job run. `trust` is the audit's trust file for its two mock timestamp authorities (test/helpers/ci-fixtures.ts),
+ * passed as the owner's PRRLA_TSA_TRUST, so the job can prove the audit's times (time round B).
+ */
+async function job(t: Target, o: { dir: string; trust?: string; override?: Record<string, string>; env?: Record<string, string>; bin?: (dir: string) => string; handlers?: Record<string, MockHandler>; path?: string; edit?: (dir: string) => void }): Promise<Job> {
   const api = o.handlers ? await new MockApi(o.handlers).start() : null;
   if (api) opened.push(api);
   const iso = newIsolation(api?.routes);
@@ -71,7 +89,7 @@ async function job(t: Target, o: { dir: string; override?: Record<string, string
     shell: t.shell,
     cwd: ws.dir,
     isolation: iso,
-    env: { ...t.vars, PRRLA_BIN: bin, CI_PROJECT_DIR: ws.dir, ...o.override, ...o.env, ...(o.path ? { PATH: `${o.path}:${process.env.PATH}` } : {}) },
+    env: { ...t.vars, PRRLA_BIN: bin, CI_PROJECT_DIR: ws.dir, ...(o.trust ? { PRRLA_TSA_TRUST: o.trust } : {}), ...o.override, ...o.env, ...(o.path ? { PATH: `${o.path}:${process.env.PATH}` } : {}) },
   });
   if (api) await api.stop();
   const jsonFile = join(ws.dir, "pr-rla.json");
@@ -89,12 +107,16 @@ async function job(t: Target, o: { dir: string; override?: Record<string, string
 }
 
 describe.each(targets)("$name: the script", (t) => {
+  let proven: GitFileAudit;
   let certified: string;
   let escalated: string;
-  beforeAll(() => {
-    certified = gitFileAudit("certified");
-    escalated = gitFileAudit("escalate");
-  });
+  beforeAll(async () => {
+    proven = await gitFileAudit("certified");
+    certified = proven.dir;
+    const esc = await gitFileAudit("escalate");
+    escalated = esc.dir;
+    servers.push(proven.tsa, esc.tsa);
+  }, 180_000);
 
   it("runs as one script item, with the exit-code mapping and no unresolved placeholder", () => {
     expect(t.lines).toHaveLength(1);
@@ -103,12 +125,23 @@ describe.each(targets)("$name: the script", (t) => {
   });
 
   it("CERTIFIED passes: the certificate line is in the log, pr-rla.json is the --json output, and the command is pinned and builtin-only", async () => {
-    const j = await job(t, { dir: certified });
+    const j = await job(t, { dir: certified, trust: proven.tsaTrust });
     expect(j.code, j.stderr).toBe(0);
     expect(j.stdout).toMatch(/prefix 36\/36 · fails 0 .* CERTIFIED \(risk 5%\)/);
     expect(j.stdout).toContain("pr-rla: pass (exit 0)");
-    expect(j.json().sequence?.state).toBe("CERTIFIED");
+    expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
     expect(j.denied).toEqual([]);
+  });
+
+  it("the same audit without the owner's anchors: its times are not proven, so the certificate is withheld (exit 6) and the job fails unless fail-on leaves incomplete out", async () => {
+    const j = await job(t, { dir: certified });
+    expect(j.code).not.toBe(0);
+    expect(j.stdout).toMatch(/prefix 36\/36 · fails 0 .* target reached · CERTIFICATE WITHHELD \(registration time unproven/);
+    expect(j.stdout).toContain("pr-rla: fail (exit 6: INCOMPLETE");
+    expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: false, certificate: { state: "WITHHELD" } });
+    const passing = await job(t, { dir: certified, override: { PRRLA_FAIL_ON: "escalate,refusal,timestamps" } });
+    expect(passing.code, passing.stderr).toBe(0);
+    expect(passing.stdout).toContain("fail-on does not include incomplete, so the job passes");
   });
 
   it("DEMO, an ESCALATE fixture fails the job: exit 2 under the default fail-on", async () => {
@@ -186,7 +219,7 @@ describe.each(targets)("$name: the script", (t) => {
         writeBin(dir, "npm", `echo "$@" >> "${logFile}"\ncase "$1" in\n  view) echo "$FAKE_NPM_INTEGRITY" ;;\n  install)\n    prefix=""\n    while [ $# -gt 0 ]; do if [ "$1" = "--prefix" ]; then prefix=$2; fi; shift; done\n    mkdir -p "$prefix/node_modules/.bin"\n    cp "$FAKE_PRRLA" "$prefix/node_modules/.bin/pr-rla"\n    ;;\nesac`);
         return { dir, log: () => (existsSync(logFile) ? readFileSync(logFile, "utf8").trim() : "") };
       }
-      const install = (extra: Record<string, string>, npm: ReturnType<typeof fakeNpm>) => job(t, { dir: certified, path: npm.dir, env: { PRRLA_BIN: "", FAKE_PRRLA: cliShim(mkdtempSync(join(tmpdir(), "prrla-real-"))), FAKE_NPM_INTEGRITY: "sha512-abc", ...extra } });
+      const install = (extra: Record<string, string>, npm: ReturnType<typeof fakeNpm>) => job(t, { dir: certified, trust: proven.tsaTrust, path: npm.dir, env: { PRRLA_BIN: "", FAKE_PRRLA: cliShim(mkdtempSync(join(tmpdir(), "prrla-real-"))), FAKE_NPM_INTEGRITY: "sha512-abc", ...extra } });
 
       it("installs the exact version with --ignore-scripts into the temporary directory, then runs it", async () => {
         const npm = fakeNpm();
@@ -214,7 +247,7 @@ describe.each(targets)("$name: the script", (t) => {
     const approvals = (home: string) => JSON.parse(readFileSync(join(home, "pr-rla-approvals.json"), "utf8")) as { approvals: { kind: string; env: string; origin: string }[] };
 
     it("approve-origins runs pr-rla plugin approve --yes for each entry, into the temporary directory and not the checkout", async () => {
-      const j = await job(t, { dir: certified, override: { PRRLA_APPROVE_ORIGINS: "GITLAB_TOKEN=https://gitlab.example.com,BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990\nMY_TOKEN=https://git.example.org" } });
+      const j = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_APPROVE_ORIGINS: "GITLAB_TOKEN=https://gitlab.example.com,BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990\nMY_TOKEN=https://git.example.org" } });
       expect(j.code, j.stderr).toBe(0);
       expect(approvals(j.home).approvals.map((a) => `${a.env}=${a.origin}`).sort()).toEqual(["BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990", "GITLAB_TOKEN=https://gitlab.example.com", "MY_TOKEN=https://git.example.org"]);
       expect(existsSync(join(j.cwd, "pr-rla-approvals.json"))).toBe(false);
@@ -252,11 +285,16 @@ describe.each(targets)("$name: the script", (t) => {
   });
 
   it("verify runs and the same mapping applies to its exit code", async () => {
-    const j = await job(t, { dir: certified, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "true" } });
-    const body = j.json();
-    expect(body.verdict).toMatch(/^(VERIFIED|INCOMPLETE|FAILED)$/);
-    expect(j.code === 0).toBe(body.verdict === "VERIFIED" || body.verdict === "INCOMPLETE");
-    expect(j.stdout).toMatch(/^(VERIFIED|INCOMPLETE|FAILED): /m);
+    // Offline, check 5 is skipped, so even with the times proven the verdict is INCOMPLETE (time round B): exit 6,
+    // which fails the job under the default fail-on and passes when fail-on leaves incomplete out.
+    const j = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "true" } });
+    expect(j.json().verdict).toBe("INCOMPLETE");
+    expect(j.code).not.toBe(0);
+    expect(j.stdout).toMatch(/^INCOMPLETE: /m);
+    expect(j.stdout).toContain("pr-rla: fail (exit 6: INCOMPLETE");
+    const passing = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "true", PRRLA_FAIL_ON: "escalate,refusal,timestamps" } });
+    expect(passing.code, passing.stderr).toBe(0);
+    expect(passing.stdout).toContain("fail-on does not include incomplete, so the job passes");
   });
 });
 
@@ -312,15 +350,16 @@ describe("the GitLab component (FR6.2)", () => {
     beforeAll(async () => {
       audit = await gitlabIssuesAudit();
       selfManaged = await gitlabIssuesAudit({ baseUrl: SELF });
+      servers.push(audit.tsa, selfManaged.tsa);
     }, 180_000);
     const comp = gitlabComponent();
     const handlers = (origin: string, fake: FakeGitLabIssues): Record<string, MockHandler> => ({ [origin]: fakeTracker(origin, fake) });
 
     it("a push to audit/** (a certified audit): the job selects, reads with GITLAB_TOKEN, only reads, and leaves the status artifact", async () => {
       expect(ruleApplies(t.job.rules!, { CI_PIPELINE_SOURCE: "push" }, ["audit/2026-q3/draws.json"])).toBe(true);
-      const j = await job(comp, { dir: audit.dir, handlers: handlers(GL, labelGitlab(audit, { pass: audit.firstDraws.length })), env: { GITLAB_TOKEN: "glpat-test" } });
+      const j = await job(comp, { dir: audit.dir, trust: audit.tsaTrust, handlers: handlers(GL, labelGitlab(audit, { pass: audit.firstDraws.length })), env: { GITLAB_TOKEN: "glpat-test" } });
       expect(j.code, j.stderr).toBe(0);
-      expect(j.json().sequence?.state).toBe("CERTIFIED");
+      expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true });
       const seen = j.api!.to(GL);
       expect(seen.length).toBeGreaterThan(0);
       expect(seen.every((q) => q.method === "GET")).toBe(true);
@@ -328,11 +367,11 @@ describe("the GitLab component (FR6.2)", () => {
       expect(j.denied).toEqual([]);
     });
 
-    it("a scheduled run notices new verdict labels: 20 of 36 labelled is NOT CERTIFIED and the job passes", async () => {
+    it("a scheduled run notices new verdict labels: 20 of 36 changes labelled is NOT CERTIFIED and the job passes", async () => {
       expect(ruleApplies(t.job.rules!, { CI_PIPELINE_SOURCE: "schedule" }, [])).toBe(true);
-      const j = await job(comp, { dir: audit.dir, handlers: handlers(GL, labelGitlab(audit, { pass: 20 })), env: { GITLAB_TOKEN: "glpat-test" } });
+      const j = await job(comp, { dir: audit.dir, trust: audit.tsaTrust, handlers: handlers(GL, labelGitlab(audit, { pass: 20 })), env: { GITLAB_TOKEN: "glpat-test" } });
       expect(j.code, j.stderr).toBe(0);
-      expect(j.stdout).toMatch(/prefix 20\/36 · fails 0 .* NOT CERTIFIED/);
+      expect(j.stdout).toMatch(new RegExp(`prefix ${labelledPrefix(audit, 20)}/36 · fails 0 .* NOT CERTIFIED`));
     });
 
     it("an ESCALATE fixture fails the job", async () => {
@@ -349,10 +388,14 @@ describe("the GitLab component (FR6.2)", () => {
       expect(without.stderr).toContain("GITLAB_TOKEN -> https://gitlab.example.com is not approved on this machine, so withheld");
 
       const approved = gitlabComponent({ "approve-origins": `GITLAB_TOKEN=${SELF}` });
-      const withApproval = await job(approved, { dir: selfManaged.dir, handlers: { [SELF]: private404 }, env: { GITLAB_TOKEN: "glpat-test" } });
+      // Time round B: a ledger that ran without its credential and had every read refused has not shown its verdicts.
+      expect(without.code).not.toBe(0);
+      expect(without.json()).toMatchObject({ certified: false, certificate: { state: "INCOMPLETE" } });
+
+      const withApproval = await job(approved, { dir: selfManaged.dir, trust: selfManaged.tsaTrust, handlers: { [SELF]: private404 }, env: { GITLAB_TOKEN: "glpat-test" } });
       expect(withApproval.code, withApproval.stderr).toBe(0);
       expect(new Set(withApproval.api!.to(SELF).map((q) => q.headers.authorization))).toEqual(new Set(["Bearer glpat-test"]));
-      expect(withApproval.json().sequence?.state).toBe("CERTIFIED");
+      expect(withApproval.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true });
     });
   });
 });
@@ -382,7 +425,8 @@ describe("the Bitbucket step (FR6.3)", () => {
   });
 
   it("the custom pipeline's settings reach the script: verify, online", async () => {
-    const dir = gitFileAudit("certified");
+    const { dir, tsa } = await gitFileAudit("certified");
+    servers.push(tsa);
     const j = await job(bitbucketStep(), { dir, bin: (d) => cannedShim(d, { code: 0, stdout: JSON.stringify({ verdict: "VERIFIED", statusLine: "s", checks: [] }) }), override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "false" } });
     expect(j.argv()).toBe("--plugins builtin-only -C . verify --json");
   });

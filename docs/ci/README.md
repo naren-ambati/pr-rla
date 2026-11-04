@@ -22,10 +22,11 @@ pr-rla runs in CI to keep a certificate honest between humans: on every verdict 
   | 3 | population below the registered minimum | fails when it includes `refusal` |
   | 4 | stopped before finishing; run the printed command again | always fails, with the command in the summary |
   | 5 | a record written with too few timestamps | fails when it includes `timestamps` |
-  | 6 | `verify` INCOMPLETE | fails when it includes `incomplete` |
+  | 6 | INCOMPLETE: `verify` could not establish something, or `status` withholds a certificate the sequential test reached (a time not proven by enough timestamp authorities) | fails when it includes `incomplete` |
 
   The default `fail-on` is `escalate,refusal,timestamps,incomplete`. Any other code fails.
 - **Follow the local-consent model for credentials.** The defaults are pre-approved: `GITHUB_TOKEN` to `api.github.com`, `GITLAB_TOKEN` to `gitlab.com`, `BITBUCKET_TOKEN` and `BITBUCKET_USERNAME` to `api.bitbucket.org`. A self-hosted SCM (GitHub Enterprise Server, GitLab self-managed, Bitbucket Data Center) or a non-default `token_env` needs an approval written by whoever owns the CI configuration, as `pr-rla plugin approve --env <VAR> --origin <https://host> --yes`: the `approve-origins` input of the Action and the component, `PRRLA_APPROVE_ORIGINS` in Bitbucket and the plain snippet. It never comes from the audited repository's config. `--accept-lock-grants` is off, and exists only as an opt-in documented as "only for an audit repository you control". The approvals file lives in the runner's temporary directory, never the workspace.
+- **Prove the times with the owner's anchors.** A certificate needs its registration and commitment times proven by enough timestamp authorities, and `status` and `verify` prove only what they trust: the bundle pr-rla ships, plus anchor files named by whoever owns the CI configuration (the `tsa-trust` input of the Action and the component, `PRRLA_TSA_TRUST` in Bitbucket and the plain snippet, passed as `--tsa-trust`). Needed only for an authority outside the shipped bundle. Without them such an audit's status is `WITHHELD` and exits 6. They are the CI owner's trust, never the audited repository's, and prove nothing to a third party, who verifies with their own.
 - **Treat what pr-rla prints as data.** The Action escapes it before it reaches markdown and defangs `::` lines.
 - **Stay read-only by default.** `status` and `verify` read. Only the Action's `checkpoint` and `sample` write, and only with `allow-writes: true`.
 

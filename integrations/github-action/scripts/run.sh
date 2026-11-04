@@ -24,15 +24,28 @@ args=()
 [ "$INPUT_ACCEPT_LOCK_GRANTS" = true ] && args+=(--accept-lock-grants)
 args+=(-C "$INPUT_DIR")
 
+# tsa-trust: the job owner's anchor files (prepare.sh checked them), as absolute paths, since -C moves the CLI's directory.
+add_trust() {
+  local f
+  set -f
+  for f in $(printf '%s' "${INPUT_TSA_TRUST:-}" | tr ',\r\n\t' '    '); do
+    case "$f" in /*) ;; *) f="$PWD/$f" ;; esac
+    args+=(--tsa-trust "$f")
+  done
+  set +f
+}
+
 out="$text"
 case "$INPUT_COMMAND" in
   status | verify)
     args+=("$INPUT_COMMAND" --json)
     [ "$INPUT_OFFLINE" = true ] && args+=(--offline)
+    add_trust
     out="$json"
     ;;
   checkpoint)
     args+=(checkpoint --push)
+    add_trust
     # A runner has no git identity, and the checkpoint is a commit: use the actions bot's unless the repository sets one.
     [ -n "$(git -C "$INPUT_DIR" config user.name 2>/dev/null)" ] || export GIT_AUTHOR_NAME="github-actions[bot]" GIT_COMMITTER_NAME="github-actions[bot]"
     [ -n "$(git -C "$INPUT_DIR" config user.email 2>/dev/null)" ] || export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com" GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"

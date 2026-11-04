@@ -25,7 +25,7 @@ Claude Code starts the plugin's MCP server in every session where the plugin is 
 
 ```
 /pr-rla:review-draw            the draw that holds the audit back
-/pr-rla:review-draw 13         a draw you name
+/pr-rla:review-draw 27         a draw you name
 ```
 
 or ask in plain words ("review the next pr-rla draw").

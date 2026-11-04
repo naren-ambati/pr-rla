@@ -1,5 +1,5 @@
 import { AuditError } from "../api/errors.js";
-import { status, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
+import { status, statusExitCode, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
 import { checkpoint } from "../api/write/checkpoint.js";
 import { perRepoLines } from "../core/pooled-report.js";
 import { provenanceLabel } from "../core/presence/index.js";
@@ -8,20 +8,25 @@ import { checkpointCommand, checkpointExitCode } from "./checkpoint.js";
 import type { CommandContext } from "./context.js";
 
 // The status logic moved to the audit API in U5 (src/api/read/status.ts); re-exported for callers.
-export { statusLine, stratumChoices, timeStanding } from "../api/read/status.js";
+export { statusExitCode, statusLine, stratumChoices, timeStanding } from "../api/read/status.js";
 
 export interface StatusOptions {
   json?: boolean;
   offline?: boolean;
   /** Also append a ledger checkpoint (FR4.4); plain status never does. */
   checkpoint?: boolean;
+  /** Timestamp-authority anchors you trust beyond the shipped bundle (files), as verify's; the checkpoint's tokens use them too. */
+  tsaTrust?: string[];
 }
+
+const apiOptions = (opts: StatusOptions): ApiStatusOptions => ({ offline: !!opts.offline, ...(opts.tsaTrust?.length ? { tsaTrust: opts.tsaTrust } : {}) });
+const checkpointOptions = (opts: StatusOptions) => (opts.tsaTrust?.length ? { tsaTrust: opts.tsaTrust } : {});
 
 export async function statusCommand(ctx: CommandContext, opts: StatusOptions): Promise<number> {
   if (opts.json && opts.checkpoint) return statusJsonWithCheckpoint(ctx, opts);
   const code = await statusOnly(ctx, opts);
   if (!opts.checkpoint) return code;
-  const cp = await checkpointCommand(ctx, {});
+  const cp = await checkpointCommand(ctx, checkpointOptions(opts));
   return code !== 0 ? code : cp;
 }
 
@@ -31,10 +36,10 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
  * The exit code is status's, else the checkpoint's; a failed checkpoint's own (as without --json).
  */
 async function statusJsonWithCheckpoint(ctx: CommandContext, opts: StatusOptions): Promise<number> {
-  const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
+  const r = await status(ctx, apiOptions(opts));
   const code = statusExitCode(r);
   try {
-    const cp = await checkpoint(ctx, {});
+    const cp = await checkpoint(ctx, checkpointOptions(opts));
     ctx.out(JSON.stringify({ ...r, checkpoint: cp }, null, 2));
     return code !== 0 ? code : checkpointExitCode(cp);
   } catch (e) {
@@ -45,16 +50,8 @@ async function statusJsonWithCheckpoint(ctx: CommandContext, opts: StatusOptions
   }
 }
 
-/** The exit code of a status result (contracts.md §7): 1 not registered, 2 ESCALATE, 3 below the minimum population. */
-export function statusExitCode(r: StatusResult): number {
-  if (r.phase === "unregistered") return 1;
-  if (r.phase !== "sampled" || !r.verdictsRead) return 0;
-  if (r.refusal) return 3;
-  return r.sequence.state === "ESCALATE" ? 2 : 0;
-}
-
 async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<number> {
-  const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
+  const r = await status(ctx, apiOptions(opts));
   if (opts.json) {
     ctx.out(JSON.stringify(r, null, 2));
     return statusExitCode(r);
@@ -79,7 +76,8 @@ export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): 
   for (const note of r.verdictNotes) ctx.out(`  ${note}`);
   if (r.belowMinimum.length) ctx.out(`  ${r.belowMinimum.length} counted verdict(s) are below the registered ${provenanceLabel(r.minProvenance)} provenance; verify check 7 will FAIL them (draws ${r.belowMinimum.map((d) => `#${d}`).join(", ")})`);
   if (r.unsigned.length) ctx.out(`  ${r.unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${r.unsigned.map((d) => `#${d}`).join(", ")})`);
-  if (r.checkpointAdvised) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
+  for (const w of r.certificate.withheld) ctx.out(`  ${r.certificate.state === "INCOMPLETE" ? "not established" : "certificate withheld"} (${w.verdict}): ${w.reason}`);
+  if (r.checkpointAdvised) ctx.out(`  ${r.certificate.state === "CERTIFIED" ? "CERTIFIED" : "target reached"}: run "pr-rla checkpoint" and commit it to anchor the verdict history`);
   if (r.perRepo) for (const l of perRepoLines(r.perRepo)) ctx.out(l);
   ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
 }

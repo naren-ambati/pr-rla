@@ -23,7 +23,7 @@ const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   tsa.nowMs = T(iso);
 };
-/** Distinct changes among the first 36 draws: the registration's bytes (and so the draws) changed with P4's ledgerPath, so the count is read, not written in. */
+/** Distinct changes among the first 36 draws: the registration's bytes, and so the draws, changed with P4's ledgerPath and time round B's binding, so the count is read, not written in. */
 const distinct = (s: Scenario) => (JSON.parse(readFileSync(join(s.dir, W, "draws.json"), "utf8")) as DrawsFile).draws.slice(0, 36).filter((d) => d.firstOccurrence).length;
 const shape = (r: Awaited<ReturnType<typeof runVerify>>) => r.checks.map((c) => ({ n: c.n, status: c.status, summary: c.summary, ...(c.n >= 6 ? { details: c.details } : {}) }));
 
@@ -68,7 +68,8 @@ describe("finding 11: a git-file audit with no keys verifies as before U9", () =
       { n: 3, status: "PASS", summary: expect.any(String) },
       { n: 4, status: "PASS", summary: expect.any(String) },
       { n: 5, status: "PASS", summary: "population 200/200 match" },
-      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: [] },
+      // Time round B: check 6 says what it compared, and the derivation it compared against.
+      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: ["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 200 change ids in canonical order"] },
       { n: 7, status: "PASS", summary: `labels (prefix 36, ${n} events)`, details: [`VERDICT PROVENANCE: self-asserted (${n}) (registered minimum: self-asserted)`] },
     ]);
   });

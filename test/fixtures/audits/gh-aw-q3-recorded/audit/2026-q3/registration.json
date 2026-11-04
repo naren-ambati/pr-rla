@@ -76,11 +76,12 @@
       "minProvenance": "self-asserted",
       "reviewers": null
     },
-    "prRlaVersion": "0.1.0"
+    "prRlaVersion": "0.1.0",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElYmxY0G4eOWj8U3OimLJH8Ax8q0w\ntcYLwyiBaSMKBjNLtDp8oLWUQza/v07kCgFI8K2hBM0AI4kyXcm1LSQw+A==\n-----END PUBLIC KEY-----\n"
   },
-  "sha256": "fa92428046ba75b3bcb48a592893b0f2adca54e5867e4734138d703816fd7345",
-  "signature": "MEUCIQDbN1A5u14sMpBjBPbu9tLSJ20VWNDzzx/eKZjj9L3xRwIgXqUk6rFZtjVJqYaM6UsxgkCJLNXAuORCsvJ7LnjOGvQ=",
-  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJEywWDTxhMRXiT53cazO1nQlpfk+\nC/RUatu/7F422HwdVPuzAH6A/6zCEBNhaVND8UzP5anwPxJqM22FLG0adg==\n-----END PUBLIC KEY-----\n",
+  "sha256": "1a619c365fb07deaf9c9e39f5a0396628ff252a83259ffe431a9a86689a3a3a5",
+  "signature": "MEUCICxxq/A19psnRMoXpMlhSWi0Ch5u3uk56aFSADv+AFYdAiEA4rIjoC32szOiRdeFYYFmnANhywZ0XA4ZfwTp166rBSc=",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElYmxY0G4eOWj8U3OimLJH8Ax8q0w\ntcYLwyiBaSMKBjNLtDp8oLWUQza/v07kCgFI8K2hBM0AI4kyXcm1LSQw+A==\n-----END PUBLIC KEY-----\n",
   "log": null,
   "timestamps": []
 }

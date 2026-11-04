@@ -28,6 +28,7 @@ Components work only from the same GitLab instance, so a self-managed instance m
 | `fail-on` | `escalate,refusal,timestamps,incomplete` | Which of exits 2, 3, 5 and 6 fail the job |
 | `plugins` | `builtin-only` | `allow` lets the audit's locked plugins load |
 | `approve-origins` | empty | `ENV_VAR=https://host` entries; see Credentials |
+| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the project, separated by spaces or commas; passed as `--tsa-trust` (`PRRLA_TSA_TRUST` in the plain snippet). Needed only for an authority outside the shipped bundle: without it such an audit's certificate is withheld (exit 6) |
 | `accept-lock-grants` | `"false"` | Only for an audit repository you control |
 | `image` | `node:24-alpine@sha256:…` | A Node 24 image pinned by digest (the tag's index digest on 2026-11-04) |
 | `stage` | `test` | |
@@ -61,6 +62,7 @@ pr-rla-status:
     PRRLA_FAIL_ON: "escalate,refusal,timestamps,incomplete"
     PRRLA_PLUGINS: "builtin-only" # allow lets the audit's locked plugins load
     PRRLA_APPROVE_ORIGINS: ""     # e.g. "GITLAB_TOKEN=https://gitlab.example.com" for GitLab self-managed
+    PRRLA_TSA_TRUST: ""           # timestamp-authority anchor files you trust beyond the shipped bundle (--tsa-trust)
     PRRLA_ACCEPT_LOCK_GRANTS: "false"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "web"
@@ -122,7 +124,7 @@ pr-rla-status:
             ;;
           6)
             prrla_name=incomplete
-            prrla_what="exit 6: INCOMPLETE (nothing failed, but part of the population could not be rebuilt or shown complete)"
+            prrla_what="exit 6: INCOMPLETE (nothing failed, but something was not established: a time not proven by enough timestamp authorities, the population not rebuilt or shown complete, or a check skipped)"
             ;;
           *)
             PRRLA_REASON="exit $prrla_rc: not a pr-rla exit code (pr-rla did not run to its end)"
@@ -188,6 +190,15 @@ pr-rla-status:
       if [ "${PRRLA_ACCEPT_LOCK_GRANTS:-false}" = true ]; then set -- --accept-lock-grants "$@"; fi
       set -- "$@" "$PRRLA_COMMAND" --json
       if [ "$PRRLA_OFFLINE" = true ]; then set -- "$@" --offline; fi
+      # The timestamp-authority anchors the owner of this CI configuration trusts beyond the shipped bundle
+      # (PRRLA_TSA_TRUST: files, relative to the project): a certificate needs its times proven.
+      set -f
+      for prrla_f in $(printf '%s' "${PRRLA_TSA_TRUST:-}" | tr ',\r\n\t' '    '); do
+        [ -f "$prrla_f" ] || { echo "tsa-trust: $prrla_f is not a file" >&2; exit 1; }
+        case "$prrla_f" in /*) ;; *) prrla_f="$(pwd -P)/$prrla_f" ;; esac
+        set -- "$@" --tsa-trust "$prrla_f"
+      done
+      set +f
       set +e
       "$PRRLA_BIN" "$@" > pr-rla.json
       PRRLA_RC=$?
@@ -226,7 +237,7 @@ pr-rla reads credentials from the environment and sends each only where a local 
 - **`CI_JOB_TOKEN` cannot call the issues API**, so the `gitlab-issues` ledger needs its own token: a project access token (Premium and Ultimate on gitlab.com) or a personal or service account's PAT (on Free). `read_api` is enough to read; the draw issues are opened by a person with a write token, not by this job.
 - Each `approve-origins` entry runs `pr-rla plugin approve --env ENV_VAR --origin https://host --yes` in the job, with the approvals file in the container's temporary directory (`PR_RLA_APPROVALS_FILE`), never in the project.
 - `accept-lock-grants: "true"` takes the grants and trust in the audit repository's `pr-rla.lock.json` as given. Use it only for an audit repository you control.
-- If the log says `is not approved on this machine, so withheld`, a credential did not reach its host and the run was anonymous: add the origin.
+- If the log says `is not approved on this machine, so withheld`, a credential did not reach its host and the run was anonymous; a private tracker that refused every read leaves the verdicts unread, so status exits 6 (INCOMPLETE). Add the origin.
 
 ## Exit codes
 

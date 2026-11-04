@@ -54,10 +54,22 @@ describe("selector review rules (finding 4)", () => {
     expect(select({ ...c, reviews: [...c.reviews, rev(human("bob", "2"), "2026-01-01T12:00:00Z")] })).toBe(0);
   });
 
-  it("the post-merge review is still kept on the change (only the stratum moves), and unreviewed:no-review is unchanged", () => {
+  it("the post-merge review is still kept on the change (only the stratum moves)", () => {
     const c = change(human("alice"), [rev(human("alice"), "2026-01-09T00:00:00Z")]);
-    expect(applySelector([c], normalizeSelector({ unreviewed: "no-review" }), "2026-01-10T00:00:00Z").selected).toHaveLength(0);
     expect(applySelector([c], DEFAULT_SELECTOR, "2026-01-10T00:00:00Z").selected[0]!.reviews).toHaveLength(1);
     expect(hasHumanDecision(c, c.reviews)).toBe(false);
+  });
+
+  it("time round B: unreviewed:no-review sees the reviews at landing (v2), so a review added after landing, or a later freeze, cannot change N; v1 keeps the freeze-time cutoff", () => {
+    const c = change(human("alice"), [rev(human("alice"), "2026-01-09T00:00:00Z", "COMMENTED")]);
+    const noReview = normalizeSelector({ unreviewed: "no-review" });
+    // v2 (the default horizon): the comment came after the merge, so the change is in the stratum whenever it is frozen.
+    for (const frozenAt of ["2026-01-08T00:00:00Z", "2026-01-10T00:00:00Z", "2026-03-01T00:00:00Z"]) expect(applySelector([c], noReview, frozenAt).selected).toHaveLength(1);
+    expect(applySelector([c], noReview, "2026-01-10T00:00:00Z", { horizon: "landing" }).selected).toHaveLength(1);
+    // A review object at or before the merge keeps it out, as before.
+    expect(applySelector([change(human("alice"), [rev(human("bob"), MERGED, "COMMENTED")])], noReview, "2026-01-10T00:00:00Z").selected).toHaveLength(0);
+    // v1 (`cutoff`): as of the freeze time, as v1 manifests were made.
+    expect(applySelector([c], noReview, "2026-01-10T00:00:00Z", { horizon: "cutoff" }).selected).toHaveLength(0);
+    expect(applySelector([c], noReview, "2026-01-08T00:00:00Z", { horizon: "cutoff" }).selected).toHaveLength(1);
   });
 });

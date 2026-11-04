@@ -806,7 +806,7 @@ describe("guard.mjs: the hook protocol", () => {
     // Options that only read, filter or format, on the commands the assistant may run (status --checkpoint, like plain checkpoint, is pr-rla's own local append).
     const reads: Record<string, Set<string>> = {
       "": new Set(["--dir", "--config", "--from-file", "--plugins"]),
-      status: new Set(["--json", "--offline", "--checkpoint"]),
+      status: new Set(["--json", "--offline", "--checkpoint", "--tsa-trust"]),
       verify: new Set(["--offline", "--log-key", "--tsa-trust", "--beacon-file", "--json", "--verbose"]),
       "draw-context": new Set(["--max-patch-bytes", "--json"]),
       checkpoint: new Set(["--tsa-trust"]),
@@ -822,6 +822,13 @@ describe("guard.mjs: the hook protocol", () => {
       const findings = guard.checkShell(line, { cwd: w.audit, env: w.env });
       expect(`${line}: ${findings.length ? "blocked" : "allowed"}`).toBe(`${line}: ${blocked ? "blocked" : "allowed"}`);
     }
+    // The value forms the rounds added, as a person types them (time round B's scoped --log-key, the status anchors).
+    for (const [line, decision] of [
+      ["pr-rla verify --log-key https://rekor.example.org=log-key.pem --tsa-trust anchors.json", "allowed"],
+      ["pr-rla status --tsa-trust anchors.json --json", "allowed"],
+      ["pr-rla --accept-lock-grants status --tsa-trust anchors.json", "blocked"],
+      ["pr-rla checkpoint --push --tsa-trust anchors.json", "blocked"],
+    ] as const) expect(`${line}: ${guard.checkShell(line, { cwd: w.audit, env: w.env }).length ? "blocked" : "allowed"}`).toBe(`${line}: ${decision}`);
   });
 
   it("decides crafted inputs (brace, nesting, heredoc and backtracking bombs) well inside its time budget", () => {

@@ -143,7 +143,8 @@ describe("finding 1 (HIGH): the walked ledger path is the registered one", () =>
     expect(after.r.ok).toBe(false);
     expect(c7(after.r).details.join("\n")).toMatch(/audit\/2026-q3 is a symbolic link/);
     expect(certified(after.status), after.status).toBe(false);
-    expect(after.status).toMatch(/NOT CERTIFIED/);
+    // The one certificate line (time round B): the target is reached, the certificate withheld, and the reason names check 7.
+    expect(after.status).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: /);
   });
 
   it("E1b: the audit copied to another audit_dir without bob's FAIL, the original removed: check 7 FAILs on the registered path", async () => {
@@ -245,7 +246,7 @@ describe("finding 2 (MEDIUM): unsigned lines appended first do not poison the re
 });
 
 describe("INFO: status never says CERTIFIED where verify FAILs check 7 (it walks the git-file history)", () => {
-  it("attack B (a rename hidden behind a merge drops bob's signed FAIL): status prints NOT CERTIFIED and the integrity FAIL", async () => {
+  it("attack B (a rename hidden behind a merge drops bob's signed FAIL): status withholds the certificate, naming check 7, and prints the integrity FAIL", async () => {
     const s = cloneScenario(base);
     reviewWithRelabel(s);
     const regCommit = s.git("log", "--format=%H", "-1", "--grep=registration, manifest, draws").trim();
@@ -262,13 +263,18 @@ describe("INFO: status never says CERTIFIED where verify FAILs check 7 (it walks
     const after = await freshClone(s);
     expect(c7(after.r).status).toBe("FAIL");
     expect(certified(after.status), after.status).toBe(false);
-    expect(after.status).toMatch(/NOT CERTIFIED: verify check 7 would FAIL \(the ledger's integrity check FAILs\); run "pr-rla verify"/);
+    // The one certificate line (time round B): the target is reached, the certificate withheld, and the reason names check 7.
+    expect(after.status).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
     expect(after.status).toMatch(/ledger integrity FAILs: audit\/2026-q3\/verdicts\.jsonl was deleted in commit/);
     // --json says the same.
     const out: string[] = [];
-    await statusCommand(ctxFor(after.dir, s, out), { json: true });
-    const json = JSON.parse(out.join("\n")) as { sequence: { state: string }; ledgerIntegrity: { ok: boolean; fails: string[] }; certificateWithheld: string[] };
+    // A withholding by a check that would FAIL exits 1, as verify does (time round B's status exit codes).
+    expect(await statusCommand(ctxFor(after.dir, s, out), { json: true })).toBe(1);
+    const json = JSON.parse(out.join("\n")) as { sequence: { state: string }; certified: boolean; certificate: unknown; ledgerIntegrity: { ok: boolean; fails: string[] }; certificateWithheld: string[] };
+    // sequence.state is the SPRT's raw state; the claim is `certified` and `certificate`.
     expect(json.sequence.state).toBe("CERTIFIED");
+    expect(json.certified).toBe(false);
+    expect(json.certificate).toEqual({ state: "WITHHELD", withheld: [{ verdict: "FAILED", reason: "verify check 7 would FAIL: the ledger's integrity check FAILs" }] });
     expect(json.certificateWithheld).toEqual(["the ledger's integrity check FAILs"]);
     expect(json.ledgerIntegrity.ok).toBe(false);
     expect(json.ledgerIntegrity.fails.join("\n")).toMatch(/was deleted in commit/);

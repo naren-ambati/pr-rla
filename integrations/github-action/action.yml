@@ -38,6 +38,10 @@ inputs:
     description: "Credentials the built-in providers and ledgers may send beyond the defaults (GITHUB_TOKEN to api.github.com, GITLAB_TOKEN to gitlab.com, BITBUCKET_TOKEN and BITBUCKET_USERNAME to api.bitbucket.org). Entries like GITHUB_TOKEN=https://ghe.example.com, separated by spaces, commas or newlines. Needed for GitHub Enterprise Server, GitLab self-managed, Bitbucket Data Center, or another token variable. Written by whoever owns this workflow; never taken from the audited repository."
     required: false
     default: ""
+  tsa-trust:
+    description: "Timestamp-authority anchor files (pr-rla's trust-extra JSON) that whoever owns this workflow trusts beyond the bundle pr-rla ships, as paths relative to the workspace separated by commas or newlines. Passed to status, verify and checkpoint as --tsa-trust. Needed only when the audit registers an authority outside the shipped bundle: a certificate needs its times proven, and status and verify can prove only what they trust. Your trust, not the audited repository's; a third party verifies with their own."
+    required: false
+    default: ""
   accept-lock-grants:
     description: "Take the credential grants and trust in the audit repository's pr-rla.lock.json as given. Only for an audit repository you control."
     required: false
@@ -53,7 +57,7 @@ inputs:
 
 outputs:
   state:
-    description: "CERTIFIED, NOT_CERTIFIED, ESCALATE or REFUSED (status and verify); empty for other commands."
+    description: "The certificate's state (status and verify): CERTIFIED, WITHHELD (the target is reached but something withholds the certificate, such as an unproven time), NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE (the verdicts could not be read); empty for other commands."
     value: ${{ steps.run.outputs.state }}
   prefix:
     description: "The longest fully labelled prefix as labelled/issued, for example 24/36."
@@ -98,6 +102,7 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_PLUGINS: ${{ inputs.plugins }}
         INPUT_APPROVE_ORIGINS: ${{ inputs.approve-origins }}
+        INPUT_TSA_TRUST: ${{ inputs.tsa-trust }}
         INPUT_ACCEPT_LOCK_GRANTS: ${{ inputs.accept-lock-grants }}
         INPUT_ALLOW_WRITES: ${{ inputs.allow-writes }}
       run: bash "$ACTION_PATH/scripts/prepare.sh"
@@ -114,6 +119,7 @@ runs:
         INPUT_OFFLINE: ${{ inputs.offline }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_TSA_TRUST: ${{ inputs.tsa-trust }}
         INPUT_ACCEPT_LOCK_GRANTS: ${{ inputs.accept-lock-grants }}
       run: bash "$ACTION_PATH/scripts/run.sh"
 

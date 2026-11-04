@@ -61,7 +61,7 @@ prrla_decide() {
       ;;
     6)
       prrla_name=incomplete
-      prrla_what="exit 6: INCOMPLETE (nothing failed, but part of the population could not be rebuilt or shown complete)"
+      prrla_what="exit 6: INCOMPLETE (nothing failed, but something was not established: a time not proven by enough timestamp authorities, the population not rebuilt or shown complete, or a check skipped)"
       ;;
     *)
       PRRLA_REASON="exit $prrla_rc: not a pr-rla exit code (pr-rla did not run to its end)"

@@ -28,7 +28,7 @@ beforeAll(async () => {
   ghes = await githubIssuesAudit({ baseUrl: GHES });
 }, 180_000);
 afterAll(async () => {
-  await Promise.all(opened.map((a) => a.stop()));
+  await Promise.all([...opened.map((a) => a.stop()), audit?.tsa.stop(), ghes?.tsa.stop()]);
 });
 
 interface Run {
@@ -39,8 +39,10 @@ interface Run {
 }
 
 /** One action run: a mock API serving `trackers` (origin -> fake), a workspace from `dir`, the CLI as the installed pr-rla. */
+/** One action run; `trust` is the audit's trust file for its two mock timestamp authorities, as the owner's `tsa-trust` input. */
 async function action(o: {
   dir: string;
+  trust?: string;
   trackers?: Record<string, FakeGitHubIssues>;
   inputs?: Record<string, string>;
   github?: CompositeOptions["github"];
@@ -59,7 +61,7 @@ async function action(o: {
     actionDir: ACTION,
     workspace: ws.dir,
     isolation: iso,
-    ...(o.inputs ? { inputs: o.inputs } : {}),
+    ...(o.inputs || o.trust ? { inputs: { ...(o.trust ? { "tsa-trust": o.trust } : {}), ...o.inputs } } : {}),
     ...(o.github ? { github: o.github } : {}),
     ...(o.bin ? { bin: o.bin } : {}),
     env: { ...o.env },
@@ -69,22 +71,48 @@ async function action(o: {
 }
 
 const certified = () => labelGithub(audit, { pass: all(audit) });
+/** The labelled prefix once the first `n` drawn changes are labelled: a change drawn twice reuses its verdict, so it can pass n. */
+function labelledPrefix(a: TrackerAudit<FakeGitHubIssues>, n: number): number {
+  const labelled = new Set(a.firstDraws.slice(0, n));
+  const first = new Map<string, number>();
+  for (const d of a.draws.draws) if (!first.has(d.changeId)) first.set(d.changeId, d.draw);
+  let prefix = 0;
+  for (const d of a.draws.draws.slice(0, a.draws.issued)) {
+    if (!labelled.has(first.get(d.changeId)!)) break;
+    prefix++;
+  }
+  return prefix;
+}
 const escalated = () => labelGithub(audit, { fail: 6 });
-const json = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { sequence?: { state: string }; error?: { code: string } };
+const json = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { sequence?: { state: string }; certified?: boolean; certificate?: { state: string }; error?: { code: string } };
 const summaryOf = (x: Run) => x.r.summary;
 
 describe("FR6.1: status on fixtures gives the right job outcome", () => {
   it("CERTIFIED: the job passes; state, prefix, llr and json are outputs; the summary carries the certificate line", async () => {
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() } });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.outputs).toMatchObject({ state: "CERTIFIED", prefix: "36/36", llr: "3.066", "exit-code": "0" });
-    expect(json(x.r.outputs.json!).sequence?.state).toBe("CERTIFIED");
+    expect(json(x.r.outputs.json!)).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
     expect(summaryOf(x)).toContain("### CERTIFIED");
     expect(summaryOf(x)).toMatch(/prefix 36\/36 · fails 0 · claim D .* LLR 3\.066 \/ target 2\.996 · CERTIFIED \(risk 5%\)/);
     expect(summaryOf(x)).toContain("| LLR / target | 3.066 / 2.996 |");
     expect(summaryOf(x)).toContain("**Job result: PASS** (exit 0)");
-    expect(x.r.step("run").stdout).toContain("pr-rla --plugins builtin-only -C . status --json --offline -> exit 0");
+    expect(x.r.step("run").stdout).toContain(`pr-rla --plugins builtin-only -C . status --json --offline --tsa-trust ${audit.tsaTrust} -> exit 0`);
     expect(x.denied).toEqual([]);
+  });
+
+  it("the same audit without the owner's anchors: its times are not proven, so the state is WITHHELD, pr-rla exits 6 and the job fails unless fail-on leaves incomplete out", async () => {
+    const x = await action({ dir: audit.dir, trackers: { [API]: certified() } });
+    expect(x.r.conclusion).toBe("failure");
+    // The output is the certificate's state, never the sequential test's raw CERTIFIED.
+    expect(x.r.outputs).toMatchObject({ state: "WITHHELD", prefix: "36/36", "exit-code": "6" });
+    expect(json(x.r.outputs.json!)).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: false, certificate: { state: "WITHHELD" } });
+    expect(summaryOf(x)).toContain("### WITHHELD");
+    expect(summaryOf(x)).toMatch(/target reached · CERTIFICATE WITHHELD \(registration time unproven/);
+    expect(summaryOf(x)).not.toMatch(/CERTIFIED \(risk/);
+    const lenient = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { "fail-on": "escalate,refusal,timestamps" } });
+    expect(lenient.r.conclusion).toBe("success");
+    expect(summaryOf(lenient)).toContain("fail-on does not include incomplete, so the job passes");
   });
 
   it("reads the ledger with the job's token, and only reads: every request to the tracker is a GET", async () => {
@@ -95,18 +123,20 @@ describe("FR6.1: status on fixtures gives the right job outcome", () => {
     expect(new Set(seen.map((q) => q.headers.authorization))).toEqual(new Set(["Bearer ghs_harness_token"]));
   });
 
-  it("a label event (issues, labeled): NOT_CERTIFIED while 20 of 36 are labelled, the job passes, and comment: true posts the status line on the event's issue", async () => {
+  it("a label event (issues, labeled): NOT_CERTIFIED while 20 of 36 changes are labelled, the job passes, and comment: true posts the status line on the event's issue", async () => {
     const event = JSON.parse(readFileSync(join(ROOT, "test", "fixtures", "ci", "issues-labeled.json"), "utf8")) as Record<string, unknown>;
     const fake = labelGithub(audit, { pass: 20 });
     const x = await action({ dir: audit.dir, trackers: { [API]: fake }, github: { event, event_name: "issues" }, inputs: { comment: "true" } });
     expect(x.r.conclusion).toBe("success");
-    expect(x.r.outputs).toMatchObject({ state: "NOT_CERTIFIED", prefix: "20/36" });
+    // The prefix counts draws: a change drawn twice reuses its verdict, so 20 labelled changes can cover more than 20 draws.
+    const prefix = labelledPrefix(audit, 20);
+    expect(x.r.outputs).toMatchObject({ state: "NOT_CERTIFIED", prefix: `${prefix}/36` });
     const posts = x.api.to(API).filter((q) => q.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0]!.path).toBe("/repos/acme/audit/issues/7/comments");
     expect(posts[0]!.headers.authorization).toBe("Bearer ghs_harness_token");
     const body = JSON.parse(posts[0]!.body) as { body: string };
-    expect(body.body).toMatch(/^\*\*pr-rla status\*\*: NOT_CERTIFIED\n\n```text\nprefix 20\/36 · fails 0 /);
+    expect(body.body).toMatch(new RegExp(`^\\*\\*pr-rla status\\*\\*: NOT_CERTIFIED\\n\\n\`\`\`text\\nprefix ${prefix}/36 · fails 0 `));
     expect(x.r.step("comment").stdout).toContain("posted the status line on acme/audit#7");
   });
 
@@ -173,7 +203,7 @@ describe("FR6.1: status on fixtures gives the right job outcome", () => {
   });
 
   it("dir: points the CLI at a subdirectory of the workspace", async () => {
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { dir: "audit-repo" }, edit: (dir) => {
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { dir: "audit-repo" }, edit: (dir) => {
       mkdirSync(join(dir, "audit-repo"));
       for (const f of readdirSync(dir)) if (f !== "audit-repo" && f !== ".git") renameSync(join(dir, f), join(dir, "audit-repo", f));
     } });
@@ -215,13 +245,15 @@ describe("credentials in CI follow the local-consent model", () => {
     const without = await action({ dir: ghes.dir, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) } });
     expect(without.api.to(origin).length).toBeGreaterThan(0);
     expect(authOf(without, origin)).toEqual(new Set(["none"]));
-    // The withheld credential is not an error to pr-rla: the ledger runs anonymously, a private tracker shows no
-    // verdicts, and the job passes NOT_CERTIFIED. The warning is what tells the owner to add approve-origins.
-    expect(without.r.outputs).toMatchObject({ state: "NOT_CERTIFIED", prefix: "0/36", "exit-code": "0" });
+    // The withheld credential is not an error to pr-rla: the ledger runs anonymously. A private tracker then refuses
+    // every read, so the verdicts were not read (time round B): INCOMPLETE, exit 6, and the job fails by default. The
+    // warning and the approve command are what tell the owner to add approve-origins.
+    expect(without.r.outputs).toMatchObject({ state: "INCOMPLETE", "exit-code": "6" });
+    expect(without.r.conclusion).toBe("failure");
     expect(without.r.step("run").stderr).toContain("GITHUB_TOKEN -> https://ghe.example.com is not approved on this machine, so withheld");
     expect(without.r.summary).toContain("is not approved on this machine, so withheld");
 
-    const withApproval = await action({ dir: ghes.dir, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) }, inputs: { "approve-origins": `GITHUB_TOKEN=${GHES}` } });
+    const withApproval = await action({ dir: ghes.dir, trust: ghes.tsaTrust, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) }, inputs: { "approve-origins": `GITHUB_TOKEN=${GHES}` } });
     expect(withApproval.r.conclusion).toBe("success");
     expect(withApproval.r.outputs.state).toBe("CERTIFIED");
     expect(authOf(withApproval, origin)).toEqual(new Set(["Bearer ghs_harness_token"]));
@@ -249,6 +281,18 @@ describe("credentials in CI follow the local-consent model", () => {
     expect(x.api.to(origin).length).toBeGreaterThan(0);
     expect(authOf(x, origin)).toEqual(new Set(["none"]));
     expect(x.denied).toEqual([]);
+  });
+
+  it("tsa-trust names files: a name that is not one is refused in prepare, and a shell metacharacter in it never runs", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "prrla-inject-")), "pwned");
+    for (const bad of ["no-such-trust.json", `x.json;touch ${marker}`, `$(touch ${marker})`]) {
+      const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { "tsa-trust": bad } });
+      expect(x.r.step("prepare").status, bad).toBe("failure");
+      expect(x.r.step("prepare").stdout, bad).toContain("tsa-trust:");
+      expect(x.r.step("prepare").stdout, bad).toContain("is not a file");
+      expect(x.r.step("run").kind, bad).toBe("not-run");
+    }
+    expect(existsSync(marker)).toBe(false);
   });
 
   it("prepare refuses malformed approve-origins entries, an approvals file inside the workspace, and runs nothing after", async () => {
@@ -314,9 +358,11 @@ describe("checkpoint and sample write, so they need allow-writes: true (FR6.1, F
   });
 
   it("with allow-writes it runs `pr-rla checkpoint --push` and the checkpoint reaches the bare remote, with no write to the tracker", async () => {
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { command: "checkpoint", "allow-writes": "true" }, remote: true });
+    // The checkpoint is time-stamped by the audit's two authorities, now, and checked with the owner's anchors.
+    audit.tsa.nowMs = Date.now();
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { command: "checkpoint", "allow-writes": "true" }, remote: true });
     const out = x.r.step("run").stdout;
-    expect(out).toContain("pr-rla --plugins builtin-only -C . checkpoint --push -> exit 0");
+    expect(out).toContain(`pr-rla --plugins builtin-only -C . checkpoint --push --tsa-trust ${audit.tsaTrust} -> exit 0`);
     expect(out).toMatch(/pushed to origin\/main \([0-9a-f]{10}, attempt 1 of 3, no force\)/);
     expect(x.r.conclusion).toBe("success");
     const log = execFileSync("git", ["--git-dir", x.ws.remote!, "log", "-1", "--name-only", "--format=%an|%s"], { encoding: "utf8" });
@@ -416,13 +462,13 @@ describe("the comment is best effort and the token stays on GitHub", () => {
 
   it("a 403 from the API is a warning; the job's outcome is the audit's", async () => {
     const read = fakeTracker(API, certified());
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, github: { event, event_name: "issues" }, inputs: { comment: "true" }, handlers: { [API]: (req) => (req.method === "POST" ? new Response("{}", { status: 403 }) : read(req)) } });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, github: { event, event_name: "issues" }, inputs: { comment: "true" }, handlers: { [API]: (req) => (req.method === "POST" ? new Response("{}", { status: 403 }) : read(req)) } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.step("comment").stdout).toContain("::warning title=pr-rla comment::GitHub answered 403 to the comment on acme/audit#7 (a comment needs issues: write)");
   });
 
   it("no issue number (a push event): a warning, no request", async () => {
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { comment: "true" } });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { comment: "true" } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.step("comment").stdout).toContain("comment: true needs an audit issue number");
     expect(x.api.to(API).some((q) => q.method === "POST")).toBe(false);
@@ -469,7 +515,7 @@ describe("the action is wired as designed (FR6.1, FR6.4, NFR18)", () => {
   });
 
   it("the installed binary is the one in the action path (a shim stands in for npm ci)", async () => {
-    const x = await action({ dir: audit.dir, trackers: { [API]: certified() }, bin: (d) => void cliShim(d) });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, bin: (d) => void cliShim(d) });
     expect(x.r.conclusion).toBe("success");
   });
 });

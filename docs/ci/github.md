@@ -41,6 +41,7 @@ jobs:
 | `fail-on` | `escalate,refusal,timestamps,incomplete` | Which of exits 2, 3, 5 and 6 fail the job. Exit 1 and exit 4 always fail |
 | `plugins` | `builtin-only` | `allow` lets the audit's locked plugins load |
 | `approve-origins` | empty | `ENV_VAR=https://host` entries; see Credentials |
+| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the workspace, separated by commas or newlines; passed to `status`, `verify` and `checkpoint` as `--tsa-trust`. Needed only for an authority outside the shipped bundle: without it such an audit's certificate is `WITHHELD` (exit 6) |
 | `accept-lock-grants` | `false` | Only for an audit repository you control |
 | `allow-writes` | `false` | Permit `checkpoint` and `sample` |
 | `token` | `github.token` | What pr-rla reads as `GITHUB_TOKEN`, and what the comment is posted with |
@@ -51,7 +52,7 @@ There is no `sample` by default: issuing draws and opening issues are writes. `c
 
 | Output | Meaning |
 |---|---|
-| `state` | `CERTIFIED`, `NOT_CERTIFIED`, `ESCALATE` or `REFUSED`; empty for `checkpoint` and `sample`, and for an offline `verify` of a tracker ledger (it reads no verdicts) |
+| `state` | The certificate's state: `CERTIFIED`, `WITHHELD` (the target is reached, but something withholds the certificate, such as a time not proven by enough timestamp authorities), `NOT_CERTIFIED`, `ESCALATE`, `REFUSED` or `INCOMPLETE` (the verdicts could not be read); empty for `checkpoint` and `sample`, and for an offline `verify` of a tracker ledger (it reads no verdicts). It is pr-rla's `certificate.state`, never the sequential test's raw `sequence.state` |
 | `prefix` | The longest fully labelled prefix as `labelled/issued`, for example `24/36` |
 | `llr` | The log-likelihood ratio, to three decimals |
 | `json` | Path to the command's `--json` output (`status` and `verify`) |
@@ -99,7 +100,7 @@ pr-rla reads credentials from the environment and sends each only where a local 
 
 - Each entry runs `pr-rla plugin approve --env ENV_VAR --origin https://host --yes`, with the approvals file in `$RUNNER_TEMP` (`PR_RLA_APPROVALS_FILE`). The action refuses an approvals file inside the workspace.
 - `accept-lock-grants: true` takes the grants and trust in the audit repository's `pr-rla.lock.json` as given. Use it only for an audit repository you control.
-- A withheld credential is not an error to pr-rla: the ledger runs anonymously, a private tracker shows no verdicts, and the job passes `NOT_CERTIFIED`. The summary then carries `is not approved on this machine, so withheld`. If you see it, add the origin to `approve-origins`.
+- A withheld credential is not an error to pr-rla: the ledger runs anonymously. When a private tracker then refuses every read, the verdicts were not read, so the state is `INCOMPLETE` and pr-rla exits 6, which fails the job by default; the summary carries `is not approved on this machine, so withheld` and the `pr-rla plugin approve` command. If you see it, add the origin to `approve-origins`.
 
 ## Pinning
 

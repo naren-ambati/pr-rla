@@ -39,12 +39,12 @@ export function tokenCerts(token: Uint8Array): { all: Uint8Array[]; signer: numb
 }
 
 /** A twin of a real certificate: the same issuer, serial and subject, the attacker's key, a critical timeStamping EKU; self-signed. */
-export async function twinOf(realDer: Uint8Array): Promise<{ der: Uint8Array; cert: pkijs.Certificate; key: webcrypto.CryptoKey }> {
+export async function twinOf(realDer: Uint8Array, serial?: number): Promise<{ der: Uint8Array; cert: pkijs.Certificate; key: webcrypto.CryptoKey }> {
   const real = pkijs.Certificate.fromBER(ab(realDer));
   const keys = (await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as webcrypto.CryptoKeyPair;
   const twin = new pkijs.Certificate();
   twin.version = 2;
-  twin.serialNumber = real.serialNumber;
+  twin.serialNumber = serial !== undefined ? new asn1js.Integer({ value: serial }) : real.serialNumber;
   twin.issuer = real.issuer;
   twin.subject = real.subject;
   twin.notBefore.value = new Date("2020-01-01T00:00:00Z");
@@ -56,8 +56,15 @@ export async function twinOf(realDer: Uint8Array): Promise<{ der: Uint8Array; ce
 }
 
 export interface ForgeOptions {
-  /** The signer identifier: a SubjectKeyIdentifier of the twin's key (pkijs then picks the twin), or the real issuer and serial. */
-  sid: "ski" | "issuerSerial";
+  /**
+   * The signer identifier: a SubjectKeyIdentifier of the twin's key (pkijs then picks the twin), the real issuer and
+   * serial, or the twin's own issuer and serial (`twinIssuerSerial`: with a distinct `twinSerial`, it names the twin alone).
+   */
+  sid: "ski" | "issuerSerial" | "twinIssuerSerial";
+  /** The twin's serial, when it is not the real signer's (pass-2 review: distinct-serial forgeries, beyond the twin rule). */
+  twinSerial?: number;
+  /** Leave the real signer certificate out of the token. */
+  dropReal?: boolean;
   /** Where the twin goes among the copied real certificates. */
   twinAt: "first" | "last";
   /** Which certificate ESSCertIDv2 names. */
@@ -71,7 +78,7 @@ export interface ForgeOptions {
 export async function forgeToken(id: string, digestHex: string, nonceHex: string, genTime: Date, o: ForgeOptions = { sid: "ski", twinAt: "last", essFor: "real" }): Promise<Uint8Array> {
   const { all, signer } = tokenCerts(recordedToken(id));
   const realDer = all[signer]!;
-  const twin = await twinOf(realDer);
+  const twin = await twinOf(realDer, o.twinSerial);
   const tst = new pkijs.TSTInfo({
     version: 1,
     policy: "1.3.6.1.4.1.99999.1",
@@ -90,8 +97,13 @@ export async function forgeToken(id: string, digestHex: string, nonceHex: string
   ];
   const ski = createHash("sha1").update(Buffer.from(twin.cert.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView)).digest();
   const real = pkijs.Certificate.fromBER(ab(realDer));
-  const sid = o.sid === "ski" ? new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 0 }, valueHex: ab(new Uint8Array(ski)) }) : new pkijs.IssuerAndSerialNumber({ issuer: real.issuer, serialNumber: real.serialNumber });
-  const copied = all.map((d) => pkijs.Certificate.fromBER(ab(d)));
+  const sid =
+    o.sid === "ski"
+      ? new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 0 }, valueHex: ab(new Uint8Array(ski)) })
+      : o.sid === "twinIssuerSerial"
+        ? new pkijs.IssuerAndSerialNumber({ issuer: twin.cert.issuer, serialNumber: twin.cert.serialNumber })
+        : new pkijs.IssuerAndSerialNumber({ issuer: real.issuer, serialNumber: real.serialNumber });
+  const copied = all.filter((d) => !(o.dropReal && d === realDer)).map((d) => pkijs.Certificate.fromBER(ab(d)));
   const certs = o.twinAt === "first" ? [twin.cert, ...copied] : [...copied, twin.cert];
   const sd = new pkijs.SignedData({
     version: 3,

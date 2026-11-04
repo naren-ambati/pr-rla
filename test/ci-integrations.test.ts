@@ -146,7 +146,7 @@ describe("FR6.2, FR6.5: the GitLab component and the plain snippet pass GitLab's
 
   it("every spec:input is typed and has a default", () => {
     for (const [name, spec] of Object.entries(header.spec.inputs)) expect(spec, name).toMatchObject({ type: "string" });
-    expect(Object.keys(header.spec.inputs).sort()).toEqual(["accept-lock-grants", "approve-origins", "audit-path", "command", "dir", "fail-on", "image", "integrity", "offline", "plugins", "stage", "version"]);
+    expect(Object.keys(header.spec.inputs).sort()).toEqual(["accept-lock-grants", "approve-origins", "audit-path", "command", "dir", "fail-on", "image", "integrity", "offline", "plugins", "stage", "tsa-trust", "version"]);
   });
 
   it("interpolating the inputs leaves no placeholder behind", () => {

@@ -1,0 +1,768 @@
+{
+ "description": "Real GitHub API responses for describeChange on 4 of the 36 changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid. Kept: 4 of the 4 changes recorded in this run (draws 5, 7, 13, 31).",
+ "source": "recorded",
+ "recordedAt": "2026-11-04T09:20:00.988Z",
+ "changes": [
+  "github:github/gh-aw#46190",
+  "github:github/gh-aw#58625",
+  "github:github/gh-aw#54497",
+  "github:github/gh-aw#49113"
+ ],
+ "exchanges": [
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/46190",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 46190,
+    "title": "Refine require-new-url-try-catch safe-argument detection",
+    "body": "`require-new-url-try-catch` was over-classifying some `new URL(...)` calls as runtime-risky. In particular, it flagged provably constant string concatenations and `new URL(import.meta.url)`, even though both are syntactically safe and non-throwing in the cases covered here.\n\n- **Rule precision**\n  - teach the rule to treat recursively constant string expressions as static:\n    - string literals\n    - expression-less template literals\n    - `+` concatenations composed only of the above\n  - reuse the existing `import.meta.url` safe-value exemption for the first argument, not just the base argument\n\n- **Behavioral effect**\n  - stop reporting false positives such as:\n    ```js\n    new URL(\"https://github.com\" + \"/owner/repo\");\n    const u = new URL(import.meta.url);\n    ```\n  - keep reporting genuinely dynamic inputs, including variable-based concatenation:\n    ```js\n    const u = new URL(host + \"/x\");\n    ```\n\n- **Coverage**\n  - add valid-case tests for constant concatenation and `import.meta.url` in first-argument position\n  - add an invalid regression test confirming variable concatenation remains in scope",
+    "head": {
+     "sha": "87f433aded9a1404e580a85890f529978cbd7ad6"
+    },
+    "base": {
+     "sha": "da9762a7085932f0136f7f396bb34d65a02a598a"
+    },
+    "changed_files": 2,
+    "html_url": "https://github.com/github/gh-aw/pull/46190"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/46190/files?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": [
+    {
+     "filename": "eslint-factory/src/rules/require-new-url-try-catch.test.ts",
+     "status": "modified",
+     "additions": 25,
+     "deletions": 1,
+     "patch": "@@ -19,7 +19,13 @@ const esmRuleTester = new RuleTester({\n describe(\"require-new-url-try-catch\", () => {\n   it(\"valid: new URL with string literal is always safe (CommonJS)\", () => {\n     cjsRuleTester.run(\"require-new-url-try-catch\", requireNewUrlTryCatchRule, {\n-      valid: [`const u = new URL(\"https://github.com\");`, `const u = new URL(\"https://github.com/owner/repo\");`, `const u = new URL(\\`https://github.com/static\\`);`],\n+      valid: [\n+        `const u = new URL(\"https://github.com\");`,\n+        `const u = new URL(\"https://github.com/owner/repo\");`,\n+        `const u = new URL(\\`https://github.com/static\\`);`,\n+        `const u = new URL(\"https://github.com\" + \"/owner/repo\");`,\n+        `const u = new URL(\"https://github.com\" + \\`/static\\` + \"/path\");`,\n+      ],\n       invalid: [],\n     });\n   });\n@@ -60,6 +66,7 @@ describe(\"require-new-url-try-catch\", () => {\n       valid: [\n         // First arg is static, base is import.meta.url — never throws\n         `new URL(\"./relative/path\", import.meta.url);`,\n+        `const u = new URL(import.meta.url);`,\n         // First arg is dynamic but we're inside try\n         `try { new URL(path, import.meta.url); } catch (e) {}`,\n       ],\n@@ -137,6 +144,23 @@ describe(\"require-new-url-try-catch\", () => {\n     });\n   });\n \n+  it(\"invalid: new URL with string concatenation containing variables (CommonJS)\", () => {\n+    cjsRuleTester.run(\"require-new-url-try-catch\", requireNewUrlTryCatchRule, {\n+      valid: [],\n+      invalid: [\n+        {\n+          code: `const u = new URL(host + \"/x\");`,\n+          errors: [\n+            {\n+              messageId: \"requireTryCatch\",\n+              data: { arg: 'host + \"/x\"' },\n+            },\n+          ],\n+        },\n+      ],\n+    });\n+  });\n+\n   it(\"invalid: new URL reports in ES module\", () => {\n     esmRuleTester.run(\"require-new-url-try-catch\", requireNewUrlTryCatchRule, {\n       valid: [],"
+    },
+    {
+     "filename": "eslint-factory/src/rules/require-new-url-try-catch.ts",
+     "status": "modified",
+     "additions": 17,
+     "deletions": 10,
+     "patch": "@@ -75,21 +75,27 @@ export const requireNewUrlTryCatchRule = createRule({\n       return null;\n     }\n \n+    /** Returns true when an expression is a compile-time constant string. */\n+    function isStaticStringExpression(arg: TSESTree.CallExpressionArgument): boolean {\n+      if (arg.type === AST_NODE_TYPES.Literal && typeof (arg as TSESTree.StringLiteral).value === \"string\") return true;\n+      if (arg.type === AST_NODE_TYPES.TemplateLiteral && (arg as TSESTree.TemplateLiteral).expressions.length === 0) return true;\n+      if (arg.type === AST_NODE_TYPES.BinaryExpression && arg.operator === \"+\") {\n+        return isStaticStringExpression(arg.left) && isStaticStringExpression(arg.right);\n+      }\n+      return false;\n+    }\n+\n     /** Returns true when an argument is a runtime-dynamic expression (not a compile-time constant). */\n     function isDynamicArg(arg: TSESTree.CallExpressionArgument): boolean {\n       if (arg.type === \"SpreadElement\") return false;\n-      // Literal strings are compile-time constants — no runtime parse risk.\n-      if (arg.type === AST_NODE_TYPES.Literal && typeof (arg as TSESTree.StringLiteral).value === \"string\") return false;\n-      // Template literals with no expressions are effectively string constants.\n-      if (arg.type === AST_NODE_TYPES.TemplateLiteral && (arg as TSESTree.TemplateLiteral).expressions.length === 0) return false;\n-      return true;\n+      return !isStaticStringExpression(arg);\n     }\n \n     /**\n-     * Returns true when a base argument is a known-safe compile-time value that never throws.\n+     * Returns true when an argument is a known-safe value that never throws in URL position.\n      * `import.meta.url` is always a valid absolute URL in ES modules.\n      */\n-    function isKnownSafeBase(arg: TSESTree.CallExpressionArgument): boolean {\n+    function isKnownSafeUrlArgument(arg: TSESTree.CallExpressionArgument): boolean {\n       // import.meta.url is a MemberExpression: { object: MetaProperty(import.meta), property: Identifier(url) }\n       if (arg.type !== AST_NODE_TYPES.MemberExpression) return false;\n       const memberExpr = arg as TSESTree.MemberExpression;\n@@ -112,11 +118,12 @@ export const requireNewUrlTryCatchRule = createRule({\n \n         // `new URL()` with zero arguments always throws TypeError at runtime — always flag it.\n         const noArgs = firstArg === undefined;\n-        // Flag when the first argument is a runtime-dynamic expression.\n-        const firstArgDynamic = !noArgs && isDynamicArg(firstArg);\n+        // Flag when the first argument is a runtime-dynamic expression, excluding known-safe\n+        // values such as import.meta.url.\n+        const firstArgDynamic = !noArgs && !isKnownSafeUrlArgument(firstArg) && isDynamicArg(firstArg);\n         // Flag when the second (base) argument is dynamic and not a known-safe value such as\n         // import.meta.url. An invalid base throws the same TypeError as an invalid URL string.\n-        const secondArgDynamic = secondArg !== undefined && !isKnownSafeBase(secondArg) && isDynamicArg(secondArg);\n+        const secondArgDynamic = secondArg !== undefined && !isKnownSafeUrlArgument(secondArg) && isDynamicArg(secondArg);\n \n         if (!noArgs && !firstArgDynamic && !secondArgDynamic) return;\n "
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=69c911d28f1ff5f65d79a5c60ae8ef8269574601",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=da9762a7085932f0136f7f396bb34d65a02a598a",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/87f433aded9a1404e580a85890f529978cbd7ad6/check-runs?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "total_count": 0,
+    "check_runs": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/87f433aded9a1404e580a85890f529978cbd7ad6/status?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "state": "pending",
+    "total_count": 0,
+    "statuses": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/58625",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 58625,
+    "title": "Preserve setup-action PATH across privileged AWF startup",
+    "body": "`docker-sudo-iptables` allowed sudo’s `secure_path` to replace the runner PATH before AWF captured it, causing setup-selected runtimes such as Ruby 3.4.8 to resolve to system versions instead.\n\n### Changes\n\n- **Privileged invocation**\n  - Restore the caller’s PATH after sudo.\n  - Execute AWF through trusted absolute paths to prevent PATH-based binary substitution.\n\n```bash\nsudo -E /usr/bin/env PATH=\"$PATH\" /usr/local/bin/awf\n```\n\n- **Regression coverage**\n  - Model the sudo boundary with selected, system, and cached Ruby versions.\n  - Verify the setup-selected Ruby retains precedence while cache-only tools remain discoverable.\n\n- **Generated workflow**\n  - Refresh the `docker-sudo-iptables` service-port smoke workflow lock file.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #58458",
+    "head": {
+     "sha": "2f2e28de363940cc9c5e39ccee69967358270c1b"
+    },
+    "base": {
+     "sha": "7952419dae5ee87d8fe37cd24cc216a92ae92c61"
+    },
+    "changed_files": 14,
+    "html_url": "https://github.com/github/gh-aw/pull/58625"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/58625/files?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": [
+    {
+     "filename": ".changeset/patch-preserve-awf-setup-path.md",
+     "status": "added",
+     "additions": 5,
+     "deletions": 0,
+     "patch": "@@ -0,0 +1,5 @@\n+---\n+\"gh-aw\": patch\n+---\n+\n+Preserve setup-action `PATH` entries when starting privileged AWF for the `docker-sudo-iptables` runtime."
+    },
+    {
+     "filename": ".github/workflows/smoke-service-ports.lock.yml",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -1007,7 +1007,7 @@ jobs:\n           GH_AW_AWF_LOG_FILE=/tmp/gh-aw/agent-stdio.log \\\n           GH_AW_AWF_ATTEMPT_LOG_NAME=codex \\\n           bash \"${RUNNER_TEMP}/gh-aw/actions/run_awf_with_startup_retries.sh\" -- \\\n-            sudo -E awf --config \"${RUNNER_TEMP}/gh-aw/awf-config.json\" --container-workdir \"${GITHUB_WORKSPACE}\" --mount \"${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro\" --mount \"${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro\" --allow-host-service-ports \"${{ job.services['redis'].ports['6379'] }}\" ${GH_AW_TOOL_CACHE_MOUNT:+--mount \"$GH_AW_TOOL_CACHE_MOUNT\"} ${GH_AW_DOCKER_HOST:+--docker-host \"$GH_AW_DOCKER_HOST\"} --env-all --exclude-env ACTIONS_ID_TOKEN_REQUEST_TOKEN --exclude-env ACTIONS_ID_TOKEN_REQUEST_URL --exclude-env CODEX_API_KEY --exclude-env COPILOT_GITHUB_TOKEN --exclude-env GITHUB_MCP_SERVER_TOKEN --exclude-env MCP_GATEWAY_AGENT_ID --exclude-env OPENAI_API_KEY --mount /tmp/gh-aw:/tmp/gh-aw:rw --log-level info --legacy-security --enable-host-access --allow-host-ports 80,443,8080 --skip-pull \\\n+            sudo -E /usr/bin/env PATH=\"$PATH\" /usr/local/bin/awf --config \"${RUNNER_TEMP}/gh-aw/awf-config.json\" --container-workdir \"${GITHUB_WORKSPACE}\" --mount \"${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro\" --mount \"${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro\" --allow-host-service-ports \"${{ job.services['redis'].ports['6379'] }}\" ${GH_AW_TOOL_CACHE_MOUNT:+--mount \"$GH_AW_TOOL_CACHE_MOUNT\"} ${GH_AW_DOCKER_HOST:+--docker-host \"$GH_AW_DOCKER_HOST\"} --env-all --exclude-env ACTIONS_ID_TOKEN_REQUEST_TOKEN --exclude-env ACTIONS_ID_TOKEN_REQUEST_URL --exclude-env CODEX_API_KEY --exclude-env COPILOT_GITHUB_TOKEN --exclude-env GITHUB_MCP_SERVER_TOKEN --exclude-env MCP_GATEWAY_AGENT_ID --exclude-env OPENAI_API_KEY --mount /tmp/gh-aw:/tmp/gh-aw:rw --log-level info --legacy-security --enable-host-access --allow-host-ports 80,443,8080 --skip-pull \\\n             -- /bin/bash -c 'set +o histexpand; export CODEX_API_KEY=\"$COPILOT_DUMMY_BYOK\" && export PATH=\"${RUNNER_TEMP}/gh-aw/mcp-cli/bin:$PATH\" && : \"${RUNNER_TOOL_CACHE:?RUNNER_TOOL_CACHE must be set}\"; GH_AW_TOOL_CACHE=\"$RUNNER_TOOL_CACHE\"; GH_AW_TOOL_BINS=\"$(find \"$GH_AW_TOOL_CACHE\" -maxdepth 5 -type d -name bin 2>/dev/null | tr '\\''\\n'\\'' '\\'':'\\'')\"; GH_AW_TOOL_BINS=\"${GH_AW_TOOL_BINS%:}\"; export PATH=\"$PATH${GH_AW_TOOL_BINS:+:}$GH_AW_TOOL_BINS\"; [ -n \"$GOROOT\" ] && export PATH=\"$GOROOT/bin:$PATH\" || true; [ -n \"$ERLANG_HOME\" ] && export PATH=\"$ERLANG_HOME/bin:$PATH\" || true && GH_AW_NODE_EXEC=\"${GH_AW_NODE_BIN:-}\"; if [ -z \"$GH_AW_NODE_EXEC\" ] || [ ! -x \"$GH_AW_NODE_EXEC\" ]; then GH_AW_NODE_EXEC=\"$(command -v node 2>/dev/null || true)\"; fi; if [ -z \"$GH_AW_NODE_EXEC\" ]; then echo \"node runtime missing on this runner — check runtimes.node in workflow YAML\" >&2; exit 127; fi; GH_AW_NPM_GLOBAL_ROOT=\"$(npm root -g 2>/dev/null || true)\"; if [ -n \"$GH_AW_NPM_GLOBAL_ROOT\" ]; then export NODE_PATH=\"${GH_AW_NPM_GLOBAL_ROOT}${NODE_PATH:+:${NODE_PATH}}\"; fi; \"$GH_AW_NODE_EXEC\" ${RUNNER_TEMP}/gh-aw/actions/codex_harness.cjs codex exec${GH_AW_MODEL_AGENT_CODEX:+ --model \"$GH_AW_MODEL_AGENT_CODEX\"} -c web_search=\"disabled\" -c fetch=\"disabled\" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check  --prompt-file /tmp/gh-aw/aw-prompts/prompt.txt'\n         env:\n           AWF_REFLECT_ENABLED: 1"
+    },
+    {
+     "filename": "pkg/constants/constants.go",
+     "status": "modified",
+     "additions": 3,
+     "deletions": 3,
+     "patch": "@@ -256,9 +256,9 @@ const (\n \tDefaultCloudHypervisorMemoryMiB = 4096\n )\n \n-// AWFLegacySecurityCommand is the AWF command prefix for legacy security mode.\n-// Used by the docker-sudo-iptables runtime profile.\n-const AWFLegacySecurityCommand = \"sudo -E awf\"\n+// AWFLegacySecurityCommand runs the trusted system AWF binary with the runner's\n+// PATH restored after sudo applies secure_path.\n+const AWFLegacySecurityCommand = `sudo -E /usr/bin/env PATH=\"$PATH\" /usr/local/bin/awf`\n \n // AWFProxyLogsDir is the default directory for AWF proxy logs\n const AWFProxyLogsDir FilePath = \"/tmp/gh-aw/sandbox/firewall/logs\""
+    },
+    {
+     "filename": "pkg/workflow/awf_command_builder.go",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -653,7 +653,7 @@ func joinPorts(ports []int) string {\n //\n // Returns:\n //   - string: The AWF command to use (e.g., \"sudo --preserve-env awf\",\n-//     \"sudo -E awf\", \"awf\", or custom command)\n+//     \"sudo -E /usr/bin/env PATH=\\\"$PATH\\\" /usr/local/bin/awf\", \"awf\", or custom command)\n func GetAWFCommandPrefix(workflowData *WorkflowData) string {\n \tagentConfig := getAgentConfig(workflowData)\n \tif agentConfig != nil && agentConfig.Command != \"\" {"
+    },
+    {
+     "filename": "pkg/workflow/awf_command_builder_test.go",
+     "status": "modified",
+     "additions": 18,
+     "deletions": 2,
+     "patch": "@@ -3,11 +3,15 @@\n package workflow\n \n import (\n+\t\"os\"\n+\t\"path/filepath\"\n+\t\"regexp\"\n \t\"strings\"\n \t\"testing\"\n \n \t\"github.com/github/gh-aw/pkg/constants\"\n \t\"github.com/stretchr/testify/assert\"\n+\t\"github.com/stretchr/testify/require\"\n )\n \n func TestBuildAWFArgsAuditDir(t *testing.T) {\n@@ -622,7 +626,7 @@ func TestGetAWFCommandPrefixNetworkIsolation(t *testing.T) {\n \t\tassert.Equal(t, \"awf\", cmd, \"Should return 'awf' (no sudo) when there is no sandbox config\")\n \t})\n \n-\tt.Run(\"returns sudo -E awf when legacy-security is enabled\", func(t *testing.T) {\n+\tt.Run(\"preserves PATH after sudo when legacy-security is enabled\", func(t *testing.T) {\n \t\tworkflowData := &WorkflowData{\n \t\t\tName:         \"test-workflow\",\n \t\t\tEngineConfig: &EngineConfig{ID: \"copilot\"},\n@@ -634,7 +638,19 @@ func TestGetAWFCommandPrefixNetworkIsolation(t *testing.T) {\n \t\t\t},\n \t\t}\n \t\tcmd := GetAWFCommandPrefix(workflowData)\n-\t\tassert.Equal(t, \"sudo -E awf\", cmd, \"Should return 'sudo -E awf' when legacy-security is enabled\")\n+\t\tassert.Equal(t, constants.AWFLegacySecurityCommand, cmd)\n+\t})\n+\n+\tt.Run(\"matches the non-rootless AWF installer path\", func(t *testing.T) {\n+\t\tinstallerPath := filepath.Join(\"..\", \"..\", \"actions\", \"setup\", \"sh\", \"install_awf_binary.sh\")\n+\t\tinstaller, err := os.ReadFile(installerPath)\n+\t\trequire.NoError(t, err)\n+\n+\t\tinstallDir := regexp.MustCompile(`(?m)^AWF_INSTALL_DIR=\"([^\"]+)\"$`).FindSubmatch(installer)\n+\t\tinstallName := regexp.MustCompile(`(?m)^AWF_INSTALL_NAME=\"([^\"]+)\"$`).FindSubmatch(installer)\n+\t\tif assert.Len(t, installDir, 2) && assert.Len(t, installName, 2) {\n+\t\t\tassert.Contains(t, constants.AWFLegacySecurityCommand, filepath.Join(string(installDir[1]), string(installName[1])))\n+\t\t}\n \t})\n \n \tt.Run(\"custom command takes precedence over the runtime profile\", func(t *testing.T) {"
+    },
+    {
+     "filename": "pkg/workflow/claude_engine_network_test.go",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -69,7 +69,7 @@ func TestClaudeEngineNetworkPermissions(t *testing.T) {\n \t\tstepYAML := strings.Join(steps[0], \"\\n\")\n \n \t\t// Verify AWF is not used without network permissions\n-\t\tif strings.Contains(stepYAML, \"sudo -E awf\") {\n+\t\tif strings.Contains(stepYAML, \"sudo -E \") {\n \t\t\tt.Error(\"AWF should not be used without network permissions\")\n \t\t}\n "
+    },
+    {
+     "filename": "pkg/workflow/compiler_permissions_test.go",
+     "status": "modified",
+     "additions": 8,
+     "deletions": 8,
+     "patch": "@@ -146,8 +146,8 @@ This is a test workflow without network permissions.\n \t\tif !strings.Contains(string(lockContent), \"awf --config\") {\n \t\t\tt.Error(\"Should contain AWF wrapper by default for Claude engine\")\n \t\t}\n-\t\tif strings.Contains(string(lockContent), \"sudo -E awf\") {\n-\t\t\tt.Error(\"Should NOT use sudo -E awf in network isolation mode (default)\")\n+\t\tif strings.Contains(string(lockContent), \"sudo -E \") {\n+\t\t\tt.Error(\"Should NOT use sudo in network isolation mode (default)\")\n \t\t}\n \t})\n \n@@ -186,8 +186,8 @@ This is a test workflow with explicit defaults network permissions.\n \t\tif !strings.Contains(string(lockContent), \"awf --config\") {\n \t\t\tt.Error(\"Should contain AWF wrapper for Claude engine with network: defaults\")\n \t\t}\n-\t\tif strings.Contains(string(lockContent), \"sudo -E awf\") {\n-\t\t\tt.Error(\"Should NOT use sudo -E awf in network isolation mode (default)\")\n+\t\tif strings.Contains(string(lockContent), \"sudo -E \") {\n+\t\t\tt.Error(\"Should NOT use sudo in network isolation mode (default)\")\n \t\t}\n \t})\n \n@@ -226,8 +226,8 @@ This is a test workflow with empty network permissions (deny all).\n \t\tif !strings.Contains(string(lockContent), \"awf --config\") {\n \t\t\tt.Error(\"Should contain AWF wrapper for Claude engine with network: {}\")\n \t\t}\n-\t\tif strings.Contains(string(lockContent), \"sudo -E awf\") {\n-\t\t\tt.Error(\"Should NOT use sudo -E awf in network isolation mode (default)\")\n+\t\tif strings.Contains(string(lockContent), \"sudo -E \") {\n+\t\t\tt.Error(\"Should NOT use sudo in network isolation mode (default)\")\n \t\t}\n \t})\n \n@@ -268,8 +268,8 @@ This is a test workflow with explicit network permissions.\n \t\tif !strings.Contains(string(lockContent), \"awf --config\") {\n \t\t\tt.Error(\"Should contain AWF wrapper with explicit network permissions\")\n \t\t}\n-\t\tif strings.Contains(string(lockContent), \"sudo -E awf\") {\n-\t\t\tt.Error(\"Should NOT use sudo -E awf in network isolation mode (default)\")\n+\t\tif strings.Contains(string(lockContent), \"sudo -E \") {\n+\t\t\tt.Error(\"Should NOT use sudo in network isolation mode (default)\")\n \t\t}\n \t\tif !strings.Contains(string(lockContent), \"allowDomains\") {\n \t\t\tt.Error(\"Should contain allowDomains in AWF config JSON\")"
+    },
+    {
+     "filename": "pkg/workflow/engine_helpers_test.go",
+     "status": "modified",
+     "additions": 52,
+     "deletions": 0,
+     "patch": "@@ -255,6 +255,58 @@ func TestGetNpmBinPathSetup_PreservesSelectedRuby(t *testing.T) {\n \tassert.Equal(t, \"ruby 3.4.8\\nnpm agent found\\n\", string(output))\n }\n \n+func TestDockerSudoIptablesPreservesSelectedRubyPath(t *testing.T) {\n+\tif runtime.GOOS != \"linux\" {\n+\t\tt.Skip(\"Skipping shell-based test on non-Linux platform\")\n+\t}\n+\n+\troot := t.TempDir()\n+\tcacheRoot := filepath.Join(root, \"toolcache\")\n+\tselectedRubyBin := filepath.Join(root, \"selected-ruby\", \"bin\")\n+\tcachedRubyBin := filepath.Join(cacheRoot, \"Ruby\", \"3.2.11\", \"x64\", \"bin\")\n+\tsecureBin := filepath.Join(root, \"secure-bin\")\n+\tcommandBin := filepath.Join(root, \"command-bin\")\n+\tfor _, dir := range []string{selectedRubyBin, cachedRubyBin, secureBin, commandBin} {\n+\t\trequire.NoError(t, os.MkdirAll(dir, 0o755))\n+\t}\n+\n+\trequire.NoError(t, os.WriteFile(filepath.Join(selectedRubyBin, \"ruby\"), []byte(\"#!/bin/sh\\necho 'ruby 3.4.8'\\n\"), 0o755))\n+\trequire.NoError(t, os.WriteFile(filepath.Join(cachedRubyBin, \"ruby\"), []byte(\"#!/bin/sh\\necho 'ruby 3.2.11'\\n\"), 0o755))\n+\trequire.NoError(t, os.WriteFile(filepath.Join(cachedRubyBin, \"npm-agent\"), []byte(\"#!/bin/sh\\necho 'npm agent found'\\n\"), 0o755))\n+\trequire.NoError(t, os.WriteFile(filepath.Join(secureBin, \"ruby\"), []byte(\"#!/bin/sh\\necho 'ruby 3.2.3'\\n\"), 0o755))\n+\n+\tfakeAWF := filepath.Join(secureBin, \"awf\")\n+\tawfScript := fmt.Sprintf(\"#!/bin/bash\\nset -e\\nunset GOROOT ERLANG_HOME\\n%s\\nruby --version\\nnpm-agent\\n\", GetNpmBinPathSetup())\n+\trequire.NoError(t, os.WriteFile(fakeAWF, []byte(awfScript), 0o755))\n+\trequire.NoError(t, os.WriteFile(filepath.Join(commandBin, \"sudo\"), []byte(`#!/bin/sh\n+if [ \"$1\" = \"-E\" ]; then\n+  shift\n+fi\n+export PATH=\"$GH_AW_TEST_SECURE_PATH\"\n+exec \"$@\"\n+`), 0o755))\n+\n+\tworkflowData := &WorkflowData{\n+\t\tSandboxConfig: &SandboxConfig{\n+\t\t\tAgent: &AgentSandboxConfig{Runtime: AgentRuntimeDockerSudoIptables},\n+\t\t},\n+\t}\n+\tawfCommand := strings.Replace(GetAWFCommandPrefix(workflowData), \"/usr/local/bin/awf\", fakeAWF, 1)\n+\thostPath := strings.Join([]string{selectedRubyBin, commandBin, \"/usr/bin\", \"/bin\"}, \":\")\n+\tsecurePath := strings.Join([]string{secureBin, \"/usr/bin\", \"/bin\"}, \":\")\n+\tshellCmd := fmt.Sprintf(\n+\t\t`export PATH=%q GH_AW_TEST_SECURE_PATH=%q RUNNER_TOOL_CACHE=%q; %s`,\n+\t\thostPath,\n+\t\tsecurePath,\n+\t\tcacheRoot,\n+\t\tawfCommand,\n+\t)\n+\n+\toutput, err := exec.Command(\"/bin/bash\", \"-c\", shellCmd).CombinedOutput()\n+\trequire.NoError(t, err, \"privileged AWF command failed: %s\", output)\n+\tassert.Equal(t, \"ruby 3.4.8\\nnpm agent found\\n\", string(output))\n+}\n+\n // TestGetNpmBinPathSetup_NoGorootDoesNotBreakChain verifies that when GOROOT is\n // not set, the command chain continues (the || true prevents short-circuit).\n func TestGetNpmBinPathSetup_NoGorootDoesNotBreakChain(t *testing.T) {"
+    },
+    {
+     "filename": "pkg/workflow/firewall_args_test.go",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -32,7 +32,7 @@ func TestFirewallArgsInCopilotEngine(t *testing.T) {\n \n \t\t// Check that the command contains awf (AWF v0.15.0+ uses chroot mode by default)\n \t\tif !strings.Contains(stepContent, \"awf \") {\n-\t\t\tt.Error(\"Expected command to contain 'sudo -E awf'\")\n+\t\t\tt.Error(\"Expected command to contain AWF\")\n \t\t}\n \n \t\t// With config file support (default AWF version), domains appear in the JSON config"
+    },
+    {
+     "filename": "pkg/workflow/firewall_workflow_test.go",
+     "status": "modified",
+     "additions": 3,
+     "deletions": 3,
+     "patch": "@@ -214,8 +214,8 @@ Test workflow with legacy security.`\n \n \tlockStr := string(lockContent)\n \n-\t// Legacy mode should use sudo -E awf\n-\tassert.Contains(t, lockStr, \"sudo -E awf\", \"Legacy security mode should use 'sudo -E awf' command\")\n+\t// Legacy mode should preserve the runner PATH across sudo's secure_path.\n+\tassert.Contains(t, lockStr, `sudo -E /usr/bin/env PATH=\"$PATH\" /usr/local/bin/awf`, \"Legacy security mode should preserve PATH across sudo\")\n \n \t// Should emit --legacy-security flag\n \tassert.Contains(t, lockStr, \"--legacy-security\", \"Legacy security mode should emit --legacy-security flag\")\n@@ -258,7 +258,7 @@ Test workflow with strict security (default).`\n \tlockStr := string(lockContent)\n \n \t// Strict mode should NOT use sudo\n-\tassert.NotContains(t, lockStr, \"sudo -E awf\", \"Strict security mode should NOT use 'sudo -E awf'\")\n+\tassert.NotContains(t, lockStr, \"sudo -E \", \"Strict security mode should NOT use sudo\")\n \n \t// Should NOT emit --legacy-security flag\n \tassert.NotContains(t, lockStr, \"--legacy-security\", \"Strict security mode should NOT emit --legacy-security\")"
+    },
+    {
+     "filename": "pkg/workflow/sandbox_agent_disabled_test.go",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -106,7 +106,7 @@ Test workflow with agent sandbox disabled.\n \t\tresult := string(lockContent)\n \n \t\t// The compiled workflow should NOT contain AWF commands\n-\t\tassert.NotContains(t, result, \"sudo -E awf\", \"Workflow should not contain AWF command when agent sandbox is disabled\")\n+\t\tassert.NotContains(t, result, \"sudo -E \", \"Workflow should not contain privileged AWF command when agent sandbox is disabled\")\n \t\tassert.NotContains(t, result, \"awf --\", \"Workflow should not contain AWF wrapper when agent sandbox is disabled\")\n \n \t\t// Should contain direct copilot command instead"
+    },
+    {
+     "filename": "pkg/workflow/sandbox_agent_false_test.go",
+     "status": "modified",
+     "additions": 2,
+     "deletions": 2,
+     "patch": "@@ -56,8 +56,8 @@ Test workflow to verify sandbox.agent: false is accepted when the feature flag i\n \t\tlockStr := string(lockContent)\n \n \t\t// Verify that AWF firewall is NOT present (agent sandbox disabled)\n-\t\tif strings.Contains(lockStr, \"sudo -E awf\") {\n-\t\t\tt.Error(\"Expected AWF firewall to be disabled, but found 'sudo -E awf' command in lock file\")\n+\t\tif strings.Contains(lockStr, \"sudo -E \") {\n+\t\t\tt.Error(\"Expected AWF firewall to be disabled, but found privileged AWF command in lock file\")\n \t\t}\n \n \t\t// Verify that MCP gateway IS present (gateway always enabled)"
+    },
+    {
+     "filename": "pkg/workflow/sandbox_custom_agent_test.go",
+     "status": "modified",
+     "additions": 5,
+     "deletions": 5,
+     "patch": "@@ -100,7 +100,7 @@ func TestCustomAWFConfiguration(t *testing.T) {\n \t})\n \n \tt.Run(\"docker-sudo-iptables does not pass --rootless\", func(t *testing.T) {\n-\t\t// The docker-sudo-iptables profile runs `sudo -E awf`, which requires awf to be\n+\t\t// The docker-sudo-iptables profile runs AWF with sudo, which requires awf to be\n \t\t// in /usr/local/bin (non-rootless install path).\n \t\tagentConfig := &AgentSandboxConfig{\n \t\t\tID:      \"awf\",\n@@ -220,7 +220,7 @@ sandbox:\n \t\t}\n \t\tlockStr := string(lockContent)\n \n-\t\t// Verify custom command is used instead of sudo -E awf\n+\t\t// Verify the custom command is used instead of privileged AWF.\n \t\tif !strings.Contains(lockStr, \"custom-awf-wrapper\") {\n \t\t\tt.Error(\"Expected custom command 'custom-awf-wrapper' in compiled workflow\")\n \t\t}\n@@ -288,9 +288,9 @@ sandbox:\n \t\t}\n \t\tlockStr := string(lockContent)\n \n-\t\t// Verify standard AWF command is used (rootless mode - no sudo -E awf)\n-\t\tif strings.Contains(lockStr, \"sudo -E awf\") {\n-\t\t\tt.Error(\"Expected no sudo -E awf with legacy type field (network isolation is the default)\")\n+\t\t// Verify standard AWF command is used (rootless mode, no sudo).\n+\t\tif strings.Contains(lockStr, \"sudo -E \") {\n+\t\t\tt.Error(\"Expected no sudo with legacy type field (network isolation is the default)\")\n \t\t}\n \t\tif !strings.Contains(lockStr, \"awf --config\") {\n \t\t\tt.Error(\"Expected rootless AWF invocation with legacy type field\")"
+    },
+    {
+     "filename": "pkg/workflow/sandbox_network_isolation_rootless_test.go",
+     "status": "modified",
+     "additions": 12,
+     "deletions": 12,
+     "patch": "@@ -11,7 +11,7 @@ import (\n \n // TestNetworkIsolationRootless verifies that the default docker runtime profile\n // compiles to a lock.yml with no \"sudo\" for the AWF binary install or the AWF\n-// invocation (rootless mode), while docker-sudo-iptables still uses \"sudo -E awf\".\n+// invocation (rootless mode), while docker-sudo-iptables still uses sudo.\n func TestNetworkIsolationRootless(t *testing.T) {\n \tt.Run(\"default runtime omits sudo from awf invocation and install\", func(t *testing.T) {\n \t\tworkflowsDir := t.TempDir()\n@@ -52,8 +52,8 @@ This workflow verifies that sudo is omitted for the default docker runtime profi\n \t\tlockStr := string(lockContent)\n \n \t\t// AWF invocation must not use sudo\n-\t\tif strings.Contains(lockStr, \"sudo -E awf\") {\n-\t\t\tt.Error(\"Expected no 'sudo -E awf' in lock file for the default docker runtime profile\")\n+\t\tif strings.Contains(lockStr, \"sudo -E \") {\n+\t\t\tt.Error(\"Expected no sudo in lock file for the default docker runtime profile\")\n \t\t}\n \n \t\t// AWF must still be invoked (just without sudo).\n@@ -75,7 +75,7 @@ This workflow verifies that sudo is omitted for the default docker runtime profi\n \t\t}\n \t})\n \n-\tt.Run(\"workflow with sudo omitted defaults to network isolation (no sudo -E awf)\", func(t *testing.T) {\n+\tt.Run(\"workflow with sudo omitted defaults to network isolation\", func(t *testing.T) {\n \t\tworkflowsDir := t.TempDir()\n \n \t\tmarkdown := `---\n@@ -113,9 +113,9 @@ This workflow verifies that sudo is omitted by default when sudo is not set (net\n \t\t}\n \t\tlockStr := string(lockContent)\n \n-\t\t// Default (sudo not set) must use network isolation mode (no sudo -E awf)\n-\t\tif strings.Contains(lockStr, \"sudo -E awf\") {\n-\t\t\tt.Error(\"Expected no 'sudo -E awf' in lock file when sudo is not set (network isolation is the default)\")\n+\t\t// Default (sudo not set) must use network isolation mode.\n+\t\tif strings.Contains(lockStr, \"sudo -E \") {\n+\t\t\tt.Error(\"Expected no sudo in lock file when sudo is not set (network isolation is the default)\")\n \t\t}\n \n \t\t// AWF must still be invoked (without sudo).\n@@ -140,7 +140,7 @@ This workflow verifies that sudo is omitted by default when sudo is not set (net\n \n // TestLegacySecurityInstallNonRootless verifies that runtime: docker-sudo-iptables\n // compiles to a lock.yml that installs awf without --rootless (to /usr/local/bin, which is\n-// on sudo's secure_path) and invokes it with \"sudo -E awf\".\n+// on sudo's secure_path) and invokes it with sudo.\n func TestLegacySecurityInstallNonRootless(t *testing.T) {\n \tworkflowsDir := t.TempDir()\n \n@@ -181,7 +181,7 @@ This workflow verifies that docker-sudo-iptables installs awf without --rootless\n \tlockStr := string(lockContent)\n \n \t// Install step must NOT pass --rootless: awf must land in /usr/local/bin so that\n-\t// the subsequent \"sudo -E awf\" invocation can find it on sudo's secure_path.\n+\t// the subsequent privileged invocation can find it on sudo's secure_path.\n \tif strings.Contains(lockStr, \"--rootless\") {\n \t\tt.Error(\"Expected no '--rootless' flag in install step for runtime: docker-sudo-iptables\")\n \t}\n@@ -191,8 +191,8 @@ This workflow verifies that docker-sudo-iptables installs awf without --rootless\n \t\tt.Error(\"Expected install_awf_binary.sh in lock file for runtime: docker-sudo-iptables\")\n \t}\n \n-\t// AWF invocation must use sudo -E awf.\n-\tif !strings.Contains(lockStr, \"sudo -E awf\") {\n-\t\tt.Error(\"Expected 'sudo -E awf' invocation in lock file for runtime: docker-sudo-iptables\")\n+\t// AWF invocation must restore the runner PATH after sudo applies secure_path.\n+\tif !strings.Contains(lockStr, `sudo -E /usr/bin/env PATH=\"$PATH\" /usr/local/bin/awf`) {\n+\t\tt.Error(\"Expected PATH-preserving sudo invocation in lock file for runtime: docker-sudo-iptables\")\n \t}\n }"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=bfb4441766d6d7abac75d6cd4d299d3e3ce92eb7",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVl\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=7952419dae5ee87d8fe37cd24cc216a92ae92c61",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVl\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.changeset/.gitattributes?ref=7952419dae5ee87d8fe37cd24cc216a92ae92c61",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.changeset/.gitattributes?ref=bfb4441766d6d7abac75d6cd4d299d3e3ce92eb7",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=7952419dae5ee87d8fe37cd24cc216a92ae92c61",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/.gitattributes?ref=bfb4441766d6d7abac75d6cd4d299d3e3ce92eb7",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=7952419dae5ee87d8fe37cd24cc216a92ae92c61",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.github/workflows/.gitattributes?ref=bfb4441766d6d7abac75d6cd4d299d3e3ce92eb7",
+   "bodySha256": null,
+   "status": 404,
+   "headers": {},
+   "response": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+    "status": "404"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/2f2e28de363940cc9c5e39ccee69967358270c1b/check-runs?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "total_count": 0,
+    "check_runs": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/2f2e28de363940cc9c5e39ccee69967358270c1b/status?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "state": "pending",
+    "total_count": 0,
+    "statuses": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/54497",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 54497,
+    "title": "Fix SEC-005 false positive in stacked_pull_requests.cjs conformance check",
+    "body": "The SEC-005 conformance check flagged `stacked_pull_requests.cjs` for containing `targetRepo` without a locally-visible allowlist check. In reality, `targetRepo` there is just a pre-validated `\"owner/repo\"` string used for log/error formatting — the actual allowlist enforcement happens upstream in `create_pull_request.cjs` via `resolveTargetRepoConfig()`/`resolveAndValidateRepo()`.\n\n- **Exemption annotation**: Added `@safe-outputs-exempt SEC-005` to the file-level doc comment in `stacked_pull_requests.cjs`, documenting that `targetRepo` is display-only and sourced from an already-validated value in the caller.\n- **Contract enforcement in docs**: Extended the JSDoc on `verifyStackBaseBranchExists` to explicitly state that `repoParts`/`targetRepo` must already be allowlist-validated by the caller before the function is invoked, so future refactors don't accidentally wire in unvalidated input.\n- **Regression test**: Added a test in `create_pull_request.test.cjs` asserting that a pull request targeting a repo outside `allowed-repos` is rejected by `resolveAndValidateRepo` before `verifyStackBaseBranchExists`/`repos.getBranch` is ever called.\n\n```js\n/**\n * CONTRACT: `repoParts` and `targetRepo` MUST already be allowlist-validated by the caller\n * (create_pull_request.cjs's `resolveTargetRepoConfig()` / `resolveAndValidateRepo()`) before this\n * function is invoked. `targetRepo` is used here only for log/error message formatting, never for\n * an independent authorization decision — do not wire in unvalidated input from a future refactor.\n */\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes #54449",
+    "head": {
+     "sha": "b0c4cad6d140b24df4243d6d2e5e0b57034ddb36"
+    },
+    "base": {
+     "sha": "241ca7f8dd7dd4574d9616929d20487d5ffe3c1e"
+    },
+    "changed_files": 2,
+    "html_url": "https://github.com/github/gh-aw/pull/54497"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/54497/files?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": [
+    {
+     "filename": "actions/setup/js/create_pull_request.test.cjs",
+     "status": "modified",
+     "additions": 13,
+     "deletions": 0,
+     "patch": "@@ -4709,6 +4709,19 @@ describe(\"create_pull_request - stacked pull requests\", () => {\n     expect(global.github.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ base: \"release/1.0\" }));\n   });\n \n+  it(\"rejects a stacked pull request targeting a repo outside the allowlist before checking the base branch\", async () => {\n+    const { main } = require(\"./create_pull_request.cjs\");\n+    const handler = await main({ allow_empty: true, allowed_repos: [\"test-owner/test-repo\"] });\n+\n+    const result = await handler({ title: \"Test PR\", body: \"Test body\", repo: \"other-owner/other-repo\", base: \"release/1.0\" }, {});\n+\n+    expect(result.success).toBe(false);\n+    expect(result.error).toContain(\"is not in the allowed-repos list\");\n+    // The base-branch existence check must never run against an unvalidated repo.\n+    expect(global.github.rest.repos.getBranch).not.toHaveBeenCalled();\n+    expect(global.github.rest.pulls.create).not.toHaveBeenCalled();\n+  });\n+\n   it(\"rejects a circular stacked pull request dependency\", async () => {\n     const { main } = require(\"./create_pull_request.cjs\");\n     const handler = await main({ allow_empty: true, max: 3, preserve_branch_name: true });"
+    },
+    {
+     "filename": "actions/setup/js/stacked_pull_requests.cjs",
+     "status": "modified",
+     "additions": 12,
+     "deletions": 2,
+     "patch": "@@ -8,6 +8,12 @@\n  * branch, so a chain of dependent changes can be reviewed and merged one at a time. Everything\n  * related to stacks (configuration, run-scoped tracking, validation, GitHub API calls and body\n  * metadata) lives in this file.\n+ *\n+ * @safe-outputs-exempt SEC-005: `targetRepo` in this file is a display-only \"owner/repo\" string\n+ * used solely for log/error message formatting (e.g. in `verifyStackBaseBranchExists`). It is not\n+ * an independent cross-repo configuration surface — the actual repo resolution and allowlist\n+ * enforcement happen in the caller, `create_pull_request.cjs`, via `resolveTargetRepoConfig()` /\n+ * `resolveAndValidateRepo()`, before the already-validated value is passed into this file.\n  */\n \n const { getErrorMessage } = require(\"./error_helpers.cjs\");\n@@ -171,10 +177,14 @@ function circularStackError(branchName, baseBranch) {\n  * A missing branch is reported with actionable guidance instead of an opaque API error; other API\n  * failures (and clients without the repos.getBranch API) degrade to a warning so the pull request\n  * creation is still attempted.\n+ * CONTRACT: `repoParts` and `targetRepo` MUST already be allowlist-validated by the caller\n+ * (create_pull_request.cjs's `resolveTargetRepoConfig()` / `resolveAndValidateRepo()`) before this\n+ * function is invoked. `targetRepo` is used here only for log/error message formatting, never for\n+ * an independent authorization decision — do not wire in unvalidated input from a future refactor.\n  * @param {any} githubClient - Authenticated Octokit client\n- * @param {{owner: string, repo: string}} repoParts\n+ * @param {{owner: string, repo: string}} repoParts - Must already be allowlist-validated by the caller\n  * @param {string} baseBranch\n- * @param {string} targetRepo - \"owner/repo\" used in log and error messages\n+ * @param {string} targetRepo - \"owner/repo\" used in log and error messages only; must already be allowlist-validated by the caller\n  * @param {string} defaultBaseBranch\n  * @returns {Promise<{success: boolean, error?: string}>}\n  */"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=dc112cdffe570ca887932e71984fe6dcdc9f7e53",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVl\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=241ca7f8dd7dd4574d9616929d20487d5ffe3c1e",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVl\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/b0c4cad6d140b24df4243d6d2e5e0b57034ddb36/check-runs?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "total_count": 1,
+    "check_runs": [
+     {
+      "name": "copilot-pull-request-reviewer",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/32477705654/job/96757392317"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/b0c4cad6d140b24df4243d6d2e5e0b57034ddb36/status?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "state": "pending",
+    "total_count": 0,
+    "statuses": []
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/49113",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "number": 49113,
+    "title": "feat: sync compat.json max-agent with DefaultCopilotVersion at build time",
+    "body": "`compat.json`'s latest interval `max-agent` was manually maintained and drifted from `DefaultCopilotVersion` in `version_constants.go`. This adds a script that keeps them in sync automatically.\n\n## Changes\n\n- **`scripts/sync-compat.sh`** — reads `DefaultCopilotVersion` from `pkg/constants/version_constants.go`, finds the latest interval (`\"open\": true`) in `.github/aw/compat.json`, and updates its `max-agent` to match. Idempotent; accepts `--check` for CI gate use.\n- **`Makefile`**:\n  - `sync-compat` — runs the script; wired as a `build` dependency so it fires on every build\n  - `check-stale-compat` — exits non-zero if `max-agent` is out of sync (intended for CI)\n- **`.github/aw/compat.json`** — `max-agent` updated `1.0.56` → `1.0.75` to match current `DefaultCopilotVersion`",
+    "head": {
+     "sha": "73df92e2c4ef3b5f206e9c804bc08664ead34415"
+    },
+    "base": {
+     "sha": "874225ae1b6249e3288bf5afc06a189fe2ea0579"
+    },
+    "changed_files": 3,
+    "html_url": "https://github.com/github/gh-aw/pull/49113"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/pulls/49113/files?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": [
+    {
+     "filename": ".github/aw/compat.json",
+     "status": "modified",
+     "additions": 1,
+     "deletions": 1,
+     "patch": "@@ -10,7 +10,7 @@\n         \"min-gh-aw\": \"0.72.0\",\n         \"max-gh-aw\": \"*\",\n         \"min-agent\": \"1.0.21\",\n-        \"max-agent\": \"1.0.56\",\n+        \"max-agent\": \"1.0.75\",\n         \"open\": true\n       },\n       {"
+    },
+    {
+     "filename": "Makefile",
+     "status": "modified",
+     "additions": 13,
+     "deletions": 1,
+     "patch": "@@ -38,7 +38,7 @@ all: build\n \n # Build the binary, run make deps before this\n .PHONY: build\n-build: sync-action-pins sync-action-scripts\n+build: sync-action-pins sync-action-scripts sync-compat\n \tgo build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/gh-aw\n \n # Build for all platforms\n@@ -1105,6 +1105,16 @@ sync-action-scripts:\n \t@cp install-gh-aw.ps1 actions/setup-cli/install.ps1\n \t@echo \"✓ Action scripts synced successfully\"\n \n+# Sync max-agent in the latest compat.json interval with DefaultCopilotVersion\n+.PHONY: sync-compat\n+sync-compat:\n+\t@bash scripts/sync-compat.sh\n+\n+# Check that compat.json is in sync with DefaultCopilotVersion (CI gate)\n+.PHONY: check-stale-compat\n+check-stale-compat:\n+\t@bash scripts/sync-compat.sh --check\n+\n # Sync install-gh-aw.sh SHA/hash constants in pkg/cli/copilot_setup.go\n .PHONY: sync-install-script-hashes\n sync-install-script-hashes:\n@@ -1301,6 +1311,8 @@ help:\n \t@echo \"  install          - Install binary locally\"\n \t@echo \"  sync-action-pins - Sync actions-lock.json from .github/aw to pkg/actionpins/data and pkg/workflow/data (runs automatically during build)\"\n \t@echo \"  sync-action-scripts - Sync install-gh-aw.sh and install-gh-aw.ps1 to actions/setup-cli/ (runs automatically during build)\"\n+\t@echo \"  sync-compat      - Sync max-agent in .github/aw/compat.json latest interval with DefaultCopilotVersion (runs automatically during build)\"\n+\t@echo \"  check-stale-compat - Guard: detect when compat.json max-agent is out of sync with DefaultCopilotVersion\"\n \t@echo \"  sync-install-script-hashes - Update install-gh-aw.sh SHA and SHA256 constants in pkg/cli/copilot_setup.go (runs automatically during update)\"\n \t@echo \"  update           - Update GitHub Actions and workflows, sync action pins, and rebuild binary\"\n \t@echo \"  fix              - Apply automatic codemod-style fixes to workflow files (depends on build)\""
+    },
+    {
+     "filename": "scripts/sync-compat.sh",
+     "status": "added",
+     "additions": 66,
+     "deletions": 0,
+     "patch": "@@ -0,0 +1,66 @@\n+#!/bin/bash\n+\n+# sync-compat.sh - Keep .github/aw/compat.json in sync with DefaultCopilotVersion\n+#\n+# Reads DefaultCopilotVersion from pkg/constants/version_constants.go and updates\n+# the max-agent field of the latest interval (the entry with \"open\": true) in\n+# .github/aw/compat.json.\n+#\n+# Usage:\n+#   sync-compat.sh [--check]\n+#\n+# Options:\n+#   --check   Exit with code 1 if compat.json is out of sync instead of updating it.\n+#\n+# Exit codes:\n+#   0 - compat.json is already in sync, or was updated successfully\n+#   1 - compat.json is out of sync (only when --check is passed), or an error occurred\n+\n+set -euo pipefail\n+\n+# Script must be run from the repository root\n+SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n+REPO_ROOT=\"$(cd \"$SCRIPT_DIR/..\" && pwd)\"\n+\n+CONSTANTS_FILE=\"$REPO_ROOT/pkg/constants/version_constants.go\"\n+COMPAT_FILE=\"$REPO_ROOT/.github/aw/compat.json\"\n+\n+CHECK_ONLY=0\n+for arg in \"$@\"; do\n+  if [ \"$arg\" = \"--check\" ]; then\n+    CHECK_ONLY=1\n+  fi\n+done\n+\n+# Extract DefaultCopilotVersion from Go constants file\n+COPILOT_VERSION=$(grep -oP '^\\s*const DefaultCopilotVersion\\s+Version\\s*=\\s*\"\\K[^\"]+' \"$CONSTANTS_FILE\")\n+if [ -z \"$COPILOT_VERSION\" ]; then\n+  echo \"Error: could not extract DefaultCopilotVersion from $CONSTANTS_FILE\" >&2\n+  exit 1\n+fi\n+\n+# Read the current max-agent of the latest interval (entry with \"open\": true)\n+CURRENT_MAX_AGENT=$(jq -r '.\"agent-compat-v1\".copilot[] | select(.open == true) | .\"max-agent\"' \"$COMPAT_FILE\")\n+if [ -z \"$CURRENT_MAX_AGENT\" ] || [ \"$CURRENT_MAX_AGENT\" = \"null\" ]; then\n+  echo \"Error: could not find latest interval (\\\"open\\\": true) in $COMPAT_FILE\" >&2\n+  exit 1\n+fi\n+\n+if [ \"$CURRENT_MAX_AGENT\" = \"$COPILOT_VERSION\" ]; then\n+  echo \"compat.json is already in sync (max-agent=$COPILOT_VERSION)\"\n+  exit 0\n+fi\n+\n+if [ \"$CHECK_ONLY\" = \"1\" ]; then\n+  echo \"Error: compat.json is out of sync: max-agent=$CURRENT_MAX_AGENT, DefaultCopilotVersion=$COPILOT_VERSION\" >&2\n+  echo \"Run 'make sync-compat' to update.\" >&2\n+  exit 1\n+fi\n+\n+# Update max-agent in the latest interval\n+UPDATED=$(jq --arg version \"$COPILOT_VERSION\" \\\n+  '.\"agent-compat-v1\".copilot = [.\"agent-compat-v1\".copilot[] | if .open == true then .\"max-agent\" = $version else . end]' \\\n+  \"$COMPAT_FILE\")\n+\n+echo \"$UPDATED\" > \"$COMPAT_FILE\"\n+echo \"Updated compat.json: max-agent $CURRENT_MAX_AGENT -> $COPILOT_VERSION\""
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=e885e8743b015f00dda405472bbc51bea9d8e566",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/contents/.gitattributes?ref=874225ae1b6249e3288bf5afc06a189fe2ea0579",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "type": "file",
+    "encoding": "base64",
+    "content": "LmNoYW5nZXNldC8qLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdl\nPW91cnMKKi5sb2NrLnltbCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJn\nZT1vdXJzCi5naXRodWIvd29ya2Zsb3dzL2Rldi5tZCBtZXJnZT1vdXJzCi5n\naXRodWIvYXcvZ2l0aHViLWFnZW50aWMtd29ya2Zsb3dzLm1kIGxpbmd1aXN0\nLWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL2NsaS90ZW1wbGF0ZXMv\nY2FtcGFpZ24tKi5tZCBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZSBtZXJnZT1v\ndXJzCnBrZy9jbGkvdGVtcGxhdGVzL2NyZWF0ZS1hZ2VudGljLXdvcmtmbG93\nLm1kIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlIG1lcmdlPW91cnMKcGtnL3dv\ncmtmbG93L2pzLyouanMgbGluZ3Vpc3QtZ2VuZXJhdGVkPXRydWUKcGtnL3dv\ncmtmbG93L2pzLyouY2pzIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCnBrZy93\nb3JrZmxvdy9zaC8qLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVlCmFjdGlv\nbnMvKi9pbmRleC5qcyBsaW5ndWlzdC1nZW5lcmF0ZWQ9dHJ1ZQphY3Rpb25z\nL3NldHVwLWNsaS9pbnN0YWxsLnNoIGxpbmd1aXN0LWdlbmVyYXRlZD10cnVl\nCmFjdGlvbnMvc2V0dXAtY2xpL2luc3RhbGwucHMxIGxpbmd1aXN0LWdlbmVy\nYXRlZD10cnVlCnNwZWNzL2FydGlmYWN0cy5tZCBsaW5ndWlzdC1nZW5lcmF0\nZWQ9dHJ1ZSBtZXJnZT1vdXJzCmRvY3MvYWRyLyoubWQgbWVyZ2U9dGhlaXJz\nCiMgVXNlIGJkIG1lcmdlIGZvciBiZWFkcyBKU09OTCBmaWxlcwouYmVhZHMv\naXNzdWVzLmpzb25sIG1lcmdlPWJlYWRzCnNsaWRlcy8qLnBkZiBmaWx0ZXI9\nbGZzIGRpZmY9bGZzIG1lcmdlPWxmcyAtdGV4dApzbGlkZXMvKi5wcHR4IGZp\nbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CmRvY3Mvc2xpZGVz\nLyoqIGZpbHRlcj1sZnMgZGlmZj1sZnMgbWVyZ2U9bGZzIC10ZXh0CgouZ2l0\naHViL3dvcmtmbG93cy8qLmxvY2sueW1sIGxpbmd1aXN0LWdlbmVyYXRlZD10\ncnVlIG1lcmdlPW91cnM=\n",
+    "path": ".gitattributes"
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/73df92e2c4ef3b5f206e9c804bc08664ead34415/check-runs?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "total_count": 36,
+    "check_runs": [
+     {
+      "name": "Notify on CGO Failure",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844877422"
+     },
+     {
+      "name": "canary-go",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844737080"
+     },
+     {
+      "name": "deploy",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355076/job/90844415578"
+     },
+     {
+      "name": "Unit tests (M-R)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844252853"
+     },
+     {
+      "name": "Unit tests (D-L)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844252810"
+     },
+     {
+      "name": "Unit tests (S-Z and other)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844252792"
+     },
+     {
+      "name": "Unit tests (A-C)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90844252773"
+     },
+     {
+      "name": "Security Scan: ${{ matrix.tool.name }}",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998754"
+     },
+     {
+      "name": "fuzz",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998388"
+     },
+     {
+      "name": "bench",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998274"
+     },
+     {
+      "name": "mcp-server-compile-test",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998077"
+     },
+     {
+      "name": "Alpine Container Test",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998038"
+     },
+     {
+      "name": "build-wasm",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998026"
+     },
+     {
+      "name": "actions-build",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998007"
+     },
+     {
+      "name": "security",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843998004"
+     },
+     {
+      "name": "build",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997992"
+     },
+     {
+      "name": "verify-integration-build",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997991"
+     },
+     {
+      "name": "lint-error-messages",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997950"
+     },
+     {
+      "name": "validate-yaml",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997908"
+     },
+     {
+      "name": "safe-outputs-conformance",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997818"
+     },
+     {
+      "name": "Check validator file sizes",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843997808"
+     },
+     {
+      "name": "copilot-pull-request-reviewer",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534363610/job/90843961531"
+     },
+     {
+      "name": "Build & Test on macos-latest",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843929275"
+     },
+     {
+      "name": "Build & Test on windows-latest",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843929230"
+     },
+     {
+      "name": "impacted-go-tests",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843929212"
+     },
+     {
+      "name": "lint-go",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843929144"
+     },
+     {
+      "name": "JS Tests (shard 2/4)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929102"
+     },
+     {
+      "name": "checkout-cache",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355303/job/90843929053"
+     },
+     {
+      "name": "JS Tests (shard 3/4)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929052"
+     },
+     {
+      "name": "JS Tests (shard 4/4)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929051"
+     },
+     {
+      "name": "lint-js",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929046"
+     },
+     {
+      "name": "JS Tests (shard 1/4)",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929036"
+     },
+     {
+      "name": "Artifact API Integration",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843929020"
+     },
+     {
+      "name": "js-typecheck",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843928956"
+     },
+     {
+      "name": "impacted-js-tests",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355344/job/90843928860"
+     },
+     {
+      "name": "build",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/github/gh-aw/actions/runs/30534355076/job/90843928326"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/github/gh-aw/commits/73df92e2c4ef3b5f206e9c804bc08664ead34415/status?per_page=100",
+   "bodySha256": null,
+   "status": 200,
+   "headers": {},
+   "response": {
+    "state": "pending",
+    "total_count": 0,
+    "statuses": []
+   }
+  }
+ ]
+}

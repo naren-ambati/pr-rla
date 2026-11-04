@@ -8,6 +8,7 @@ import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
+import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyExitCode } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
 import { checkpointRecord, type LedgerCheckpointLine } from "../src/core/checkpoint.js";
@@ -226,7 +227,10 @@ describe("the ledger index anchor with pooled draws (bolt/u8-org-pooled-freeze �
     expect(c5.status).toBe("PASS");
     expect(c7.status).not.toBe("FAIL");
     expect(c7.details.join("\n")).not.toMatch(/ledger-index|draw → issue/);
-    expect(r.verdict).toBe("VERIFIED");
+    // Time round B: the pool's times are self-asserted (no timestamp authority), so checks 1–3 are INCOMPLETE and the
+    // verdict is INCOMPLETE; every other check passes.
+    expect(r.checks.filter((c) => c.status === "INCOMPLETE" || c.status === "SKIP" || c.status === "FAIL").map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE"]);
+    expect(r.verdict).toBe("INCOMPLETE");
   });
 
   it("an index edited across repos FAILs check 7 even while a gone repo makes check 5 INCOMPLETE: the verdict is FAILED, exit 1", async () => {
@@ -387,33 +391,59 @@ describe("read-only mode honours this machine's approvals (bolt/u5-audit-api-mcp
 });
 
 describe("check 7's git-file gate through pr-rla/api/read: status withholds CERTIFIED where verify FAILs (bolt/u5-audit-api-mcp × fix/p4-ledger-path)", () => {
-  it("a committed ledger line removed later: the sequence certifies, but read.status says NOT CERTIFIED with the reason and read.verify FAILs check 7 (exit 1)", async () => {
-    const s = setupAuditRepo({ changes: makeChanges(200) });
+  it("a committed ledger line removed later: the sequence certifies, but read.status withholds the certificate, naming check 7, and read.verify FAILs check 7 (exit 1)", async () => {
+    // Two registered timestamp authorities. The CLI's context trusts their roots, so there the times are proven and only
+    // check 7 can withhold; pr-rla/api/read trusts only the shipped anchors, so there the times stay unproven (time round B).
+    const s = setupAuditRepo({ changes: makeChanges(200), tsa: { ids: ["test-a", "test-b"], server: tsa } });
     appendFileSync(join(s.dir, ".pr-rla.yml"), "ledger: git-file\n");
     s.git("commit", "-qam", "a git-file ledger");
-    s.clock.now = T("2026-10-20T00:00:00Z");
+    at(s, "2026-10-20T00:00:00Z");
     expect(await registerCommand(s.ctx, {})).toBe(0);
-    s.clock.now = T("2026-10-20T12:00:00Z");
+    at(s, "2026-10-20T12:00:00Z");
     expect(await freezeCommand(s.ctx, {})).toBe(0);
-    s.clock.now = T("2026-10-21T01:00:00Z");
+    at(s, "2026-10-21T01:00:00Z");
     expect(await sampleCommand(s.ctx, {})).toBe(0);
     s.git("add", "-A");
     s.git("commit", "-qm", "registration, manifest, draws");
-    const W = "audit/2026-q3";
     const ledger = join(s.dir, W, "verdicts.jsonl");
     const protocolSha256 = readJ<{ record: { protocolSha256: string } }>(s, `${W}/registration.json`).record.protocolSha256;
     const line = (d: { draw: number; changeId: string }) => `${JSON.stringify({ schema: "pr-rla/verdict/v1", draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z" })}\n`;
     const first = readJ<DrawsFile>(s, `${W}/draws.json`).draws.slice(0, 36).filter((d) => d.firstOccurrence);
     for (const d of first) appendFileSync(ledger, line(d));
     commitAll(s.dir, "bob's verdicts", null);
-    s.clock.now = T("2026-10-21T04:00:00Z");
+    at(s, "2026-10-21T04:00:00Z");
     const opts = { nowMs: () => s.clock.now, fetch: s.fetch, env: s.ctx.env };
+
+    const UNPROVEN = [
+      { verdict: "INCOMPLETE", reason: "registration time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" },
+      { verdict: "INCOMPLETE", reason: "manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" },
+    ];
+    const cliStatus = async () => {
+      const from = s.out.length;
+      const code = await statusCommand(s.ctx, { json: true });
+      return { code, json: JSON.parse(s.out.slice(from).join("\n")) as { certified: boolean; certificate: unknown; line: string } };
+    };
 
     const honest = await read.status({ dir: s.dir }, opts);
     if (honest.phase !== "sampled" || !honest.verdictsRead) throw new Error("not sampled");
     expect(honest.sequence.state).toBe("CERTIFIED");
-    expect(honest).toMatchObject({ certificateWithheld: [], ledgerIntegrity: { ok: true, fails: [] } });
-    expect(honest.line).not.toMatch(/NOT CERTIFIED/);
+    expect(honest).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: UNPROVEN }, certificateWithheld: [], ledgerIntegrity: { ok: true, fails: [] } });
+    const honestCli = await cliStatus();
+    expect(honestCli.code).toBe(0);
+    expect(honestCli.json).toMatchObject({ certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
+    expect(honestCli.json.line).toMatch(/· CERTIFIED \(risk /);
+    // A context that trusts nothing beyond the shipped bundle proves the times only with the anchors given to status
+    // as --tsa-trust, as verify's (the wave-2 integration added the option: a certificate needs its times proven).
+    const trustFile = join(mkdtempSync(join(tmpdir(), "prrla-wave2-trust-")), "tsa-trust.json");
+    writeFileSync(trustFile, JSON.stringify(tsa.trust()));
+    const bare = { ...s.ctx, tsaTrust: [] };
+    const bareStatus = async (o: { tsaTrust?: string[] }) => {
+      const from = s.out.length;
+      const code = await statusCommand(bare, { json: true, ...o });
+      return { code, json: JSON.parse(s.out.slice(from).join("\n")) as { certified: boolean; certificate: { state: string } } };
+    };
+    expect(await bareStatus({})).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD" } } });
+    expect(await bareStatus({ tsaTrust: [trustFile] })).toMatchObject({ code: 0, json: { certified: true, certificate: { state: "CERTIFIED" } } });
 
     // A second line is appended and committed, then taken out again: the committed history is rewritten.
     appendFileSync(ledger, line(first[0]!));
@@ -423,10 +453,17 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
 
     const r = await read.status({ dir: s.dir }, opts);
     if (r.phase !== "sampled" || !r.verdictsRead) throw new Error("not sampled");
-    expect(r.sequence.state).toBe("CERTIFIED"); // the counting alone would certify
+    expect(r.sequence.state).toBe("CERTIFIED"); // the SPRT's raw state: the counting alone would certify
     expect(r.certificateWithheld).toEqual(["the ledger's integrity check FAILs"]);
     expect(r.ledgerIntegrity).toMatchObject({ ok: false, fails: [`${W}/verdicts.jsonl was rewritten (not appended) in commit ${rewrite.slice(0, 10)}`] });
-    expect(r.line).toMatch(/NOT CERTIFIED: verify check 7 would FAIL \(the ledger's integrity check FAILs\); run "pr-rla verify"/);
+    // P4's gate through time round B's one certificate: withheld as FAILED, the reason naming check 7, beside the times.
+    const CHECK7 = { verdict: "FAILED", reason: "verify check 7 would FAIL: the ledger's integrity check FAILs" };
+    expect(r).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [...UNPROVEN, CHECK7] } });
+    expect(r.line).toMatch(/target reached · CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
+    const tamperedCli = await cliStatus();
+    expect(tamperedCli.code).toBe(1); // a withholding a check would FAIL exits as verify would
+    expect(tamperedCli.json).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [CHECK7] } });
+    expect(tamperedCli.json.line).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
 
     const v = await read.verify({ dir: s.dir, offline: true }, opts);
     expect(v).toMatchObject({ ok: false, verdict: "FAILED", exitCode: 1 });

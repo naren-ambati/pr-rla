@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -268,6 +268,7 @@ describe("freezePreview: in memory, cached 600 s by (window, registration digest
 
   it("writes nothing: no manifest, no key, no cache file (.pr-rla/cache), the tree unchanged", async () => {
     const s = setupAuditRepo({ changes: makeChanges(200) });
+    rmSync(join(s.dir, ".pr-rla"), { recursive: true, force: true }); // the scenario's fixed test key: none, so a key written would show
     s.clock.now = T("2026-10-20T00:00:00Z");
     const before = treeHash(s.dir);
     const p = await read.freezePreview({ dir: s.dir }, opts(s));

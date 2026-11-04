@@ -4,7 +4,8 @@ import type { CommandContext } from "./context.js";
 
 export interface VerifyOptions {
   offline?: boolean;
-  logKey?: string;
+  /** `--log-key <log url>=<pem file>`, repeatable. */
+  logKey?: string[];
   beaconFile?: string;
   json?: boolean;
   /** Also print the per-item lines a summary line stands for (VerifyCheck.verbose); --json always has them. */
@@ -55,5 +56,6 @@ export function printVerify(ctx: Pick<CommandContext, "out">, report: VerifyResu
   } else if (!report.timestampTamperProof) ctx.out("TIMESTAMP NOT TAMPER-PROOF: registration and/or manifest times are self-asserted (no transparency-log entry was verified)");
   if (report.statusLine) ctx.out(report.statusLine);
   const list = (st: string) => report.checks.filter((c) => c.status === st).map((c) => `check ${c.n} (${c.name})`).join(", ");
-  ctx.out(report.verdict === "VERIFIED" ? "VERIFIED" : report.verdict === "FAILED" ? `FAILED: ${list("FAIL")}` : `INCOMPLETE: ${list("INCOMPLETE")} could not be completed; nothing failed, but this is not a verification (exit 6)`);
+  const open = [list("INCOMPLETE") ? `${list("INCOMPLETE")} could not be established` : "", list("SKIP") ? `${list("SKIP")} skipped` : ""].filter(Boolean).join("; ");
+  ctx.out(report.verdict === "VERIFIED" ? "VERIFIED" : report.verdict === "FAILED" ? `FAILED: ${list("FAIL")}` : `INCOMPLETE: ${open}; nothing failed, but this is not a verification (exit 6)`);
 }

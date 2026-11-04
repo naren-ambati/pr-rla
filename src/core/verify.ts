@@ -5,16 +5,19 @@ import { ledgerPathFindings } from "./ledger-path.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
-import { logKeySource } from "../translog/keys.js";
+import { logKeySource, type TrustedLogKey } from "../translog/keys.js";
 import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
+import { createPublicKey } from "node:crypto";
 import { canonicalJson, sha256Hex } from "./canonical.js";
 import { assemblePopulation, manifestAliases, type Population } from "./population.js";
 import { checkPool } from "./rebuild.js";
 import { poolRecordProblems } from "./repo-set.js";
 import {
   auditMode,
+  compareChangeIds,
   derivedRoundFor,
+  drawBinding,
   effectiveTime,
   isCommitmentV2,
   isManifestV2,
@@ -26,6 +29,8 @@ import {
   registeredVisibility,
   registrationRepoSet,
   registrationTime,
+  reviewHorizonFor,
+  sortChanges,
   type AnyCommitment,
   type AnyManifest,
   type AnyRegistration,
@@ -41,16 +46,20 @@ import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
 import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
+import { auditVerdict, certificateFor, raiseStatus, verdictWithholdings, type AuditVerdict, type Certificate, type CheckStatus } from "./verdict.js";
+import { resolveWindow } from "./window.js";
 import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
 
 /**
- * INCOMPLETE (U8): no FAIL, but part of what the check covers could not be checked (a repo that could not be rebuilt,
- * completeness that could not be established). The audit is then neither VERIFIED nor FAILED: `verify` exits 6.
+ * A check's status and the audit verdict: the one model in src/core/verdict.ts (time round B). INCOMPLETE (U8): no
+ * FAIL, but part of what the check covers could not be established (a repo not rebuilt, a time not proven by k
+ * operators, a seed round resting on such a time); a SKIP is a check that did not run. Either makes the verdict
+ * INCOMPLETE, never VERIFIED: `verify` exits 6.
  */
-export type CheckStatus = "PASS" | "WARN" | "FAIL" | "SKIP" | "INCOMPLETE";
+export type { CheckStatus } from "./verdict.js";
 
-/** VERIFIED: no check FAILed and none is INCOMPLETE. INCOMPLETE: none FAILed, some could not be completed. */
-export type VerifyVerdict = "VERIFIED" | "INCOMPLETE" | "FAILED";
+/** VERIFIED: no check FAILed, none is INCOMPLETE, none skipped. INCOMPLETE: none FAILed, but not everything was established. */
+export type VerifyVerdict = AuditVerdict;
 
 export interface VerifyCheck {
   n: number;
@@ -96,8 +105,11 @@ export interface VerifyDeps {
   ledgerIdentity?: PluginIdentity;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
-  /** Trusted public key (PEM) for a log URL: the verifier's --log-key or a key pinned in the package, never the audit repo's; null if none. */
-  logKey: (logUrl: string) => Promise<string | null>;
+  /**
+   * The key verify trusts for a log URL, with its source and operator: the key pinned in the package (it always wins
+   * for a pinned log), else the verifier's --log-key for that exact URL, never the audit repo's; null if none.
+   */
+  logKey: (logUrl: string) => Promise<TrustedLogKey | null>;
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
   /**
@@ -112,6 +124,12 @@ export interface VerifyReport {
   /** True only when the verdict is VERIFIED: an INCOMPLETE audit is not ok (U8). */
   ok: boolean;
   verdict: VerifyVerdict;
+  /**
+   * What the certificate line may say (src/core/verdict.ts): CERTIFIED only when the SPRT certified and the verdict is
+   * VERIFIED; WITHHELD, with the checks that withhold it, when the SPRT certified but the verdict is not. null without
+   * a sequence (check 7 did not run).
+   */
+  certificate: Certificate | null;
   mode: "PROSPECTIVE" | "RETROSPECTIVE";
   timestampTamperProof: boolean;
   status: StatusReport | null;
@@ -133,48 +151,66 @@ function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes:
 }
 
 /**
- * Checks a record's transparency-log entry. v1 records: the entry is the time evidence.
- * v2 records: a Rekor v1 entry is one more bound (operator Sigstore), a Rekor v2 entry
- * carries no time, and a missing entry is not a warning (tokens are the evidence).
+ * Checks a record's transparency-log entry. v1 records: the entry is the time evidence (the caller makes the check
+ * INCOMPLETE when it is not verified). v2 records: a Rekor v1 entry is one more bound (operator Sigstore for a pinned
+ * log, `log at <host>` for one only the verifier's --log-key vouches for), a Rekor v2 entry carries no time, and a
+ * missing entry is not a warning (tokens are the evidence).
  */
-async function checkLog(entry: LoggedEntry | RekorV2Entry | null, signed: SignedRecord<unknown>, what: string, deps: VerifyDeps, c: VerifyCheck, v2: boolean): Promise<{ verified: boolean; integratedTime: number | null }> {
-  const none = { verified: false, integratedTime: null };
+async function checkLog(entry: LoggedEntry | RekorV2Entry | null, signed: SignedRecord<unknown>, what: string, deps: VerifyDeps, c: VerifyCheck, v2: boolean): Promise<{ verified: boolean; integratedTime: number | null; operator: string | null }> {
+  const none = { verified: false, integratedTime: null, operator: null };
   if (!entry) {
-    if (!v2) {
-      c.details.push(`TIMESTAMP NOT TAMPER-PROOF: the ${what} is not in a transparency log; its time is the signer's own clock`);
-      if (c.status === "PASS") c.status = "WARN";
-    }
+    if (!v2) c.details.push(`TIMESTAMP NOT TAMPER-PROOF: the ${what} is not in a transparency log; its time is the signer's own clock`);
     return none;
   }
   const key = await deps.logKey(entry.logUrl);
   if (!key) {
     // An entry under a key the verifier did not choose proves nothing: no time evidence, no operator.
-    c.details.push(`${what} log entry unverified: no trusted key for ${entry.logUrl} (pr-rla pins only Sigstore's production logs; a verifier who trusts this log passes its key with --log-key <file>), so its ${"apiVersion" in entry ? "inclusion proof is" : "integratedTime is"} not evidence`);
-    if (!v2 && c.status === "PASS") c.status = "WARN";
+    c.details.push(`${what} log entry unverified: no trusted key for ${entry.logUrl} (pr-rla pins only Sigstore's production logs; a verifier who trusts this log passes its key with --log-key <log url>=<pem file>), so its ${"apiVersion" in entry ? "inclusion proof is" : "integratedTime is"} not evidence`);
     return none;
   }
   if ("apiVersion" in entry) {
-    const r = verifyRekorV2Entry(entry, signed, key);
+    const r = verifyRekorV2Entry(entry, signed, key.publicKeyPem);
     if (!r.ok) {
       c.status = "FAIL";
       c.details.push(...r.problems.map((p) => `${what} Rekor v2 entry: ${p}`));
       return none;
     }
-    c.details.push(`${what} in Rekor v2 log ${entry.logUrl} index ${entry.logIndex} (inclusion proof and signed checkpoint verified under ${logKeySource(entry.logUrl, key)}; v2 entries carry no time, and the client is unverified against the production log)`);
-    return { verified: true, integratedTime: null };
+    c.details.push(`${what} in Rekor v2 log ${entry.logUrl} index ${entry.logIndex} (inclusion proof and signed checkpoint verified under ${logKeySource(key)}; operator ${key.operator}; v2 entries carry no time, and the client is unverified against the production log)`);
+    return { verified: true, integratedTime: null, operator: key.operator };
   }
-  const r = verifyLoggedEntry(entry, signed, key);
+  const r = verifyLoggedEntry(entry, signed, key.publicKeyPem);
   if (!r.ok) {
     c.status = "FAIL";
     c.details.push(...r.problems.map((p) => `${what} log entry: ${p}`));
     return none;
   }
-  c.details.push(`${what} logged at ${entry.logUrl} index ${entry.logIndex}, integratedTime ${unixToIso(entry.integratedTime)} (SET and inclusion proof verified under ${logKeySource(entry.logUrl, key)})`);
-  return { verified: true, integratedTime: entry.integratedTime };
+  c.details.push(`${what} logged at ${entry.logUrl} index ${entry.logIndex}, integratedTime ${unixToIso(entry.integratedTime)} (SET and inclusion proof verified under ${logKeySource(key)}; operator ${key.operator})`);
+  return { verified: true, integratedTime: entry.integratedTime, operator: key.operator };
+}
+
+/** Two PEM public keys are the same key (their SPKI DER bytes are equal); an unreadable key is never the same. */
+function sameKey(a: string, b: string): boolean {
+  try {
+    const der = (pem: string) => createPublicKey(pem).export({ type: "spki", format: "der" });
+    return der(a).equals(der(b));
+  } catch {
+    return false;
+  }
+}
+
+/** A registered window whose opensAt/closesAt are not what its start/end resolve to (src/core/window.ts), or null. */
+function windowProblem(w: { name: string; start: string; end: string; opensAt: string; closesAt: string }): string | null {
+  try {
+    const r = resolveWindow({ name: w.name, start: w.start, end: w.end });
+    if (r.opensAt !== w.opensAt || r.closesAt !== w.closesAt) return `the registered window ${w.name} says ${w.opensAt}..${w.closesAt}, but its days ${w.start}..${w.end} resolve to ${r.opensAt}..${r.closesAt}`;
+    return null;
+  } catch (e) {
+    return `the registered window is malformed: ${(e as Error).message}`;
+  }
 }
 
 /** Rule-checks a v2 record's tokens; any token failing rules 1–7 FAILs the check. */
-async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], log: { integratedTime: number | null }, what: string, deps: VerifyDeps, c: VerifyCheck): Promise<TimeEvidenceSummary> {
+async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], log: { integratedTime: number | null; operator?: string | null }, what: string, deps: VerifyDeps, c: VerifyCheck, unprovenAs: "INCOMPLETE" | "WARN" = "INCOMPLETE"): Promise<TimeEvidenceSummary> {
   const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
   const ts = await assessTimestamps({
     timestamps: signed.timestamps ?? [],
@@ -183,7 +219,7 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     signedTimeIso,
     timestamping,
     bundle: deps.trustBundle,
-    log: log.integratedTime !== null ? { operator: deps.trustBundle.authorities.sigstore?.operator ?? "Sigstore", integratedTime: log.integratedTime } : null,
+    log: log.integratedTime !== null ? { operator: log.operator ?? deps.trustBundle.authorities.sigstore?.operator ?? "Sigstore", integratedTime: log.integratedTime } : null,
   });
   for (const f of ts.failed) {
     c.status = "FAIL";
@@ -198,7 +234,8 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
   for (const l of anchorLines(ts)) c.details.push(`${what} ${l}`);
   if (!ts.proven) {
     c.details.push(`${notTamperProof(ts)}: the ${what}'s time is the signer's own clock${ts.configured.length ? `, bounded by ${ts.operators.length} operator(s) where ${ts.k} are required` : ""}`);
-    if (c.status === "PASS") c.status = "WARN";
+    // A time k operators do not bound is not established: the record's own time (time round B, finding 6).
+    c.status = raiseStatus(c.status, unprovenAs);
   }
   return ts;
 }
@@ -221,6 +258,22 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c1.details.push(`registration signature: ${sig.reason}`);
   }
   const regLog = await checkLog(reg.log, reg, "registration", deps, c1, v2);
+  const win = windowProblem(reg.record.window);
+  if (win) {
+    c1.status = "FAIL";
+    c1.details.push(`FAIL ${win}`);
+  }
+  if (v2) {
+    // Time round B: a v2 registration names its own signing key inside the signed, time-stamped bytes.
+    const bound = (reg.record as RegistrationRecordV2).publicKeyPem;
+    if (bound === undefined) {
+      c1.details.push("WARN the registration does not name its signing key (written before registrations bound their key): anyone can re-sign it under another key, and the commitment's key is checked only against this envelope");
+      c1.status = raiseStatus(c1.status, "WARN");
+    } else if (!sameKey(bound, reg.publicKeyPem)) {
+      c1.status = "FAIL";
+      c1.details.push("FAIL the registration was re-signed: its envelope's key is not the signing key the registration names (publicKeyPem, inside the signed and time-stamped bytes)");
+    }
+  }
   if (v2 && reg.timestamps === undefined) {
     // A v2 record always carries the field (empty when no authority is configured): its absence is tampering, never a fallback to the log (FR1.4).
     c1.status = "FAIL";
@@ -231,7 +284,13 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (!regTs.proven) tamperProof = false;
     else mode = regTs.ukMs! < Date.parse(reg.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
     c1.details.push(`registered with pr-rla ${reg.record.prRlaVersion} · provider ${reg.record.plugins.provider.name} (${reg.record.plugins.provider.source} ${reg.record.plugins.provider.version ?? "?"}) · ledger ${reg.record.plugins.ledger.name} · verdict provenance ${provenanceLabel(reg.record.verdicts.minProvenance)}${reg.record.verdicts.require_signed ? " · signed verdicts required" : ""}`);
-  } else if (!regLog.verified) tamperProof = false;
+  } else if (!regLog.verified) {
+    // v1: the log entry is the whole time evidence. Unverified, the registration time is not established (time round B).
+    tamperProof = false;
+    c1.status = raiseStatus(c1.status, "INCOMPLETE");
+  }
+  // The registration time is proven when k operators bound it (v2) or its log entry verifies under a trusted key (v1).
+  const regProven = v2 ? !!regTs?.proven : regLog.verified;
   if (a.currentProtocolSha256 === null) {
     c1.details.push("review protocol file not found: cannot confirm it is the registered one");
     if (c1.status === "PASS") c1.status = "WARN";
@@ -259,7 +318,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (m.changes.length !== m.N) c2.details.push(`manifest lists ${m.changes.length} changes but N = ${m.N}`);
     const ids = m.changes.map((x) => x.id);
     if (new Set(ids).size !== ids.length) c2.details.push("manifest lists a change twice");
-    if (ids.some((id, i) => i > 0 && ids[i - 1]! >= id)) c2.details.push("manifest changes are not sorted by id");
+    if (ids.some((id, i) => i > 0 && compareChangeIds(ids[i - 1]!, id) > 0)) c2.details.push("manifest changes are not sorted by id");
     if (m.registrationSha256 !== reg.sha256) c2.details.push("manifest names a different registration");
     if (isManifestV2(m) !== v2 || isCommitmentV2(cm) !== v2) c2.details.push("registration, manifest and commitment use different schema versions");
     for (const [k, mine, theirs] of [
@@ -275,21 +334,33 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c2.details.push(...poolRecordProblems(registrationRepoSet(reg), { repos: manifestRepos(m), changeRepos: m.changes.map((x) => x.repo), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], registered: isRegistrationV2(reg) ? recordedRegisteredRepos(reg) : [], ...(mv2?.headEvidence ? { headEvidence: mv2.headEvidence } : {}) }));
     const csig = verifySignedRecord(cm);
     if (!csig.ok) c2.details.push(`commitment signature: ${csig.reason}`);
-    if (cm.publicKeyPem.trim() !== reg.publicKeyPem.trim()) c2.details.push("commitment is signed by a different key than the registration");
+    if (!sameKey(cm.publicKeyPem, reg.publicKeyPem)) c2.details.push("commitment is signed by a different key than the registration");
     if (cm.record.manifestSha256 !== m.sha256) c2.details.push("commitment names a different manifest hash");
     if (cm.record.N !== m.N) c2.details.push("commitment names a different N");
     if (cm.record.registrationSha256 !== reg.sha256) c2.details.push("commitment names a different registration");
     if (isCommitmentV2(cm) && cm.timestamps === undefined) c2.details.push("a schema-v2 commitment has no timestamps field (writers always store one); its time evidence was removed");
     if (isoToUnix(m.frozenAt) < isoToUnix(reg.record.window.closesAt)) c2.details.push(`frozen ${m.frozenAt}, before the window closed`);
+    // Time round B: a label stratum is the one registered input freeze reads as it is at freeze, not as it was at landing.
+    const labelled = reg.record.selector.labels ?? [];
     // A pooled freeze signs its commitment when it finishes, after the as-of time its manifest records; never before it.
+    // A single repo signs both at the command's start: the two times are one (time round B, finding 9).
     if (isoToUnix(cm.record.frozenAt) < isoToUnix(m.frozenAt)) c2.details.push(`commitment dated ${cm.record.frozenAt}, before the manifest's as-of time ${m.frozenAt}`);
+    else if (registrationRepoSet(reg).kind === "repo" && cm.record.frozenAt !== m.frozenAt) c2.details.push(`commitment dated ${cm.record.frozenAt}, but a single-repo freeze signs it at the manifest's own time ${m.frozenAt}`);
     if (c2.details.length) c2.status = "FAIL";
+    if (labelled.length) {
+      c2.details.push(`WARN the registered stratum selects by labels (${labelled.join(", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
+      c2.status = raiseStatus(c2.status, "WARN");
+    }
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
     if (v2 && isRegistrationV2(reg)) {
       cmTs = await checkTimestamps(cm, cm.record.frozenAt, reg.record.timestamping, cmLog, "manifest commitment", deps, c2);
       if (!cmTs.proven) tamperProof = false;
       if (isManifestV2(m)) c2.details.push(`frozen with pr-rla ${m.prRlaVersion} · provider ${m.provider.name} (${m.provider.source} ${m.provider.version ?? "?"})`);
-    } else if (!cmLog.verified) tamperProof = false;
+    } else if (!cmLog.verified) {
+      // v1: an unverified commitment time does not show the manifest existed before R (time round B).
+      tamperProof = false;
+      c2.status = raiseStatus(c2.status, "INCOMPLETE");
+    }
     const t = effectiveTime(cm, cm.record.frozenAt);
     const bound = cmTs?.ukMs ?? null;
     const late = t.unix >= derived.publishesAt ? t.iso : bound !== null && bound >= derived.publishesAt * 1000 ? isoMs(bound) : null;
@@ -298,8 +369,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c2.details.unshift(`FAIL manifest logged after the seed was public (${late} ≥ round ${derived.round} at ${unixToIso(derived.publishesAt)})`);
       c2.summary = "manifest logged after the seed was public";
     } else if (c2.status === "FAIL") c2.summary = "manifest inconsistent";
-    else if (cmTs) c2.summary = cmTs.proven ? `manifest logged by ${cmTs.k} of ${cmTs.operators.length} operators by ${isoMs(bound!)}, before R` : `manifest written (signed time, unproven) ${t.iso}, before R`;
-    else c2.summary = `manifest ${t.source === "log" ? (cmLog.verified ? "logged" : "logged (unverified)") : "written (local clock)"} ${t.iso}, before R`;
+    else if (cmTs) c2.summary = cmTs.proven ? `manifest logged by ${cmTs.operators.length} operator${cmTs.operators.length === 1 ? "" : "s"} (k = ${cmTs.k}) by ${isoMs(bound!)}, before R` : `manifest written (signed time, unproven) ${t.iso}: not shown to precede R`;
+    else c2.summary = t.source === "log" && cmLog.verified ? `manifest logged ${t.iso}, before R` : `manifest ${t.source === "log" ? "logged (unverified)" : "written (local clock)"} ${t.iso}: not shown to precede R`;
   }
   checks.push(c2);
 
@@ -309,6 +380,17 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   for (const [where, r] of named) if (r !== derived.round) c3.details.push(`FAIL seed round ${n(r)} ≠ derived round ${n(derived.round)} (${where})`);
   c3.status = c3.details.length ? "FAIL" : "PASS";
   c3.summary = c3.details.length ? c3.details[0]!.replace(/^FAIL /, "") : `R = ${n(derived.round)}: first round ≥ 24 h after ${derived.base === "registration" ? "registration" : "window close"}`;
+  if (!c3.details.length && !regProven) {
+    // R is fixed by the registration time (or by window close, given a registration before it): when that time is not
+    // proven, whoever wrote it could have chosen R after the seed was public (pass-2 review #2). Not established, so not a PASS.
+    c3.status = "INCOMPLETE";
+    c3.summary += ", but the registration time it rests on is unproven";
+    c3.details.push(
+      derived.base === "registration"
+        ? `INCOMPLETE R is derived from the registration time ${registrationTime(reg).iso}, which no trusted evidence bounds (${v2 ? "fewer than k timestamp authorities agree" : "no transparency-log entry verified under a trusted key"}): it could have been written after round ${n(derived.round)} was public, to choose R`
+        : `INCOMPLETE R is derived from window close because the registration claims a time before it, which no trusted evidence bounds (${v2 ? "fewer than k timestamp authorities agree" : "no transparency-log entry verified under a trusted key"}): a registration written after the seed was public could claim it`,
+    );
+  }
   checks.push(c3);
 
   // 4. R's BLS signature.
@@ -385,10 +467,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const listings = pool.rebuilt.filter((b) => b.listed).map((b) => ({ repo: b.repo, listed: b.listed! }));
     let pop: Population;
     try {
-      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, aliases });
+      pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
     } catch (e) {
       c5.details.push(`FAIL population: the rebuilt population is malformed: ${(e as Error).message}`);
-      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, aliases });
+      pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
     }
     const verifiable = m.changes.filter((x) => !unrebuilt.has(x.repo));
     const mine = new Map(verifiable.map((x) => [x.id, x]));
@@ -447,28 +529,76 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   }
   checks.push(c5);
 
-  // 6. Every draw recomputed.
+  // 6. Every draw recomputed: from the beacon, the binding (the registration for v2, the manifest for v1) and the
+  // population's change ids in canonical order (contracts.md §5, "Draws"). Every entry of the file is compared, and
+  // every issued draw must be among them.
   const c6: VerifyCheck = { n: 6, name: "draws", status: "PASS", summary: "", details: [] };
   let recomputed: { draw: number; index: number; changeId: string; url: string }[] | null = null;
+  const minPopulation = m !== null ? reg.record.parameters.minPopulation : 0;
+  const belowMinimum = m !== null && m.N < minPopulation ? `population ${n(m.N)} < the registered minimum ${n(minPopulation)}: the registration says review all ${n(m.N)} instead` : null;
   if (!a.draws) {
     c6.status = "SKIP";
-    c6.summary = "not sampled yet";
+    c6.summary = belowMinimum ? `${belowMinimum} (no draws)` : "not sampled yet";
+  } else if (belowMinimum) {
+    // sample refuses below the minimum (exit 3); draws that exist anyway count for nothing (time review finding 7).
+    c6.status = "FAIL";
+    c6.summary = `${belowMinimum}; no draw may count`;
+    c6.details.push(`FAIL ${c6.summary}, yet draws.json issues ${n(a.draws.issued)} draw(s)`);
   } else if (!m || !beacon) {
     c6.status = "SKIP";
     c6.summary = "needs the manifest and round R";
   } else {
     const cap = effectiveCap(reg.record.parameters);
-    recomputed = computeDraws(beacon.randomness, m.sha256, m.N, cap).map((d) => ({ ...d, changeId: m.changes[d.index]!.id, url: m.changes[d.index]!.url }));
-    if (a.draws.manifestSha256 !== m.sha256) c6.details.push("draws file names a different manifest");
-    if (a.draws.N !== m.N) c6.details.push("draws file names a different N");
-    const bad = a.draws.draws.filter((d) => {
-      const r = recomputed![d.draw - 1];
-      return !r || r.index !== d.index || r.changeId !== d.changeId;
-    });
-    for (const d of bad.slice(0, 5)) c6.details.push(`draw #${d.draw}: file says ${d.changeId}, recomputed ${recomputed[d.draw - 1]?.changeId ?? "(beyond cap)"}`);
-    if (a.draws.issued > cap) c6.details.push(`draws file issues ${a.draws.issued} > cap ${cap}`);
-    c6.status = c6.details.length ? "FAIL" : "PASS";
-    c6.summary = c6.status === "PASS" ? `${a.draws.issued}/${a.draws.issued} draws reproduce` : `${bad.length} draws do not reproduce`;
+    const binding = drawBinding(reg, m);
+    const order = sortChanges(m.changes);
+    let all: { draw: number; index: number; changeId: string; url: string; mergeSha: string; firstOccurrence: boolean }[] = [];
+    try {
+      if (m.N !== order.length) throw new Error(`the manifest says N = ${n(m.N)} but lists ${n(order.length)} changes`);
+      const seen = new Set<string>();
+      all = computeDraws(beacon.randomness, binding.hex, m.N, cap).map((d) => {
+        const c = order[d.index]!;
+        const firstOccurrence = !seen.has(c.id);
+        seen.add(c.id);
+        return { ...d, changeId: c.id, url: c.url, mergeSha: c.mergeSha, firstOccurrence };
+      });
+      recomputed = all.map(({ draw, index, changeId, url }) => ({ draw, index, changeId, url }));
+    } catch (e) {
+      c6.details.push(`FAIL the draws cannot be recomputed: ${(e as Error).message}`);
+    }
+    if (a.draws.manifestSha256 !== m.sha256) c6.details.push("FAIL draws file names a different manifest");
+    if (a.draws.N !== m.N) c6.details.push("FAIL draws file names a different N");
+    if (a.draws.cap !== cap) c6.details.push(`FAIL draws file says cap ${a.draws.cap}, the registered parameters give ${cap}`);
+    if (!Number.isInteger(a.draws.issued) || a.draws.issued < 1) c6.details.push(`FAIL draws file issues ${a.draws.issued} draws: sample issues at least one`);
+    if (a.draws.issued > cap) c6.details.push(`FAIL draws file issues ${a.draws.issued} > cap ${cap}`);
+    const file = a.draws;
+    const entries = file.draws;
+    if (!entries.length) c6.details.push("FAIL draws file lists no draws");
+    const numbers = new Set<number>();
+    const bad: number[] = [];
+    let compared = 0;
+    for (const d of entries) {
+      if (numbers.has(d.draw)) {
+        c6.details.push(`FAIL draws file lists draw #${d.draw} twice`);
+        continue;
+      }
+      numbers.add(d.draw);
+      const r = recomputed ? all[d.draw - 1] : undefined;
+      if (!recomputed) continue;
+      compared++;
+      if (!r || r.index !== d.index || r.changeId !== d.changeId || r.url !== d.url || r.mergeSha !== d.mergeSha || r.firstOccurrence !== d.firstOccurrence) bad.push(d.draw);
+    }
+    for (const k of bad.slice(0, 5)) {
+      const d = entries.find((x) => x.draw === k)!;
+      const r = all[k - 1];
+      c6.details.push(`FAIL draw #${k}: file says ${d.changeId} (index ${d.index}), recomputed ${r ? `${r.changeId} (index ${r.index})` : "(beyond cap)"}`);
+    }
+    const missing = Array.from({ length: Math.max(0, Math.min(a.draws.issued, cap)) }, (_, i) => i + 1).filter((k) => !numbers.has(k));
+    if (missing.length) c6.details.push(`FAIL draws file lists ${n(a.draws.issued - missing.length)} of the ${n(a.draws.issued)} issued draws (missing ${missing.slice(0, 5).map((k) => `#${k}`).join(", ")}${missing.length > 5 ? ", …" : ""})`);
+    const reproduced = recomputed ? Math.max(0, file.issued - missing.length - bad.filter((k) => k <= file.issued).length) : 0;
+    c6.status = c6.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : "PASS";
+    if (c6.status === "PASS")
+      c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} change ids in canonical order`);
+    c6.summary = c6.status === "PASS" ? `${n(reproduced)}/${n(a.draws.issued)} draws reproduce` : bad.length ? `${n(bad.length)} draws do not reproduce` : c6.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "");
   }
   checks.push(c6);
 
@@ -589,7 +719,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
           // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
           if (cp.line.timestamps.length && isRegistrationV2(reg)) {
-            const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7);
+            const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7, "WARN");
             // Coverage counts only what the trusted-time rules count: ignored (unregistered) or failing tokens time-stamp nothing.
             stampedBy.set(cp, ts.counted.length > 0);
           }
@@ -602,11 +732,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   }
   checks.push(c7);
 
-  const verdict: VerifyVerdict = checks.some((c) => c.status === "FAIL") ? "FAILED" : checks.some((c) => c.status === "INCOMPLETE") ? "INCOMPLETE" : "VERIFIED";
+  const verdict: VerifyVerdict = auditVerdict(checks);
   return {
     checks,
     ok: verdict === "VERIFIED",
     verdict,
+    certificate: status ? certificateFor(status.sequence.state, status.refusal, verdictWithholdings(checks)) : null,
     mode,
     timestampTamperProof: tamperProof,
     status,

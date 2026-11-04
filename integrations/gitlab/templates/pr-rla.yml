@@ -50,6 +50,10 @@ spec:
       type: string
       default: ""
       description: "Credentials the built-ins may send beyond the defaults (GITLAB_TOKEN to gitlab.com, GITHUB_TOKEN to api.github.com, BITBUCKET_TOKEN and BITBUCKET_USERNAME to api.bitbucket.org). ENV_VAR=https://host entries, separated by spaces or commas. Needed for GitLab self-managed or another token variable. Written by whoever owns this pipeline; never taken from the audited repository."
+    tsa-trust:
+      type: string
+      default: ""
+      description: "Timestamp-authority anchor files (pr-rla's trust-extra JSON) that whoever owns this pipeline trusts beyond the bundle pr-rla ships, as paths relative to the project separated by spaces or commas; passed as --tsa-trust. Needed only when the audit registers an authority outside the shipped bundle: a certificate needs its times proven. Your trust, not the audited repository's."
     accept-lock-grants:
       type: string
       default: "false"
@@ -75,6 +79,7 @@ pr-rla-$[[ inputs.command ]]:
     PRRLA_FAIL_ON: "$[[ inputs.fail-on ]]"
     PRRLA_PLUGINS: "$[[ inputs.plugins ]]"
     PRRLA_APPROVE_ORIGINS: "$[[ inputs.approve-origins ]]"
+    PRRLA_TSA_TRUST: "$[[ inputs.tsa-trust ]]"
     PRRLA_ACCEPT_LOCK_GRANTS: "$[[ inputs.accept-lock-grants ]]"
   rules:
     # Pushes that touch the audit directory, the schedule that notices the window closing and the
@@ -138,7 +143,7 @@ pr-rla-$[[ inputs.command ]]:
             ;;
           6)
             prrla_name=incomplete
-            prrla_what="exit 6: INCOMPLETE (nothing failed, but part of the population could not be rebuilt or shown complete)"
+            prrla_what="exit 6: INCOMPLETE (nothing failed, but something was not established: a time not proven by enough timestamp authorities, the population not rebuilt or shown complete, or a check skipped)"
             ;;
           *)
             PRRLA_REASON="exit $prrla_rc: not a pr-rla exit code (pr-rla did not run to its end)"
@@ -204,6 +209,15 @@ pr-rla-$[[ inputs.command ]]:
       if [ "${PRRLA_ACCEPT_LOCK_GRANTS:-false}" = true ]; then set -- --accept-lock-grants "$@"; fi
       set -- "$@" "$PRRLA_COMMAND" --json
       if [ "$PRRLA_OFFLINE" = true ]; then set -- "$@" --offline; fi
+      # The timestamp-authority anchors the owner of this CI configuration trusts beyond the shipped bundle
+      # (PRRLA_TSA_TRUST: files, relative to the project): a certificate needs its times proven.
+      set -f
+      for prrla_f in $(printf '%s' "${PRRLA_TSA_TRUST:-}" | tr ',\r\n\t' '    '); do
+        [ -f "$prrla_f" ] || { echo "tsa-trust: $prrla_f is not a file" >&2; exit 1; }
+        case "$prrla_f" in /*) ;; *) prrla_f="$(pwd -P)/$prrla_f" ;; esac
+        set -- "$@" --tsa-trust "$prrla_f"
+      done
+      set +f
       set +e
       "$PRRLA_BIN" "$@" > pr-rla.json
       PRRLA_RC=$?

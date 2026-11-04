@@ -71,7 +71,7 @@ describe("errors: a plain sentence and the next step on stderr; with --json, the
     const c = { ...ctxIn(dir), sleep: async () => {} };
     expect(await cli(c, "draw-context", "7", "--json")).toBe(1);
     const e = JSON.parse(c.stdout.join("\n")).error;
-    expect(e).toMatchObject({ code: "FAILED", message: expect.stringMatching(/^GitHub GET \/repos\/github\/gh-aw\/pulls\/42597: gave up after 7 attempts \(no network\)$/) });
+    expect(e).toMatchObject({ code: "FAILED", message: expect.stringMatching(/^GitHub GET \/repos\/github\/gh-aw\/pulls\/58625: gave up after 7 attempts \(no network\)$/) });
   });
 
   it("draw-context: exit 0 with the context, 1 on a refusal; record, sample and the other writers keep their codes", async () => {
@@ -149,7 +149,8 @@ describe("the writers keep master's exit codes (the review's differential flows,
       [["checkpoint"], 1],
       [["checkpoint", "--push"], 1],
       // A git-file ledger never committed beside a committed registration has no tamper trail at
-      // its path: verify check 7 FAILs until the ledger file is committed (fix/p4-ledger-path).
+      // its path: verify check 7 FAILs until the ledger file is committed (fix/p4-ledger-path). A FAIL wins over
+      // time round B's INCOMPLETE (--offline skips check 5; the recorded audit's times are self-asserted): exit 1.
       [["verify", "--offline"], 1],
     ];
     for (const [argv, code] of steps) expect(await cli(ctxIn(dir), ...argv), argv.join(" ")).toBe(code);
@@ -157,7 +158,12 @@ describe("the writers keep master's exit codes (the review's differential flows,
     const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", ...a], { cwd: dir, stdio: "ignore" });
     git("add", "audit/2026-q3/verdicts.jsonl");
     git("commit", "-qm", "verdicts");
-    expect(await cli(ctxIn(dir), "verify", "--offline"), "verify --offline after committing the ledger").toBe(0);
+    // Then nothing FAILs. Offline, on self-asserted times, that is INCOMPLETE (exit 6, time round B): never VERIFIED.
+    const after = ctxIn(dir);
+    expect(await cli(after, "verify", "--offline", "--json"), "verify --offline after committing the ledger").toBe(6);
+    const doc = JSON.parse(after.stdout.join("\n")) as { verdict: string; checks: { n: number; status: string }[] };
+    expect(doc.verdict).toBe("INCOMPLETE");
+    expect(doc.checks.filter((c) => c.status === "FAIL")).toEqual([]);
   });
 
   it("init, status, verify, freeze --dry-run, register --dry-run, plugin and simulate on an empty directory (flow 3)", async () => {

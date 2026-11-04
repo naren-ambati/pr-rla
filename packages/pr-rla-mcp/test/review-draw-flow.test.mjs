@@ -58,21 +58,23 @@ describe("the review-draw skill against pr-rla-mcp", () => {
     assert.equal(d.draws[0].state, "unlabelled");
   });
 
+  // Time round B rebuilt the recorded audit (draws bound to the registration): draw #27, gh-aw#55696, is the one with
+  // generated files now (12 of 18), as #13 (gh-aw#49685, 21 of 28) was before.
   it("step 2: draw_context gives the header, CI results, the checklist and the files, generated files by name only", async () => {
-    const c = body(await s.call("draw_context", { draw: 13 }));
-    assert.equal(c.changeId, "github:github/gh-aw#49685");
-    assert.equal(c.summary.files, 7);
-    assert.equal(c.summary.generatedFiles, 21);
-    assert.equal(c.untrusted.generatedFiles.length, 21);
+    const c = body(await s.call("draw_context", { draw: 27 }));
+    assert.equal(c.changeId, "github:github/gh-aw#55696");
+    assert.equal(c.summary.files, 6);
+    assert.equal(c.summary.generatedFiles, 12);
+    assert.equal(c.untrusted.generatedFiles.length, 12);
     for (const f of c.untrusted.files) assert.ok(!c.untrusted.generatedFiles.includes(f.path));
-    assert.deepEqual(c.summary.checks, { success: 1 });
+    assert.deepEqual(c.summary.checks, { success: 29, skipped: 3 }); // gh-aw#55696's recorded CI results
     assert.equal(c.protocol.ok, true);
     assert.ok(c.protocol.failsIf.length > 0);
     assert.match(c.text, /the change FAILS if any of these holds:/);
   });
 
   it("step 3: the change's own text is inside the core's fence, apart from pr-rla's words", async () => {
-    const c = body(await s.call("draw_context", { draw: 13 }));
+    const c = body(await s.call("draw_context", { draw: 27 }));
     const id = c.untrusted.fence;
     const open = c.text.indexOf(`<<<UNTRUSTED-CHANGE-CONTENT ${id}>>>`);
     const close = c.text.indexOf(`<<<END ${id}>>>`);
@@ -90,12 +92,12 @@ describe("the review-draw skill against pr-rla-mcp", () => {
   });
 
   it("step 5: howToRecord is the person's own command, which the guard blocks from the assistant", async () => {
-    const c = body(await s.call("draw_context", { draw: 13 }));
-    assert.equal(c.howToRecord, 'pr-rla record 13 pass|fail --reviewer <you> --note "<one line>", then commit audit/2026-q3/verdicts.jsonl');
+    const c = body(await s.call("draw_context", { draw: 27 }));
+    assert.equal(c.howToRecord, 'pr-rla record 27 pass|fail --reviewer <you> --note "<one line>", then commit audit/2026-q3/verdicts.jsonl');
     // The assistant running it, filled in, is blocked; so is appending the line itself.
     const run = (command) => guard.evaluate({ hook_event_name: "PreToolUse", cwd: dir, tool_name: "Bash", tool_input: { command } }, { client: "claude-code", env: { HOME: dir } });
-    assert.equal(run('pr-rla record 13 pass --reviewer alice --note "ok"').decision, "block");
-    assert.equal(run(`echo '{"draw":13,"verdict":"pass"}' >> audit/2026-q3/verdicts.jsonl`).decision, "block");
+    assert.equal(run('pr-rla record 27 pass --reviewer alice --note "ok"').decision, "block");
+    assert.equal(run(`echo '{"draw":27,"verdict":"pass"}' >> audit/2026-q3/verdicts.jsonl`).decision, "block");
     assert.equal(run("pr-rla status --offline").decision, "allow");
   });
 

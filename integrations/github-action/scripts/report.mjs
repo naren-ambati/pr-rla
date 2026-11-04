@@ -25,8 +25,13 @@ const fenced = (s) => {
   return `${fence}text\n${String(s).replace(/\n+$/, "")}\n${fence}`;
 };
 
-/** CERTIFIED, NOT_CERTIFIED, ESCALATE or REFUSED, from a status result (or a verify result's `status`). */
-function stateOf(st) {
+/**
+ * The certificate's state, from the result's `certificate` (pr-rla's one display decision: CERTIFIED only when
+ * `certified`): CERTIFIED, WITHHELD, NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE. `sequence.state` is the SPRT's
+ * raw state and is never reported as the claim; a result without `certificate` falls back to it.
+ */
+function stateOf(st, certificate) {
+  if (certificate && typeof certificate === "object" && typeof certificate.state === "string") return certificate.state.replace(/ /g, "_");
   if (!st || typeof st !== "object" || !st.sequence) return "NOT_CERTIFIED";
   if (st.refusal) return "REFUSED";
   if (st.sequence.state === "ESCALATE") return "ESCALATE";
@@ -65,7 +70,7 @@ function build() {
     // ledger skips check 7, so it read no verdicts: it has a verdict, and no state to report.
     const st = command === "verify" ? parsed.status : parsed;
     const verdictsRead = command !== "verify" || !Array.isArray(parsed.checks) || parsed.checks.find((c) => c.n === 7)?.status !== "SKIP";
-    const state = verdictsRead ? stateOf(st) : "";
+    const state = verdictsRead ? stateOf(st, parsed.certificate) : "";
     out.state = state;
     if (verdictsRead && st && st.sequence) {
       if (Number.isInteger(st.labelledPrefix) && Number.isInteger(st.drawsIssued)) out.prefix = `${st.labelledPrefix}/${st.drawsIssued}`;

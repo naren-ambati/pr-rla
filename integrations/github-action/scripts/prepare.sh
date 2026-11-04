@@ -58,6 +58,13 @@ fi
 bin="$ACTION_PATH/node_modules/.bin/pr-rla"
 [ -x "$bin" ] || bad "pr-rla is not installed at $bin (the install step did not run)"
 
+# tsa-trust: anchor files the job's owner trusts, paths relative to the workspace, separated by commas or newlines.
+set -f
+for f in $(printf '%s' "${INPUT_TSA_TRUST:-}" | tr ',\r\n\t' '    '); do
+  [ -f "$f" ] || bad "tsa-trust: $f is not a file"
+done
+set +f
+
 # approve-origins: "ENV=https://host" entries separated by spaces, commas or newlines. Each one is
 # `pr-rla plugin approve --env ENV --origin https://host --yes`, the same consent a person gives locally.
 list=$(printf '%s' "$INPUT_APPROVE_ORIGINS" | tr ',\r\n\t' '    ')

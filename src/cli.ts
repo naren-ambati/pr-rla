@@ -134,6 +134,8 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--json", "machine-readable output")
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
     .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")
+    .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable), as verify's: a certificate needs its times proven", collect)
+    .addHelpText("after", "\nExit codes: 0 · 1 not registered · 2 ESCALATE · 3 population below the registered minimum · 6 the SPRT target is reached but the certificate is withheld (the registration or commitment time is not proven by k operators)")
     .action(function (this: Command) {
       return run((ctx) => statusCommand(ctx, this.opts()), !!this.opts().json)();
     });
@@ -153,12 +155,12 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .command("verify")
     .description("third-party check of the seven audit properties")
     .option("--offline", "skip the population rebuild and any network fetch")
-    .option("--log-key <pem>", "a transparency-log public key you trust (PEM file); without it only Sigstore's pinned log keys are trusted")
+    .option("--log-key <url=pem>", "a transparency log you trust, as <log url>=<PEM file> (repeatable); it counts only for that log, as operator \"log at <host>\"; Sigstore's pinned logs always use their pinned keys", collect)
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")
     .option("--verbose", "also print the per-repo lines a summary line stands for (--json always has them)")
-    .addHelpText("after", "\nExit codes: 0 VERIFIED · 1 FAILED (a check failed) · 6 INCOMPLETE (nothing failed, but part of the population could not be rebuilt, or its completeness could not be established; --json has the verdict)")
+    .addHelpText("after", "\nExit codes: 0 VERIFIED · 1 FAILED (a check failed) · 6 INCOMPLETE (nothing failed, but something was not established or a check was skipped: a time not proven by k operators, the population not rebuilt or not shown complete, --offline, before sample; --json has the verdict)")
     .action(function (this: Command) {
       return run((ctx) => verifyCommand(ctx, this.opts()), !!this.opts().json)();
     });

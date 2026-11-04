@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -10,6 +10,7 @@ import type { DrawsFile } from "../../src/core/records.js";
 import { makeChanges, setupAuditRepo, T, type Scenario } from "./audit-scenario.js";
 import { FakeGitHubIssues, FakeGitLabIssues } from "./fake-issue-trackers.js";
 import { fixturePath } from "./fixtures.js";
+import { MockTsaServer, makeTestAuthority } from "./test-tsa.js";
 import { unsignedLine } from "./verdict-lines.js";
 
 /**
@@ -23,6 +24,14 @@ import { unsignedLine } from "./verdict-lines.js";
  *  - git-file audit (the Bitbucket row): the recorded gh-aw Q3 audit (test/fixtures/audits/
  *    gh-aw-q3-recorded: recorded population and beacon, synthetic times and key) with synthetic
  *    verdict lines.
+ *
+ * Since time round B a certificate needs its registration and commitment times proven by k
+ * timestamp authorities. Every audit here is registered and frozen with two mock authorities
+ * (test/helpers/test-tsa.ts, synthetic) that the shipped bundle does not hold; `tsaTrust` is a
+ * trust file for them, which the CI job passes as `--tsa-trust` (the `tsa-trust` input). Without
+ * it the same audit's certificate is withheld (exit 6). Status and verify check the stored tokens
+ * offline; a checkpoint asks the authorities again, so their server (`tsa`) stays up until the test
+ * file stops it (afterAll), with `nowMs` set to the time the checkpoint is taken.
  */
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=ci-fixture", "-c", "user.email=ci-fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -32,6 +41,10 @@ export const aliceGitLab = { id: 11, username: "alice" };
 
 export interface TrackerAudit<F> {
   dir: string;
+  /** A trust file for the two mock authorities that time-stamped the audit (pass it as --tsa-trust). */
+  tsaTrust: string;
+  /** Their server, still up (a checkpoint asks them again); the test file stops it. */
+  tsa: MockTsaServer;
   /** The tracker as it stands after `sample`: one issue per drawn change, no verdicts yet. */
   fake: F;
   draws: DrawsFile;
@@ -41,26 +54,40 @@ export interface TrackerAudit<F> {
 
 const W = "audit/2026-q3";
 
-async function build<F>(ledgerYaml: string, route: (url: string) => boolean, fake: F & { fetch: typeof fetch }, env: Record<string, string>): Promise<TrackerAudit<F>> {
-  const routed = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    return route(url) ? fake.fetch(input, init) : globalThis.fetch(input, init);
-  }) as typeof fetch;
-  const s: Scenario = setupAuditRepo({ changes: makeChanges(400), fetch: routed });
-  s.ctx.env = env;
-  appendFileSync(join(s.dir, ".pr-rla.yml"), `${ledgerYaml}\n`);
-  s.git("commit", "-qam", "ledger");
-  const at = (iso: string) => void (s.clock.now = T(iso));
+/** Two mock authorities for one audit, and a trust file for them outside the audit directory. */
+async function authorities(): Promise<{ server: MockTsaServer; tsaTrust: string }> {
+  const server = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+  const tsaTrust = join(mkdtempSync(join(tmpdir(), "prrla-ci-trust-")), "tsa-trust.json");
+  writeFileSync(tsaTrust, `${JSON.stringify(server.trust(), null, 2)}\n`);
+  return { server, tsaTrust };
+}
+
+/** register, freeze and sample on the scenario's clock, each record time-stamped by the two authorities at that time. */
+async function registerFreezeSample(s: Scenario, server: MockTsaServer): Promise<void> {
+  const at = (iso: string) => void ((s.clock.now = T(iso)), (server.nowMs = T(iso)));
   at("2026-10-20T00:00:00Z");
   if ((await registerCommand(s.ctx, {})) !== 0) throw new Error(`fixture register failed: ${s.out.join("\n")}`);
   at("2026-10-20T12:00:00Z");
   if ((await freezeCommand(s.ctx, {})) !== 0) throw new Error(`fixture freeze failed: ${s.out.join("\n")}`);
   at("2026-10-21T01:00:00Z");
   if ((await sampleCommand(s.ctx, {})) !== 0) throw new Error(`fixture sample failed: ${s.out.join("\n")}`);
+}
+
+async function build<F>(ledgerYaml: string, route: (url: string) => boolean, fake: F & { fetch: typeof fetch }, env: Record<string, string>): Promise<TrackerAudit<F>> {
+  const routed = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    return route(url) ? fake.fetch(input, init) : globalThis.fetch(input, init);
+  }) as typeof fetch;
+  const { server, tsaTrust } = await authorities();
+  const s: Scenario = setupAuditRepo({ changes: makeChanges(400), fetch: routed, tsa: { ids: ["test-a", "test-b"], server } });
+  s.ctx.env = env;
+  appendFileSync(join(s.dir, ".pr-rla.yml"), `${ledgerYaml}\n`);
+  s.git("commit", "-qam", "ledger");
+  await registerFreezeSample(s, server);
   s.git("add", "-A");
   s.git("commit", "-qm", "draws and ledger index");
   const draws = JSON.parse(readFileSync(join(s.dir, W, "draws.json"), "utf8")) as DrawsFile;
-  return { dir: s.dir, fake, draws, firstDraws: draws.draws.slice(0, draws.issued).filter((d) => d.firstOccurrence).map((d) => d.draw) };
+  return { dir: s.dir, tsaTrust, tsa: server, fake, draws, firstDraws: draws.draws.slice(0, draws.issued).filter((d) => d.firstOccurrence).map((d) => d.draw) };
 }
 
 /** A GitHub audit on `github-issues`; with `baseUrl`, a GitHub Enterprise Server at that origin (REST under /api/v3). */
@@ -120,20 +147,48 @@ export function workspace(auditDir: string, o: { remote?: boolean; edit?: (dir: 
 
 export type Verdicts = "continue" | "certified" | "escalate";
 
-/** The recorded gh-aw audit (git-file ledger) with synthetic verdict lines: 0, 36 passes, or 6 fails. */
-export function gitFileAudit(kind: Verdicts): string {
-  const dir = mkdtempSync(join(tmpdir(), "prrla-gitfile-"));
-  cpSync(fixturePath("audits", "gh-aw-q3-recorded"), dir, { recursive: true });
-  const draws = JSON.parse(readFileSync(join(dir, W, "draws.json"), "utf8")) as DrawsFile;
-  const protocolSha256 = createHash("sha256").update(readFileSync(join(dir, "review-protocol.md"))).digest("hex");
-  const firsts = draws.draws.filter((d) => d.firstOccurrence);
-  const n = kind === "certified" ? 36 : kind === "escalate" ? 6 : 0;
-  const lines = firsts.slice(0, n).map((d, i) => unsignedLine({ draw: d.draw, changeId: d.changeId, verdict: kind === "escalate" ? "fail" : "pass", protocolSha256, reviewer: "ci-fixture", recordedAt: new Date(Date.parse("2026-10-21T03:00:00Z") + i * 1000).toISOString().replace(".000Z", "Z") }));
-  if (lines.length) {
-    mkdirSync(join(dir, W), { recursive: true });
-    writeFileSync(join(dir, W, "verdicts.jsonl"), lines.join(""));
+export interface GitFileAudit {
+  dir: string;
+  /** A trust file for the two mock authorities that time-stamped it (pass it as --tsa-trust). */
+  tsaTrust: string;
+  /** Their server, still up; the test file stops it. */
+  tsa: MockTsaServer;
+}
+
+/**
+ * The recorded gh-aw audit's population (git-file ledger), registered, frozen and sampled again with
+ * two mock authorities, with synthetic verdict lines: 0, 36 passes, or 6 fails, committed as a
+ * reviewer would. Its configuration, protocol and changes are the recorded fixture's; only the
+ * timestamping names the two authorities, so the registration, and with it the draws, are its own.
+ */
+export async function gitFileAudit(kind: Verdicts): Promise<GitFileAudit> {
+  const { server, tsaTrust } = await authorities();
+  {
+    const s = setupAuditRepo({ changes: [], tsa: { ids: ["test-a", "test-b"], server } });
+    const recorded = fixturePath("audits", "gh-aw-q3-recorded");
+    cpSync(recorded, s.dir, { recursive: true });
+    rmSync(join(s.dir, "audit"), { recursive: true, force: true });
+    const yml = join(s.dir, ".pr-rla.yml");
+    const config = readFileSync(yml, "utf8");
+    if (!config.includes("timestamping: { authorities: [] }")) throw new Error("the recorded fixture's timestamping line moved");
+    writeFileSync(yml, config.replace("timestamping: { authorities: [] }", "timestamping: { authorities: [test-a, test-b], min_tokens: 2 }"));
+    s.git("add", "-A");
+    s.git("commit", "-qm", "the recorded gh-aw audit, time-stamped by two authorities");
+    await registerFreezeSample(s, server);
+    const dir = s.dir;
+    const draws = JSON.parse(readFileSync(join(dir, W, "draws.json"), "utf8")) as DrawsFile;
+    const protocolSha256 = createHash("sha256").update(readFileSync(join(dir, "review-protocol.md"))).digest("hex");
+    const firsts = draws.draws.filter((d) => d.firstOccurrence);
+    const n = kind === "certified" ? 36 : kind === "escalate" ? 6 : 0;
+    const lines = firsts.slice(0, n).map((d, i) => unsignedLine({ draw: d.draw, changeId: d.changeId, verdict: kind === "escalate" ? "fail" : "pass", protocolSha256, reviewer: "ci-fixture", recordedAt: new Date(Date.parse("2026-10-21T03:00:00Z") + i * 1000).toISOString().replace(".000Z", "Z") }));
+    if (lines.length) {
+      mkdirSync(join(dir, W), { recursive: true });
+      writeFileSync(join(dir, W, "verdicts.jsonl"), lines.join(""));
+    }
+    s.git("add", "-A");
+    s.git("commit", "-qm", "registration, manifest, draws and verdicts");
+    return { dir, tsaTrust, tsa: server };
   }
-  return dir;
 }
 
 /** A registered and frozen audit of only 12 changes: below the registered minimum of 150, so `sample` refuses with exit 3. */

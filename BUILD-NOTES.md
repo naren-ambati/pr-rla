@@ -3121,6 +3121,128 @@ What was found and fixed, by kind (each now a named case in `guard.test.ts`):
 - **A release** bumps the `pr-rla-mcp@` pin in `integrations/claude-code/.mcp.json`, `integrations/codex/config.toml`, `integrations/cursor/mcp.json` and `docs/assistants/*.md`, and the plugin's `version`; `integrations.test.ts` fails until they all equal `packages/pr-rla-mcp/package.json`'s version, which must equal `package.json`'s.
 - **When the approvals store lands** (`operatorConsents` in `src/api/credentials.ts`), nothing here needs to change: the guard keeps the assistant from writing an approval, whatever the store then grants. Which approved credentials the MCP server may use is the fix round's decision, not this bolt's.
 
+## P2 time round B (2026-11-04)
+
+Branch `fix/p2-time-b`, off `integrate/wave2` at `0fa9ad8` (U1–U5, U8, U9, the ledger, trusted-time and plugins-broker rounds merged). It fixes time review findings 2, 6, 7 and 9 (`master-time-review.md`), pass-2 findings 2 and 6 and the trusted-time test gaps (`pass2-ledgers-time.md`), and two cases the coordinator added during the round: the CI round's withheld-credential case and the seam review's "CERTIFIED shown where it cannot stand". P1, P3 and P4 ran in parallel; this round stayed out of checks 5 and 7's logic, the ledgers, the providers and the freeze store, except the narrow seams listed under "For the integration step".
+
+### The shared names
+
+- **`src/core/verdict.ts`**, the one verdict model:
+  - `CheckStatus` (`PASS | WARN | FAIL | SKIP | INCOMPLETE`), re-exported by `src/core/verify.ts` as before;
+  - `AuditVerdict` (`VERIFIED | INCOMPLETE | FAILED`; `VerifyVerdict` is an alias);
+  - `auditVerdict(checks)`: any FAIL → FAILED; any INCOMPLETE **or SKIP** → INCOMPLETE; else VERIFIED;
+  - `VERDICT_EXIT_CODES` / `verdictExitCode(verdict)`: 0, 6, 1 (`src/api/read/verify.ts` re-exports `verdictExitCode`; the CLI's `verifyExitCode` calls it);
+  - `raiseStatus(status, to)`: FAIL > INCOMPLETE > WARN > PASS;
+  - `Withholding` (`{ verdict: "INCOMPLETE" | "FAILED", reason }`), `Certificate` (`{ state, withheld }`), `CertificateState` (`CERTIFIED | WITHHELD | NOT CERTIFIED | ESCALATE | REFUSED | INCOMPLETE`);
+  - `certificateFor(sprtState, refusal, withheld, unread)`: the certificate; `isCertified(certificate)`: **the only "certified" any surface shows**; `verdictWithholdings(checks)`: verify's withholdings; `failedWithholdings(reasons)`: a status-side gate's FAIL reasons as withholdings; `withheldVerdict(withheld)`.
+- **`src/api/access.ts`**: `accessShortfall(auditContext, pluginId, label)`, the CI-round rule.
+- **`src/core/records.ts`**: `drawBinding(registration, manifest)`, `compareChangeIds`, `reviewHorizonFor(registration)`, `RegistrationRecordV2.publicKeyPem`.
+
+### Findings fixed
+
+| # | What was wrong | What changed | Regression tests (fail at `0fa9ad8`, pass now) |
+|---|---|---|---|
+| time #2 (HIGH) | each draw index hashed the manifest's sha256, which covers `frozenAt`, the funnel, limitations and the version: one registration frozen twelve times before R gave twelve samples to choose from | schema v2: `index_i = SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N` over the change ids in canonical order (contracts.md §5, "Draws"); v1 keeps the manifest binding; the population audit below; `unreviewed: no-review` counts review objects at landing (v2) | `time-round-b › time review #2` (twelve freezes: twelve manifests, twelve old-binding samples, one new-binding sample; a review added after landing between two freezes changes neither N nor the ids); `seed › time round B` (binding per schema, the 72-byte message checked independently, strict encoding); `selector-review-rules › time round B` (both horizons) |
+| time #6 | verify said VERIFIED / CERTIFIED / exit 0 with a commitment time no operator proved, and with checks 4–7 skipped | unproven times are INCOMPLETE in checks 1 and 2 (v2: fewer than k registered operators; v1: no log entry verified under a trusted key), and so is check 3 when its R rests on an unproven registration time; any SKIP makes the verdict INCOMPLETE (exit 6); the certificate is withheld whenever the verdict is not VERIFIED; status withholds it for unproven times (exit 6) | `time-round-b › time review #6` (the late commitment: INCOMPLETE, exit 6, `ok` false, `certificate.state` WITHHELD, in text, `--json` and status `--json`; `--offline` before sample: exit 6; offline after sample: check 5's skip alone is INCOMPLETE, online the same audit is VERIFIED and CERTIFIED) |
+| time #7 | N below `minPopulation`: hand-made draws certified, verify VERIFIED, status `--json` reported `sequence.state` CERTIFIED next to the refusal | draws that exist below the minimum FAIL check 6 (exit 1); without draws check 6 SKIPs naming the minimum (INCOMPLETE); status refuses with exit 3 (U5 had already fixed the exit code) and `certificate.state` REFUSED | `time-round-b › time review #7` (both cases, text and `--json`) |
+| pass-2 #2 | a v1 envelope's unsigned `integratedTime` chose R and check 3 PASSed: CERTIFIED, VERIFIED, exit 0 | check 3 INCOMPLETE ("it could have been written after round R was public, to choose R"), certificate withheld, exit 6; with the log's key the edit FAILs checks 1 and 2 | `time-round-b › pass-2 review #2` (the reviewer's steer, both ways); `v1-compat` (rewritten: the old test enshrined `3:PASS`); `timestamp-verify › FR1.4` (the v1 clause now also runs verify: check 3 INCOMPLETE) |
+| pass-2 #6 | one `--log-key` replaced the pinned key for every URL, and anything verified under it counted as operator Sigstore | `--log-key <log url>=<pem file>`, repeatable, each key scoped to its log; the pinned key always wins for a pinned log (a key given for one is ignored, and check 1 says so); a log only the verifier vouches for counts as `log at <host>`; malformed values, non-keys and two keys for one log are usage errors (exit 1) | `translog-keys` (scoping, pinned-wins, neutral operator, the parser's refusals; a key for another log vouches for nothing); `e2e`, `rekor-v2` (the operator line) |
+| time #9 | swapped "logged by k of n"; check 6 counted issued draws, not compared ones, and passed an empty `draws[]`; `frozenAt` of manifest and commitment never compared; `opensAt`/`closesAt` never re-derived; `publicKeyPem` outside the signed bytes | `manifest logged by <operators> operators (k = <k>)`; check 6 compares every entry (index, change, url, merge SHA, first occurrence), needs every issued draw, FAILs duplicates, an empty list and `issued < 1`, and names the derivation; a single repo's commitment must carry the manifest's `frozenAt`; check 1 re-derives the window from its days; v2 registrations name `publicKeyPem` inside their signed bytes (check 1 FAILs a re-signed one, WARNs one without the field) | `time-round-b › time review #9` (six tests) |
+
+The CI round's two cases (the coordinator, during this round):
+
+| Case | What changed | Tests |
+|---|---|---|
+| a withheld or missing credential, then 401/403/404 | the broker records each 401/403/404 by caller (`stats.denied`) and each 2xx (`stats.answered`); the context records each provider's and ledger's credential standing (`credentialStanding`: granted, withheld with the approve command, not set). A plugin that ran without a credential and had every read refused (`accessShortfall`) makes check 5 (provider) or 7 (ledger) INCOMPLETE, even where those reads made it FAIL, and status `INCOMPLETE: not established (…)` with exit 6; the reason names the variable and `pr-rla plugin approve --env <ENV> --origin <origin>` (built-ins) or `pr-rla plugin approve <use>` (isolated plugins) | `access-incomplete` (GHES tracker: status text and `--json`, verify text and `--json`, withheld and not set; the provider in check 5; the control; a public tracker's deleted issue still FAILs anonymously) |
+| offline verify with a tracker ledger | covered by "a SKIP is INCOMPLETE": check 7 SKIPs offline, so exit 6 | `access-incomplete › offline verify with a tracker ledger` |
+
+The seam review's case (the coordinator, after P4's merge, `zz-seam-auditlist`): `audit_list`'s `certified`, verify's `statusLine` and `--json`, and status now all ask `isCertified(certificate)`. `StatusReport.sequence.state` stays the SPRT's **raw** state (documented in contracts.md §7, the MCP tool descriptions and README); `certified` and `certificate` are the claim. verify's line on a FAILED verdict reads `target reached · CERTIFICATE WITHHELD (verify check 7 (labels) FAILED)` (`time-round-b › seam review`).
+
+### The population: every input to N and to the sorted list
+
+| Input | Fixed by | Status after this round |
+|---|---|---|
+| window, kinds, authors, bots, `direct_push_via_merge`, `max_changed_lines`, `merged_by` | the signed registration (check 2 compares the manifest's copy; check 1 re-derives the window) | fixed |
+| review state for `no-human-review` | reviews submitted at or before `mergedAt` (since the ledger round) | fixed at landing |
+| review objects for `no-review` | v2: submitted at or before `mergedAt` (this round; was as of `frozenAt`); v1: as of `frozenAt`, as v1 manifests were made | fixed at landing (v2) |
+| `frozenAt`, the funnel, limitations, `prRlaVersion`, the provider's identity fields, `repoListing`, `goneRepos` | in the manifest hash only | no longer reach a draw |
+| the canonical id order | `compareChangeIds` (UTF-16 code units), validated by check 2, used by `sample` and check 6 | fixed |
+| labels (a `labels:` stratum) | read as of the freeze | **stated limit**: `register` notes it and check 2 WARNs; not refused, because the spec lists label strata and pr-rla reads no label history |
+| an approval dismissed after the merge, an account renamed | the SCM's current record | stated limit (providers' review normalisation is P1's area) |
+| a pool's repositories and heads | U8's registered repos and listing, P3's push-log proof | P3's area |
+
+### Fixtures: what changed and why
+
+- **`test/fixtures/audits/gh-aw-q3-recorded`** (recorded population, synthetic times) is a schema-v2 audit, so its draws change. It was rebuilt with its own scripts: `scripts/build-gh-aw-recorded-audit.mjs` (it now takes the protocol file as a third argument, so the fixture keeps its own `review-protocol.md`) on the fixture's own `changes.json` as `{ listed, selected, limitations }`, which reproduced the manifest's changes byte for byte; only the registration (a new key, named inside it), the manifest's `registrationSha256` and `sha256`, the commitment and the draws differ. The 36 new draws name 36 changes, none of the old 36.
+- **The new draws' descriptions were recorded live**, read-only, by `scripts/record-draw-descriptions.mjs` (new `--only` and `--merge` options): GitHub API with the operator's `gh auth token`, pr-rla's broker in read-only mode, GETs only. 2026-11-04T09:05:19Z–09:06:40Z, 249 GETs (all 36); 09:19:35Z and 09:20:00Z, 30 GETs each (four of them again, for the replay file; the first of these two runs wrote a wrong count into its description, fixed in the script and run again). 309 GETs in all, to `api.github.com` only. No write anywhere; no timestamp authority, drand relay or Rekor host was contacted in this round.
+- `changes.json` keeps the 36 old descriptions (recorded 04:50Z) beside the 36 new ones, because `test/fixtures/github/gh-aw-q3-draws-2026-11-04.json` still replays four of them for the provider's `describeChange` tests; `recordedDescriptions` says which is which (its text was rewritten by hand to say so; no recorded data was edited). That file's `description` now says its four changes were the draws before this round.
+- **New `test/fixtures/github/gh-aw-q3-draws-v2-binding-2026-11-04.json`** (recorded): the four kept changes of the new draws 5, 7, 13 and 31, which the MCP package's mock GitHub serves.
+- Tests moved to the new draws: draw #7 is gh-aw#58625 (a lock file and a changeset dropped), #27 gh-aw#55696 (12 of 18 files generated; it replaces the old #13, gh-aw#49685, 21 of 28). The MCP demo's default draw is 27.
+- **The bolt-1 TSA recording** (`test/fixtures/tsa/recorded-2026-11-03.json`, recorded) is unchanged, but `register` can no longer reproduce its digest: the recorded record names no key, and a registration now does. The replay tests (`timestamps-e2e`, `timestamp-trust-bundle`) install the recorded record and its four registered tokens as a registration (`test/helpers/recorded-registration.ts`), signed with the tests' fixed key: all four tokens still verify (`4 of 4 … PROVEN`, U_k 2026-11-03T22:32:28Z), register's printer gives its recorded lines, and verify WARNs that the record names no key. No new timestamp request was made.
+- The v1 fixture keeps its draws (v1 binding). No other committed fixture carries draws; the e2e, pooled and ledger tests draw at run time.
+
+### Decisions and deviations
+
+1. **v1 with an unverified log: INCOMPLETE, not FAIL.** An honest v1 audit verified without its log's key shows nothing false; INCOMPLETE says the time, and R with it, is not established. R is still derived from the logged time, so every verifier computes the same R.
+2. **Check 3 is INCOMPLETE on an unproven registration time for either base.** With a window-close base, the claim that the registration preceded R is the unproven time too.
+3. **SKIP counts as not verified** for every check, not only 4–7 (checks 1–3 never skip).
+4. **A wholly refused, uncredentialed plugin turns its check from FAIL to INCOMPLETE**, as the coordinator decided. Only "wholly": a plugin with any 2xx read is reading a public tracker or repository, its 404s are the server's answers, and the plugin's own probes decide (so a deleted issue on a public tracker still FAILs). Without that limit, U8's anonymous-verifier tests showed genuine FAILs masked.
+5. **Status can now exit 6** (a withheld certificate or unread verdicts), and 1 when a status-side gate shows a check would FAIL. contracts.md §7 says so; U7's CI map already treats 6 as "incomplete".
+6. **`CertificateState` gained `INCOMPLETE`**: the verdicts were not readable, so even the SPRT's state is not established.
+7. **The withheld line reads `target reached · CERTIFICATE WITHHELD (reasons)`**, so it never says CERTIFIED; P4's merged line says `NOT CERTIFIED: verify check 7 would FAIL (…)` (see the integration notes).
+8. **Label strata are noted and WARNed, not refused** (above).
+9. **A registration without `publicKeyPem` WARNs** rather than FAILs or INCOMPLETE: it can be re-keyed, but the draws no longer depend on the commitment, the tokens still bind its digest, and the only such records are test fixtures and the 2026-11-03 recording (P4 chose the same for its new field).
+10. **The trust-bundle "not cA" and "absent" cases are refused before pr-rla's own clause:** node's `checkIssued` (OpenSSL's `X509_check_issued`) refuses such an issuer, so no chain forms (`rule 6: chain … does not reach an anchor`). The tests assert that; pr-rla's clause stays for another OpenSSL. The "not critical" case reaches it.
+11. **SPRT cap-reached is reachable**, so the branch stays: with a registered cap of 36, 35 passes then a fail escalate at the cap. Under the default cap (144) it cannot fire for claim D's parameters; a test enumerates every split of the 143 draws before the cap and finds none landing within one pass of the target.
+12. **Rule 3's index and key-equality findings are reached by replacing pkijs's `SignedData.verify`** in the test: pr-rla resolves the signer itself, so an agreeing library never trips them. The finding for a certificate outside the token said "certificate 0 of the token"; it now says "a certificate that is not in the token".
+13. **Draw encoding is strict:** `drawIndex` refuses anything but 64 lowercase hex characters for the randomness and the binding; check 6 reports a refusal as a FAIL instead of throwing.
+
+### Tests
+
+At `0fa9ad8`: 83 files, **1218** passed. Now: 85 files, **1269** passed (+51): `time-round-b` (16) and `access-incomplete` (8) are new; `timestamp-signer-identity` +20 (the sixteen distinct-serial forgeries against DigiCert, GlobalSign, Microsoft and Sigstore, and four tests of rule 3's cross-check); `seed` +2; `sprt` +2 (one rewritten: the old "at the cap" test reached target-unreachable); `selector-review-rules` +1; `translog-keys` +1; `timestamps-e2e` +1; `timestamp-trust-bundle` (the not-cA and absent cases in the existing test). The MCP package keeps 59. Tests rewritten for the new behaviour, each to what the round decided, none weakened: `e2e`, `v1-compat`, `timestamps-e2e`, `translog-keys`, `rekor-v2`, `timestamp-trust-bundle`, `git-file-unchanged`, `pooled-verify`, `pooled-plugin`, `u8-review` (an honest frozen, unsampled pool is INCOMPLETE now, and check 5 is still its own PASS), `wave2-integration`, `api-cli-contract`, `draw-context`, `single-repo-anchor` (time round B's differences from master are applied to master's output rule by rule, so nothing else may differ), and the MCP tests. Helpers: `signing-key.ts` (a fixed synthetic key, which `setupAuditRepo` installs in every scenario: a registration names its key now, so with a fresh key per run its digest, and the draws, changed from run to run; the first verification runs caught one test, `e2e › one failure …`, that assumed draw #37 was new and failed when the random draws repeated a change; it now reads the blocking draw from `draws.json`), `recorded-registration.ts`, `audit-scenario.ts` (`logKeyArgs`), `forge-tsa.ts` (distinct-serial twins).
+
+The reproductions, run against `0fa9ad8` (a `git archive` with the new test files copied in): `time-round-b` and `access-incomplete`, 23 of 24 fail; the one that passes is the guard that a public tracker's deleted issue FAILs anonymously. The reviewers' own files, run on this branch: `rvtime-grind`, `rvtime-small`'s offline test and `rv2-v1-steer` (which assert the vulnerable behaviour) fail; `rvtime-late` and `rvtime-small`'s minimum-population test only print what verify said, and print `INCOMPLETE` exit 6 (`ok` false) and `FAILED: check 6 (draws)` exit 1 with status exit 3 (its `state CERTIFIED` is `sequence.state`, the raw SPRT state, beside `certificate.state` REFUSED).
+
+### Unverified
+
+- The new descriptions against GitHub after 2026-11-04T09:20Z (the recording is what GitHub said then).
+- `accessShortfall` against a real GitHub Enterprise Server, GitLab self-managed or Bitbucket Data Center: tested on fakes that answer 404 to anonymous reads, as GitHub does for a private repository.
+- The neutral `log at <host>` operator against any real non-Sigstore log (none was contacted).
+
+### For the integration step
+
+A trial merge of this branch (`1a32174`) into `integrate/wave2` at `6b0ec01` (P3, P4 and U7 merged), in a scratch clone, 2026-11-04:
+
+- **Conflicts:** 11 files. In source, four, each small: `src/core/verify.ts` (the import line: keep P4's `auditBinding` and this round's `./verdict.js` and `./window.js` imports), `src/api/pool-list.ts` (keep P3's `now` line beside this round's `horizon`), `src/cli.ts` (keep P3's `--verbose` and this round's exit-code help), and `src/api/read/status.ts`. Docs: `contracts.md`, `packages/pr-rla-mcp/README.md`. Tests: `api-cli-contract`, `git-file-unchanged`, `pooled-plugin`, `single-repo-anchor`, `u8-review`.
+- **`src/api/read/status.ts`, the seam.** Keep P4's `ledgerIntegrity` and `certificateWithheld` fields beside `certificate` and `certified`; keep this round's `statusLine` (it still takes P4's `info.withheld`) and its verdict text; keep P4's extra arguments to `countedLedgerVerdicts` inside this round's `try`, and add `ineligible: () => null` to the fallback `CountedVerdicts` (P4 added the field); then fold P4's gate into the one certificate: `const withholdings = [...timeWithheld, ...failedWithholdings(withheld.map((w) => \`verify check 7 would FAIL: ${w}\`))]`. P1's check-7 local gate goes into the same list the same way. The resolved four source files are in `scratchpad/p2b-merge-resolution/src/`; with them the merged tree builds and typechecks (both tsconfigs).
+- **What then fails, 40 tests in 9 files, each an expectation of the old model, none a crash:**
+  - U7's CI tests (`ci-github-action` 7, `ci-job-scripts` 17): their fixtures certify on self-asserted times (no timestamp authority), and status now withholds that certificate and exits 6, which U7's map turns into a failed job (`fail-on` includes incomplete by default); one also counts a labelled prefix that the new draws move (20/36 → 21/36). They pass on `integrate/wave2` alone. Give those fixtures mock authorities (as `test/time-round-b.test.ts` does), or expect INCOMPLETE where the times are unproven.
+  - P3's `p3-pool-head` (8), `u8-review` (2) and `pooled-verify` (1): VERIFIED on audits with no timestamp authority, or before sample; now INCOMPLETE for checks 1–3 (and 6–7 when unsampled). Assert check 5's own status and `honestButUnsampled` (in `u8-review`), or add authorities.
+  - P4's `p4-review-regressions` (2) and `wave2-integration` (1): they match P4's line `NOT CERTIFIED: verify check 7 would FAIL (…)`; the one line is now `target reached · CERTIFICATE WITHHELD (verify check 7 would FAIL: …)`, and `certified` is false.
+  - `single-repo-anchor`: the three rule sets (P3's moved heads and `headEvidence`, P4's ledger path, this round's `timeRoundB`) must be combined; P3's moved-head scenarios are VERIFIED on master and INCOMPLETE here (no authority), so `timeRoundB` applies to them too.
+  - `api-cli-contract` flow 2: P4 expects `verify --offline` to exit 1 (an uncommitted git-file ledger FAILs check 7); FAIL still wins over INCOMPLETE, so keep P4's 1 and re-check the other steps' codes.
+- **Files this round touched that P1, P3 or P4 also own:** `src/core/verify.ts` (check 5: one line passing `reviewHorizonFor`; check 7: only `checkTimestamps(..., "WARN")` for checkpoints, so their coverage keeps WARNing), `src/api/read/verify.ts` (`noteAccess` runs after P1's and P3's checks and only lowers a check to INCOMPLETE), `src/api/pool-list.ts` and `src/api/read/freeze-preview.ts` (the review horizon), `src/api/write/register.ts` (`publicKeyPem` in the record; the label note), `src/net/broker.ts` (`stats.denied`, `stats.answered`), `src/plugins/open.ts` and `src/api/context.ts` (credential standing).
+- **Every registration's digest changes** (it names its key), so anything a test or fixture pinned to a registration's sha256, or to draws, moves; P4's verdict payload v2 names the manifest and the beacon, which this round does not change.
+
+### Verified (command → output)
+
+From fresh `git clone`s of `fix/p2-time-b` at `e450463` (the last code and test commit; only this section comes after it), 2026-11-04T10:04Z to 10:14Z, Node 22.23.2, OpenSSL 3.6.4, three runs in a row, each the whole command, every step exit 0:
+
+```
+npm ci                                       → found 0 vulnerabilities
+npm run build                                → exit 0
+npm run typecheck                            → exit 0 (both tsconfigs)
+npm test                                     → Test Files 85 passed (85) · Tests 1269 passed (1269)
+npm --prefix packages/pr-rla-mcp ci && test  → # pass 59 · # fail 0
+npm --prefix examples/providers/gitea ci && test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci && test    → # pass 1 · # fail 0
+node scripts/demo-{broker,ledgers,plugin-host,presence,sdk-carry-overs}.mjs, packages/pr-rla-mcp/scripts/demo-draw-context.mjs → exit 0
+```
+
+- An earlier set of three runs, at `3110a10`, had run 2 fail on `e2e › one failure …` (the random-key draws above); `e450463` fixed it, and the three runs above followed it.
+- The ledgers demo now ends `INCOMPLETE … (exit 6)` for the relabel fixture (its audit has no timestamp authority) and still `FAILED: check 7 (labels)` for the deleted issue, read anonymously from a recorded public tracker.
+- `npm test` makes no network call. The only network use of the round is the 309 read-only GitHub GETs listed under "Fixtures".
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
@@ -3384,3 +3506,41 @@ Merged on top of `6b0ec01` on the coordinator's instruction. U6 was cut from U5'
 - **Wording:** U6's docs pass the allow-list as they are.
 - **The Action's pin** is re-taken (`node scripts/pack-action-tarball.mjs`), because `npm pack` includes `README.md`, which U6 extended. Nothing else in the tarball changed.
 - **Verified** (in this worktree, 2026-11-04, load average 17–34): build 0 · typecheck 0 · `npm test` 91 files, **2415 passed (2415)** (U6's 901 and the option test among them) · `packages/pr-rla-mcp` **66 pass, 0 fail** (U6's review-draw flow among them) · `claude plugin validate integrations/claude-code` and `claude plugin validate .` (the marketplace), Claude Code 2.1.267: both pass · gitea 1 pass · jira 1 pass · every demo exits 0 (`demo-review-draw` among them) · `npm --prefix integrations/github-action ci` 0 vulnerabilities, `pr-rla --version` 0.1.0.
+- **Verified from a fresh clone of `integrate/wave2` at `1943f7f`** (2026-11-04, 09:41Z–09:49Z, Node v22.23.2, load average 31–48): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 91 files, **2415 passed (2415)** · `npm pack` of the clone equals the vendored tarball · the Action's `npm ci` 0 vulnerabilities, `pr-rla --version` 0.1.0 · `packages/pr-rla-mcp` **66 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0 · both `claude plugin validate` runs pass.
+
+### Merge 11: `fix/p2-time-b` (2a8fa2d)
+
+Merged on top of `1943f7f` on the coordinator's instruction. P2 was cut from `0fa9ad8`; its section's "For the integration step" (a trial merge against `6b0ec01`, with resolved source files in the scratchpad) was the plan.
+
+- **Conflicts (12 files):**
+  - **Source.** `src/core/verify.ts`, `src/api/pool-list.ts` and `src/cli.ts` are each a both-sides line: P4's `auditBinding` import beside P2's `./verdict.js` and `./window.js`; P3's `now` beside P2's `horizon`; P3's `--verbose` beside P2's exit-code help. Resolved by hand, they are byte-equal to P2's reference resolutions. `src/api/read/status.ts` is the seam. P4's `ledgerIntegrity` and `certificateWithheld` sit beside P2's `certificate` and `certified`, and P4's extra arguments to `countedLedgerVerdicts` sit inside P2's access `try`, with `ineligible: () => null` in its fallback. P4's gate goes through P2's one certificate: `failedWithholdings(withheld.map((w) => "verify check 7 would FAIL: " + w))`, beside the unproven times. P2's reference file was taken after a line-by-line review against both sides.
+  - **Docs.** `contracts.md` keeps P3's two registration rows and P2's `publicKeyPem` row and "Draws" section, and P3's `verbose` sentence and P2's verdict-model bullet. The MCP README's `verify` row has P3's `verbose` and P2's wording and `certified`.
+  - **Tests.** `api-cli-contract`, `git-file-unchanged`, `pooled-plugin`, `u8-review` and `single-repo-anchor` (below). In BUILD-NOTES, P2's section goes before this one.
+- **Tests that expected the old model, each updated to the same intent under the stricter one (none weakened):**
+  - **P4 (3).** `p4-review-regressions` E1 and attack B, and the wave-2 seam test, now assert the one line, `target reached · CERTIFICATE WITHHELD (verify check 7 would FAIL: the ledger's integrity check FAILs)`, and the reason names check 7. Attack B also asserts `certified: false`, the certificate `{ state: WITHHELD, withheld: [{ verdict: FAILED, … }] }`, status exit 1, and `sequence.state` CERTIFIED as the raw state. The seam test now registers with two mock authorities. Through the CLI's context, which trusts their roots, the honest audit is CERTIFIED (exit 0) and the rewritten one withheld by check 7 alone (exit 1). Through `pr-rla/api/read`, which trusts only the shipped bundle, both are withheld for the unproven times, and the rewritten one by check 7 too.
+  - **P3.**
+    - `p3-pool-head`'s finding-3 shapes (12 cases) are frozen, unsampled pools without authorities. They now assert that check 5 keeps its own status, that nothing FAILs, and that the INCOMPLETE comes only from checks 1–4 and 6–7 (plus 5 where a window commit is not placed), each test saying why.
+    - A new test keeps VERIFIED where that is the intent: with two mock authorities, a commit dated in the window and pushed onto the frozen head after freeze, then sample and verify, is VERIFIED with check 5's FR7.2 note.
+    - `u8-review`'s backdated push uses P2's `honestButUnsampled`.
+    - `pooled-verify` records one verdict per drawn change: the draws moved, and draw 1 now repeats a change among the first 12.
+  - **U7 (24).** The CI fixtures now register and freeze with two mock authorities, and each audit carries a trust file for them. The CERTIFIED tests pass it as the owner's `tsa-trust` and are truly PROVEN, and still exit 0. New tests run the same audit without the anchors: the state is `WITHHELD`, the exit 6, and the job fails unless `fail-on` leaves `incomplete` out. The tests changed beyond that:
+    - the label-event prefix is computed from the draws (20 labelled changes now cover 21 draws);
+    - a self-hosted tracker without approval is `INCOMPLETE`, exit 6 (P2's access rule, where U7 expected NOT_CERTIFIED and exit 0);
+    - an offline verify is INCOMPLETE (exit 6) and passes only when `fail-on` leaves `incomplete` out;
+    - the Action's checkpoint test keeps the authorities' server up, since a checkpoint asks them again.
+  - **`single-repo-anchor`.** The three rule sets apply in turn: U8's, P4's ledger path, P3's head evidence, P3's moved heads, then P2's key and draws and `timeRoundB`. P3's moved shapes are VERIFIED on master. Here only checks 1–3 become INCOMPLETE (exit 6), with check 5 and the FR7.2 note as master has them.
+  - **`api-cli-contract`.** P4's exit 1 stays for the uncommitted ledger. After the commit, offline verify is INCOMPLETE (exit 6) with no FAIL.
+  - **U6's review-draw flow** and its docs move to draw #27 (gh-aw#55696: 12 of 18 files generated; CI 29 success, 3 skipped), as P2 moved the MCP demo.
+  - **Wording.** P2's line listing the demo files is vetted under `names`.
+- **Added by the merge, where two rounds met:**
+  - **`pr-rla status --tsa-trust <file>`** (repeatable; `StatusOptions.tsaTrust`; passed on to `status --checkpoint`'s checkpoint).
+    - Under P2 a certificate needs proven times. `register`, `freeze`, `checkpoint` and `verify` all take the verifier's extra anchors, but `status` could prove only the shipped bundle's. So an audit stamped by any other authority could never show a certificate in status, and no CI job could pass one.
+    - `pr-rla/api/read` and the MCP `status` tool are unchanged: they trust the shipped bundle only.
+    - U6's option test now classifies `status --tsa-trust` as a read. It also runs the guard on the value forms: `verify --log-key https://…=key.pem --tsa-trust …` and `status --tsa-trust …` are allowed, while `--accept-lock-grants status …` and `checkpoint --push --tsa-trust …` are blocked.
+  - **CI integrations.**
+    - A `tsa-trust` input on the Action and the GitLab component, and `PRRLA_TSA_TRUST` in the plain snippet and the Bitbucket step. These are anchor files that whoever owns the CI configuration trusts, passed as `--tsa-trust` to `status` and `verify` (and to the Action's `checkpoint`). Relative paths are made absolute, since `-C` moves the CLI.
+    - The Action's prepare step, and the shared job scripts, refuse a name that is not a file, and a shell metacharacter in it never runs (tested).
+    - The exit map's reason for 6 now names unproven times and skipped checks, in all four copies, which stay identical (tested).
+    - The Action's `state` output is now the certificate's state, never `sequence.state` (P2's one display decision): CERTIFIED, WITHHELD, NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE.
+    - `docs/ci/*`, the README and `docs/security-model.md` say so, and that these anchors are the CI owner's trust, which proves nothing to a third party.
+- **Verified** (in this worktree, 2026-11-04, load average 4–10): build 0 · typecheck 0 · `npm test` 93 files, **2472 passed (2472)** · `packages/pr-rla-mcp` **66 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.

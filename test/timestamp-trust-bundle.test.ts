@@ -6,16 +6,17 @@ import { join } from "node:path";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import type { CommandContext } from "../src/commands/context.js";
-import { registerCommand } from "../src/commands/register.js";
+import { reportTimestamps } from "../src/commands/timestamps.js";
 import { statusCommand } from "../src/commands/status.js";
 import { verifyCommand } from "../src/commands/verify.js";
 import { canonicalJson } from "../src/core/canonical.js";
 import type { TimestampEvidence } from "../src/core/records.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, type TrustBundle } from "../src/timestamp/bundle.js";
-import { anchorLine, checkToken, isoMs, readToken, type TokenCheck } from "../src/timestamp/verify.js";
+import { anchorLine, assessTimestamps, checkToken, isoMs, readToken, type TokenCheck } from "../src/timestamp/verify.js";
 import { T } from "./helpers/audit-scenario.js";
 import { FIXTURES } from "./helpers/fixtures.js";
 import { RECORDED, RECORDED_IDS, recordedToken } from "./helpers/forge-tsa.js";
+import { RECORDING, installRecordedRegistration, recordedRegistration } from "./helpers/recorded-registration.js";
 import { bundleCert, mintResponse, tokenOf, type TestAuthority } from "./helpers/test-tsa.js";
 
 /**
@@ -82,6 +83,8 @@ const newKeys = async () => (await subtle.generateKey({ name: "ECDSA", namedCurv
 
 interface CaOptions {
   ca?: boolean;
+  /** false leaves basicConstraints out altogether. */
+  basicConstraints?: false;
   critical?: boolean;
   pathLen?: number;
   /** keyUsage bits as the first byte (0x06 = keyCertSign + cRLSign); null leaves keyUsage out. */
@@ -102,7 +105,7 @@ async function cert(subject: string, issuer: { name: string; keys: Keys }, keys:
     c.extensions.push(new pkijs.Extension({ extnID: "2.5.29.37", critical: true, extnValue: new pkijs.ExtKeyUsage({ keyPurposes: ["1.3.6.1.5.5.7.3.8"] }).toSchema().toBER(false) }));
   } else {
     const bc = new pkijs.BasicConstraints({ cA: o.ca ?? true, ...(o.pathLen !== undefined ? { pathLenConstraint: o.pathLen } : {}) });
-    c.extensions.push(new pkijs.Extension({ extnID: "2.5.29.19", critical: o.critical ?? true, extnValue: bc.toSchema().toBER(false) }));
+    if (o.basicConstraints !== false) c.extensions.push(new pkijs.Extension({ extnID: "2.5.29.19", critical: o.critical ?? true, extnValue: bc.toSchema().toBER(false) }));
     const ku = o.keyUsage === undefined ? 0x06 : o.keyUsage;
     if (ku !== null) c.extensions.push(new pkijs.Extension({ extnID: "2.5.29.15", critical: true, extnValue: new asn1js.BitString({ valueHex: ab(new Uint8Array([ku])), unusedBits: 1 }).toBER(false) }));
     if (o.eku) c.extensions.push(new pkijs.Extension({ extnID: "2.5.29.37", critical: false, extnValue: new pkijs.ExtKeyUsage({ keyPurposes: o.eku }).toSchema().toBER(false) }));
@@ -148,8 +151,13 @@ describe("intermediate CA constraints (rule 6, synthetic chains)", () => {
     expect(ok.chain).toEqual(["good TSA", "good CA 1", "good root"]);
   });
 
-  it("an intermediate whose basicConstraints is not critical, or not cA, is refused", async () => {
+  it("an intermediate whose basicConstraints is not critical, or not cA, or absent, is refused", async () => {
     expect((await chained("nc", [{ critical: false }])).check.problems).toEqual(["rule 6: nc CA 1 is not marked as a CA (basicConstraints must be present, critical and cA)"]);
+    // pass-2 review: the "not cA" and "absent" cases were never exercised. Both are refused; node's checkIssued (OpenSSL's
+    // X509_check_issued) already refuses such an issuer, so no chain forms and pr-rla's own clause (kept, for another
+    // OpenSSL) is not reached: the same as a keyUsage without keyCertSign, below.
+    expect((await chained("nca", [{ ca: false }])).check.problems).toEqual(["rule 6: chain nca TSA does not reach an anchor pinned for nca"]);
+    expect((await chained("nbc", [{ basicConstraints: false }])).check.problems).toEqual(["rule 6: chain nbc TSA does not reach an anchor pinned for nbc"]);
   });
 
   it("an intermediate with no keyUsage, or one without keyCertSign, is refused", async () => {
@@ -179,14 +187,8 @@ describe("intermediate CA constraints (rule 6, synthetic chains)", () => {
 });
 
 describe("NFR4: register, verify and status print each counted authority's anchor and independence (the recorded demo, replayed offline)", () => {
-  type Rec = { registeredAt: string; nonces: Record<string, string>; authorities: Record<string, { url: string; request: string; status: number; contentType: string; response: string }> };
-  const rec = RECORDED as unknown as Rec;
-  const replay = (async (input: string | URL) => {
-    const url = new URL(String(input)).href;
-    const ex = Object.values(rec.authorities).find((e) => new URL(e.url).href === url);
-    if (!ex) throw new Error(`no recorded exchange for ${url}`);
-    return new Response(Buffer.from(ex.response, "base64"), { status: ex.status, headers: { "content-type": ex.contentType } });
-  }) as typeof fetch;
+  // Time round B: the recorded registration is replayed as stored (register cannot reproduce its digest now that a
+  // registration names its key); register's lines come from the same printer register uses, on the recorded tokens.
   const out: string[] = [];
   let ctx: CommandContext;
   const LINES = [
@@ -198,11 +200,16 @@ describe("NFR4: register, verify and status print each counted authority's ancho
   beforeAll(async () => {
     const dir = mkdtempSync(join(tmpdir(), "prrla-anchors-"));
     cpSync(join(FIXTURES, "audits", "tsa-demo"), dir, { recursive: true });
-    ctx = { cwd: dir, env: {}, nowMs: () => T(rec.registeredAt), fetch: replay, nonceFor: (id) => new Uint8Array(Buffer.from(rec.nonces[id]!, "hex")), out: (l) => out.push(l), err: (l) => out.push(`ERR ${l}`) };
-    expect(await registerCommand(ctx, {})).toBe(0);
+    installRecordedRegistration(dir);
+    ctx = { cwd: dir, env: {}, nowMs: () => T(RECORDING.registeredAt), fetch: (async () => { throw new Error("the replay sends nothing"); }) as unknown as typeof fetch, out: (l) => out.push(l), err: (l) => out.push(`ERR ${l}`) };
   });
 
-  it("register", () => {
+  it("register", async () => {
+    const reg = recordedRegistration();
+    const data = new Uint8Array(Buffer.from(canonicalJson(reg.record)));
+    const summary = await assessTimestamps({ timestamps: reg.timestamps!, data, digestHex: reg.sha256, signedTimeIso: reg.record.registeredAt, timestamping: reg.record.timestamping, bundle: SHIPPED_TRUST_BUNDLE });
+    out.length = 0;
+    expect(reportTimestamps(ctx, summary, [], "pr-rla register --force")).toBe(0);
     const i = out.indexOf("  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN");
     expect(i).toBeGreaterThanOrEqual(0);
     expect(out.slice(i + 1, i + 5)).toEqual(LINES.map((l) => `    ${l}`));
