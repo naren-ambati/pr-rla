@@ -14,6 +14,8 @@ import { join } from "node:path";
 import gitFile from "../dist/ledgers/git-file.js";
 import { PRESENCE_LIMIT, attestVerdicts, countedVerdicts, parseAllowedSigners, provenanceLabel, verdictRuleFailures } from "../dist/core/presence/index.js";
 import { provenanceLine } from "../dist/core/status.js";
+// The core's lines carry what a ledger line says as foreign text (S1): this demo prints them as the CLI does, quoted in place.
+import { quoted } from "../dist/core/said.js";
 
 const fx = JSON.parse(readFileSync(new URL("../test/fixtures/presence/sk-dummy-verdicts.json", import.meta.url), "utf8"));
 const dir = mkdtempSync(join(tmpdir(), "prrla-presence-demo-"));
@@ -35,8 +37,9 @@ const counted = countedVerdicts(read, { registration, binding, verifiesSignature
 const hasSshKeygen = spawnSync("ssh-keygen", ["-?"]).error === undefined;
 for (const [i, v] of a.events.entries()) {
   const step = fx.steps.find((s) => s.draw === v.draw);
-  const ignored = counted.ineligible(counted.verdicts[i]);
-  const failures = verdictRuleFailures(v, rules);
+  const why = counted.ineligible(counted.verdicts[i]);
+  const ignored = why === null ? null : quoted(why);
+  const failures = verdictRuleFailures(v, rules).map(quoted);
   let oracle = "";
   if (hasSshKeygen && step.signer) {
     const sig = read.find((x) => x.draw === v.draw).sshsig;
@@ -49,8 +52,8 @@ for (const [i, v] of a.events.entries()) {
   console.log(`         → check 7 under min_provenance presence + require_signed: ${ignored ? `ignored (never counted): ${ignored}` : failures.length ? `FAIL: ${failures.join("; ")}` : "PASS"}`);
 }
 console.log(`\nsignatures: ${a.warnings.length ? "WARN" : "PASS"}`);
-for (const w of a.warnings) console.log(`  WARN ${w}`);
-for (const f of a.findings) console.log(`  ${f}`);
+for (const w of a.warnings) console.log(`  WARN ${quoted(w)}`);
+for (const f of a.findings) console.log(`  ${quoted(f)}`);
 const counts = ["self-asserted", "account", "presence"].map((level) => ({ level, count: a.events.filter((v) => (v.provenance?.level ?? "self-asserted") === level).length })).filter((c) => c.count);
 console.log(`\n${provenanceLine(counts)}`);
 console.log(PRESENCE_LIMIT);

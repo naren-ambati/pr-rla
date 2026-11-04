@@ -133,6 +133,9 @@ interface LedgerIntegrityReport {
 }
 // classifyVerdicts(verdicts, { protocolSha256, draws, reviewers?, ineligible? }): P4 adds `ineligible`, a further reason a
 // verdict cannot count (the core's signing rules); null when it can. The ledger kit passes none.
+// S1: each IgnoredVerdictEvent also carries `reasonParts?: ReasonPart[]` (ReasonPart = string | { words, foreign }), the
+// reason with what the ledger line said (a reviewer, an app, a change id) apart from pr-rla's words; `ineligible` may
+// answer in parts. `verdictIneligibilityParts` is `verdictIneligibility` in parts, and `reasonText` joins parts.
 interface LedgerDefinition {
   /* phase-1 fields unchanged */
   hosts?: (options: unknown) => string[];
@@ -245,11 +248,13 @@ interface BrokerPolicy {
 6. **Retry.** The broker is the only retrier once a caller is wired to it; built-ins construct their clients with `maxRetries: 0`.
    - **What is retried.** The phase-2 policy: 5xx, 429, truncated JSON bodies and GitHub transient GraphQL errors, with backoff and jitter.
    - **Limits by destination.** SCM, drand and Rekor allow at most 7 attempts. `tsa` retries until a 5-minute per-request deadline (FR1.10).
+   - **Hints are numbers** (S1). `maxRetries`, `maxBlindRateLimitRetries` and `blindRateLimitWaitMs` must each be a finite number of 0 or more, or the request is refused unsent (`RetryHintInvalid`, `RETRY_HINT_INVALID`): a NaN limit is never reached. The plugin host drops an isolated plugin's hint that is not a finite number, so the default applies.
    - **Rate-limit waits.** Waits imposed by rate-limit headers are the governor's, not retries. They do not count as attempts.
    - **Non-idempotent requests.** A request marked `idempotent: false` (ledger writes) is retried only on connection errors before send and on 429, never on 5xx after send.
-7. **Recorder.** When set, records the exchange with `authorization`, `private-token` and `cookie` headers and e-mail addresses scrubbed, and every secret value the caller holds replaced by its placeholder wherever it appears (URL, header values, body), raw, percent-encoded, base64 or base64url, and inside a Basic pair; an identity (`secret: false`) is left alone. It is never set in read-only mode.
+7. **Read-only responses** (S1). In `read-only` mode every secret value the caller holds is replaced by its placeholder in each response (body, header values, status text), in the forms the recorder covers, before the caller sees it.
+8. **Recorder.** When set, records the exchange with `authorization`, `private-token` and `cookie` headers and e-mail addresses scrubbed, and every secret value the caller holds replaced by its placeholder wherever it appears (URL, header values, body), raw, percent-encoded, base64 or base64url, and inside a Basic pair; an identity (`secret: false`) is left alone. It is never set in read-only mode.
 
-**Errors** are typed classes with `code`, `host` and a `next` hint. They surface through the CLI error form (§7).
+**Errors** are typed classes with `code`, `host` and a `next` hint. They surface through the CLI error form (§7). Every string a refusal echoes (a method, a path, a host, a header name, a service's last answer) is cut to 2 KiB (S1).
 
 ## 3. Plugin host IPC (`pr-rla/ipc/v2`)
 
@@ -306,6 +311,8 @@ The parent and the child exchange JSON objects in frames on the child's file des
 - **Preview cache.** A finished `freeze_preview` is cached in memory for 600 s, keyed by (window, registration digest, `estimate`).
 
 **Error results:** `isError: true` with `{ code, message, next? }`. The codes are `ROOT_ESCAPE`, `NO_AUDIT`, `BAD_WINDOW`, `DRAW_OUT_OF_RANGE`, `READ_ONLY_VIOLATION`, `PROVIDER_ERROR`, `TIMEOUT`, `TOO_MANY_JOBS`, `RESULT_TOO_LARGE`.
+
+**Text from outside pr-rla in results** (S1). `verify`, `status`, `draws` and `freeze_preview` carry no text from an SCM, a tracker, a provider, a ledger or a plugin in pr-rla's voice: each line or field that quotes it says `<pr-rla's words>; what it said is in untrusted.errors[i]`, and the result's `untrusted: { errors: string[] }` (present only then) holds the texts, escaped and at most 2 KiB each. The CLI's `--json` is the same object with each text quoted in place.
 
 **Untrusted-content fence** (built by AuditCore):
 
