@@ -1510,6 +1510,12 @@ Tests that could not fail, made able to: **order** (`repo-set` › "the same poo
 - **`assemblePopulation` depended on the order repos were given** (limitations and diagnostics by first appearance). It sorts by repo now.
 - **A GitHub App installation token (`GITHUB_TOKEN`) cannot read `/user`.** `listingVisibility` and the user-pool check now treat that answer as "not proven" rather than an error, so such a token can still freeze and verify (INCOMPLETE for private and internal).
 - **A repo of a registered list renamed after freeze** has no id to match by; its probe follows GitHub's redirect to the new path, and the rebuild follows it there (one rename, never a chain).
+- **Five timing and filesystem flakes in older tests, met only with two or three suites running at once** (the machine's load average was 40 to 185 from other work; each failed the same way on `b76a9e4`, or in code this round did not touch):
+  - `plugin-host` › "a slow call that keeps sending heartbeats is not stopped": a 500 ms silence timeout stopped the child. The call now outlasts a 5 s timeout (6.5 s), which still shows the heartbeats keep it alive.
+  - `wave1-integration` › the Jira kit through the host: past the 60 s test timeout; 240 s now.
+  - `e2e-gitlab` and `timestamps-e2e` (`cloneScenario`): `ENOENT … .git/objects` while copying an audit repo. git 2.55's `commit` starts `git maintenance run --auto --detach`, whose `objects/maintenance.lock` vanished mid-copy. The test repos now set `maintenance.auto=false` and `gc.auto=0` (`test/helpers/audit-scenario.ts`).
+  - `timestamp-verify`: its `beforeAll` (test keys) passed vitest's default 10 s hook timeout; `hookTimeout` is now 60 s, as tests already had (`vitest.config.ts`).
+  - `plugin-host` › the Gitea kit through the host: 30.3 s against a 30 s real-time bound that only has to show a 45 s rate-limit wait did not run in real time; the bound is 45 s.
 - **The estimate's k-th sampling is coarse on heavy-tailed orgs.** Measured on six synthetic 40-repo orgs (2026-11-04): every 4th repo probed, requests off by up to −34.2%; every 2nd, up to −10.2% and wall time up to +57% when the budget binds. All probed: requests within ±5.2%, wall within ±28.6% (budget-bound) or ±11% (latency-bound). 200 of 240 probed: −3.1% and −13.2%. Recorded in the docs as a limit; not changed.
 
 ### Single-repo behaviour changes (all deliberate)
@@ -1528,6 +1534,18 @@ U7's CI exit-code mapping needs a row for **6**: fail when `fail-on` includes `i
 
 578 passed, 1 skipped (49 files) at `b76a9e4`; 647 passed, 1 skipped (52 files) now. New files: `test/u8-review.test.ts` (28), `test/pool-integrity.test.ts` (18), `test/fake-clock.test.ts` (3). Changed: `pooled-freeze` (+7), `pooled-verify` (+2), `pooled-api` (+2), `list-repos` (+10), `repo-set` (0 net, two rewritten), `pooled-plugin` (more assertions), `single-repo-anchor` (rewritten, one test), `net-io` (exit 6), `timestamps-e2e` (boundary adapted).
 
+### Verified (command → output)
+
+Each run is a fresh `git clone --branch bolt/u8-org-pooled-freeze` of this worktree into the scratch directory, then `npm ci && npm run build && npm run typecheck && npm test`, then `npm --prefix examples/providers/gitea ci && npm --prefix examples/providers/gitea test` and the same for `examples/ledgers/jira` (2026-11-04, UTC, at `ca94524`; the docs commit after it changes no code):
+
+| Run | Clones at once | Load average | Result |
+|---|---|---|---|
+| 1 (05:29) | 1 | 160–185 | build and typecheck (both tsconfigs) clean; `Test Files 52 passed (52) · Tests 647 passed \| 1 skipped (648)`; gitea `# pass 1`, jira `# pass 1` |
+| 2 and 3 (05:33) | 2 | 130–170 | the same, in both clones |
+| extra (05:37) | 3, tests only | 100–150 | `647 passed \| 1 skipped` in all three |
+
+The runs before these found the five flakes above, each fixed and committed before the streak was started again from new clones. `node dist/cli.js verify --help` ends with the exit codes line. The suite makes no network call (the network-deny harness).
+
 ### Files touched in this round
 
 - Commands (thin): `src/commands/freeze.ts` (the R checks, two manifest fields, `markComplete` call removed, `reg` to the estimate), `src/commands/freeze-pool.ts` (registered repos and the clock to the run, notes printed, the resume and dry-run texts), `src/commands/register.ts` (`registeredRepos`), `src/commands/status.ts` (no pool listing before freeze), `src/commands/verify.ts` (verdict, exit 6, the INCOMPLETE line), `src/cli.ts` (help text for verify's exit codes).
@@ -1535,6 +1553,7 @@ U7's CI exit-code mapping needs a row for **6**: fail when `fail-on` includes `i
 - SDK and plumbing: `src/sdk/provider.ts`, `src/sdk/http.ts`, `tsconfig.sdk.json`, `package.json` (typecheck script), `src/cli/exit-codes.ts`, `src/plugins/{protocol,child,host}.ts`, `src/testing/{conformance,index}.ts`, `src/index.ts`.
 - Providers: `src/providers/github/{index,http}.ts`, `src/providers/gitlab/index.ts`, `src/providers/bitbucket-cloud/index.ts`, `src/providers/bitbucket-data-center/index.ts`, `src/providers/first-parent.ts` (new).
 - Docs: `README.md`, `docs/org-pooled-audits.md`, `docs/security-model.md` (new section), `docs/writing-a-provider.md`, `docs/design/phase-3-4/contracts.md` (§1 SDK lines, §5 record fields, §7 exit 6 and `--json`).
+- Shared test files outside U8 (timing and robustness only): `vitest.config.ts` (`hookTimeout`), `test/helpers/audit-scenario.ts` (git options), `test/plugin-host.test.ts` (two margins), `test/wave1-integration.test.ts` (one timeout), `test/timestamps-e2e.test.ts` (the U_k boundary test, adapted to the freeze deadline), `test/net-io.test.ts` (exit 6).
 - For the integration step: U5 is moving commands into `src/api`; the six command files above change by a few lines each. U9 may touch `src/core/verify.ts` (check 7 is untouched; check 2 and check 5 changed) and `src/core/records.ts` (additions only).
 
 ### Unverified
