@@ -209,6 +209,11 @@ export function fakeOrg(spec: OrgSpec) {
     control,
     requests: () => total,
     requestsFor: (full: string) => perRepo.get(full) ?? 0,
+    /** Removes a repo, as deleting it would: it leaves the listing and its endpoints answer 404. */
+    removeRepo(name: string) {
+      specs.delete(`${spec.owner}/${name}`);
+      inner.delete(`${spec.owner}/${name}`);
+    },
     /** Adds (or replaces) a repo; it appears in the next listing. */
     addRepo(r: RepoSpec) {
       specs.set(`${spec.owner}/${r.name}`, r);
