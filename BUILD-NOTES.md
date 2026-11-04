@@ -1452,12 +1452,15 @@ npm --prefix examples/ledgers/jira test    → ok 1 - the ledger kit: recorded h
 npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
 ```
 
-- **Four fresh clones, each running the whole command.** Runs 2, 3 and 4 were green in a row.
-- **Run 1 failed one test**, U2b's `plugin-host.test.ts › a slow call that keeps sending heartbeats is not stopped` (`plugin hostile sent no heartbeat for 1 s and was stopped`), in a cold run that took 45 s; warm runs take 24 s.
-  - The host's watchdog is armed from spawn, so that test's 500 ms limit also covers the child's start-up (Node with `--permission`, loading the TypeScript child). A cold or loaded start can exceed it.
-  - In this worktree under `~/Documents`, the test run alone fails 3 of 3. In `/private/tmp` clones, at `4b72ecb` and at `07ce083` alike, it passes 3 of 3. So it is environmental, not this round's code.
+- **Every run was a fresh clone running the whole command**, 16 at this branch (4 at `07ce083`, 12 at the docs commit) and 8 at `4b72ecb` for comparison. The last three runs at the docs commit, and runs 2–4 at `07ce083`, were green in a row.
+- **Two load-dependent tests from other units fail at times, at `4b72ecb` as well.** Other agents' suites ran on this machine throughout (load averages 18–98 on 10 cores; a quiet `npm test` takes 24 s, these took 45–72 s).
+  - U2b's `plugin-host.test.ts › a slow call that keeps sending heartbeats is not stopped` (`plugin hostile sent no heartbeat for 1 s and was stopped`).
+  - Wave 1's `wave1-integration.test.ts › the Jira example passes the ledger conformance kit with every instance in its own plugin host` (the 60 s test timeout).
+  - Failing runs: 5 of 16 on this branch (heartbeat 4, Jira host 2) and 3 of 8 at `4b72ecb` (heartbeat 3, Jira host 1). The failures are the same, at a similar rate, without this round's code.
+- **The heartbeat test's cause.** The host's watchdog is armed from spawn, so the test's 500 ms limit also covers the child's start-up (Node with `--permission`, loading the TypeScript child). A cold or loaded start exceeds it.
+  - In this worktree under `~/Documents`, that test run alone fails 3 of 3. In `/private/tmp` clones, at `4b72ecb` and this branch alike, it passes 3 of 3 alone.
   - It is probably the unexplained first-run failure the wave-1 integration recorded.
-  - It is left alone here: `fix/ledgers-selector` touches the plugin host files. A start-up allowance in the host, or a longer timeout in the test, would settle it.
+- **Both are left alone here**, since `fix/ledgers-selector` touches the plugin host files. A start-up allowance in the host's watchdog, and a longer timeout for the 67-child Jira test, would settle them. This round's four new test files add about 16 s of CPU to the suite (U2b's `plugin-host.test.ts` alone takes 8 s).
 - `npm test` makes no network call: OpenSSL runs locally, and every log, authority and beacon is a mock or a recording under the network-deny harness.
 
 ### Unverified
