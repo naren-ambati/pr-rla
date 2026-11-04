@@ -43,3 +43,13 @@ export function replayFetch(rec: Recording): typeof fetch & { served: () => numb
   f.unused = () => queue.filter((q) => !q.used).map((q) => q.e);
   return f;
 }
+
+/**
+ * The clock a recorded listing walk ran on. A CLI-mode recording (scripts/record-fixture.mjs --cli) takes
+ * recordedAt when the script starts, but the provider re-scans the head of its listing from its own walk
+ * start minus 60 s: the latest `updated_after` in the recording, plus 60 s and half a second.
+ */
+export function recordedWalkClock(rec: Recording): number {
+  const latest = rec.exchanges.map((e) => /[?&]updated_after=([^&]+)/.exec(e.url)?.[1]).filter((x): x is string => !!x).map(decodeURIComponent).sort().at(-1);
+  return latest ? Date.parse(latest) + 60_500 : Date.parse(rec.recordedAt);
+}

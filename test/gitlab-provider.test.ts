@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import gitlab, { GitLabProvider } from "../src/providers/gitlab/index.js";
 import { buildReviews, normalizeCommitAuthor, normalizeUser } from "../src/providers/gitlab/normalize.js";
 import { loadProviderDefinition } from "../src/registry.js";
-import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
-import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
+import { fakeGitLab, GL_BASE, glUserId } from "./helpers/fake-gitlab.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
-import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
-import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
+import { recordedWalkClock, replayFetch, type Recording } from "./helpers/replay-fetch.js";
+import { buildScenario, OID, scenarioExpectations, scmScenario, U } from "./helpers/scm-scenario.js";
 
 /** gitlab.com's 429: Retry-After plus RateLimit-Reset in epoch seconds. */
 const GITLAB_RATE_LIMIT = { status: 429, headers: (now: number) => ({ "retry-after": "20", "ratelimit-remaining": "0", "ratelimit-reset": String(now + 20) }), minWaitMs: 20_000 };
@@ -17,18 +17,16 @@ const human = (login: string) => ({ login, kind: "human" as const });
 
 describe("GitLab provider on a synthetic self-managed instance: every merge strategy", () => {
   const sc = scmScenario();
+  const late = scmScenario({ latePush: true });
   const x = scenarioExpectations("gitlab");
-  const make = (h?: ConformanceHarness) => {
-    const fake = fakeGitLab(sc, { pageSize: 3 });
+  const make = (h?: ConformanceHarness, s = sc) => {
+    const fake = fakeGitLab(s, { pageSize: 3 });
     const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
     return { fake, provider: new GitLabProvider({ base_url: GL_BASE, page_size: 3, batch_size: 4 }, { ...(h ? h.context(base) : base), now: () => Date.parse("2026-08-03T00:00:00Z") }) };
   };
   it("passes the conformance kit: squash, squash + merge commit, merge commit, rebase, fast-forward, direct pushes", async () => {
     let last = make();
-    const report = await runProviderConformance(
-      (_f, h) => (last = make(h)).provider,
-      [
-        {
+    const base: ConformanceFixture = {
           name: "synthetic gitlab acme/widgets 2026-08-01",
           request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -57,13 +55,16 @@ describe("GitLab provider on a synthetic self-managed instance: every merge stra
             bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "project_42_bot_0a1b2c[bot]"],
             humans: ["maint", "bob", "dave", "erin", "carol"],
             minPages: 20,
+            actorIds: { carol: String(glUserId("carol")), "review-bot[bot]": String(glUserId("review-bot")) },
+            reviewGranularity: "first-comment-per-user",
+            revokedApprovals: x.revokedApprovals,
           },
           pagesServed: () => last.fake.served(),
           http: true,
           rateLimitFault: GITLAB_RATE_LIMIT,
-        },
-      ],
-    );
+        };
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic gitlab, a merge pushed after freeze", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
+    const report = await runProviderConformance((f, h) => (last = make(h, f.pinnedHead ? late : sc)).provider, [base, pushedLater], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
@@ -87,8 +88,28 @@ describe("GitLab provider on a synthetic self-managed instance: every merge stra
     const { provider, fake } = make();
     const before = fake.served();
     const r = await provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
-    expect(r.changes.find((c) => c.id === x.ids.squash)!.reviews).toEqual([{ author: bot("review-bot"), state: "COMMENTED", submittedAt: "2026-08-01T11:00:00Z" }]);
+    expect(r.changes.find((c) => c.id === x.ids.squash)!.reviews).toEqual([{ author: { ...bot("review-bot"), id: String(glUserId("review-bot")) }, state: "COMMENTED", submittedAt: "2026-08-01T11:00:00Z" }]);
     expect(fake.served() - before).toBeGreaterThan(10);
+  });
+
+  it("walks from request.head: a merge pushed after freeze brings in nothing from the frozen head (FR7.2)", async () => {
+    const late = scmScenario({ latePush: true });
+    const p = new GitLabProvider({ base_url: GL_BASE, page_size: 3, batch_size: 4 }, { cwd: ".", env: {}, log: () => {}, fetch: fakeGitLab(late, { pageSize: 3 }).fetch, now: () => Date.parse("2026-08-05T00:00:00Z") });
+    const now = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["direct_push"] });
+    expect(now.headSha).toBe(OID("LM"));
+    expect(now.changes.map((c) => c.id)).toContain(x.late.id);
+    const frozen = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["direct_push"], head: late.frozenHead });
+    expect(frozen.headSha).toBe(late.frozenHead);
+    expect(frozen.changes.map((c) => c.id).sort()).toEqual([...x.directPushes].sort());
+  });
+
+  it("account ids from GraphQL and REST; a release branch merged by a push gives its commits landedVia (FR7.3, FR7.6)", async () => {
+    const r = await make().provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] });
+    expect(r.changes.find((c) => c.id === x.ids.rebase)!.reviews.map((rv) => [rv.author.login, rv.author.id])).toEqual([["dave", String(glUserId("dave"))], ["erin", String(glUserId("erin"))]]);
+    const c = (tag: string, date: string, parents: string[]) => ({ oid: OID(tag), date: `2026-08-01T${date}:00Z`, authorDate: `2026-08-01T${date}:00Z`, parents: parents.map(OID), author: { name: "Rel", email: "rel@example.com", user: U("rel") }, additions: 1, deletions: 0, subject: tag });
+    const rel = buildScenario({ repo: sc.repo, head: OID("X"), window: sc.window, commits: [c("X", "12:00", ["B", "R2"]), c("R2", "11:00", ["R1"]), c("R1", "10:00", ["B"]), c("B", "09:00", [])], prs: [] });
+    const out = await new GitLabProvider({ base_url: GL_BASE }, { cwd: ".", env: {}, log: () => {}, fetch: fakeGitLab(rel).fetch }).listChanges({ repo: sc.repo, window: sc.window, kinds: ["direct_push"] });
+    expect(Object.fromEntries(out.changes.map((ch) => [ch.mergeSha, ch.landedVia ?? null]))).toEqual({ [OID("X")]: null, [OID("R2")]: OID("X"), [OID("R1")]: OID("X"), [OID("B")]: null });
   });
 
   it("is registered as a built-in", async () => {
@@ -142,13 +163,13 @@ describe("GitLab normalizers (pure)", () => {
 });
 
 type Rec = Recording & { options: Record<string, string>; window: { opensAt: string; closesAt: string }; repo: string; expected: { ids: string[]; directPushes: string[]; diagnostics: { label: string; value: number }[] } };
-const recorded = (name: string) => {
+const recorded = (name: string, clock: (rec: Rec) => number = (rec) => Date.parse(rec.recordedAt)) => {
   const rec = readJsonFixture<Rec>("gitlab", name);
   let last = replayFetch(rec);
   const make = (h?: ConformanceHarness) => {
     last = replayFetch(rec);
     const base = { cwd: ".", env: {}, log: () => {}, fetch: last as typeof fetch };
-    return new GitLabProvider(rec.options, { ...(h ? h.context(base) : base), now: () => Date.parse(rec.recordedAt) });
+    return new GitLabProvider(rec.options, { ...(h ? h.context(base) : base), now: () => clock(rec) });
   };
   return { rec, make, served: () => last.served(), request: { repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] as ("pull_request" | "direct_push")[] } };
 };
@@ -180,12 +201,16 @@ describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, 2026
           // GitLab reports these service accounts as bot: false, so pr-rla counts them as human (documented limitation).
           humans: ["gitlab-bot", "gitlab-dependency-update-bot", "viktomas"],
           minPages: 20,
+          // U3: user ids from GraphQL and REST; gitlab-bot's approval on !4290 was withdrawn ("unapproved") 73 min later.
+          actorIds: { "gitlab-bot": "1786152", viktomas: "3457201", "GitLabDuo[bot]": "21826781" },
+          reviewGranularity: "first-comment-per-user",
+          revokedApprovals: { [id(4290)]: ["gitlab-bot"] },
         },
         pagesServed: r.served,
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ]);
+    ], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -222,12 +247,13 @@ describe("GitLab provider on recorded self-managed responses: gitlab.freedesktop
           actors: { [id(2341)]: { author: human("whot"), mergedBy: human("marge-bot") } },
           humans: ["marge-bot", "whot"],
           minPages: 10,
+          reviewGranularity: "first-comment-per-user",
         },
         pagesServed: r.served,
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ]);
+    ], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -240,5 +266,46 @@ describe("GitLab provider on recorded self-managed responses: gitlab.freedesktop
       { label: "commits linked only through GitLab's commit->MR lookup", value: 0 },
       { label: "direct pushes that are merge commits", value: 0 },
     ]);
+  });
+});
+
+describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, October 2026 (FR7.1, the U3 demo)", () => {
+  // Recorded read-only during `pr-rla -C examples/gitlab-cli-2026-10 freeze --dry-run` (scripts/record-fixture.mjs --cli).
+  const r = recorded("gitlab-org-cli-2026-10.json", recordedWalkClock);
+  const id = (n: number) => `gitlab:gitlab-org/cli#${n}`;
+  // The example's stratum (examples/gitlab-cli-2026-10/.pr-rla.yml), with and without the registered bot list.
+  const selector = (bots: string[], max_changed_lines: number | null = 200) => normalizeSelector({ kinds: ["pull_request", "direct_push"], authors: "any", unreviewed: "no-human-review", merged_by: "any", max_changed_lines, bots });
+
+  it("passes the extended conformance kit on a month of real data", async () => {
+    const report = await runProviderConformance((_f, h) => r.make(h), [
+      {
+        name: "gitlab-org/cli 2026-10",
+        request: r.request,
+        expect: { ids: r.rec.expected.ids, directPushes: [], bots: ["GitLabDuo[bot]"], humans: ["gitlab-bot", "jay_mccure"], actorIds: { "gitlab-bot": "1786152" }, reviewGranularity: "first-comment-per-user", minPages: 400 },
+        pagesServed: r.served,
+        http: true,
+        rateLimitFault: GITLAB_RATE_LIMIT,
+      },
+    ], { definition: gitlab });
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
+  });
+
+  it("bots: [gitlab-bot] moves exactly 4 MRs into the no-human-review stratum (0 -> 4); the provider still reports gitlab-bot as human", async () => {
+    const out = await r.make().listChanges(r.request);
+    expect(out.changes).toHaveLength(205);
+    expect(out.diagnostics).toEqual(r.rec.expected.diagnostics);
+    const step = (s: ReturnType<typeof applySelector>) => s.funnel.find((x) => x.step === "no recorded human review")!.count;
+    const without = applySelector(out.changes, selector([], null), r.rec.recordedAt);
+    const withBots = applySelector(out.changes, selector(["gitlab-bot"], null), r.rec.recordedAt);
+    expect(step(without)).toBe(0);
+    expect(step(withBots)).toBe(4);
+    // Each was approved only by GitLabDuo (bot: true) and gitlab-bot (checked by hand with curl on /approvals, 2026-11-04).
+    expect(withBots.selected.map((c) => c.id)).toEqual([id(4191), id(4247), id(4251), id(4253)]);
+    expect(withBots.funnel[1]).toEqual({ step: "actors re-labelled as bot by selector", count: 164 });
+    // The example's 200-line cap keeps 3 of them (!4247 has 569 lines).
+    expect(applySelector(out.changes, selector(["gitlab-bot"]), r.rec.recordedAt).selected.map((c) => c.id)).toEqual([id(4191), id(4251), id(4253)]);
+    // The same list by account id: gitlab-bot is user 1786152 on gitlab.com.
+    expect(applySelector(out.changes, selector(["id:1786152"], null), r.rec.recordedAt).selected.map((c) => c.id)).toEqual(withBots.selected.map((c) => c.id));
+    expect(out.changes.flatMap((c) => c.reviews.map((rv) => rv.author)).find((a) => a.login === "gitlab-bot")).toEqual({ login: "gitlab-bot", kind: "human", id: "1786152" });
   });
 });

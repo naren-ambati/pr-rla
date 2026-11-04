@@ -17,6 +17,7 @@ import {
 import type { Selector } from "../core/selector.js";
 import { isoToUnix, unixToIso } from "../core/seed.js";
 import { loadOrCreateKey, signRecord } from "../core/signing.js";
+import { providerTraits } from "../provider-traits.js";
 import { pluginIdentity } from "../registry.js";
 import { PROVIDER_API_VERSION } from "../sdk/provider.js";
 import { isoMs } from "../timestamp/verify.js";
@@ -92,6 +93,16 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const url = opts.submit && !opts.dryRun ? submitUrl(config, opts.rekorUrl) : null;
   if (url && api === "v2") await confirmRekorV2(ctx, opts.yes);
   const repo = reg ? registrationRepo(reg) : config.repo;
+  if (reg && isRegistrationV2(reg)) {
+    // Options that change the population are part of the stratum (populationOptions, check 5).
+    const now = await pluginIdentity(config.provider, "provider", config.dir);
+    const reg0 = reg.record.plugins.provider;
+    if (now.optionsSha256 !== reg0.optionsSha256 && now.populationOptionsSha256 !== reg0.populationOptionsSha256) {
+      const why = `the provider options that change the population (populationOptions) differ from the registration (${now.populationOptionsSha256.slice(0, 12)}… ≠ registered ${reg0.populationOptionsSha256.slice(0, 12)}…)`;
+      if (!opts.dryRun) throw new CommandError(`${why}: freeze with the registered options, or verify check 5 fails`);
+      ctx.err(`note: ${why}`);
+    }
+  }
 
   const provider = await providerFor(ctx, config);
   const pop = await buildPopulation(provider, { repo, window, selector, cutoffIso: frozenAt });
@@ -106,7 +117,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     }
   }
   if (opts.json) {
-    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo, window, frozenAt, N, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, summary }, null, 2));
+    ctx.out(JSON.stringify({ dryRun: !!opts.dryRun, repo, window, frozenAt, N, headSha: pop.headSha, funnel: pop.selection.funnel, byKind: pop.byKind, mergedBy: pop.selection.mergedByBreakdown, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], viaMerge: pop.viaMerge, limitations: pop.limitations, summary }, null, 2));
   } else {
     ctx.out(`${opts.dryRun ? "[dry run] " : ""}${repo} · window ${window.name} (${window.start}..${window.end} UTC) · provider ${provider.name} · reviews as of ${frozenAt}`);
     lines.forEach((l) => ctx.out(l));
@@ -114,12 +125,14 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     ctx.out(summary);
     if (native.length) ctx.out(`provider-native, for comparison only (not used): ${native.map((n) => `${n.label} ${fmt(n.value)}`).join(" · ")}`);
     for (const d of pop.listed.diagnostics ?? []) ctx.out(`  diagnostic: ${d.label}: ${fmt(d.value)}`);
+    for (const v of pop.viaMerge) ctx.out(`  diagnostic: direct pushes that arrived through merge ${v.merge.slice(0, 12)}… (a non-first parent): ${fmt(v.count)}`);
+    if (pop.headSha) ctx.out(`  history walked from ${pop.listed.defaultBranch} head ${pop.headSha} (recorded in the manifest; verify walks the same history)`);
     for (const l of pop.limitations) ctx.out(`  limitation: ${l}`);
     if (N < parameters.minPopulation) ctx.out(`population ${fmt(N)} < ${parameters.minPopulation}: review all ${fmt(N)} instead`);
   }
   if (opts.dryRun) {
     if (opts.out) {
-      writeJson(resolve(ctx.cwd, opts.out), { repo, window, frozenAt, selector, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
+      writeJson(resolve(ctx.cwd, opts.out), { repo, window, frozenAt, selector, headSha: pop.headSha, funnel: pop.selection.funnel, nativeCounts: native, diagnostics: pop.listed.diagnostics ?? [], limitations: pop.limitations, listed: pop.listed.changes, selected: pop.entries.map((e) => e.id) });
       ctx.out(`wrote the dry-run population to ${opts.out}`);
     }
     return 0;
@@ -169,14 +182,15 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
 
   const v2reg = reg as SignedRecord<RegistrationRecordV2>;
   const providerId = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
+  const traits = await providerTraits(config.provider, config.dir);
   const registered = v2reg.record.plugins.provider;
   if (providerId.name !== registered.name || providerId.optionsSha256 !== registered.optionsSha256)
     ctx.err(`note: the provider in .pr-rla.yml (${providerId.name}) differs from the registered one (${registered.name}, options ${registered.optionsSha256.slice(0, 8)}…); verify rebuilds the population with the provider it is given`);
   const body: Omit<ManifestV2, "sha256"> = {
     schema: "pr-rla/manifest/v2",
     registrationSha256: v2reg.sha256,
-    repos: [{ repo, repoId: null, defaultBranch: pop.listed.defaultBranch, headSha: null }],
-    provider: { ...providerId, apiVersion: PROVIDER_API_VERSION, reviewGranularity: "submission" },
+    repos: [{ repo, repoId: null, defaultBranch: pop.listed.defaultBranch, headSha: pop.headSha }],
+    provider: { ...providerId, apiVersion: PROVIDER_API_VERSION, reviewGranularity: traits.reviewGranularity },
     window,
     frozenAt,
     selector,

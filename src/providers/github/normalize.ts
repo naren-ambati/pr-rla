@@ -4,6 +4,8 @@ import type { Actor, ChangeRecord, Review, ReviewState } from "../../sdk/provide
 export interface GqlActor {
   __typename?: string;
   login: string;
+  /** The account's stable id (absent on actor types without one). */
+  databaseId?: number | null;
 }
 
 export interface GqlReview {
@@ -34,7 +36,7 @@ export interface GqlHistoryCommit {
   additions: number;
   deletions: number;
   parents: { nodes: { oid: string }[] };
-  author: { name: string | null; email: string | null; user: { login: string } | null } | null;
+  author: { name: string | null; email: string | null; user: { login: string; databaseId?: number | null } | null } | null;
   associatedPullRequests: { nodes: { number: number; merged: boolean; baseRefName: string }[] };
 }
 
@@ -49,9 +51,10 @@ const BOT_SUFFIX = "[bot]";
  */
 export function normalizeActor(a: GqlActor | null): Actor {
   if (!a) return { login: "ghost", kind: "human" };
+  const id = a.databaseId != null ? { id: String(a.databaseId) } : {};
   const isBot = a.__typename === "Bot" || a.login.endsWith(BOT_SUFFIX);
-  if (!isBot) return { login: a.login, kind: "human" };
-  return { login: a.login.endsWith(BOT_SUFFIX) ? a.login : `${a.login}${BOT_SUFFIX}`, kind: "bot" };
+  if (!isBot) return { login: a.login, kind: "human", ...id };
+  return { login: a.login.endsWith(BOT_SUFFIX) ? a.login : `${a.login}${BOT_SUFFIX}`, kind: "bot", ...id };
 }
 
 const STATES: Record<string, ReviewState> = {
@@ -101,13 +104,14 @@ export function normalizePullRequest(repo: string, pr: GqlPullRequest, extraRevi
  */
 export function normalizeCommitAuthor(c: GqlHistoryCommit): Actor {
   const login = c.author?.user?.login;
-  if (login) return { login, kind: login.endsWith(BOT_SUFFIX) ? "bot" : "human" };
+  const dbId = c.author?.user?.databaseId;
+  if (login) return { login, kind: login.endsWith(BOT_SUFFIX) ? "bot" : "human", ...(dbId != null ? { id: String(dbId) } : {}) };
   const name = c.author?.name ?? "";
   if (name.endsWith(BOT_SUFFIX)) return { login: name, kind: "bot" };
   return { login: `git:${c.author?.email || name || "unknown"}`, kind: "human" };
 }
 
-export function normalizeDirectPush(repo: string, c: GqlHistoryCommit): ChangeRecord {
+export function normalizeDirectPush(repo: string, c: GqlHistoryCommit, landedVia?: string): ChangeRecord {
   return {
     id: `github:${repo}@${c.oid.toLowerCase()}`,
     kind: "direct_push",
@@ -120,5 +124,6 @@ export function normalizeDirectPush(repo: string, c: GqlHistoryCommit): ChangeRe
     reviews: [],
     changedLines: c.additions + c.deletions,
     labels: [],
+    ...(landedVia ? { landedVia } : {}),
   };
 }

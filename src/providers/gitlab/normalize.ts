@@ -3,7 +3,8 @@ import { isoUtcSeconds } from "../http.js";
 
 /** The subsets of GitLab REST (v4) and GraphQL responses pr-rla reads. */
 export interface GlUser {
-  id?: number;
+  /** REST: the numeric user id; GraphQL: the global id `gid://gitlab/User/<n>`. */
+  id?: number | string;
   username: string;
   /** Present on MR `author` in REST, and on every GraphQL user. */
   bot?: boolean;
@@ -66,11 +67,20 @@ export const BOT_SUFFIX = "[bot]";
  * GitLab's `ghost` user: human, as on GitHub (a ghost approval still counts).
  * Bots are normalized to the `login[bot]` form the provider SDK specifies.
  */
-export function normalizeUser(u: GlUser | null | undefined, botByUsername: ReadonlyMap<string, boolean> = new Map()): Actor {
+export function normalizeUser(u: GlUser | null | undefined, botByUsername: ReadonlyMap<string, boolean> = new Map(), idByUsername: ReadonlyMap<string, string> = new Map()): Actor {
   if (!u) return { login: "ghost", kind: "human" };
   const name = u.username.endsWith(BOT_SUFFIX) ? u.username.slice(0, -BOT_SUFFIX.length) : u.username;
   const bot = botByUsername.get(name) === true || u.bot === true || BOT_USERNAME.test(name) || u.username.endsWith(BOT_SUFFIX);
-  return bot ? { login: `${name}${BOT_SUFFIX}`, kind: "bot" } : { login: name, kind: "human" };
+  const id = userId(u) ?? idByUsername.get(u.username);
+  const extra = id !== undefined ? { id } : {};
+  return bot ? { login: `${name}${BOT_SUFFIX}`, kind: "bot", ...extra } : { login: name, kind: "human", ...extra };
+}
+
+/** The user's numeric id as a string, from REST (`123`) or GraphQL (`gid://gitlab/User/123`). Actor.id (U3). */
+export function userId(u: Pick<GlUser, "id"> | null | undefined): string | undefined {
+  if (u?.id === undefined || u.id === null) return undefined;
+  const m = /(\d+)$/.exec(String(u.id));
+  return m ? m[1] : undefined;
 }
 
 /** The author of a default-branch commit: GitLab links no account to it, so the git identity is used. */
@@ -175,7 +185,7 @@ export function normalizeMergeRequest(repo: string, mr: GlMergeRequest, reviews:
   };
 }
 
-export function normalizeDirectPush(repo: string, c: GlCommit): ChangeRecord {
+export function normalizeDirectPush(repo: string, c: GlCommit, landedVia?: string): ChangeRecord {
   const sha = c.id.toLowerCase();
   return {
     id: `gitlab:${repo}@${sha}`,
@@ -189,6 +199,7 @@ export function normalizeDirectPush(repo: string, c: GlCommit): ChangeRecord {
     reviews: [],
     changedLines: (c.stats?.additions ?? 0) + (c.stats?.deletions ?? 0),
     labels: [],
+    ...(landedVia ? { landedVia } : {}),
   };
 }
 

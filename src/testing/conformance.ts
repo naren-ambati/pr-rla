@@ -1,6 +1,7 @@
 import { canonicalJson } from "../core/canonical.js";
 import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
+  DEFAULT_REVIEW_GRANULARITY,
   SUPPORTED_PROVIDER_API_VERSIONS,
   changeRecordProblems,
   normalizeLogin,
@@ -8,7 +9,10 @@ import {
   type ChangeKind,
   type ChangeRecord,
   type ListChangesRequest,
+  type ListChangesResult,
   type ProviderContext,
+  type ProviderDefinition,
+  type ReviewGranularity,
   type ReviewState,
   type ScmProvider,
 } from "../sdk/provider.js";
@@ -47,7 +51,19 @@ export interface ConformanceFixture {
     bots?: string[];
     /** Logins that must be `kind: "human"` wherever they appear. */
     humans?: string[];
+    /** U3 (`actor-ids`): the stable account id each login must carry (`Actor.id`). */
+    actorIds?: Record<string, string>;
+    /** U3 (`review-granularity`): how the fixture's data forms review objects; must match what the definition declares. */
+    reviewGranularity?: ReviewGranularity;
+    /** U3 (`revoked-approval`): per change id, the logins whose approval was revoked (unapproved, reset by a push, dismissed). None may come back as APPROVED. */
+    revokedApprovals?: Record<string, string[]>;
   };
+  /**
+   * U3 (`pinned-head`): the transport serves a default branch with commits pushed after `head` (the
+   * frozen tip), dated in the window. Unpinned, the provider must return the `late` commits; with
+   * `request.head = head` it must report `headSha: head`, leave them out and change nothing else.
+   */
+  pinnedHead?: { head: string; late: string[] };
   /** How many requests/pages the fixture transport has served (pagination check). Defaults to the harness's request count. */
   pagesServed?: () => number;
   /**
@@ -87,6 +103,11 @@ export interface ConformanceHarness {
 
 export type ProviderUnderTest = ScmProvider | ((fixture: ConformanceFixture, harness: ConformanceHarness) => ScmProvider | Promise<ScmProvider>);
 
+/** U3: what the kit needs beyond the provider: its definition, for the checks that read what it declares. */
+export interface ConformanceOptions {
+  definition?: Pick<ProviderDefinition, "reviewGranularity">;
+}
+
 export interface ConformanceResult {
   fixture: string;
   check: string;
@@ -115,6 +136,10 @@ export const CONFORMANCE_CHECKS = [
   "pagination",
   "kind-filtering",
   "transient-faults",
+  "pinned-head",
+  "actor-ids",
+  "review-granularity",
+  "revoked-approval",
 ] as const;
 export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
 
@@ -219,7 +244,31 @@ function allActors(c: ChangeRecord): Actor[] {
   return [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)];
 }
 
-export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[]): Promise<ConformanceReport> {
+/** Actors that are SCM accounts: a direct push's author is a git identity the SCM links to an account only sometimes. */
+function accountActors(c: ChangeRecord): Actor[] {
+  return [...(c.kind === "pull_request" ? [c.author] : []), ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)];
+}
+
+/** An expected actor matches on login and kind, and on id when the expectation names one. */
+function sameActor(got: Actor | null | undefined, want: Actor | null): boolean {
+  if (want === null || !got) return (got ?? null) === want;
+  return got.login === want.login && got.kind === want.kind && (want.id === undefined || got.id === want.id);
+}
+
+/** login (normalized) -> account ids seen for it, and id -> logins, over every actor that carries an id. */
+function idMaps(changes: readonly ChangeRecord[]): { byLogin: Map<string, Set<string>>; byId: Map<string, Set<string>> } {
+  const byLogin = new Map<string, Set<string>>();
+  const byId = new Map<string, Set<string>>();
+  for (const a of changes.flatMap(allActors)) {
+    if (a.id === undefined) continue;
+    const l = normalizeLogin(a.login);
+    byLogin.set(l, (byLogin.get(l) ?? new Set()).add(a.id));
+    byId.set(a.id, (byId.get(a.id) ?? new Set()).add(l));
+  }
+  return { byLogin, byId };
+}
+
+export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[], options: ConformanceOptions = {}): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
   for (const f of fixtures) {
     const push = (check: ConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
@@ -228,8 +277,10 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     const p1 = await instantiate(provider, f, h1);
     push("api-version", SUPPORTED_PROVIDER_API_VERSIONS.includes(p1.apiVersion) && /^[a-z0-9][a-z0-9-]*$/.test(p1.name), `apiVersion ${p1.apiVersion} / name ${p1.name}`);
     let first: ChangeRecord[];
+    let firstResult: ListChangesResult;
     try {
-      first = (await p1.listChanges(f.request)).changes;
+      firstResult = await p1.listChanges(f.request);
+      first = firstResult.changes;
     } catch (e) {
       push("normalization", false, `listChanges threw: ${(e as Error).message}`);
       continue;
@@ -300,7 +351,7 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     for (const [id, actors] of Object.entries(f.expect.reviewers ?? {})) {
       const c = first.find((x) => x.id === id);
       const got = c?.reviews.map((r) => r.author) ?? null;
-      if (canonicalJson(got) !== canonicalJson(actors)) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
+      if (!got || got.length !== actors.length || got.some((a, i) => !sameActor(a, actors[i]!))) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
     }
     push("review-state-mapping", rs.length === 0, rs.join("; "));
 
@@ -309,8 +360,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const c = first.find((x) => x.id === id);
       if (!c) ac.push(`${id} missing`);
       else {
-        if (exp.author && canonicalJson(c.author) !== canonicalJson(exp.author)) ac.push(`${id} author ${canonicalJson(c.author)}`);
-        if (exp.mergedBy !== undefined && canonicalJson(c.mergedBy) !== canonicalJson(exp.mergedBy)) ac.push(`${id} mergedBy ${canonicalJson(c.mergedBy)}`);
+        if (exp.author && !sameActor(c.author, exp.author)) ac.push(`${id} author ${canonicalJson(c.author)}`);
+        if (exp.mergedBy !== undefined && !sameActor(c.mergedBy, exp.mergedBy)) ac.push(`${id} mergedBy ${canonicalJson(c.mergedBy)}`);
       }
     }
     for (const [id, n] of Object.entries(f.expect.changedLines ?? {})) {
@@ -358,8 +409,100 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     } else {
       push("transient-faults", ...(await transientFaults(provider, f, first, cleanRequests)));
     }
+
+    // --- U3 checks -------------------------------------------------------------------------------
+    const pin = await pinnedHead(provider, f, firstResult);
+    if (pin.skip) skip("pinned-head", pin.skip);
+    else push("pinned-head", pin.problems.length === 0, pin.problems.join("; "));
+
+    const withId = first.flatMap(allActors).filter((a) => a.id !== undefined);
+    if (withId.length === 0) {
+      if (f.expect.actorIds) push("actor-ids", false, `the fixture expects account ids (${Object.keys(f.expect.actorIds).slice(0, 3).join(", ")}) but the provider reports no Actor.id`);
+      else skip("actor-ids", "the provider reports no Actor.id");
+    } else {
+      const ai: string[] = [];
+      const missing = first.flatMap((c) => accountActors(c).filter((a) => a.id === undefined && normalizeLogin(a.login) !== "ghost").map((a) => `${a.login} in ${c.id}`));
+      if (missing.length) ai.push(`${missing.length} account actor(s) without an id although others have one (e.g. ${missing.slice(0, 3).join(", ")})`);
+      const maps = idMaps(first);
+      for (const [login, ids] of maps.byLogin) if (ids.size > 1) ai.push(`${login} carries ${ids.size} ids (${[...ids].slice(0, 3).join(", ")})`);
+      for (const [id, logins] of maps.byId) if (logins.size > 1) ai.push(`id ${id} is carried by ${[...logins].slice(0, 3).join(", ")}`);
+      for (const [login, id] of Object.entries(f.expect.actorIds ?? {})) {
+        const got = [...(maps.byLogin.get(normalizeLogin(login)) ?? [])];
+        if (got.length !== 1 || got[0] !== id) ai.push(`${login}: id ${got.join(",") || "missing"} ≠ ${id}`);
+      }
+      if (second) {
+        const again = idMaps(second).byLogin;
+        for (const [login, ids] of maps.byLogin) if (canonicalJson([...ids].sort()) !== canonicalJson([...(again.get(login) ?? [])].sort())) ai.push(`${login}'s id changed between two runs`);
+      }
+      push("actor-ids", ai.length === 0, ai.join("; "));
+    }
+
+    const declared = options.definition ? (options.definition.reviewGranularity ?? DEFAULT_REVIEW_GRANULARITY) : undefined;
+    const shown = f.expect.reviewGranularity;
+    if (declared === undefined && shown === undefined) skip("review-granularity", "neither the definition (pass { definition }) nor the fixture names a review granularity");
+    else {
+      const rg: string[] = [];
+      if (declared !== undefined && shown !== undefined && declared !== shown) rg.push(`the definition declares reviewGranularity "${declared}", but the fixture's review objects are "${shown}"`);
+      if ((declared ?? shown) === "first-comment-per-user") {
+        for (const c of first) {
+          const seen = new Set<string>();
+          for (const r of c.reviews.filter((x) => x.state === "COMMENTED")) {
+            const l = normalizeLogin(r.author.login);
+            if (seen.has(l)) rg.push(`${c.id}: ${r.author.login} has more than one COMMENTED`);
+            if (c.kind === "pull_request" && l === normalizeLogin(c.author.login)) rg.push(`${c.id}: its author's own comment is a COMMENTED review`);
+            seen.add(l);
+          }
+        }
+      }
+      push("review-granularity", rg.length === 0, [...new Set(rg)].slice(0, 5).join("; "));
+    }
+
+    if (!f.expect.revokedApprovals) skip("revoked-approval", "the fixture lists no revoked approvals");
+    else {
+      const ra: string[] = [];
+      for (const [id, logins] of Object.entries(f.expect.revokedApprovals)) {
+        const c = first.find((x) => x.id === id);
+        if (!c) {
+          ra.push(`${id} missing`);
+          continue;
+        }
+        for (const login of logins) if (c.reviews.some((r) => r.state === "APPROVED" && normalizeLogin(r.author.login) === normalizeLogin(login))) ra.push(`${id}: ${login}'s revoked approval came back as APPROVED`);
+      }
+      push("revoked-approval", ra.length === 0, ra.join("; "));
+    }
   }
   return { ok: results.every((r) => r.ok), results };
+}
+
+/**
+ * `pinned-head` (U3): a provider that reports `headSha` must honour `request.head`. With the
+ * fixture's `pinnedHead`, the late commits must appear unpinned and vanish pinned; without it, a
+ * re-run from the reported head must give the same head and the same records.
+ */
+async function pinnedHead(provider: ProviderUnderTest, f: ConformanceFixture, first: ListChangesResult): Promise<{ skip?: string; problems: string[] }> {
+  const ph = f.pinnedHead;
+  if (!ph && first.headSha === undefined) return { skip: "the provider reports no headSha: it does not pin history (verify says so in check 5)", problems: [] };
+  const head = (ph?.head ?? first.headSha!).toLowerCase();
+  const late = new Set((ph?.late ?? []).map((x) => x.toLowerCase()));
+  const problems: string[] = [];
+  if (ph) {
+    const landed = new Set(first.changes.map((c) => c.mergeSha));
+    const absent = [...late].filter((x) => !landed.has(x));
+    if (absent.length) problems.push(`the unpinned run does not return the late commit(s) ${absent.map((x) => x.slice(0, 12)).join(", ")}: the fixture does not exercise a push after freeze`);
+    if (first.headSha !== undefined && first.headSha.toLowerCase() === head) problems.push(`the unpinned run reports the frozen head ${head.slice(0, 12)}, not the current one`);
+  }
+  let pinned: ListChangesResult;
+  try {
+    pinned = await (await instantiate(provider, f, makeHarness())).listChanges({ ...f.request, head });
+  } catch (e) {
+    return { problems: [...problems, `listChanges with head ${head.slice(0, 12)} threw: ${(e as Error).message}`] };
+  }
+  if (pinned.headSha?.toLowerCase() !== head) problems.push(`asked to walk from ${head.slice(0, 12)}, the provider reported headSha ${pinned.headSha?.slice(0, 12) ?? "none"}`);
+  const leaked = pinned.changes.filter((c) => late.has(c.mergeSha));
+  if (leaked.length) problems.push(`with the head pinned, a commit pushed after it came back: ${leaked[0]!.id}`);
+  const expected = first.changes.filter((c) => !late.has(c.mergeSha));
+  if (canonicalJson(sortById(pinned.changes)) !== canonicalJson(sortById(expected))) problems.push(ph ? "with the head pinned, the records differ from the unpinned run by more than the late commits" : "re-run from the reported head, the records differ");
+  return { problems };
 }
 
 /**
@@ -408,8 +551,8 @@ export function formatConformanceReport(r: ConformanceReport): string {
   return r.results.map((x) => `${x.ok ? (x.skipped ? "skip" : "ok  ") : "FAIL"} ${x.fixture} › ${x.check}${x.message ? `: ${x.message}` : ""}`).join("\n");
 }
 
-export async function assertProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[]): Promise<ConformanceReport> {
-  const r = await runProviderConformance(provider, fixtures);
+export async function assertProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[], options: ConformanceOptions = {}): Promise<ConformanceReport> {
+  const r = await runProviderConformance(provider, fixtures, options);
   if (!r.ok) throw new Error(`provider conformance failed:\n${formatConformanceReport(r)}`);
   return r;
 }

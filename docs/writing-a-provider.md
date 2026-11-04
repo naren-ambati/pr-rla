@@ -54,6 +54,19 @@ Each `ChangeRecord` (validated by `assertChangeRecord`):
 | `changedLines` | raw additions + deletions as the SCM reports them |
 | `labels` | strings, sorted |
 
+**Optional fields (phase 3, same API version 1).** A provider written for phase 2 keeps working without any of them; set the ones your SCM can provide:
+
+| Field | Meaning |
+|---|---|
+| `Actor.id` | the SCM's stable account id (GitHub `databaseId`, GitLab user id, Bitbucket `uuid`, Gitea user id). Selectors match it as `id:<value>`, and `verify` uses the manifest's ids so a renamed account stays the same actor. A direct push's git identity (`git:<email>`) and `ghost` have none |
+| `ListChangesRequest.head` / `ListChangesResult.headSha` | walk default-branch history from `req.head` when it is given, and report the head you walked. `freeze` records it; `verify` passes it back, so a commit dated in the window but pushed after freeze does not show up. Without it, `verify` says so in check 5 |
+| `ChangeRecord.landedVia` | for a direct push that a pushed merge commit brought in through a non-first parent (a release branch merged by a push), that merge's SHA. `selector.direct_push_via_merge: exclude` drops such records |
+| definition `reviewGranularity` | `"submission"` (one review object per submitted review: GitHub, Gitea) or `"first-comment-per-user"` (one `COMMENTED` per non-author user, at their first comment: GitLab, Bitbucket). Recorded in the manifest; absent means `"submission"` |
+| definition `populationOptions` | the option keys that change the population, e.g. `["base_url", "bots"]`. The registration hashes them; a verifier with other values FAILs check 5 |
+| definition `reportsLandedVia` | `true` if you set `landedVia`; otherwise `register` warns that `exclude` has no effect |
+
+A `DISMISSED` review is a decision that no longer stands: a dismissed review, a withdrawn approval, an approval reset by a push. A revoked approval must never come back as `APPROVED`.
+
 ## 2. Step by step: the Gitea provider
 
 The numbers below match the comments in [`index.mjs`](../examples/providers/gitea/index.mjs).
@@ -109,7 +122,7 @@ await assertProviderConformance(
 );
 ```
 
-It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`, `merge-strategies`, `no-double-counting`, `stable-sorted-ids` (two runs, identical records), `review-state-mapping`, `actors`, `bot-detection`, `pagination`, `kind-filtering`, and `transient-faults`. The last one re-runs the fixture with:
+It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`, `merge-strategies`, `no-double-counting`, `stable-sorted-ids` (two runs, identical records), `review-state-mapping`, `actors`, `bot-detection`, `pagination`, `kind-filtering`, `transient-faults`, and four checks for the optional fields: `pinned-head`, `actor-ids`, `review-granularity` and `revoked-approval` (below). `transient-faults` re-runs the fixture with:
 - a 503 on the first request;
 - a 429 with `Retry-After: 7`;
 - your SCM's own rate-limit response (`rateLimitFault`, or a 502 if none is given);
@@ -117,7 +130,15 @@ It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`,
 
 The provider must retry each one, wait at least as long as the headers say, and return exactly the same records.
 
+The four checks for the optional fields skip, and say why, when there is nothing to check:
+- `pinned-head`: a provider that reports `headSha` must honour `request.head`. A fixture's `pinnedHead: { head, late }` serves a branch with commits pushed after `head`: unpinned, the `late` commits must come back; pinned, they must not, and nothing else may change.
+- `actor-ids`: once any actor has an `id`, every account actor must (a direct push's author may lack one), with one id per login, stable across two runs; `expect.actorIds` pins specific ones.
+- `review-granularity`: pass your definition as the third argument, `assertProviderConformance(factory, fixtures, { definition })`. Its declaration must match `expect.reviewGranularity`, and under `first-comment-per-user` no user may have two `COMMENTED` on one change.
+- `revoked-approval`: `expect.revokedApprovals: { "<change id>": ["<login>"] }` lists approvals your data shows withdrawn; none may come back as `APPROVED`.
+
 **Behind the fetch broker.** In a real run `ctx.fetch` is pr-rla's fetch broker: every request passes its read-only guard (a provider may send only `GET`, `HEAD` and GraphQL queries), a per-host rate budget shared with every other caller, and a 30 s timeout. A request made as plain `fetch(url, init)`, as this example makes them, gets one attempt and the provider retries it, as above. A provider may instead hand retries to the broker by passing `destination: "scm"` (and optionally `retry: { maxRetries, acceptJson }`) in the init, as the built-in providers do; the kit's harness then retries that request with the broker's policy, and the provider passes by recovering through it.
+
+For your own retries outside the broker, `pr-rla/http` exports the built-ins' retrying JSON client, `createJsonClient({ base, headers, fetch, sleep, log, maxRetries })`, versioned on its own (`HTTP_HELPER_VERSION`, now 1). Behind the broker, construct it with `maxRetries: 0`: it then hands every request's retries to the broker.
 
 Two optional definition fields tell the broker what the provider reaches: `hosts(options)` (the hosts it contacts) and `credentials` (`[{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }]`). A header value `prrla-cred:GITEA_TOKEN` is then replaced with the token for those hosts only; a request to any other host carrying it is refused unsent. **Declare both:** an external provider runs isolated by default (section 7), where it may contact only the hosts it declared and receives each declared credential only as its placeholder.
 

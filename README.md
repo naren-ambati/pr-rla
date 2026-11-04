@@ -103,7 +103,8 @@ Package exports:
 
 - `pr-rla/provider`: `ScmProvider`, `ChangeRecord` and related types, `PROVIDER_API_VERSION` (1), `defineProvider()`.
 - `pr-rla/ledger`: `Ledger`, `VerdictEvent`, `LEDGER_API_VERSION` (1), `defineLedger()`.
-- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected.
+- `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected; and, for the optional phase-3 fields, the pinned head, account ids, review granularity and revoked approvals.
+- `pr-rla/http`: `createJsonClient()`, the built-ins' retrying JSON client, under its own `HTTP_HELPER_VERSION` (1).
 
 Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
@@ -134,7 +135,7 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 
 - **Claim D only.** It bounds what reviewers detect under the protocol; claim T, fixed attribute plans, stratified audits and sampling without replacement are not built.
 - **Transparency log.** Exercised only against local mock logs (v1 and v2). No Rekor production or staging entry has ever been created, so a real `--submit` is unverified on both APIs.
-- **Bots on regular accounts.** Every SCM's bot detection rests on its own account type or flag. Service accounts that run as ordinary users count as human: GitHub's `Copilot` commit author, GitLab's `gitlab-bot` and `marge-bot`, Bitbucket's `bamboo_hg_user`. On Gitea, which has no flag at all, they count as human unless they are listed in the provider's `bots` option.
+- **Bots on regular accounts.** Every SCM's bot detection rests on its own account type or flag. Service accounts that run as ordinary users count as human: GitHub's `Copilot` commit author, GitLab's `gitlab-bot` and `marge-bot`, Bitbucket's `bamboo_hg_user`. On Gitea, which has no flag at all, they count as human unless they are listed in the provider's `bots` option. Register them in `selector.bots` (logins or `id:<account id>`): the core then counts them as bots on every provider, and `verify` re-applies the list.
 - **Direct pushes on GitHub.**
   - The commit author is not the pusher, and GitHub's commit APIs do not expose the pusher. Every manifest records this.
   - The window applies to the commit date.

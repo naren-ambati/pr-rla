@@ -105,9 +105,15 @@ export function actor(user, bots) {
   return bot ? { login: `${login}${BOT_SUFFIX}`, kind: "bot" } : { login, kind: "human" };
 }
 
+/** `actor` plus the account's stable id (Actor.id): Gitea user ids survive renames. Deleted users (ghost) have none. */
+export function account(user, bots) {
+  const a = actor(user, bots);
+  return user && user.id !== -1 && user.id !== undefined ? { ...a, id: String(user.id) } : a;
+}
+
 /** A commit's author: the Gitea account linked by e-mail if any, else the git identity. */
 export function commitAuthor(c, bots) {
-  if (c.author) return actor(c.author, bots);
+  if (c.author) return account(c.author, bots);
   const { name = "", email = "" } = c.commit.author ?? {};
   if (name.endsWith(BOT_SUFFIX) || bots.has(name.toLowerCase())) return { login: name.endsWith(BOT_SUFFIX) ? name : `${name}${BOT_SUFFIX}`, kind: "bot" };
   return { login: `git:${email || name || "unknown"}`, kind: "human" };
@@ -119,7 +125,7 @@ const STATES = { APPROVED: "APPROVED", REQUEST_CHANGES: "CHANGES_REQUESTED", COM
 export function reviews(list, bots) {
   return list
     .filter((r) => r.submitted_at && (r.dismissed || STATES[r.state]))
-    .map((r) => ({ author: actor(r.user, bots), state: r.dismissed ? "DISMISSED" : STATES[r.state], submittedAt: iso(r.submitted_at) }))
+    .map((r) => ({ author: account(r.user, bots), state: r.dismissed ? "DISMISSED" : STATES[r.state], submittedAt: iso(r.submitted_at) }))
     .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0));
 }
 
@@ -183,6 +189,7 @@ class GiteaProvider {
 
     const changes = [];
     const diagnostics = [];
+    let headSha = req.head;
     if (req.kinds.includes("pull_request")) {
       diagnostics.push({ label: "PRs merged into other branches in window (excluded)", value: otherBase });
       for (const p of inWindow.sort((a, b) => a.number - b.number)) {
@@ -204,8 +211,8 @@ class GiteaProvider {
           url: full.html_url,
           mergeSha: full.merge_commit_sha.toLowerCase(),
           mergedAt: iso(full.merged_at),
-          author: actor(full.user, this.bots),
-          mergedBy: full.merged_by ? actor(full.merged_by, this.bots) : null,
+          author: account(full.user, this.bots),
+          mergedBy: full.merged_by ? account(full.merged_by, this.bots) : null,
           reviews: reviews(revs, this.bots),
           changedLines,
           labels: (full.labels ?? []).map((l) => l.name).sort(),
@@ -216,8 +223,9 @@ class GiteaProvider {
     if (req.kinds.includes("direct_push")) {
       // (b) Default-branch history from a pinned head, newest first (git's date order), until a whole
       //     page is older than the window. Forgejo ignores since/until here, so they are not sent.
-      const { data: head } = await this.http.get(`${repoPath}/branches/${encodeURIComponent(branch)}`, signal);
-      const history = await this.http.all(`${repoPath}/commits?sha=${head.commit.id}&limit=${this.limit}&stat=true&verification=false&files=false`, signal, (page) =>
+      //     `req.head` (the frozen head, when verify passes it) is walked instead of the branch's tip.
+      headSha = req.head ?? (await this.http.get(`${repoPath}/branches/${encodeURIComponent(branch)}`, signal)).data.commit.id;
+      const history = await this.http.all(`${repoPath}/commits?sha=${headSha}&limit=${this.limit}&stat=true&verification=false&files=false`, signal, (page) =>
         page.some((c) => Date.parse(c.commit.committer.date) >= opens),
       );
       const seen = new Set();
@@ -267,7 +275,7 @@ class GiteaProvider {
         { label: "direct pushes that are merge commits", value: open.filter((c) => (c.parents ?? []).length > 1).length },
       );
     }
-    return { changes, defaultBranch: branch, limitations: LIMITATIONS, diagnostics };
+    return { changes, defaultBranch: branch, limitations: LIMITATIONS, diagnostics, ...(headSha ? { headSha: headSha.toLowerCase() } : {}) };
   }
 }
 
@@ -282,6 +290,10 @@ export default defineProvider({
   // for the token on codeberg.org only.
   hosts: (options) => [new URL(options?.base_url ?? "https://codeberg.org").host],
   credentials: [{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }],
+  // Optional fields of the same API version: one review object per submitted review; the options that
+  // change the population (hashed into the registration).
+  reviewGranularity: "submission",
+  populationOptions: ["base_url", "bots"],
   create(options, ctx) {
     return new GiteaProvider(options ?? {}, ctx);
   },

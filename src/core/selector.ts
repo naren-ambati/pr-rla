@@ -1,4 +1,4 @@
-import { CHANGE_KINDS, normalizeLogin, type ChangeKind, type ChangeRecord, type Review } from "../sdk/provider.js";
+import { CHANGE_KINDS, normalizeLogin, type Actor, type ChangeKind, type ChangeRecord, type Review } from "../sdk/provider.js";
 
 export type Unreviewed = "no-human-review" | "no-review" | "any";
 export type MergedBy = "human" | "bot" | "any";
@@ -6,7 +6,7 @@ export type MergedBy = "human" | "bot" | "any";
 /** The registered stratum. Keys are snake_case because this is exactly what `.pr-rla.yml` and the registration carry. */
 export interface Selector {
   kinds: ChangeKind[];
-  /** Author logins (bots with `[bot]` suffix), or "any". */
+  /** Author logins (bots with `[bot]` suffix) or stable account ids (`id:<value>`), or "any". */
   authors: string[] | "any";
   /** A change must carry every listed label. Labels can change after freeze; avoid them for strata you need to re-verify. */
   labels: string[];
@@ -16,11 +16,15 @@ export interface Selector {
   /** Review scope only: generated files are dropped from what the reviewer reads. Does not change the stratum. */
   exclude_generated: boolean;
   /**
-   * Schema v2: logins (or `id:<v>`) to treat as bots wherever they appear. Registered from bolt 1 so the
-   * selector's shape is fixed; applied from bolt 5 (U3). Until then only [] is accepted. Absent on v1 records.
+   * Schema v2: logins (or `id:<v>`) to treat as bots wherever they appear: author, merger and every
+   * review. The core re-labels them before the selector runs, identically on every provider, and
+   * `verify` re-applies the registered list (FR7.1). Sorted and de-duplicated. Absent on v1 records.
    */
   bots?: string[];
-  /** Schema v2: whether direct pushes that landed through a pushed merge commit count. Only "include" until bolt 5 (U3). */
+  /**
+   * Schema v2: whether direct pushes that arrived through a pushed merge commit (`landedVia` set, e.g.
+   * a release branch merged by a push) count. Default "include" (FR7.6). Absent on v1 records.
+   */
   direct_push_via_merge?: "include" | "exclude";
 }
 
@@ -57,15 +61,61 @@ export function normalizeSelector(raw: Partial<Record<keyof Selector, unknown>> 
   const eg = r.exclude_generated ?? DEFAULT_SELECTOR.exclude_generated;
   if (typeof eg !== "boolean") throw new Error("selector.exclude_generated must be true or false");
   const bots = r.bots ?? [];
-  if (!Array.isArray(bots) || bots.some((b) => typeof b !== "string")) throw new Error("selector.bots must be a list of logins");
-  // Registering a bot list this build cannot apply would sign a stratum it does not compute: refuse instead.
-  if (bots.length > 0) throw new Error("selector.bots is applied from bolt 5 (U3); this build cannot honour a non-empty list, so leave it [] for now");
+  if (!Array.isArray(bots) || bots.some((b) => typeof b !== "string" || b.trim().length === 0 || b.trim() === "id:")) throw new Error('selector.bots must be a list of logins or "id:<account id>" entries');
   const dpvm = r.direct_push_via_merge ?? "include";
   if (dpvm !== "include" && dpvm !== "exclude") throw new Error("selector.direct_push_via_merge must be include or exclude");
-  if (dpvm === "exclude") throw new Error('selector.direct_push_via_merge: "exclude" needs landedVia from the providers (bolt 5, U3); this build supports only "include"');
   const orderedKinds = CHANGE_KINDS.filter((k) => (kinds as ChangeKind[]).includes(k));
-  return { kinds: orderedKinds, authors, labels: [...(labels as string[])].sort(), unreviewed, merged_by, max_changed_lines: mcl as number | null, exclude_generated: eg, bots: [], direct_push_via_merge: "include" };
+  return { kinds: orderedKinds, authors, labels: [...(labels as string[])].sort(), unreviewed, merged_by, max_changed_lines: mcl as number | null, exclude_generated: eg, bots: normalizeBotList(bots as string[]), direct_push_via_merge: dpvm };
 }
+
+/** Trimmed, de-duplicated (logins case-insensitively, ids exactly) and sorted in UTF-16 code-unit order. */
+export function normalizeBotList(bots: readonly string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const raw of bots) {
+    const b = raw.trim();
+    const key = b.startsWith("id:") ? b : normalizeLogin(b);
+    if (!byKey.has(key)) byKey.set(key, b);
+  }
+  return [...byKey.values()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * Account ids mapped to the login they had when the manifest was frozen. `verify` passes the
+ * manifest's, so an account renamed after freeze still matches a login in the selector (FR7.3).
+ */
+export type ActorAliases = ReadonlyMap<string, string>;
+
+/**
+ * Whether a selector entry names this actor: `id:<v>` matches `Actor.id`; a login matches the
+ * actor's login (case-insensitive), or the login its id had at freeze (`aliases`).
+ */
+export function actorMatches(actor: Actor, entry: string, aliases?: ActorAliases): boolean {
+  if (entry.startsWith("id:")) return actor.id !== undefined && actor.id === entry.slice(3);
+  const want = normalizeLogin(entry);
+  if (normalizeLogin(actor.login) === want) return true;
+  const frozen = actor.id !== undefined ? aliases?.get(actor.id) : undefined;
+  return frozen !== undefined && normalizeLogin(frozen) === want;
+}
+
+/**
+ * Re-labels every actor the registered bot list names as `kind: "bot"`: author, merger and every
+ * review, on copies. Logins are kept. Returns how many actor entries changed from human to bot.
+ */
+export function applyBotList(changes: readonly ChangeRecord[], bots: readonly string[], aliases?: ActorAliases): { changes: ChangeRecord[]; relabelled: number } {
+  if (bots.length === 0) return { changes: [...changes], relabelled: 0 };
+  let relabelled = 0;
+  const fix = (a: Actor): Actor => {
+    if (a.kind === "bot" || !bots.some((b) => actorMatches(a, b, aliases))) return a;
+    relabelled++;
+    return { ...a, kind: "bot" };
+  };
+  const out = changes.map((c) => ({ ...c, author: fix(c.author), mergedBy: c.mergedBy ? fix(c.mergedBy) : null, reviews: c.reviews.map((r) => ({ ...r, author: fix(r.author) })) }));
+  return { changes: out, relabelled };
+}
+
+/** Funnel step names the selector adds for U3 options (none of them mention reviews). */
+export const BOT_LIST_STEP = "actors re-labelled as bot by selector";
+export const VIA_MERGE_STEP = "excluding pushes via a pushed merge";
 
 /** Reviews visible as of `cutoffIso` (inclusive). Later reviews are not part of the frozen record. */
 export function reviewsAsOf(change: ChangeRecord, cutoffIso: string): Review[] {
@@ -84,10 +134,9 @@ export function matchesUnreviewed(change: ChangeRecord, mode: Unreviewed, cutoff
   return !hasHumanDecision(reviews);
 }
 
-export function matchesAuthor(change: ChangeRecord, authors: Selector["authors"]): boolean {
+export function matchesAuthor(change: ChangeRecord, authors: Selector["authors"], aliases?: ActorAliases): boolean {
   if (authors === "any") return true;
-  const login = normalizeLogin(change.author.login);
-  return authors.some((a) => normalizeLogin(a) === login);
+  return authors.some((a) => actorMatches(change.author, a, aliases));
 }
 
 /** A direct push has no known pusher, so it only matches `merged_by: any`. */
@@ -112,12 +161,20 @@ export interface SelectionResult {
  * Applies the selector. Steps are applied in a fixed order so the funnel is
  * reproducible; the final set is the intersection of all filters.
  * `cutoffIso` is the freeze time: reviews submitted after it are ignored.
+ * The registered bot list is applied first (on copies), and selected changes carry its labels.
  */
-export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string): SelectionResult {
+export function applySelector(changes: readonly ChangeRecord[], sel: Selector, cutoffIso: string, opts: { aliases?: ActorAliases } = {}): SelectionResult {
   const funnel: FunnelStep[] = [{ step: "landed in window", count: changes.length }];
-  let cur = changes.filter((c) => sel.kinds.includes(c.kind));
+  const bots = sel.bots ?? [];
+  const relabel = applyBotList(changes, bots, opts.aliases);
+  if (bots.length > 0) funnel.push({ step: BOT_LIST_STEP, count: relabel.relabelled });
+  let cur = relabel.changes.filter((c) => sel.kinds.includes(c.kind));
   funnel.push({ step: `kinds ${sel.kinds.join("+")}`, count: cur.length });
-  cur = cur.filter((c) => matchesAuthor(c, sel.authors));
+  if (sel.direct_push_via_merge === "exclude" && sel.kinds.includes("direct_push")) {
+    cur = cur.filter((c) => !(c.kind === "direct_push" && c.landedVia !== undefined));
+    funnel.push({ step: VIA_MERGE_STEP, count: cur.length });
+  }
+  cur = cur.filter((c) => matchesAuthor(c, sel.authors, opts.aliases));
   funnel.push({ step: sel.authors === "any" ? "any author" : `author ${sel.authors.join("|")}`, count: cur.length });
   if (sel.labels.length > 0) {
     cur = cur.filter((c) => sel.labels.every((l) => c.labels.includes(l)));

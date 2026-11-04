@@ -21,6 +21,10 @@
  *   S12   08-01 00:00:01 squash of PR 12, merged 00:00:02 but updated 23:59:58 the day before
  *   B0    07-31 23:00  before the window
  * Also: PR 6 merged into `release` in the window (excluded), PR 8 merged before it.
+ *
+ * `latePush` (U3, pinned head): after freeze, a merge LM (08-04) is pushed whose second parent LC
+ * (alice, 08-01 22:30) is local work dated in the window. From the current head LM, LC is a direct
+ * push; from the frozen head L10 it is unreachable.
  */
 export type Strategy = "merge" | "squash" | "squash+merge" | "rebase" | "fast-forward";
 
@@ -92,7 +96,7 @@ const users = {
   pusher: BOT("deploy-bot"),
 };
 
-export function scmScenario() {
+export function scmScenario(opts: { latePush?: boolean } = {}) {
   const ev = (user: ScUser, kind: ScEventKind, at: string): ScEvent => ({ user, kind, at: `2026-08-01T${at}Z` });
   const dev = { name: "Dev", email: "dev@example.com", user: U("dev") };
   const c = (tag: string, date: string, parents: string[], extra: Partial<ScCommit> = {}): ScCommit => ({
@@ -139,6 +143,7 @@ export function scmScenario() {
     c("R6", "2026-08-01T14:00:00Z", ["B0"]),
     c("H8", "2026-07-31T22:00:00Z", []),
   ];
+  if (opts.latePush) commits.push(c("LC", "2026-08-01T22:30:00Z", ["D2"], { author: { name: "Alice", email: "alice@example.com", user: users.alice }, additions: 2, deletions: 0 }), c("LM", "2026-08-04T09:00:00Z", ["L10", "LC"]));
   const pr = (p: Partial<ScPr> & Pick<ScPr, "number" | "strategy" | "mergedAt" | "updatedAt">): ScPr => ({
     base: "main",
     createdAt: "2026-07-30T08:00:00Z",
@@ -195,7 +200,7 @@ export function scmScenario() {
     pr({ number: 12, strategy: "squash", mergedAt: "2026-08-01T00:00:02Z", updatedAt: "2026-07-31T23:59:58Z", squashCommit: OID("S12"), head: OID("H12"), landed: [OID("S12")], listed: [OID("H12")], author: users.agent, additions: 1, deletions: 1 }),
     pr({ number: 8, strategy: "squash", mergedAt: "2026-07-31T22:00:05Z", updatedAt: "2026-07-31T22:00:10Z", squashCommit: OID("B0"), head: OID("H8"), landed: [OID("B0")], listed: [OID("H8")] }),
   ];
-  return { ...buildScenario({ repo: "acme/widgets", head: OID("L10"), window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, commits, prs }), users };
+  return { ...buildScenario({ repo: "acme/widgets", head: OID(opts.latePush ? "LM" : "L10"), window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, commits, prs }), users, frozenHead: OID("L10") };
 }
 
 /** The shape every fake server consumes. */
@@ -248,6 +253,10 @@ export function scenarioExpectations(scheme: string, repo = "acme/widgets") {
     },
     mergeShas: { [ids.squash]: OID("S1"), [ids.rebase]: OID("R2c"), [ids.merge]: OID("M3"), [ids.ff]: OID("FF4b"), [ids.squash5]: OID("S5"), [ids.squashMerge]: OID("M11"), [ids.atOpen]: OID("S12"), [ids.alice]: OID("D2"), [ids.bot]: OID("D1") },
     changedLines: { [ids.squash]: 200, [ids.merge]: 42, [ids.alice]: 7, [ids.bot]: 3 },
+    /** U3: approvals withdrawn in the scenario (erin unapproved PR 2; carol's on PR 11 was reset by a push). */
+    revokedApprovals: { [ids.rebase]: ["erin"], [ids.squashMerge]: ["carol"] },
+    /** U3: the commit a late push brings in (latePush scenario only). */
+    late: { id: d("LC"), sha: OID("LC") },
     /** Commits on main dated in the window: 14 brought in by PRs (2 of them by PR 9, merged after the window) + 2 direct pushes. */
     inWindowCommits: 16,
   };

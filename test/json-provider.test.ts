@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JsonFileProvider } from "../src/providers/json-file.js";
+import jsonFile, { JsonFileProvider } from "../src/providers/json-file.js";
 import { runProviderConformance, formatConformanceReport } from "../src/testing/index.js";
 import { fixturePath } from "./helpers/fixtures.js";
 
@@ -24,6 +24,13 @@ describe("json-file provider", () => {
       },
     ]);
     expect(report.ok, formatConformanceReport(report)).toBe(true);
+  });
+
+  it("passes the extended kit with its definition: review-granularity runs; it pins no head and the export carries no ids, so those skip", async () => {
+    const report = await runProviderConformance(new JsonFileProvider(file), [{ name: "acme export", request: { repo: "acme/widgets", window: W, kinds: ["pull_request", "direct_push"] }, expect: { reviewGranularity: "submission" } }], { definition: jsonFile });
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
+    expect(report.results.find((r) => r.check === "review-granularity")).toEqual({ fixture: "acme export", check: "review-granularity", ok: true });
+    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["bot-detection", "transient-faults", "pinned-head", "actor-ids", "revoked-approval"]);
   });
 
   it("filters by window and kinds, and carries the export's limitations", async () => {

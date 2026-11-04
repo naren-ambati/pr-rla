@@ -6,6 +6,8 @@ import { isoUtcSeconds } from "../http.js";
  * from Atlassian's documented shapes. UNVERIFIED against a live server.
  */
 export interface DcUser {
+  /** The user's numeric id: stable across renames of name and slug (Actor.id, U3). */
+  id?: number;
   name?: string;
   slug?: string;
   emailAddress?: string;
@@ -69,7 +71,8 @@ export function normalizeUser(u: DcUser | null | undefined): Actor {
   if (!u) return { login: "ghost", kind: "human" };
   const name = u.slug ?? u.name ?? u.displayName ?? "unknown";
   const bot = u.type === "SERVICE" || name.endsWith(BOT_SUFFIX);
-  return bot ? { login: name.endsWith(BOT_SUFFIX) ? name : `${name}${BOT_SUFFIX}`, kind: "bot" } : { login: name, kind: "human" };
+  const id = typeof u.id === "number" ? { id: String(u.id) } : {};
+  return bot ? { login: name.endsWith(BOT_SUFFIX) ? name : `${name}${BOT_SUFFIX}`, kind: "bot", ...id } : { login: name, kind: "human", ...id };
 }
 
 /** A commit author: the matched account when Bitbucket resolved one (it then carries `type`), else the git identity. */
@@ -154,7 +157,7 @@ export function normalizePullRequest(repo: string, pr: DcPullRequest, args: { me
   };
 }
 
-export function normalizeDirectPush(repo: string, c: DcCommit, changedLines: number, webBase: string): ChangeRecord {
+export function normalizeDirectPush(repo: string, c: DcCommit, changedLines: number, webBase: string, landedVia?: string): ChangeRecord {
   const sha = c.id.toLowerCase();
   return {
     id: `bitbucket-data-center:${repo}@${sha}`,
@@ -168,5 +171,6 @@ export function normalizeDirectPush(repo: string, c: DcCommit, changedLines: num
     reviews: [],
     changedLines,
     labels: [],
+    ...(landedVia ? { landedVia } : {}),
   };
 }

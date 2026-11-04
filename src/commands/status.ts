@@ -5,6 +5,7 @@ import { unixToIso } from "../core/seed.js";
 import { computeStatus, type StatusReport } from "../core/status.js";
 import { windowDays } from "../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
+import type { Selector } from "../core/selector.js";
 import { notTamperProof } from "../timestamp/verify.js";
 import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
 import { assessRecord } from "./timestamps.js";
@@ -35,9 +36,21 @@ export interface StatusOptions {
   offline?: boolean;
 }
 
-export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string }): string {
+/**
+ * The registered U3 stratum choices, as the certificate names them: the bot list, and whether direct
+ * pushes that arrived through a pushed merge are in the stratum (FR7.1, FR7.6). Empty for v1 records.
+ */
+export function stratumChoices(sel: Partial<Pick<Selector, "kinds" | "bots" | "direct_push_via_merge">> | undefined): string {
+  if (!sel) return "";
+  const parts: string[] = [];
+  if (sel.bots && sel.bots.length > 0) parts.push(`registered bots ${sel.bots.join(", ")}`);
+  if (sel.direct_push_via_merge !== undefined && sel.kinds?.includes("direct_push")) parts.push(`direct pushes via a pushed merge ${sel.direct_push_via_merge === "exclude" ? "excluded" : "included"}`);
+  return parts.map((p) => `, ${p}`).join("");
+}
+
+export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector> }): string {
   const s = r.sequence;
-  const stratum = info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : "";
+  const stratum = `${info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : ""}${stratumChoices(info.selector)}`;
   const head = `prefix ${r.labelledPrefix}/${r.drawsIssued} · fails ${s.fails} · claim D (detected-defect rate ≤ ${pct(info.p0)}, protocol ${info.protocol.slice(0, 4)}…${stratum}) · LLR ${s.llr.toFixed(3)} / target ${s.target.toFixed(3)}`;
   let verdict: string;
   if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
@@ -92,7 +105,7 @@ export async function statusCommand(ctx: CommandContext, opts: StatusOptions): P
     ctx.out(report.refusal);
     return 3;
   } else {
-    ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode }) + tsNote);
+    ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }) + tsNote);
     if (report.blockingDraw) ctx.out(`  blocking draw: #${report.blockingDraw.draw} ${report.blockingDraw.changeId} ${report.blockingDraw.url}`);
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);

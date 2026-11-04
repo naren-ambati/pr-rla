@@ -8,6 +8,7 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
+import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, isoUtcSeconds } from "../http.js";
 import {
   buildReviews,
@@ -163,7 +164,7 @@ export class BitbucketCloudProvider implements ScmProvider {
     const fullSha = new Map<string, string>();
     // Walked for PRs too: merge_commit.hash is abbreviated, and 2-3 history pages resolve every merge
     // commit since the window opened, where one /commit lookup per PR would cost more.
-    const history = await this.history(base, branch, opens, req.signal);
+    const { head, commits: history } = await this.history(base, branch, opens, req.signal, req.head);
     for (const c of history) fullSha.set(c.hash.slice(0, 12), c.hash);
 
     if (req.kinds.includes("pull_request")) {
@@ -180,6 +181,7 @@ export class BitbucketCloudProvider implements ScmProvider {
       }
     }
 
+    let landedVia = new Map<string, string>();
     if (req.kinds.includes("direct_push")) {
       // Merge commits (abbreviated to 12) are claimed from the listing; PR commit lists are read only while commits are unclaimed.
       const known = new Map<string, number>();
@@ -208,9 +210,10 @@ export class BitbucketCloudProvider implements ScmProvider {
           return [...listed, ...copies].map((c) => ({ sha: c.hash }));
         },
       });
+      landedVia = landedViaMerges(new Map(history.map((c) => [c.hash, c.parents.map((p) => p.hash)])), res.pushes.map((c) => c.hash));
       for (const c of res.pushes) {
         const stats = await this.paged<{ lines_added: number; lines_removed: number }>(`${base}/diffstat/${c.hash}?pagelen=500&fields=next,values.lines_added,values.lines_removed`, req.signal);
-        changes.push(normalizeDirectPush(req.repo, c, stats.reduce((n, s) => n + (s.lines_added ?? 0) + (s.lines_removed ?? 0), 0), this.webBase));
+        changes.push(normalizeDirectPush(req.repo, c, stats.reduce((n, s) => n + (s.lines_added ?? 0) + (s.lines_removed ?? 0), 0), this.webBase, landedVia.get(c.hash)?.toLowerCase()));
       }
       diagnostics.push(
         { label: "default-branch commits in window", value: inWin.length },
@@ -219,7 +222,7 @@ export class BitbucketCloudProvider implements ScmProvider {
         { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
-    return { changes, defaultBranch: branch, limitations: BITBUCKET_CLOUD_LIMITATIONS, diagnostics };
+    return { changes, defaultBranch: branch, limitations: landedVia.size ? [...BITBUCKET_CLOUD_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_CLOUD_LIMITATIONS, diagnostics, headSha: head };
   }
 
   /**
@@ -249,10 +252,14 @@ export class BitbucketCloudProvider implements ScmProvider {
     return byId;
   }
 
-  /** Main-branch history from a pinned head, newest first (git's date order), until a whole page is older than the window. */
-  async history(base: string, branch: string, opens: number, signal?: AbortSignal): Promise<BbCommit[]> {
-    const { data: ref } = await this.http.get<{ target: { hash: string } }>(`${base}/refs/branches/${encodeURIComponent(branch)}?fields=target.hash`, signal);
-    return this.paged<BbCommit>(`${base}/commits/${ref.target.hash}?pagelen=100&fields=${COMMIT_FIELDS}`, signal, (page) => page.some((c) => Date.parse(c.date) >= opens));
+  /**
+   * Main-branch history from a pinned head (`head`, the frozen one when verify passes it), newest first
+   * (git's date order), until a whole page is older than the window.
+   */
+  async history(base: string, branch: string, opens: number, signal?: AbortSignal, head?: string): Promise<{ head: string; commits: BbCommit[] }> {
+    const tip = head ?? (await this.http.get<{ target: { hash: string } }>(`${base}/refs/branches/${encodeURIComponent(branch)}?fields=target.hash`, signal)).data.target.hash;
+    const commits = await this.paged<BbCommit>(`${base}/commits/${tip}?pagelen=100&fields=${COMMIT_FIELDS}`, signal, (page) => page.some((c) => Date.parse(c.date) >= opens));
+    return { head: tip.toLowerCase(), commits };
   }
 }
 
@@ -261,5 +268,9 @@ export default defineProvider<BitbucketCloudOptions>({
   name: "bitbucket-cloud",
   description: "Bitbucket Cloud: merged PRs, activity, participants and diffstat, plus main-branch history for direct pushes",
   hosts: (options) => [new URL(options?.api_url ?? "https://api.bitbucket.org/2.0").host],
+  // Bitbucket has no review objects for comments: one COMMENTED per non-author user, at their first comment.
+  reviewGranularity: "first-comment-per-user",
+  populationOptions: ["api_url", "listing_slack_hours"],
+  reportsLandedVia: true,
   create: (options, ctx) => new BitbucketCloudProvider(options ?? {}, ctx),
 });

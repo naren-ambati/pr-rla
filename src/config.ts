@@ -161,6 +161,8 @@ selector:
   merged_by: any                # human | bot | any (direct pushes only match any)
   max_changed_lines: null       # e.g. 200 (raw additions + deletions)
   exclude_generated: true       # review scope only; does not change the stratum
+  bots: []                      # accounts to count as bots on every provider: logins or "id:<account id>", e.g. ["gitlab-bot"]
+  direct_push_via_merge: include  # include | exclude: direct pushes a pushed merge brought in (e.g. a release branch)
 
 audit:
   claim: D                      # detected-defect rate under the review protocol
