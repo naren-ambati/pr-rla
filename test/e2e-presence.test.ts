@@ -20,6 +20,7 @@ import { recordedBeacon } from "./helpers/fixtures.js";
 import { commitAll } from "./helpers/signed-commits.js";
 import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
 import { NAMESPACE, signedLine } from "./helpers/verdict-lines.js";
+import { claimsIn, jsonSentences, unlabelledPresence } from "./helpers/wording.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
 
 /**
@@ -230,6 +231,41 @@ describe("each way a verdict can fall short (FR9.1, FR9.3, FR9.4, FR9.5)", () =>
     expect(r.status!.firstVerdicts.find((v) => v.changeId === forged.changeId)?.provenance).toBeUndefined();
     const { config, paths } = configFor(s.ctx);
     expect((await (await ledgerFor(s.ctx, config, paths)).readVerdicts()).find((v) => v.changeId === forged.changeId)!.provenance).toBeUndefined();
+  });
+});
+
+describe("finding 9: every printed level is labelled, and no output claims hardware-verified presence (text and --json)", () => {
+  it("register, record, status and verify, passing and failing, in text and in --json", async () => {
+    const texts: string[] = [base.out.join("\n"), honest.out.join("\n")];
+    const jsons: unknown[] = [];
+    const { s: upClear } = await reviewed((_d, i) => bobSigns(i + 1, i === 4 ? 0x00 : 0x01));
+    const { s: unsigned } = await reviewed((_d, i) => (i === 7 ? { reviewer: "bob" } : bobSigns(i + 1)));
+    for (const src of [honest, upClear, unsigned]) {
+      const s = cloneScenario(src);
+      await statusCommand(s.ctx, {});
+      await verifyCommand(s.ctx, {});
+      texts.push(src.out.join("\n"), s.out.join("\n"));
+      s.out.length = 0;
+      await statusCommand(s.ctx, { json: true });
+      jsons.push(JSON.parse(s.out.join("\n")));
+      s.out.length = 0;
+      await verifyCommand(s.ctx, { json: true });
+      jsons.push(JSON.parse(s.out.join("\n")));
+    }
+    // The refusals' messages.
+    for (const yaml of [`verdicts: { min_provenance: presence, allowed_signers: ["${keys.alice!.allowedSigner("alice")}"] }\n`, "ledger: { use: github-issues, options: { repo: acme/audit } }\nverdicts: { min_provenance: presence }\n"]) {
+      const s = setupAuditRepo({ changes: makeChanges(200) });
+      appendFileSync(join(s.dir, ".pr-rla.yml"), yaml);
+      texts.push(await registerCommand(s.ctx, { dryRun: true }).then(() => "", (e: Error) => e.message));
+    }
+    const all = texts.join("\n");
+    expect(all).toContain(PRESENCE_LABEL);
+    expect(unlabelledPresence(all)).toEqual([]);
+    expect(claimsIn(all)).toEqual([]);
+    const sentences = jsons.flatMap(jsonSentences);
+    expect(sentences.some((x) => x.includes(PRESENCE_LABEL))).toBe(true);
+    expect(unlabelledPresence(sentences.join("\n"))).toEqual([]);
+    expect(claimsIn(sentences.join("\n"))).toEqual([]);
   });
 });
 

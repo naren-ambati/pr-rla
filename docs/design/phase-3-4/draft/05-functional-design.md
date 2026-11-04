@@ -525,6 +525,8 @@ flowchart TD
 
 The goal: let a registration demand cryptographic evidence that a person touched an authenticator when each verdict was committed. This is the only control in the design that an assistant holding the reviewer's shell and tokens **cannot** forge. Software controls on the same machine (U6 hooks, the read-only MCP) are speed bumps by comparison.
 
+> **Superseded (2026-11-04):** the "cannot forge" sentence above is false. An assistant holding the reviewer's shell can sign with a software key, or with a software-emulated authenticator that sets the user-presence flag (threat T16); and while a verdict took the level of the signed commit that added it, one touch covered every line that commit carried. The refined design ([`functional-design.md`](../functional-design.md), §U9, "Changed after review") gives each verdict its own signature, and [`docs/security-model.md`](../../../security-model.md) says what `presence` does and does not show. This draft is kept as written.
+
 ### Provenance levels (FR-M8)
 
 | Level | Meaning | Produced by |
