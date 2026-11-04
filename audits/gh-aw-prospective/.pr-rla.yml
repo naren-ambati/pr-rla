@@ -1,6 +1,6 @@
 # Prospective audit of github/gh-aw: the launch artifact (docs/design/spec.md, validation gate).
 # Prepared in bolt 1, completed in bolt 3; REGISTERED BY THE FOUNDER. See docs/gh-aw-prospective.md.
-# Four values are placeholders (marked EDIT: the window dates, the audit repo, your login). Until they are
+# Three values are placeholders (marked EDIT: the window dates and the audit repo). Until they are
 # replaced this file does not pass register's preflight, so nothing can register it by accident.
 provider: github                # the built-in provider, at the registering pr-rla version
 repo: github/gh-aw
@@ -37,7 +37,7 @@ timestamping:                   # the four default authorities, k = 2
 ledger:                         # the built-in github-issues ledger (bolt 3): one issue per drawn change
   use: github-issues
   options:
-    repo: <owner>/<audit-repo>  # EDIT: the audit repo you own (draw issues and verdict labels live there; gh-aw is only read)
+    repo: <owner>/<audit-repo>  # EDIT: a separate audit repo (founder 2026-11-03), e.g. naren-ambati/pr-rla-audits; public, issues on
 verdicts:
   min_provenance: account       # label events by a GitHub account; the default with an issue ledger
-  reviewers: ["<founder's GitHub login>"]   # EDIT: only these accounts' label events count
+  reviewers: ["naren-ambati"]   # the founder (2026-11-03); only this account's label events count

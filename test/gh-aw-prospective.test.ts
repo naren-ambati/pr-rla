@@ -8,19 +8,20 @@ import type { CommandContext } from "../src/commands/context.js";
 
 /**
  * The prospective gh-aw audit (docs/gh-aw-prospective.md) passes register's preflight once the
- * founder fills in its four placeholders, and refuses, naming the placeholder, until then. Only
+ * founder fills in its remaining placeholders (the window and the audit repo; the reviewer login was
+ * filled in on 2026-11-03), and refuses, naming the placeholder, until then. Only
  * `register --dry-run` runs here, on a copy: it writes nothing and contacts nothing. The real
  * `register` is the founder's to run.
  */
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "audits", "gh-aw-prospective");
 
-function copy(fill: { window?: boolean; repo?: boolean; reviewer?: boolean }) {
+function copy(fill: { window?: boolean; repo?: boolean; reviewerPlaceholder?: boolean }) {
   const dir = mkdtempSync(join(tmpdir(), "prrla-ghaw-"));
   cpSync(SRC, dir, { recursive: true });
   let yml = readFileSync(join(dir, ".pr-rla.yml"), "utf8");
   if (fill.window) yml = yml.replace("start: YYYY-MM-DD", "start: 2026-11-11").replace("end: YYYY-MM-DD", "end: 2026-12-22");
   if (fill.repo) yml = yml.replace("repo: <owner>/<audit-repo>", "repo: founder/gh-aw-audit");
-  if (fill.reviewer) yml = yml.replace(`reviewers: ["<founder's GitHub login>"]`, `reviewers: ["founder-login"]`);
+  if (fill.reviewerPlaceholder) yml = yml.replace(`reviewers: ["naren-ambati"]`, `reviewers: ["<founder's GitHub login>"]`);
   writeFileSync(join(dir, ".pr-rla.yml"), yml);
   const out: string[] = [];
   const requests: string[] = [];
@@ -45,16 +46,17 @@ describe("audits/gh-aw-prospective: register's preflight", () => {
   });
 
   it("refuses each remaining placeholder by name", async () => {
-    await expect(registerCommand(copy({ window: true, repo: true }).ctx, { dryRun: true })).rejects.toThrow(/verdicts\.reviewers: replace the placeholder "<founder's GitHub login>" with a login/);
-    await expect(registerCommand(copy({ window: true, reviewer: true }).ctx, { dryRun: true })).rejects.toThrow(/ledger github-issues: github-issues: options\.repo must be the audit repo as "owner\/name" \(replace the placeholder\)/);
+    await expect(registerCommand(copy({ window: true }).ctx, { dryRun: true })).rejects.toThrow(/ledger github-issues: github-issues: options\.repo must be the audit repo as "owner\/name" \(replace the placeholder\)/);
+    // The reviewer login is filled in; a placeholder put back is still refused by name.
+    await expect(registerCommand(copy({ window: true, repo: true, reviewerPlaceholder: true }).ctx, { dryRun: true })).rejects.toThrow(/verdicts\.reviewers: replace the placeholder "<founder's GitHub login>" with a login/);
   });
 
   it("filled in, passes: PROSPECTIVE, github-issues with account provenance and the registered reviewer, the four default authorities, nothing written or contacted", async () => {
-    const c = copy({ window: true, repo: true, reviewer: true });
+    const c = copy({ window: true, repo: true });
     expect(await registerCommand(c.ctx, { dryRun: true })).toBe(0);
     const out = c.out.join("\n");
     expect(out).toMatch(/^\[dry run\] registration [0-9a-f]{12}… · github\/gh-aw · window gh-aw-prospective \(2026-11-11\.\.2026-12-22\)/);
-    expect(out).toMatch(/provider github \(builtin 0\.1\.0\) · ledger github-issues · verdict provenance account · reviewers founder-login/);
+    expect(out).toMatch(/provider github \(builtin 0\.1\.0\) · ledger github-issues · verdict provenance account · reviewers naren-ambati/);
     expect(out).toMatch(/PROSPECTIVE/);
     expect(out).toMatch(/timestamps: not requested \(dry run\) · authorities sigstore, digicert, globalsign, microsoft · k = 2/);
     expect(c.requests).toEqual([]);

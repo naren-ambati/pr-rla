@@ -38,10 +38,11 @@ Signed into `audits/gh-aw-prospective/audit/gh-aw-prospective/registration.json`
 1. **Use a build that includes bolt 3**, so the `github-issues` ledger exists. (The bolt-1 build refused this configuration with `cannot load ledger "github-issues"`.)
 2. **Finalize `audits/gh-aw-prospective/review-protocol.md`.** Its hash is registered; changing it later fails check 1. It is drafted for gh-aw (2026-11-03): five failure codes with gh-aw examples, the generated-file exception, an unresolved specific concern counted as FAIL, and label rules that match the ledger's (the first label counts; never remove one). Edit it until it says what you mean; nothing hashes it before `register`.
 3. **Create the audit repo** on GitHub (public, so auditors can read it), with issues enabled. `sample` opens the draw issues there and creates the labels `pr-rla:pass`, `pr-rla:fail` and `pr-rla:draw`; nothing is written before `sample`.
-4. **Fill in the four placeholders (marked `EDIT`) in `audits/gh-aw-prospective/.pr-rla.yml`.** Until each is replaced, `register` refuses and names it.
+4. **Fill in the three remaining placeholders (marked `EDIT`) in `audits/gh-aw-prospective/.pr-rla.yml`.** Until each is replaced, `register` refuses and names it.
    - `window.start`: the UTC day after the day you register; `window.end`: start + 41 days (42 inclusive days).
-   - `ledger.options.repo`: the audit repo, as `owner/name` (draw issues and labels live there; gh-aw itself is only read). Bolt 3 confirmed this option name.
-   - `verdicts.reviewers`: your GitHub login (the account `gh` is logged in as, if that is the one you review with). Only label events by listed accounts count; events by bots, apps and anyone else are ignored and reported.
+   - `ledger.options.repo`: the audit repo, as `owner/name` (draw issues and labels live there; gh-aw itself is only read). Bolt 3 confirmed this option name. The founder chose a **separate** audit repo (2026-11-03), not the pr-rla product repo, for example `naren-ambati/pr-rla-audits`.
+   - `verdicts.reviewers`: **filled in** as `naren-ambati` (2026-11-03). Only label events by listed accounts count; events by bots, apps and anyone else are ignored and reported.
+   - **Which account runs what.** `sample` opens issues as the token's account, which may be any account with Issues: write on the audit repo. A verdict counts only if `naren-ambati` applies the label: in the web UI signed in as `naren-ambati`, or with `pr-rla record` and a `naren-ambati` token. On 2026-11-03 the `gh` CLI on the build machine was signed in as a different account, so `GITHUB_TOKEN=$(gh auth token) pr-rla record …` from there would label as that account, and the verdict would be ignored and reported.
    - `verdicts.min_provenance: account` is already set; it is also the default with an issue ledger.
 5. **Check without writing anything:**
 
