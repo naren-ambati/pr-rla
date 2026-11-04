@@ -71,6 +71,8 @@ export interface VerifyDeps {
    * counted at this level and check 7 WARNs. Absent: no cap.
    */
   provenanceCeiling?: ProvenanceLevel;
+  /** The identity of the ledger verify loaded (U9, after review): check 7 FAILs when it is not the registered one. */
+  ledgerIdentity?: PluginIdentity;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL, or null if none is available. */
@@ -384,9 +386,21 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
     const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
+    // U9: the ledger read must be the registered one (name, source, files, options), or nothing it says counts as registered.
     const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-    // Verdict signatures count only in the registered built-in git-file ledger; nothing counts above the ledger's ceiling.
-    const verifiesSignatures = ledger.name === "git-file" && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
+    const loadedId = deps.ledgerIdentity;
+    const idDiffs = registeredLedger && loadedId ? (["name", "source", "integrity", "optionsSha256"] as const).filter((k) => registeredLedger[k] !== loadedId[k]) : [];
+    if (idDiffs.length) {
+      const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
+      c7.status = "FAIL";
+      c7.details.push(`FAIL the ledger verify loaded is not the registered one (${idDiffs.map((k) => `${k} ${show(registeredLedger![k])} → ${show(loadedId![k])}`).join("; ")}): verify with the registered ledger and options`);
+    }
+    if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
+      c7.status = "FAIL";
+      c7.details.push(`FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})`);
+    }
+    // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
+    const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
     const counted = read ? countedVerdicts(read, { registration: reg, verifiesSignatures, ...(deps.provenanceCeiling ? { ceiling: deps.provenanceCeiling } : {}), ledger: ledger.name }) : null;
     const verdicts = counted?.verdicts ?? null;
     if (counted) {

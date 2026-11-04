@@ -5,7 +5,7 @@ import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
 import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
-import { ledgerTraits } from "../ledger-traits.js";
+import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
 import { builtinLedgerName } from "../registry.js";
 import { provenanceRank } from "../sdk/ledger.js";
 import { checkpointCommand } from "./checkpoint.js";
@@ -105,9 +105,9 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   }
   const draws = readDraws(paths);
   const ledger = await ledgerFor(ctx, config, paths);
-  // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the ledger's ceiling.
+  // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the registered ledger's ceiling.
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-  const ceiling = (await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins)).maxProvenance;
+  const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins));
   const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
   const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
   const report = computeStatus({
