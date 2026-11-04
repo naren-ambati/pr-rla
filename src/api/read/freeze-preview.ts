@@ -16,7 +16,7 @@ import type { PrRlaConfig, WindowPaths } from "../../config.js";
 import { pluginIdentity } from "../../registry.js";
 import type { ChangeKind, ChangeRecord, ScmProvider } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, type ApiContext } from "../session.js";
+import { readOnlyContext, auditContextFor, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, type ApiContext } from "../session.js";
 
 /**
  * `freeze_preview` and `freeze --dry-run` (functional-design.md §U5): the population a freeze would
@@ -281,6 +281,7 @@ export async function planFreeze(ctx: ApiContext, o: { dryRun: boolean; window?:
  * written, and no checkpoint is made.
  */
 export async function freezeEstimate(ctx: ApiContext, opts: { window?: string } = {}): Promise<FreezeEstimateResult> {
+  ctx = readOnlyContext(ctx); // P1: an estimate writes nothing, so it runs read-only
   const i = await freezeInputs(ctx, { dryRun: true, ...(opts.window !== undefined ? { window: opts.window } : {}) });
   const actx = auditContextFor(ctx);
   const before = actx.broker.stats.requests;
@@ -318,6 +319,7 @@ export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions 
 export async function freezePreview(ctx: ApiContext, opts?: FreezePreviewOptions & { estimate?: false }): Promise<FreezePreview>;
 export async function freezePreview(ctx: ApiContext, opts?: FreezePreviewOptions): Promise<FreezePreview | FreezeEstimateResult>;
 export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions = {}): Promise<FreezePreview | FreezeEstimateResult> {
+  ctx = readOnlyContext(ctx); // P1: a dry run writes nothing, so it runs read-only (freeze --dry-run)
   if (opts.estimate) return freezeEstimate(ctx, opts.window !== undefined ? { window: opts.window } : {});
   const plan = await planFreeze(ctx, { dryRun: true, ...(opts.window !== undefined ? { window: opts.window } : {}), ...(opts.listing ? { listing: true } : {}) });
   return plan.preview;

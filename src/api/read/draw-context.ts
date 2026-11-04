@@ -13,7 +13,7 @@ import { NoRecordedDescription } from "../../providers/json-file.js";
 import type { VerdictEvent } from "../../sdk/ledger.js";
 import { changeDescriptionProblems, type ChangeDescription } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, ledgerFor, providerFor, readDraws, readManifest, readProtocol, readRegistration, type ApiContext } from "../session.js";
+import { readOnlyContext, auditContextFor, configFor, ledgerFor, providerFor, readDraws, readManifest, readProtocol, readRegistration, type ApiContext } from "../session.js";
 import { countedLedgerVerdicts } from "./status.js";
 
 export type { DrawContext } from "../../core/draw-context.js";
@@ -73,6 +73,7 @@ export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerT
  * provider's description with linguist-generated files dropped under exclude_generated. Reads only.
  */
 export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Promise<DrawContext> {
+  ctx = readOnlyContext(ctx); // P1: it only reads
   const maxPatchBytes = opts.maxPatchBytes ?? DEFAULT_MAX_PATCH_BYTES;
   if (!Number.isInteger(maxPatchBytes) || maxPatchBytes < 0 || maxPatchBytes > MAX_PATCH_BYTES_LIMIT) throw new AuditError(`maxPatchBytes must be a whole number from 0 to ${MAX_PATCH_BYTES_LIMIT} (1 MiB)`);
   const { config, paths } = configFor(ctx, opts.window);

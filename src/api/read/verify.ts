@@ -11,7 +11,7 @@ import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
 import { readCheckpoints } from "./checkpoints.js";
 import { readError } from "./errors.js";
-import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { callerOf, readOnlyContext, auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { logPublicKey } from "../translog.js";
 import { statusLine } from "./status.js";
 
@@ -51,6 +51,9 @@ export interface VerifyResult extends VerifyReport {
 
 /** `verify` (FR3.1): a third party's check of the seven audit properties. Reads only; offline skips the population rebuild and every fetch. */
 export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise<VerifyResult> {
+  // P1 (master-plugins-review #7): verify only reads, so it never runs read-write: the CLI's context becomes a
+  // read-only one for the same person, whose broker refuses every request that is not a read (a ledger cannot write).
+  ctx = readOnlyContext(ctx);
   const { config, paths } = configFor(ctx, opts.window);
   const registration = readRegistration(paths);
   const manifest = existsSync(paths.manifest) ? readManifest(paths) : null;
@@ -76,11 +79,11 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
   const provider = opts.offline || !providerBound ? null : withProgress(ctx, await providerFor(ctx, config, { onMismatch: "report" }));
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths, { onMismatch: "report" });
-  // Checks 4 and 7 catch a failure and quote it. In read-only mode (an assistant reads the result),
+  // Checks 4 and 7 catch a failure and quote it. When an assistant reads the result (pr-rla/api/read),
   // what the ledger or the relay said moves to `untrusted.errors`, and the check quotes pr-rla's words.
   const errors: string[] = [];
   const fenced = <T>(fn: () => Promise<T>, words?: string): Promise<T> =>
-    ctx.mode !== "read-only"
+    callerOf(ctx) === "person"
       ? fn()
       : fn().catch((e: unknown) => {
           const r = readError(e);

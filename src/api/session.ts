@@ -14,7 +14,7 @@ import { isCommitId, type ScmProvider } from "../sdk/provider.js";
 import { identityNext, identityRefusal } from "../core/plugin-binding.js";
 import { bindingIdentity } from "../registry.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
-import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditContext, type AuditMode } from "./context.js";
+import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditCaller, type AuditContext, type AuditMode } from "./context.js";
 import { AuditError, type AuditErrorCode } from "./errors.js";
 
 /**
@@ -64,6 +64,11 @@ export interface ApiContext {
    */
   mode?: AuditMode;
   /**
+   * Who reads a read-only context's results (src/api/context.ts `AuditCaller`): `pr-rla/api/read` is an
+   * assistant's (the default in read-only mode); the CLI's verify, status and dry runs are a person's.
+   */
+  caller?: AuditCaller;
+  /**
    * Refuses a file or directory the caller may not open (the MCP server's roots: ROOT_ESCAPE). The
    * API calls it for the config, the audit directory, the protocol and any file the config names.
    */
@@ -87,6 +92,7 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
   if (!a) {
     a = createAuditContext({
       mode: ctx.mode ?? "read-write",
+      ...(ctx.caller ? { caller: ctx.caller } : {}),
       env: ctx.env,
       nowMs: () => ctx.nowMs(),
       sleep: (ms, signal) => (ctx.sleep ? ctx.sleep(ms, signal) : sleepFor(ms, signal)),
@@ -101,12 +107,27 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
 }
 
 /**
+ * The read-only context a read function runs on (P1, master-plugins-review #7). Verify, status, the draws,
+ * the draw context and a dry-run freeze only read, so the CLI never opens them in read-write mode: called
+ * with a read-write context (the CLI's), they run on a read-only copy for the same person (`caller:
+ * person`), whose broker refuses every request that is not a read and whose ledgers have no write
+ * methods. A context that is read-only already (`pr-rla/api/read`) is returned as it is.
+ */
+export function readOnlyContext<T extends ApiContext>(ctx: T): T {
+  if ((ctx.mode ?? "read-write") === "read-only") return ctx;
+  return { ...ctx, mode: "read-only", caller: "person" };
+}
+
+/** Who reads this context's results: a read-write context is a person's; a read-only one an assistant's unless it says otherwise. */
+export const callerOf = (ctx: Pick<ApiContext, "mode" | "caller">): AuditCaller => ((ctx.mode ?? "read-write") === "read-write" ? "person" : (ctx.caller ?? "assistant"));
+
+/**
  * Gives an ApiContext an AuditContext made elsewhere, so several calls share one broker and its
  * per-host budgets (`pr-rla/api/read` does this per caller session and audit directory).
  * The modes must agree.
  */
 export function bindAuditContext(ctx: ApiContext, actx: AuditContext): void {
-  if ((ctx.mode ?? "read-write") !== actx.mode) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode cannot use a ${actx.mode} AuditContext`);
+  if ((ctx.mode ?? "read-write") !== actx.mode || callerOf(ctx) !== actx.caller) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode (${callerOf(ctx)}) cannot use a ${actx.mode} AuditContext (${actx.caller})`);
   auditContexts.set(ctx, actx);
 }
 

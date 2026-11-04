@@ -46,8 +46,17 @@ export interface PluginGrant {
   budgetFamily?: BudgetFamily;
 }
 
+/**
+ * Who reads a read-only context's results (P1). `assistant` (the MCP server, `pr-rla/api/read`): built-ins
+ * hold placeholders, only this machine's approvals count, and no `trust: full` plugin runs. `person` (the
+ * CLI's verify, status and dry runs): the same read-only broker and ledger, with the person's own approvals,
+ * `--accept-lock-grants` and approved `trust: full` plugins, as in read-write mode. A read-write context is a person's.
+ */
+export type AuditCaller = "person" | "assistant";
+
 export interface AuditContext {
   readonly mode: AuditMode;
+  readonly caller: AuditCaller;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly nowMs: () => number;
   /** Waits on the command's clock; `signal` ends a wait early (a plugin host cancels a plugin's wait with it). */
@@ -78,6 +87,8 @@ export interface AuditContext {
 
 export interface AuditContextOptions {
   mode: AuditMode;
+  /** Who reads a read-only context's results (default `assistant`; ignored in read-write mode, which is always a person's). */
+  caller?: AuditCaller;
   env?: Readonly<Record<string, string | undefined>>;
   nowMs?: () => number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -161,15 +172,18 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     },
   );
 
+  const caller: AuditCaller = o.mode === "read-write" ? "person" : (o.caller ?? "assistant");
   const ctx: AuditContext = {
     mode: o.mode,
+    caller,
     env,
     nowMs,
     sleep,
     log,
     broker,
-    plugins: readOnlyPolicy(o.mode, o.plugins ?? pluginPolicy(undefined, env)),
-    consent: approvedOnly(o.mode, localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
+    // An assistant's read-only context narrows the policy and the consent; a person's keeps their own (P1).
+    plugins: caller === "person" ? (o.plugins ?? pluginPolicy(undefined, env)) : readOnlyPolicy(o.mode, o.plugins ?? pluginPolicy(undefined, env)),
+    consent: ((c: LocalConsent) => (caller === "person" ? c : approvedOnly(o.mode, c)))(localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
@@ -266,7 +280,8 @@ const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => gr
 export function builtinEnv(ctx: AuditContext, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; credentials: PluginCredential[] } {
   const { env, granted } = builtinEnvironment(ctx, kind, name, use, options);
   const credentials = builtinGrantCredentials(granted);
-  if (ctx.mode !== "read-only") return { env, credentials };
+  // A person's read-only context (the CLI's verify and status) gives built-ins the values, as read-write does.
+  if (ctx.mode !== "read-only" || ctx.caller === "person") return { env, credentials };
   return { env: Object.fromEntries(Object.keys(env).map((k) => [k, `prrla-cred:${k}`])), credentials };
 }
 

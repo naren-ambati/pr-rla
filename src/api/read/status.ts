@@ -15,7 +15,7 @@ import { builtinLedgerName } from "../../registry.js";
 import { provenanceRank, type ProvenanceLevel, type VerdictEvent } from "../../sdk/ledger.js";
 import { anchorLines, notTamperProof } from "../../timestamp/verify.js";
 import { latestCheckpointAt } from "./checkpoints.js";
-import { auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { readOnlyContext, auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { assessRecord, logBound } from "../timestamps.js";
 
 /**
@@ -173,6 +173,7 @@ export async function ledgerStatus(paths: WindowPaths, ledger: { readVerdicts():
 
 /** Where the audit stands: one result per phase (unregistered, registered, frozen, sampled). */
 export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise<StatusResult> {
+  ctx = readOnlyContext(ctx); // P1: status only reads (--checkpoint is a separate write, on the caller's own context)
   const { config, paths } = configFor(ctx, opts.window);
   const window = opts.window ?? config.window.name;
   if (!existsSync(paths.registration)) {

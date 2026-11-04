@@ -3,7 +3,7 @@ import { computeStatus, provenanceOf } from "../../core/status.js";
 import { ledgerTraits } from "../../ledger-traits.js";
 import type { ProvenanceLevel } from "../../sdk/ledger.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, ledgerFor, readManifest, readRegistration, type ApiContext } from "../session.js";
+import { readOnlyContext, auditContextFor, configFor, ledgerFor, readManifest, readRegistration, type ApiContext } from "../session.js";
 import { issuedDraws } from "./draw-context.js";
 import { countedLedgerVerdicts } from "./status.js";
 
@@ -50,6 +50,7 @@ export interface DrawsView {
 
 /** `draws`: the issued draws with state, and the blocking draw. No network: a tracker ledger's verdicts are not read. */
 export async function draws(ctx: ApiContext, opts: DrawsOptions = {}): Promise<DrawsView> {
+  ctx = readOnlyContext(ctx); // P1: it only reads
   const { config, paths } = configFor(ctx, opts.window);
   const window = opts.window ?? config.window.name;
   const file = issuedDraws(paths, window);
