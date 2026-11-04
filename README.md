@@ -107,7 +107,7 @@ Package exports:
 - `pr-rla/testing`: `runProviderConformance()` / `assertProviderConformance()`. It checks normalization, PR vs direct-push classification, merge strategies (no commit a PR brought in comes back as a direct push), no double counting, stable sorted ids, review-state mapping, actors, bot detection, pagination, kind filtering, and retries under injected 5xx/429 faults with the rate-limit headers respected; and, for the optional phase-3 fields, the pinned head, account ids, review granularity and revoked approvals.
 - `pr-rla/testing` also has `runLedgerConformance()` / `assertLedgerConformance()` for ledgers: the first eligible verdict counts, relabels warn, a removal after counting, a deleted or moved issue and a deleted or renamed verdict label fail, bots, apps and unregistered reviewers are ignored, verdicts carry the tracker's time, history pages and round-trips through a checkpoint, publishing is idempotent, and reads survive injected faults. Each fixture says whether it is `recorded` or `synthetic`.
 - `pr-rla/http`: `createJsonClient()`, the built-ins' retrying JSON client, under its own `HTTP_HELPER_VERSION` (1).
-- `pr-rla/api/read`: the read-only audit API, `auditList`, `status`, `draws`, `drawContext`, `verify`, `freezePreview` and `simulate`. Each call runs read-only: the fetch broker refuses any request that is not a read, and no write function is reachable from this subpath (a test walks its import graph). Every CLI command is a formatter over the audit API in `src/api`, and its `--json` output is the API's result object.
+- `pr-rla/api/read`: the read-only audit API, `auditList`, `status`, `draws`, `drawContext`, `verify`, `freezePreview` and `simulate`, with `LONG_CALL_DEADLINE_MS` and `SIMULATE_MAX_DRAWS`. Each call runs read-only: the fetch broker refuses any request that is not a read, no `trust: full` plugin loads, every file it opens is confined to the caller's `roots`/`confine`, its `signal` stops it, and its errors carry foreign text only in `untrusted`. No write function is reachable from this subpath (a test walks its import graph, and another traces what a run loads, writes and starts). Every CLI command is a formatter over the audit API in `src/api`, and its `--json` output is the API's result object.
 
 Built-in providers (one page each in [`docs/providers/`](docs/providers/)):
 
@@ -141,17 +141,17 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 
 ## For assistants: `draw-context` and the read-only MCP server
 
-`pr-rla draw-context <n>` shows what a reviewer reads for an issued draw: the change's files and patches with `linguist-generated` files dropped (when the registration's `exclude_generated` is on, from the `.gitattributes` at the landed commit), its description, its CI results, the protocol's "FAILS if" checklist (with a FAIL if the protocol's hash is not the registered one), the draw's verdict state, and how to record a verdict. Every built-in provider implements `describeChange` for it; a provider without it gets the manifest's fields and the URL. Text the change's author wrote is fenced as untrusted data:
+`pr-rla draw-context <n>` shows what a reviewer reads for an issued draw: the change's files and patches with `linguist-generated` files dropped (when the registration's `exclude_generated` is on: only files the `.gitattributes` of both the change's base commit and its landed commit mark, by git's own rules, and none when the change touches a `.gitattributes`), its description, its CI results, the protocol's "FAILS if" checklist (with a FAIL, and no checklist, if the protocol's hash is not the registered one), the draw's verdict state, and how to record a verdict. Every built-in provider implements `describeChange` for it; a provider without it gets the manifest's fields and the URL. Text from the change, its SCM, the ledger or a plugin is fenced as untrusted data, with its control characters escaped:
 
 ```
 <<<UNTRUSTED-CHANGE-CONTENT 7f3a9c…>>>
-… title, description, patches, CI check names …
+… author, title, description, patches, CI check names, the verdict's reviewer and note …
 <<<END 7f3a9c…>>>
 ```
 
 with a fresh 128-bit id on every call. The fence lowers the risk of prompt injection; it cannot rule it out, which is one more reason the verdict stays with a person.
 
-[`packages/pr-rla-mcp`](packages/pr-rla-mcp) is a separate package: an MCP server over stdio with eight read-only tools, `audit_list`, `status`, `draws`, `draw_context`, `verify`, `simulate`, `freeze_preview` and `job_status`. It imports only `pr-rla/api/read`. It records no verdict, issues no draw, submits to no log and writes no file; its jobs and caches live in memory. Tools open only directories under its `--root`s. A call still running after 25 s returns `{ jobId }` for `job_status`. See its [README](packages/pr-rla-mcp/README.md) and [`docs/security-model.md`](docs/security-model.md) for what this does and does not guarantee.
+[`packages/pr-rla-mcp`](packages/pr-rla-mcp) is a separate package: an MCP server over stdio with eight read-only tools, `audit_list`, `status`, `draws`, `draw_context`, `verify`, `simulate`, `freeze_preview` and `job_status`. It imports only `pr-rla/api/read`, whose read-only mode runs pr-rla's built-ins and isolated plugins only (a `trust: full` plugin is refused). So it records no verdict, issues no draw, submits to no log and writes no file, and its jobs and caches live in memory. Tools open only files under its `--root`s. A built-in gets only its default token variables, sent only to its default origin; a credential the audit repo's config or lock chooses is withheld until the operator consents. A call still running after 25 s returns `{ jobId }` for `job_status`. See its [README](packages/pr-rla-mcp/README.md) and [`docs/security-model.md`](docs/security-model.md) for what this does and does not guarantee.
 
 ## Limitations (v0.1)
 

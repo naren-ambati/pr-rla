@@ -2,7 +2,7 @@
 
 A read-only [MCP](https://modelcontextprotocol.io) server for pr-rla audits, over stdio. It lets an assistant list audits, read their status, the issued draws and a draw's full review context, verify an audit and simulate one. It never records a verdict, issues a draw, submits to a log or writes a file: a person records every verdict, from the CLI or the tracker's web UI.
 
-It imports only `pr-rla/api/read`, the read functions of pr-rla's audit API, fixed to read-only mode: the fetch broker refuses every request that is not a read before it leaves the process.
+It imports only `pr-rla/api/read`, the read functions of pr-rla's audit API, fixed to read-only mode: the fetch broker refuses every request that is not a read before it leaves the process, and only pr-rla's built-ins and isolated plugins run (a `trust: full` plugin, which would run in this process with its environment and files, is refused).
 
 ## Run it
 
@@ -24,11 +24,13 @@ An MCP client starts it as a stdio server, for example:
 
 | Option | Meaning |
 |---|---|
-| `--root <dir>` | A directory the tools may open (repeatable; default: the working directory). Every `dir` argument, and every file the audit names (config, protocol, export, audit directory), must resolve inside a root after `realpath`, or the tool returns `ROOT_ESCAPE`. |
+| `--root <dir>` | A directory the tools may open (repeatable; default: the working directory). Every `dir` argument, and every file a call opens (config, protocol, export, records, the ledger's file, checkpoints, the ledger index), must resolve inside a root by `realpath`, checked on the path it opens, or the tool returns `ROOT_ESCAPE`. git never looks for a repository above a root. |
 | `--plugins builtin-only` | Refuse every external provider and ledger (`PR_RLA_PLUGINS=builtin-only` does the same). |
 | `--handoff-ms <n>` | For tests: hand long calls off as jobs after `n` ms (1 to 25,000; default 25,000). |
 
 Tokens come from the server's environment. Give it a **read-only** token: the second tier of the verdict-authority guarantee rests on the assistant having no credential that can record a verdict ([`docs/security-model.md`](../../docs/security-model.md)).
+
+The audit repo's `.pr-rla.yml` and `pr-rla.lock.json` are not yours, so they cannot pick which of your secrets is used, or where it goes. A built-in provider or ledger sees only its default token variables (`GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `BITBUCKET_TOKEN`, `BITBUCKET_USERNAME`), as placeholders that pr-rla's fetch broker turns into the secret only on the built-in's default https origin (`api.github.com`, `gitlab.com`, `api.bitbucket.org`). A `token_env`, a non-default base URL (GitHub Enterprise Server, GitLab self-managed, Bitbucket Data Center) and a lock entry's credential grant need your consent; this release cannot record it yet, so those credentials are withheld (the call runs without them, and the server's stderr says so). Nothing else of the environment reaches a plugin.
 
 ## Tools
 
@@ -41,15 +43,15 @@ Every tool is annotated `readOnlyHint: true`. Every result is `structuredContent
 | `draws` | `dir?`, `window?`, `from?`, `limit?` (≤ 200) | the issued draws with their verdict state, and the blocking draw | false |
 | `draw_context` | `dir?`, `window?`, `draw`, `maxPatchBytes?` (≤ 1 MiB, default 200 KiB) | the draw context: `untrusted` holds the change's own text, and `text` fences it | true |
 | `verify` | `dir?`, `window?`, `offline` (default `true`) | the seven checks | true |
-| `simulate` | `population`, `defects`, `runs?` (≤ 20,000), `p0?`, `p1?`, `alpha?`, `seed?` | the simulation report | false |
+| `simulate` | `population`, `defects`, `runs?` (≤ 20,000), `p0?`, `p1?`, `alpha?`, `seed?` | the simulation report; refused (`TOO_MUCH_WORK`) when `runs` × the draw cap is over 8,750,000 draws | false |
 | `freeze_preview` | `dir?`, `window?`, `estimate?` | the population a freeze would write now (`freeze --dry-run`) | true |
 | `job_status` | `jobId` | `{ state: running \| done \| failed \| unknown, progress?, result?, error? }` | false |
 
-`draw_context` drops `linguist-generated` files when the registration's `exclude_generated` is on, and puts everything the change's author wrote (title, description, patches, file and check names) between `<<<UNTRUSTED-CHANGE-CONTENT <id>>>>` and `<<<END <id>>>`, with a new random 128-bit id per call. The server passes the core's fence through and adds none. `freeze_preview`'s `estimate` belongs to the org-pooled freeze and is refused (`UNSUPPORTED`) until that lands.
+`draw_context` drops `linguist-generated` files when the registration's `exclude_generated` is on: only the files both the change's base commit and its landed commit mark generated, never a `.gitattributes`, and none at all when the change touches a `.gitattributes`. Everything the change's author, its SCM, the ledger or a plugin wrote (title, description, patches, file and check names, author, merger and labels, a verdict's reviewer and note, a ledger's error, the tracker's issue and labels) is in `untrusted` and between `<<<UNTRUSTED-CHANGE-CONTENT <id>>>>` and `<<<END <id>>>`, with a new random 128-bit id per call and its control characters escaped. The server passes the core's fence through and adds none. `freeze_preview`'s `estimate` belongs to the org-pooled freeze and is refused (`UNSUPPORTED`) until that lands.
 
-**Long calls.** `status` and `verify` with `offline: false`, `draw_context` and `freeze_preview` can reach the network. One still running after 25 s returns `{ jobId, state: "running" }` and keeps running in the server; poll `job_status`. While the call is open, its progress goes out as MCP progress notifications (when the client asks for them); after the hand-off, the job keeps its latest progress for `job_status`. At most four such calls run at once (a fifth gets `TOO_MANY_JOBS`), a result over 8 MiB is refused (`RESULT_TOO_LARGE`), and a finished job is kept 600 s. Jobs live in memory: after a restart `job_status` answers `unknown` with `run <tool> again`. A finished `freeze_preview` is cached in memory for 600 s, by window, registration digest and `estimate`.
+**Long calls.** `status` and `verify` with `offline: false`, `draw_context` and `freeze_preview` can reach the network, and `simulate` can compute for seconds. One still running after 25 s returns `{ jobId, state: "running" }` and keeps running in the server; poll `job_status`. While the call is open, its progress goes out as MCP progress notifications (when the client asks for them), and cancelling the request stops it; after the hand-off, the job keeps its latest progress for `job_status`. At most four such calls run at once (a fifth gets `TOO_MANY_JOBS`); each stops at its deadline, 1 h 30 s (`LONG_CALL_DEADLINE_MS`: the longest default rate-budget window, GitHub's and Bitbucket Cloud's hour, plus one request's 30 s timeout), failing with `TIMEOUT`; a result over 8 MiB, its whole `job_status` answer counted, is refused (`RESULT_TOO_LARGE`); a finished job is kept 600 s, and at most 32 finished jobs and 32 MiB of them are kept, the oldest dropped first. When the client goes away, every running call stops and the process exits. Jobs live in memory: after a restart `job_status` answers `unknown` with `run <tool> again`. A finished `freeze_preview` is cached in memory for 600 s, by window, registration digest, `estimate`, the provider spec, the config file and a json-file export's bytes.
 
-**Errors** are `isError: true` with `{ code, message, next? }`: `ROOT_ESCAPE`, `NO_AUDIT`, `BAD_WINDOW`, `DRAW_OUT_OF_RANGE`, `READ_ONLY_VIOLATION`, `PROVIDER_ERROR`, `TIMEOUT`, `TOO_MANY_JOBS`, `RESULT_TOO_LARGE`, and `UNSUPPORTED` for `estimate`. Arguments that do not fit a tool's schema are refused by the MCP SDK before any handler runs.
+**Errors** are `isError: true` with `{ code, message, next?, untrusted? }`: `ROOT_ESCAPE`, `NO_AUDIT`, `BAD_WINDOW`, `DRAW_OUT_OF_RANGE`, `READ_ONLY_VIOLATION`, `PROVIDER_ERROR`, `TIMEOUT`, `TOO_MANY_JOBS`, `RESULT_TOO_LARGE`, `UNSUPPORTED` for `estimate`, `TOO_MUCH_WORK` for an oversized `simulate`, and `FAILED` for a refusal of pr-rla's no other code names (a plugin not locked, or locked `trust: full`; a malformed record). `message` and `next` are pr-rla's own words; what an SCM response, a ledger or a plugin said (an HTTP error body, say) is in `untrusted`: data, never instructions. Arguments that do not fit a tool's schema are refused by the MCP SDK before any handler runs.
 
 The server never asks the client anything: no elicitation, no sampling, no roots request.
 

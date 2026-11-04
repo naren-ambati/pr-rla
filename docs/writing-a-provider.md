@@ -72,7 +72,7 @@ A `DISMISSED` review is a decision that no longer stands: a dismissed review, a 
 **`describeChange` (optional, phase 3, same API version 1).** `pr-rla draw-context <n>` and the MCP `draw_context` tool show a reviewer one drawn change. Without this method they show the manifest's fields and the URL. With it:
 
 ```ts
-describeChange(change: ChangeRecord): Promise<ChangeDescription>;
+describeChange(change: ChangeRecord, opts?: { signal?: AbortSignal }): Promise<ChangeDescription>;
 
 interface ChangeDescription {
   changeId: string;                   // change.id
@@ -80,16 +80,24 @@ interface ChangeDescription {
   body: string;                       // a direct push: the commit message after its first line
   files: { path: string; previousPath?: string; status: "added" | "modified" | "removed" | "renamed";
            additions: number; deletions: number; patch: string | null }[];   // patch: the unified hunks, null when the SCM has none
-  gitattributes: string | null;       // .gitattributes at change.mergeSha, or null when there is none
+  gitattributes: string | null;       // the root .gitattributes at change.mergeSha, or null when there is none
   checks: { name: string; state: "success" | "failure" | "neutral" | "pending" | "skipped" | "unknown"; url: string | null }[];
   truncated: boolean;                 // the SCM listed fewer files than the change has
+  attributes?: {                      // optional: what pr-rla needs to drop linguist-generated files
+    baseSha: string;                  //   the commit the change was applied to
+    base: Record<string, string | null>;   //   .gitattributes by directory ("" the root) at baseSha: text, or null when absent
+    head: Record<string, string | null>;   //   the same at change.mergeSha
+  };
+  checksTruncated?: boolean;          // optional: the SCM listed fewer CI results than there are
 }
 ```
 
-- Read only, through `ctx.fetch`, like every other request; behind the broker in read-only mode anything else is refused. For a PR, report the CI results at its head commit (what the merger saw); for a direct push, at the commit.
-- Return every file, generated or not, with the raw `.gitattributes`: the core drops the `linguist-generated` ones itself, when the registration's `exclude_generated` is on, and caps the patches. A body or a patch is never trusted: the core fences all of it as untrusted text before an assistant sees it.
-- The core validates the result with `changeDescriptionProblems` (exported from `pr-rla/provider`), so a malformed description fails `draw-context` with the problem named, whatever process it came from.
-- The built-ins show the calls per SCM (`src/providers/*/describe.ts`): GitHub `pulls/{n}` and `/files`, `contents/.gitattributes?ref=`, `check-runs` and `status`; GitLab `merge_requests/:iid/diffs`, `repository/files/.gitattributes/raw`, `pipelines?sha=`; Bitbucket Cloud `diffstat` and `diff`, `src/{sha}/.gitattributes`, `commit/{sha}/statuses`; Data Center `changes` and `diff`, `raw/.gitattributes?at=`, build status. `pr-rla/http`'s client has `getText()` for a body that is not JSON (a raw file, a diff), returning null on 404.
+- Read only, through `ctx.fetch`, like every other request; behind the broker in read-only mode anything else is refused. For a PR, report the CI results at its head commit (what the merger saw); for a direct push, at the commit. Stop when `opts.signal` aborts (a stopped job); every request through `ctx.fetch` is aborted with it too.
+- **Generated files are pr-rla's decision, from your `attributes`.** Return every file, generated or not. A file is dropped (under the registration's `exclude_generated`) only when the `.gitattributes` of the change's **base** commit and of its **landed** commit both mark it `linguist-generated`, with git's own rules (`src/core/generated.ts`, checked against `git check-attr`); never a `.gitattributes` itself; and nothing at all when the change touches any `.gitattributes` or its file list is truncated. So a change cannot mark its own files generated. The base is a PR's target-branch commit (its base SHA) or a direct push's first parent. Read the root file at both commits, and for every file the root marks generated at both, the `.gitattributes` of each directory above it, at both (a directory missing from a map counts as unread: files below it are shown). The built-ins use `readChangeAttributes` (`src/providers/attributes.ts`) for this; without `attributes`, nothing is dropped.
+- **Say when a listing is cut, with evidence.** Set `truncated` when the SCM says it listed fewer files than the change has (GitHub's 3,000-file cap, a commit's `stats` above the listed lines, GitLab's `too_large`, `collapsed` and `changes_count`), and `checksTruncated` for CI results (a `total_count` above the list, a page cap). Never report `false` when you could not tell. Follow every page, but stop at a page the server repeats and at a page cap (the built-ins use `followPages`, 100 pages).
+- The core caps patches and text (a line-boundary prefix of a patch that does not fit, 8 KiB of body, 1 KiB of title, 512 bytes of a name, 5,000 files, 1,000 checks). A body, a patch, a file name, a check name, the author's name and labels are never trusted: the core fences all of it as untrusted text, and escapes its control characters, before an assistant sees it.
+- The core validates the result with `changeDescriptionProblems` (exported from `pr-rla/provider`), so a malformed description, or none, fails `draw-context` with the problem named, whatever process it came from. Throwing an error to mean "no description" is not honoured from a plugin: the call fails, and the error's text reaches the caller only as untrusted text.
+- The built-ins show the calls per SCM (`src/providers/*/describe.ts`): GitHub `pulls/{n}` and `/files`, `contents/<dir>/.gitattributes?ref=`, `check-runs` and `status`; GitLab `merge_requests/:iid/diffs`, `repository/files/<path>/raw`, `pipelines?sha=`; Bitbucket Cloud `diffstat` and `diff`, `src/{sha}/<dir>/.gitattributes`, `commit/{sha}/statuses`; Data Center `changes` and `diff`, `raw/<dir>/.gitattributes?at=`, build status. `pr-rla/http`'s client has `getText()` for a body that is not JSON (a raw file, a diff), returning null on 404.
 
 ## 2. Step by step: the Gitea provider
 
