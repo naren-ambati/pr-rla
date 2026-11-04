@@ -50,12 +50,12 @@ export function treeHash(dir) {
  * Starts pr-rla-mcp over stdio with the SDK's own client, under Node's permission model (reads
  * anywhere, no writes, child processes for git) and the write and network guard preloaded.
  */
-export async function startServer({ roots, args = [], env = {}, negotiation, permission = true } = {}) {
+export async function startServer({ roots, args = [], env = {}, negotiation, permission = true, allowNet = false } = {}) {
   const stderr = [];
   // Node 25 and later also deny the network under --permission; the guard still refuses every host but loopback.
   const net = Number(process.versions.node.split(".")[0]) >= 25 ? ["--allow-net"] : [];
   const node = [...(permission ? ["--permission", "--allow-fs-read=*", "--allow-child-process", ...net] : []), "--import", GUARD, BIN, ...roots.flatMap((r) => ["--root", r]), ...args];
-  const transport = new StdioClientTransport({ command: process.execPath, args: node, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env }, stderr: "pipe" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: node, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...(allowNet ? { PRRLA_GUARD_NET: "allow" } : {}), ...env }, stderr: "pipe" });
   transport.stderr?.on("data", (d) => stderr.push(...String(d).split("\n").filter(Boolean)));
   const client = new Client({ name: "pr-rla-mcp-test", version: "0" }, { capabilities: { elicitation: {} }, ...(negotiation ? { versionNegotiation: { mode: negotiation } } : {}) });
   const elicitations = [];

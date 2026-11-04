@@ -1,6 +1,7 @@
 // Loaded into the pr-rla-mcp process under test (node --import). It reports, on stderr:
 //   PRRLA-WRITE-ATTEMPT <function> <path>  for every call that would create, change or remove a file;
-//   PRRLA-NET-DENIED <host>                 for every socket to a host other than loopback (refused).
+//   PRRLA-NET-DENIED <host>                 for every socket to a host other than loopback (refused),
+//                                           unless PRRLA_GUARD_NET=allow (the live demo).
 // The server also runs under Node's permission model with no fs-write grant, so a write would fail
 // even if this spy missed it; the spy proves that none was attempted, even one some code caught.
 import fs from "node:fs";
@@ -38,7 +39,8 @@ syncBuiltinESMExports();
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const connect = net.Socket.prototype.connect;
-net.Socket.prototype.connect = function (...args) {
+// The live demo (scripts/demo-draw-context.mjs --live) reads GitHub: it allows the network, and still spies on writes.
+if (process.env.PRRLA_GUARD_NET !== "allow") net.Socket.prototype.connect = function (...args) {
   let a = args[0];
   if (Array.isArray(a)) a = a[0];
   const host = typeof a === "object" && a && !a.path ? (a.host ?? "localhost") : typeof a === "number" ? (typeof args[1] === "string" ? args[1] : "localhost") : null;
