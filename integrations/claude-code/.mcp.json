@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pr-rla": {
+      "command": "npx",
+      "args": ["-y", "pr-rla-mcp@0.1.0", "--root", "${CLAUDE_PROJECT_DIR}"]
+    }
+  }
+}

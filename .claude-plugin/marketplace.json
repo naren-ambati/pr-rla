@@ -1,0 +1,12 @@
+{
+  "name": "pr-rla",
+  "owner": { "name": "pr-rla" },
+  "description": "The pr-rla plugin for Claude Code: the review-draw skill, the read-only pr-rla MCP server and the guard hooks",
+  "plugins": [
+    {
+      "name": "pr-rla",
+      "source": "./integrations/claude-code",
+      "description": "Review pr-rla audit draws with the read-only MCP server; guard hooks block verdict writes from the assistant"
+    }
+  ]
+}

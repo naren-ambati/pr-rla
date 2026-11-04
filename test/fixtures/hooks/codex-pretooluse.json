@@ -1,0 +1,19 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Codex hooks documentation, PreToolUse (common input fields, turn_id, tool_name, tool_use_id, tool_input; Bash and apply_patch use tool_input.command), https://learn.chatgpt.com/docs/hooks.md (redirected from https://developers.openai.com/codex/hooks), read 2026-11-04",
+    "note": "Documented, not observed: Codex is not installed on the build machine. Whether a running Codex sends tool_input.command as a string or an argv array is unverified, so the guard accepts both. The founder's manual run records real payloads with guard.mjs --record."
+  },
+  "payload": {
+    "session_id": "thr_123",
+    "transcript_path": null,
+    "cwd": "/home/user/audit-repo",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-5-codex",
+    "turn_id": "turn_1",
+    "permission_mode": "default",
+    "tool_name": "Bash",
+    "tool_use_id": "call_1",
+    "tool_input": { "command": "pr-rla status" }
+  }
+}

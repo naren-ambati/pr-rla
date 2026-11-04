@@ -1,0 +1,21 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Cursor hooks documentation: beforeMCPExecution input (tool_input is a JSON string), https://cursor.com/docs/hooks.md, read 2026-11-04",
+    "note": "Documented, not observed."
+  },
+  "payload": {
+    "conversation_id": "conv-1",
+    "generation_id": "gen-1",
+    "model": "claude-opus-4-7-thinking-max",
+    "hook_event_name": "beforeMCPExecution",
+    "cursor_version": "1.7.2",
+    "workspace_roots": ["/home/user/audit-repo"],
+    "user_email": null,
+    "transcript_path": null,
+    "tool_name": "draws",
+    "tool_input": "{}",
+    "mcp_server_name": "pr-rla",
+    "command": "npx -y pr-rla-mcp@0.1.0 --root /home/user/audit-repo"
+  }
+}

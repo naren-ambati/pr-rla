@@ -1,0 +1,20 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Cursor hooks documentation: common schema and beforeShellExecution input, https://cursor.com/docs/hooks.md, read 2026-11-04",
+    "note": "Documented, not observed: the founder's manual run records real payloads with guard.mjs --record."
+  },
+  "payload": {
+    "conversation_id": "conv-1",
+    "generation_id": "gen-1",
+    "model": "claude-opus-4-7-thinking-max",
+    "hook_event_name": "beforeShellExecution",
+    "cursor_version": "1.7.2",
+    "workspace_roots": ["/home/user/audit-repo"],
+    "user_email": null,
+    "transcript_path": null,
+    "command": "pr-rla status",
+    "cwd": "/home/user/audit-repo",
+    "sandbox": false
+  }
+}
