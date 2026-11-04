@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withConfinement, type Confinement } from "../../io/confine.js";
-import { sleepFor } from "../../net/abort.js";
+import { abortReason, sleepFor } from "../../net/abort.js";
 import { DESTINATION_TIMEOUT_MS } from "../../net/contract.js";
 import { BUDGET_FAMILIES } from "../../net/rate-limits.js";
 import { withPluginHostScope } from "../../plugins/host.js";
@@ -91,6 +91,19 @@ const sessions = new WeakMap<object, Map<string, AuditContext>>();
  */
 export const LONG_CALL_DEADLINE_MS = Math.max(...Object.values(BUDGET_FAMILIES).flatMap((f) => f.rules.map((r) => r.perMs))) + DESTINATION_TIMEOUT_MS.scm;
 
+/** The real path of `p`, or for a path that does not exist, of its nearest existing ancestor plus the rest. */
+function realOrNearest(p: string): string {
+  let cur = resolve(p);
+  const rest: string[] = [];
+  while (!existsSync(cur)) {
+    const parent = dirname(cur);
+    if (parent === cur) return resolve(p);
+    rest.unshift(basename(cur));
+    cur = parent;
+  }
+  return join(realpathSync(cur), ...rest);
+}
+
 /** The caller's `confine`, its refusals as ROOT_ESCAPE in pr-rla's error. */
 function confinement(o: ReadOptions): Confinement | undefined {
   if (!o.confine && !o.roots) return undefined;
@@ -101,7 +114,7 @@ function confinement(o: ReadOptions): Confinement | undefined {
   });
   const confine = (path: string, what: string) => {
     if (!o.confine) {
-      if (!inside(path)) throw new AuditError(`${what} resolves outside the roots this call may open`, 1, "ROOT_ESCAPE");
+      if (!inside(realOrNearest(path))) throw new AuditError(`${what} resolves outside the roots this call may open`, 1, "ROOT_ESCAPE");
       return;
     }
     try {
@@ -166,6 +179,8 @@ const run = <T>(o: ReadOptions, fn: () => Promise<T>): Promise<T> =>
         try {
           return await fn();
         } catch (e) {
+          // A stopped call: the stop is the error, whatever the work threw on its way out.
+          if (o.signal?.aborted) throw abortReason(o.signal);
           throw readError(e);
         }
       }),
