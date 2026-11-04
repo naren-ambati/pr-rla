@@ -5,6 +5,8 @@ import {
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
@@ -100,6 +102,31 @@ export class BitbucketDataCenterProvider implements ScmProvider {
       if (!(e instanceof HttpError) || e.status !== 404) throw e;
       return (await this.http.get<{ id: string; displayId: string; latestCommit: string }>(`${path}/branches/default`, signal)).data; // before 7.6
     }
+  }
+
+  /**
+   * The repositories of a project (U8): `GET /projects/{KEY}/repos`, paged by `start`. `origin` marks a fork. The list
+   * does not carry the default branch (one more request per repository), so it is left empty: `freeze` records the
+   * branch `listChanges` walked.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    interface DcRepo {
+      id: number;
+      slug: string;
+      project?: { key?: string };
+      public?: boolean;
+      archived?: boolean;
+      origin?: unknown;
+    }
+    const repos = await this.paged<DcRepo>(`/projects/${encodeURIComponent(set.owner)}/repos`);
+    return repos.map((r) => ({
+      repo: `${r.project?.key ?? set.owner}/${r.slug}`,
+      id: String(r.id),
+      defaultBranch: "",
+      archived: r.archived === true,
+      fork: r.origin !== undefined && r.origin !== null,
+      visibility: r.public === true ? "public" : "private",
+    }));
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

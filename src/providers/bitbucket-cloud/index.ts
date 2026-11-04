@@ -5,6 +5,8 @@ import {
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
@@ -133,6 +135,23 @@ export class BitbucketCloudProvider implements ScmProvider {
       url = data.next;
     }
     return out;
+  }
+
+  /**
+   * The repositories in a workspace the token can see (U8): `GET /repositories/{workspace}`. Bitbucket Cloud has no
+   * archived state, `parent` marks a fork, and a repository is public or private.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    interface BbRepo {
+      full_name: string;
+      uuid: string;
+      is_private?: boolean;
+      mainbranch?: { name?: string } | null;
+      parent?: unknown;
+    }
+    const fields = "next,values.full_name,values.uuid,values.is_private,values.mainbranch.name,values.parent.full_name";
+    const repos = await this.paged<BbRepo>(`/repositories/${encodeURIComponent(set.owner)}?pagelen=100&fields=${fields}`);
+    return repos.map((r) => ({ repo: r.full_name, id: r.uuid, defaultBranch: r.mainbranch?.name ?? "", archived: false, fork: r.parent !== undefined && r.parent !== null, visibility: r.is_private === false ? "public" : "private" }));
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

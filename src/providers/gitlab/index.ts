@@ -6,6 +6,9 @@ import {
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
+  type RepoRef,
+  type RepoSetRule,
+  type RepoVisibility,
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { attributeCommits } from "../attribution.js";
@@ -110,6 +113,38 @@ export class GitLabProvider implements ScmProvider {
       url = nextLink(headers);
     }
     return out;
+  }
+
+  /**
+   * The projects under a group, subgroups included (U8): `GET /groups/:path/projects`. A personal namespace answers
+   * 404 there, so the user's own projects are read instead. A GitLab fork carries `forked_from_project`.
+   */
+  async listRepos(set: RepoSetRule): Promise<RepoRef[]> {
+    interface GlProject {
+      id: number;
+      path_with_namespace: string;
+      default_branch?: string | null;
+      archived?: boolean;
+      forked_from_project?: unknown;
+      visibility?: string;
+    }
+    const q = `per_page=${this.pageSize}&order_by=path&sort=asc`;
+    const groups = `/groups/${enc(set.owner)}/projects?include_subgroups=true&with_shared=false&${q}`;
+    let projects: GlProject[];
+    try {
+      projects = await this.paged<GlProject>(groups);
+    } catch (e) {
+      if (!(e instanceof HttpError) || e.status !== 404) throw e;
+      projects = await this.paged<GlProject>(`/users/${enc(set.owner)}/projects?${q}`);
+    }
+    return projects.map((p) => ({
+      repo: p.path_with_namespace,
+      id: String(p.id),
+      defaultBranch: p.default_branch ?? "",
+      archived: p.archived === true,
+      fork: p.forked_from_project !== undefined && p.forked_from_project !== null,
+      visibility: (p.visibility === "public" || p.visibility === "internal" ? p.visibility : "private") satisfies RepoVisibility,
+    }));
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {
