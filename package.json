@@ -35,15 +35,20 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.15"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sdk.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:check": "node scripts/check-docs.mjs",
+    "docs:outputs": "node scripts/docs-outputs.mjs",
+    "secret-grep": "node scripts/secret-grep.mjs"
   },
   "dependencies": {
     "asn1js": "4.0.0",
