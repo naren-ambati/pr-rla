@@ -226,7 +226,7 @@ describe("trust: full from a repo lock refuses to load without local consent (fi
     await auditeeLocks(dir, use, machine("auditee"), "full");
     const env = { GITHUB_TOKEN: "ghp_MINE", PR_RLA_APPROVALS_FILE: machine("verifier") };
     const approve = await cli(dir, ["plugin", "approve", use, "--yes"], env);
-    expect(approve.out[1]).toBe("  trust         full: IN THIS PROCESS, with your environment and files (its imports are held to its hashed files; what it reads and runs is its own)");
+    expect(approve.out[1]).toBe("  trust         full: IN THIS PROCESS, with your environment and files (its imports on this thread are held to its hashed files; workers, forks and what it reads and runs are its own)");
     const v = await cli(dir, ["verify"], env);
     expect(v.err).toContain("PLUGIN TRUST: full (p@unversioned runs with your environment and files)");
     // It ran in this process, as approved.

@@ -358,23 +358,53 @@ describe("trust: full imports only what its tree hash covers (review of this rou
   }
   const run = (args: string[], env: Record<string, string> = {}) => spawnSync(process.execPath, args, { encoding: "utf8", env: { PATH: process.env.PATH ?? "", PR_RLA_APPROVALS_FILE: process.env.PR_RLA_APPROVALS_FILE!, ...env }, timeout: 60_000 });
 
-  it("the resolve hook refuses an undeclared package and an unhashed sibling file, and allows node: built-ins (Node's own resolution)", () => {
+  it("the resolve hook refuses undeclared packages and unhashed files, allows node: built-ins and declared dependencies (Node's own resolution)", () => {
     const m = marker();
     const guard = pathToFileURL(join(ROOT, "src", "plugins", "inprocess-guard.ts")).href;
-    for (const [importLine, refused] of [
-      ['import "left-pad-unhashed";', true],
-      ['import "./helper.mjs";', true],
-      ['import { readFileSync } from "node:fs"; void readFileSync;', false],
-    ] as [string, boolean][]) {
+    // Each case: a plugin's import line, whether it has a package root (with a declared and an undeclared package in its node_modules), and the outcome.
+    const cases: [string, boolean, string][] = [
+      ['import "left-pad-unhashed";', false, "TREE_ESCAPE"],
+      ['import "./helper.mjs";', false, "TREE_ESCAPE"],
+      ['import { readFileSync } from "node:fs"; void readFileSync;', false, "LOADED"],
+      // The review's repro: the tree hash skips <root>/node_modules, so an undeclared package there is unhashed.
+      ['import "nested-undeclared";', true, "TREE_ESCAPE"],
+      ['import "declared-dep";', true, "LOADED"],
+    ];
+    for (const [importLine, packaged, outcome] of cases) {
       const dir = auditWith(`${importLine}\nexport default { ok: true };\n`, m);
-      const plugin = join(dir, "plugins", "p.mjs");
+      const root = join(dir, "plugins");
+      const trees = [packaged ? root : join(root, "p.mjs")];
+      if (packaged) {
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "p", version: "1.0.0", type: "module", dependencies: { "declared-dep": "1.0.0" } }));
+        for (const [name, body] of [["nested-undeclared", UNHASHED(m)], ["declared-dep", "export default 2;\n"]] as const) {
+          const d = join(root, "node_modules", name);
+          mkdirSync(d, { recursive: true });
+          writeFileSync(join(d, "package.json"), JSON.stringify({ name, version: "1.0.0", type: "module", exports: "./index.js" }));
+          writeFileSync(join(d, "index.js"), body);
+        }
+        trees.push(join(root, "node_modules", "declared-dep"));
+      }
       const script = join(dir, "load.mjs");
-      writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nguardInProcessImports("./plugins/p.mjs", [${JSON.stringify(plugin)}], [${JSON.stringify(plugin)}]);\ntry { await import(${JSON.stringify(pathToFileURL(plugin).href)}); console.log("LOADED"); } catch (e) { console.log(JSON.stringify({ code: e.code, message: e.message })); }\n`);
+      writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nguardInProcessImports("./plugins/p.mjs", ${JSON.stringify(trees)}, []);\ntry { await import(${JSON.stringify(pathToFileURL(join(root, "p.mjs")).href)}); console.log(JSON.stringify({ code: "LOADED" })); } catch (e) { console.log(JSON.stringify({ code: e.code, message: e.message })); }\n`);
       const r = run(["--disable-warning=ExperimentalWarning", script]);
-      if (refused) expect(JSON.parse(r.stdout.trim()), importLine).toMatchObject({ code: "TREE_ESCAPE", message: expect.stringMatching(/^plugin \.\/plugins\/p\.mjs imports ".*", which resolves to .*, outside the files its tree hash covers/) });
-      else expect(r.stdout.trim(), importLine).toBe("LOADED");
+      const got = JSON.parse(r.stdout.trim() || "{}") as { code?: string; message?: string };
+      expect(got.code, `${importLine} ${r.stderr}`).toBe(outcome);
+      if (outcome === "TREE_ESCAPE") expect(got.message).toMatch(/^plugin \.\/plugins\/p\.mjs imports ".*", which resolves to .*, outside the files its tree hash covers/);
     }
     expect(existsSync(m)).toBe(false);
+  });
+
+  it("a plugin guarded again replaces its guard (a long-lived process that re-locks it), never stacking under the old one", () => {
+    const m = marker();
+    const guard = pathToFileURL(join(ROOT, "src", "plugins", "inprocess-guard.ts")).href;
+    const dir = auditWith('import "./helper.mjs";\nexport default 1;\n', m);
+    writeFileSync(join(dir, "plugins", "helper.mjs"), "export default 2;\n");
+    const root = join(dir, "plugins");
+    const script = join(dir, "load.mjs");
+    // First guarded as the file alone (helper refused), then as the directory (helper hashed, allowed).
+    writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nconst p = ${JSON.stringify(pathToFileURL(join(root, "p.mjs")).href)};\nconst out = [];\nguardInProcessImports("p", [${JSON.stringify(root)}, ${JSON.stringify(join(root, "x"))}], []);\nguardInProcessImports("p", [${JSON.stringify(join(root, "p.mjs"))}], []);\ntry { await import(p + "?1"); out.push("LOADED"); } catch (e) { out.push(e.code); }\nguardInProcessImports("p", [${JSON.stringify(root)}], []);\ntry { await import(p + "?2"); out.push("LOADED"); } catch (e) { out.push(e.code); }\nconsole.log(JSON.stringify(out));\n`);
+    const r = run(["--disable-warning=ExperimentalWarning", script]);
+    expect(JSON.parse(r.stdout.trim() || "[]"), r.stderr).toEqual(["TREE_ESCAPE", "LOADED"]);
   });
 
   const DIST = join(ROOT, "dist", "plugins", "inprocess-guard.js");

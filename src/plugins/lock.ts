@@ -456,8 +456,9 @@ export function assertLinksRunningPrRla(p: ResolvedPlugin): void {
  */
 export function guardFullTrust(p: ResolvedPlugin): void {
   assertLinksRunningPrRla(p);
-  const tree = [p.root, ...p.deps.map((d) => d.dir)];
-  guardInProcessImports(p.use, tree, [...tree, RUNNING_PR_RLA]);
+  // The running pr-rla counts for its own code and installed dependencies only, not for a checkout's other directories.
+  const own = ["dist", "src", "node_modules", "package.json"].map((x) => join(RUNNING_PR_RLA, x));
+  guardInProcessImports(p.use, [p.root, ...p.deps.map((d) => d.dir)], own);
 }
 
 /** The directory of the nearest package.json at or above `dir` (Node's package scope), or null. */
