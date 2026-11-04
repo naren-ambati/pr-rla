@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.js";
-import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
+import { isRegistrationV2 } from "../../core/records.js";
 import { verifyAudit, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
-import { pluginIdentity } from "../../registry.js";
+import { identityDiffs } from "../../core/plugin-binding.js";
+import { bindingIdentity } from "../../registry.js";
 import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
@@ -61,13 +62,20 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   } catch {
     currentProtocol = null;
   }
+  // P1: what the configured plugins are, read from their definitions or locks (nothing runs yet). One that is not
+  // the registered plugin is never opened: checks 5 and 7 FAIL naming the difference, and nothing reaches its hosts.
+  const regV2 = isRegistrationV2(registration) ? registration : null;
+  const loaded = opts.offline ? null : await bindingIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
+  const providerBound = !loaded || !regV2 || identityDiffs(regV2.record.plugins.provider, loaded).length === 0;
+  const ledgerIdentity = await bindingIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx));
+  const ledgerBound = !regV2 || identityDiffs(regV2.record.plugins.ledger, ledgerIdentity).length === 0;
   // A ledger that lives in a tracker (it declares hosts) is not read offline: check 7 then SKIPs and says why.
   // An external ledger's hosts are its locked ones: it is not imported here.
-  const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx));
-  const skipLedger = !!opts.offline && lt.hosts.length > 0;
+  const lt = ledgerBound ? await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx)) : null;
+  const skipLedger = !ledgerBound || (!!opts.offline && lt!.hosts.length > 0);
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
-  const provider = opts.offline ? null : withProgress(ctx, await providerFor(ctx, config));
-  const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
+  const provider = opts.offline || !providerBound ? null : withProgress(ctx, await providerFor(ctx, config, { onMismatch: "report" }));
+  const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths, { onMismatch: "report" });
   // Checks 4 and 7 catch a failure and quote it. In read-only mode (an assistant reads the result),
   // what the ledger or the relay said moves to `untrusted.errors`, and the check quotes pr-rla's words.
   const errors: string[] = [];
@@ -84,18 +92,15 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     const read = ledger.readVerdicts.bind(ledger);
     ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), fenced(read));
   }
-  // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
-  const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
-  // U9: the ledger's, compared in check 7; its ceiling is the registered ledger's.
-  const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) : null;
+  const ledgerSkipped = !ledgerBound ? `the ledger in .pr-rla.yml is not the registered one, so it was not read` : skipLedger ? `offline: ledger ${lt!.name} lives in ${lt!.hosts.join(", ")}; run verify without --offline to check the verdicts` : null;
   const report = await verifyAudit(
     { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
     {
       provider,
       ledger,
-      ...(skipLedger ? { ledgerSkipped: `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; run verify without --offline to check the verdicts` } : {}),
-      provenanceCeiling: registeredCeiling(isRegistrationV2(registration) ? registration.record.plugins.ledger : null, lt),
-      ...(ledgerIdentity ? { ledgerIdentity } : {}),
+      ...(ledgerSkipped ? { ledgerSkipped } : {}),
+      ...(lt ? { provenanceCeiling: registeredCeiling(regV2 ? regV2.record.plugins.ledger : null, lt) } : {}),
+      ledgerIdentity,
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
@@ -117,7 +122,6 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
       ...(loaded ? { providerIdentity: loaded } : {}),
     },
   );
-  if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);
   const reg = registration.record;
   return {
     ...report,
@@ -141,18 +145,4 @@ function withProgress(ctx: ApiContext, provider: ScmProvider): ScmProvider {
       return r;
     },
   });
-}
-
-/**
- * Check 5 rebuilt the population with the provider verify loaded; say so when that is not the
- * registered external plugin (another release, other files or options, another trust).
- */
-function noteProviderIdentity(report: VerifyReport, registered: PluginIdentity, loaded: PluginIdentity): void {
-  if (registered.source === "builtin" && loaded.source === "builtin") return;
-  const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
-  const diffs = (["name", "source", "version", "integrity", "optionsSha256", "trust"] as const).filter((k) => registered[k] !== loaded[k]).map((k) => `${k} ${show(registered[k])} → ${show(loaded[k])}`);
-  const c5 = report.checks.find((c) => c.n === 5);
-  if (!diffs.length || !c5) return;
-  c5.details.push(`WARN the provider verify loaded is not the registered one (${diffs.join("; ")}): the population was rebuilt with it`);
-  if (c5.status === "PASS") c5.status = "WARN";
 }

@@ -2,6 +2,7 @@ import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/le
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import { ledgerPathFindings } from "./ledger-path.js";
+import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -92,8 +93,11 @@ export interface VerifyDeps {
    * counted at this level and check 7 WARNs. Absent: no cap.
    */
   provenanceCeiling?: ProvenanceLevel;
-  /** The identity of the ledger verify loaded (U9, after review): check 7 FAILs when it is not the registered one. */
-  ledgerIdentity?: PluginIdentity;
+  /**
+   * What the configured ledger is (U9, after review; P1): check 7 FAILs when it is not the registered one. verify
+   * then does not open it (`ledger` is null), so nothing it would say is read.
+   */
+  ledgerIdentity?: BindingIdentity;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL: the verifier's --log-key or a key pinned in the package, never the audit repo's; null if none. */
@@ -101,10 +105,10 @@ export interface VerifyDeps {
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
   /**
-   * What the verifier's provider is (its options hashed as at registration). When given for a v2
-   * registration, provider options that change the population must match the registered ones (check 5).
+   * What the configured provider is (P1). For a v2 registration it must be the registered provider (name,
+   * source, files, trust, every option), or check 5 FAILs; verify then does not open it (`provider` is null).
    */
-  providerIdentity?: PluginIdentity;
+  providerIdentity?: BindingIdentity;
 }
 
 export interface VerifyReport {
@@ -328,12 +332,21 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
 
   // 5. Population rebuilt from the SCM with the registered selector, diffed against the manifest.
   const c5: VerifyCheck = { n: 5, name: "population", status: "PASS", summary: "", details: [] };
+  // P1: the provider freeze ran (the manifest names it) must be the registered one; checked offline too, it is in the manifest.
+  const frozenWith = m && isManifestV2(m) && v2 ? identityDiffs((reg.record as RegistrationRecordV2).plugins.provider, m.provider) : [];
+  const frozenWithFail = frozenWith.length ? `FAIL the manifest was frozen with a provider that is not the registered one (${frozenWith.join("; ")}): its population is not the registered stratum` : null;
+  // P1: the provider in .pr-rla.yml must be the registered one, every option included (no escape through
+  // populationOptionsSha256): a population rebuilt by another provider, even another built-in, proves nothing.
+  const loadedDiffs = v2 && deps.providerIdentity ? identityDiffs((reg.record as RegistrationRecordV2).plugins.provider, deps.providerIdentity) : [];
+  const loadedFail = loadedDiffs.length ? `FAIL the provider in .pr-rla.yml is not the registered one (${loadedDiffs.join("; ")}): verify did not run it, so the population was not rebuilt; verify with the registered provider and options` : null;
   if (!m) {
     c5.status = "SKIP";
     c5.summary = "no manifest";
   } else if (!deps.provider) {
-    c5.status = "SKIP";
-    c5.summary = "offline: population not rebuilt";
+    const fails = [frozenWithFail, loadedFail].filter((f): f is string => f !== null);
+    c5.status = fails.length ? "FAIL" : "SKIP";
+    c5.summary = fails.length ? fails[0]!.replace(/^FAIL /, "").replace(/ \(.*$/, "") : "offline: population not rebuilt";
+    if (fails.length) c5.details.push(...fails, loadedFail ? "population not rebuilt" : "offline: population not rebuilt");
   } else {
     const provider = deps.provider;
     const set = registrationRepoSet(reg);
@@ -345,12 +358,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const aliases = manifestAliases(m.changes);
     const window = reg.record.window;
     const selector = reg.record.selector;
-    // Identical options cannot differ in the ones that change the population (a registration made before
-    // U3 hashed no population options, so the population hash alone would differ for nothing).
-    const registered = v2 ? (reg.record as RegistrationRecordV2).plugins.provider : null;
-    const id = deps.providerIdentity;
-    if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256)
-      c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
+    if (frozenWithFail) c5.details.push(frozenWithFail);
+    // A caller of the core that gives a provider it did not bind (the API never does: see above) still FAILs.
+    if (loadedFail) c5.details.push(loadedFail.replace("verify did not run it, so the population was not rebuilt", "the population was rebuilt with another provider"));
     // Every repo rebuilt from its frozen head and compared with the window as its current head shows it; the pool held to
     // the rule and the registered repos (src/core/rebuild.ts).
     // P3: each frozen head is held to the push log over the freeze span (the manifest's as-of time until R publishes),
@@ -475,9 +485,17 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   // 7. Label (verdict) events of the counted prefix.
   const c7: VerifyCheck = { n: 7, name: "labels", status: "PASS", summary: "labels", details: [] };
   let status: StatusReport | null = null;
+  // P1: the ledger in .pr-rla.yml must be the registered one (name, source, files, trust, every option): one comparison for every plugin and command (src/core/plugin-binding.ts).
+  const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
+  const idDiffs = registeredLedger && deps.ledgerIdentity ? identityDiffs(registeredLedger, deps.ledgerIdentity) : [];
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
+    if (idDiffs.length) {
+      c7.status = "FAIL";
+      c7.summary = "labels FAIL";
+      c7.details.push(`FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): verify did not read it; verify with the registered ledger and options`);
+    }
     // The index file is local: its hash is checked even when the tracker is not read.
     if (a.draws && a.ledgerIndex !== undefined) {
       if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
@@ -498,14 +516,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
     const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
-    // U9: the ledger read must be the registered one (name, source, files, options), or nothing it says counts as registered.
-    const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-    const loadedId = deps.ledgerIdentity;
-    const idDiffs = registeredLedger && loadedId ? (["name", "source", "integrity", "optionsSha256"] as const).filter((k) => registeredLedger[k] !== loadedId[k]) : [];
+    // U9: the ledger read must be the registered one, or nothing it says counts as registered (the API never opens another; a direct caller of the core may).
     if (idDiffs.length) {
-      const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
       c7.status = "FAIL";
-      c7.details.push(`FAIL the ledger verify loaded is not the registered one (${idDiffs.map((k) => `${k} ${show(registeredLedger![k])} → ${show(loadedId![k])}`).join("; ")}): verify with the registered ledger and options`);
+      c7.details.push(`FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): verify with the registered ledger and options`);
     }
     if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
       c7.status = "FAIL";
@@ -574,6 +588,15 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c7.status = "FAIL";
       c7.details.push(`FAIL checkpoint file: ${p}`);
     }
+    // P1: a checkpoint names the ledger whose history it hashed; one taken of another ledger proves nothing about the registered one.
+    if (registeredLedger)
+      for (const cp of checkpoints) {
+        const d = cp.line.ledger && typeof cp.line.ledger === "object" ? identityDiffs(registeredLedger, cp.line.ledger) : ["ledger (none recorded)"];
+        if (d.length) {
+          c7.status = "FAIL";
+          c7.details.push(`FAIL checkpoint ${cp.line.takenAt} was taken of a ledger that is not the registered one (${d.join("; ")})`);
+        }
+      }
     if (checkpoints.length && !ledger.readHistory) {
       c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
       if (c7.status === "PASS") c7.status = "WARN";

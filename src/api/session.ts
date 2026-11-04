@@ -11,6 +11,8 @@ import type { BrokerFetch } from "../net/contract.js";
 import { pluginPolicy } from "../plugins/lock.js";
 import type { Ledger } from "../sdk/ledger.js";
 import { isCommitId, type ScmProvider } from "../sdk/provider.js";
+import { identityNext, identityRefusal } from "../core/plugin-binding.js";
+import { bindingIdentity } from "../registry.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
 import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditContext, type AuditMode } from "./context.js";
 import { AuditError, type AuditErrorCode } from "./errors.js";
@@ -166,14 +168,50 @@ export function configFor(ctx: ApiContext, window?: string): { config: PrRlaConf
   return { config, paths };
 }
 
-/** The configured provider, its requests through the context's broker. */
-export async function providerFor(ctx: ApiContext, config: PrRlaConfig): Promise<ScmProvider> {
+/**
+ * How a command holds the plugin it opens to the registration (P1): a schema-v2 registration's
+ * `plugins.provider` / `plugins.ledger` is the only one an audit runs (src/core/plugin-binding.ts).
+ */
+export interface BindingOptions {
+  /** The command that opens it, for the refusal (e.g. "status"). */
+  command?: string;
+  /**
+   * `refuse` (default): an AuditError before the plugin is opened. `note`: a note on `err`, then it is
+   * opened (a dry run, which writes nothing). `report`: opened without comparing; the caller compares
+   * (verify, whose checks 5 and 7 FAIL on any difference).
+   */
+  onMismatch?: "refuse" | "note" | "report";
+}
+
+/** Refuses (or notes) a configured plugin that is not the registered one. A v1 registration names no plugins. */
+export async function bindRegisteredPlugin(ctx: ApiContext, config: PrRlaConfig, registration: SignedRecord<AnyRegistration> | null | undefined, kind: "provider" | "ledger", o: BindingOptions = {}): Promise<void> {
+  if (!registration || !isRegistrationV2(registration) || o.onMismatch === "report") return;
+  // Read from the definition or the lock: a plugin the registration does not name never runs (P1).
+  const loaded = await bindingIdentity(config[kind], kind, config.dir, auditContextFor(ctx));
+  const why = identityRefusal(kind, registration.record.plugins[kind], loaded, o.command ?? "the command");
+  if (!why) return;
+  if (o.onMismatch === "note") ctx.err(`note: ${why.replace(/^.*? refused: /, "")}; a real ${o.command ?? "run"} refuses it`);
+  else throw new AuditError(why, 1, "FAILED", identityNext(kind));
+}
+
+/**
+ * The configured provider, its requests through the context's broker. With a v2 `registration` it
+ * must be the registered provider (P1: see `BindingOptions`); without one (register, an unregistered
+ * dry run) nothing is compared.
+ */
+export async function providerFor(ctx: ApiContext, config: PrRlaConfig, o: BindingOptions & { registration?: SignedRecord<AnyRegistration> | null } = {}): Promise<ScmProvider> {
+  await bindRegisteredPlugin(ctx, config, o.registration, "provider", o);
   return openProvider(auditContextFor(ctx), config.provider, config.dir, ctx.signal ? { signal: ctx.signal } : {});
 }
 
-/** The configured ledger, its requests through the context's broker, told the registered reviewers once a registration exists. */
-export async function ledgerFor(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths): Promise<Ledger> {
+/**
+ * The configured ledger, its requests through the context's broker, told the registered reviewers once a
+ * registration exists. Under a v2 registration it must be the registered ledger (P1): any other is refused
+ * before it is opened, unless the caller compares it itself (`onMismatch: "report"`, verify).
+ */
+export async function ledgerFor(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, o: BindingOptions = {}): Promise<Ledger> {
   const reg = existsSync(paths.registration) ? readRegistration(paths) : null;
+  await bindRegisteredPlugin(ctx, config, reg, "ledger", o);
   const reviewers = reg && isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
   return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, { reviewers, ...(ctx.signal ? { signal: ctx.signal } : {}) });
 }

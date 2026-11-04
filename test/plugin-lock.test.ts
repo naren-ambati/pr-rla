@@ -434,10 +434,9 @@ describe("trust: full imports only what its tree hash covers (review of this rou
 });
 
 describe("verify compares the provider it loads with the registered one (functional-design.md §U2b item 5)", () => {
-  // KNOWN GAP, left as it is on purpose: finding 2 of the plugin and broker review. A provider whose
-  // integrity differs from the registered one should make check 5 FAIL (and freeze refuse it); this
-  // test pins today's WARN. The identity round, after the other branches merge, fixes it and this test.
-  it("a plugin re-locked after registration rebuilds the population with a WARN naming the difference", async () => {
+  // Finding 2 of the plugin and broker review, fixed in P1: this test pinned a WARN; a provider whose files differ from
+  // the registered ones now makes check 5 FAIL, and freeze refuses it.
+  it("a plugin re-locked after registration: freeze refuses it, and verify FAILs check 5 naming the difference", async () => {
     const s = withPlugin();
     expect((await cli(s, ["plugin", "add", USE, "--yes"])).code).toBe(0);
     expect((await cli(s, ["register"])).code).toBe(0);
@@ -450,8 +449,12 @@ describe("verify compares the provider it loads with the registered one (functio
     expect((await cli(s, ["plugin", "lock", USE, "--yes"])).code).toBe(0);
     const now = readLock(s.dir).plugins[USE]!.treeSha256;
     const v = await cli(s, ["verify"]);
-    expect(v.out.find((l) => l.startsWith("5. "))).toMatch(/^5\. WARN population: population 6\/6 match/);
-    expect(v.out).toContain(`        WARN the provider verify loaded is not the registered one (integrity ${registered.slice(0, 12)}… → ${now.slice(0, 12)}…): the population was rebuilt with it`);
+    expect(v.code).toBe(1);
+    expect(v.out.find((l) => l.startsWith("5. "))).toBe("5. FAIL population: the provider in .pr-rla.yml is not the registered one");
+    expect(v.out).toContain(`        FAIL the provider in .pr-rla.yml is not the registered one (integrity ${registered.slice(0, 12)}… → ${now.slice(0, 12)}…): verify did not run it, so the population was not rebuilt; verify with the registered provider and options`);
+    const f = await cli(s, ["freeze", "--force"]);
+    expect(f.code).toBe(1);
+    expect(text(f)).toMatch(new RegExp(`freeze refused: the provider in \\.pr-rla\\.yml is not the registered one \\(integrity ${registered.slice(0, 12)}… → ${now.slice(0, 12)}…\\)`));
   });
 });
 

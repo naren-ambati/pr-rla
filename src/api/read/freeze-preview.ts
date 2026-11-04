@@ -171,17 +171,8 @@ async function freezeInputs(ctx: ApiContext, o: { dryRun: boolean; window?: stri
   const repoSet = reg ? registrationRepoSet(reg) : config.repoSet;
   const pooled = repoSet.kind !== "repo";
   const repo = repoSet.kind === "repo" ? repoSet.repo : repoSetLabel(repoSet);
-  if (reg && isRegistrationV2(reg)) {
-    // Options that change the population are part of the stratum (populationOptions, check 5).
-    const id = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
-    const reg0 = reg.record.plugins.provider;
-    if (id.optionsSha256 !== reg0.optionsSha256 && id.populationOptionsSha256 !== reg0.populationOptionsSha256) {
-      const why = `the provider options that change the population (populationOptions) differ from the registration (${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${reg0.populationOptionsSha256.slice(0, 12)}…)`;
-      if (!o.dryRun) throw new AuditError(`${why}: freeze with the registered options, or verify check 5 fails`);
-      ctx.err(`note: ${why}`);
-    }
-  }
-  const provider = await providerFor(ctx, config);
+  // P1: freeze runs the registered provider only (its name, source, files, trust and every option); a dry run notes the difference.
+  const provider = await providerFor(ctx, config, { registration: reg, command: "freeze", onMismatch: o.dryRun ? "note" : "refuse" });
   return { config, paths, reg, selector, window, parameters, protocol, repo, repoSet, pooled, frozenAt, round, tooLate, tsaMs, provider };
 }
 

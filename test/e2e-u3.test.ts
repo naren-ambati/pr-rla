@@ -129,21 +129,22 @@ export default {
     return s;
   };
 
-  it("a verifier whose population options differ FAILs check 5; other options do not", async () => {
+  // P1: there is no escape through populationOptionsSha256 any more. Before, an option outside populationOptions was a
+  // WARN; every option is part of the registered identity, so both are FAILs, and each names the difference.
+  it("a verifier whose provider options differ FAILs check 5, population options or not", async () => {
     const s = await setup();
     await registerAndFreeze(s);
     const cfg = join(s.dir, ".pr-rla.yml");
     const original = readFileSync(cfg, "utf8");
     writeFileSync(cfg, original.replace("page_size: 10", "page_size: 50"));
-    // Not a FAIL. For an external plugin, other options are a WARN naming optionsSha256 (draft 02 Q3; U2b's identity note).
     const other = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
-    expect(other.status).toBe("WARN");
-    expect(other.details.filter((d) => d.startsWith("FAIL "))).toEqual([]);
-    expect(other.details.some((d) => /^WARN the provider verify loaded is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/.test(d))).toBe(true);
+    expect(other.status).toBe("FAIL");
+    expect(other.details.some((d) => /^FAIL the provider in \.pr-rla\.yml is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\): verify did not run it, so the population was not rebuilt/.test(d))).toBe(true);
     writeFileSync(cfg, original.replace("scope: all", "scope: prs"));
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("FAIL");
-    expect(c5.summary).toMatch(/^population: provider options that change the population differ from the registration \(populationOptionsSha256 [0-9a-f]{12}… ≠ registered [0-9a-f]{12}…\); rebuild with the registered options$/);
+    expect(c5.summary).toBe("the provider in .pr-rla.yml is not the registered one");
+    expect(c5.details[0]).toMatch(/^FAIL the provider in \.pr-rla\.yml is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/);
   });
 
   it("a registration made before U3 (population options not hashed) still verifies with the same options", async () => {
@@ -174,6 +175,9 @@ export default {
     const cfg = join(s.dir, ".pr-rla.yml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("scope: all", "scope: prs"));
     at(s, "2026-10-20T12:00:00Z");
-    await expect(freezeCommand(s.ctx, {})).rejects.toThrow(/the provider options that change the population \(populationOptions\) differ from the registration .*freeze with the registered options/);
+    await expect(freezeCommand(s.ctx, {})).rejects.toThrow(/^freeze refused: the provider in \.pr-rla\.yml is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/);
+    // An option outside populationOptions is refused too (P1).
+    writeFileSync(cfg, readFileSync(cfg, "utf8").replace("scope: prs", "scope: all").replace("page_size: 10", "page_size: 50"));
+    await expect(freezeCommand(s.ctx, {})).rejects.toThrow(/^freeze refused: the provider in \.pr-rla\.yml is not the registered one \(optionsSha256 /);
   });
 });

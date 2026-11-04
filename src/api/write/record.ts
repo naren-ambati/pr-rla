@@ -61,7 +61,7 @@ export async function record(ctx: ApiContext, input: RecordInput): Promise<Recor
   const draws = readDraws(paths);
   const d = draws.draws.find((x) => x.draw === draw);
   if (!d || draw > draws.issued) throw new AuditError(`draw #${draw} has not been issued (issued: ${draws.issued}; "pr-rla sample --through ${draw}" issues more)`);
-  const ledger = await ledgerFor(ctx, config, paths);
+  const ledger = await ledgerFor(ctx, config, paths, { command: "record" });
   // Only a verdict that counts blocks a new one: a bot's or an unregistered account's label does not, nor (P4) an unsigned line where the registration requires signatures.
   const reviewers = isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
   const binding = auditBinding(reg.sha256, draws.manifestSha256, draws.beacon);

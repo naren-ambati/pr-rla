@@ -193,7 +193,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     let soFar = "";
     const set = registrationRepoSet(reg);
     if (!opts.offline && now >= opens && set.kind === "repo") {
-      const provider = await providerFor(ctx, config);
+      const provider = await providerFor(ctx, config, { registration: reg, command: "status" });
       ctx.onProgress?.({ done: 0, message: `listing ${set.repo} on ${provider.name} for N so far` });
       const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), ...(ctx.signal ? { signal: ctx.signal } : {}) });
       nSoFar = pop.entries.length;
@@ -219,7 +219,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
       return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing };
     }
   }
-  const ledger = await ledgerFor(ctx, config, paths);
+  const ledger = await ledgerFor(ctx, config, paths, { command: "status" });
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${ledger.name}` });
   const capped = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
   const report = computeStatus({

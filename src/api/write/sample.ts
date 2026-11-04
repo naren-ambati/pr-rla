@@ -82,8 +82,9 @@ export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise
     cap,
     draws,
   };
+  // The registered ledger (P1), bound before anything is written: a refused ledger leaves draws.json as it was.
+  const ledger = await ledgerFor(ctx, config, paths, { command: "sample" });
   writeJson(paths.draws, file);
-  const ledger = await ledgerFor(ctx, config, paths);
   await ledger.publishDraws?.(draws.slice(0, issued), { window: config.window.name, protocolSha256: reg.record.protocolSha256, registrationSha256: reg.sha256, repo: repoLabel(manifest) });
   // The ledger's draw → issue index now exists: bind it to the draws (verify compares this hash with the file).
   const index = readIndexDocument(paths.windowDir);

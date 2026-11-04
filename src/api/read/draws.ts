@@ -69,7 +69,7 @@ export async function draws(ctx: ApiContext, opts: DrawsOptions = {}): Promise<D
     return { ...base, draws: page.map((d) => ({ ...view(d), state: null })), blockingDraw: null, verdictsRead: false, verdictsSkipped: `ledger ${lt.name} lives in ${lt.hosts.join(", ")}; status with offline: false reads its verdicts` };
   }
   const manifest = readManifest(paths);
-  const ledger = await ledgerFor(ctx, config, paths);
+  const ledger = await ledgerFor(ctx, config, paths, { command: "draws" });
   const counted = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: file.beacon });
   const report = computeStatus({
     N: manifest.N,

@@ -16,6 +16,7 @@ import { HttpError } from "../src/sdk/http.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
 import { fixturePath } from "./helpers/fixtures.js";
 import { lockPlugin } from "./helpers/plugin-lock.js";
+import { registerPluginInCopy } from "./helpers/rebind.js";
 
 /**
  * pr-rla/api/read after the U5 fix round: confinement of every file it opens, read-path git, the
@@ -92,6 +93,8 @@ describe("M1: every file a read-only call opens is confined, by the path it open
     const dir = recorded();
     const abs = join(realpathSync(dir), "audit", "2026-q3", "verdicts.jsonl");
     writeFileSync(join(dir, ".pr-rla.yml"), readFileSync(join(dir, ".pr-rla.yml"), "utf8").replace("ledger: git-file", `ledger: { use: git-file, options: { file: ${JSON.stringify(abs)} } }`));
+    // P1: status reads only the registered ledger, so the copy is registered with these options.
+    await registerPluginInCopy(dir, "ledger", { use: "git-file", options: { file: abs } });
     await expect(read.status({ dir }, within(dir))).resolves.toMatchObject({ phase: "sampled" });
   });
 
@@ -288,6 +291,8 @@ export default defineLedger({ ledgerApiVersion: 1, name: "bad", provenance: "sel
     );
     writeFileSync(join(dir, ".pr-rla.yml"), readFileSync(join(dir, ".pr-rla.yml"), "utf8").replace("ledger: git-file", "ledger: { use: ./plugins/bad/index.mjs }"));
     await lockPlugin(dir, "./plugins/bad/index.mjs", { kind: "ledger" });
+    // P1: verify reads only the registered ledger, so the copy is registered with this one.
+    await registerPluginInCopy(dir, "ledger", { use: "./plugins/bad/index.mjs", options: {} });
     const r = await read.verify({ dir }, { nowMs: () => NOW, fetch: noNet });
     const c7 = r.checks.find((c) => c.n === 7)!;
     expect(c7.status).toBe("FAIL");
@@ -330,14 +335,17 @@ describe("cancellation reaches the work (M2)", () => {
     const st = await read.status({ dir: s.dir, offline: false }, { nowMs: () => T("2026-08-15T00:00:00Z"), onProgress: (p) => progress.push(p.message) });
     expect(st).toMatchObject({ phase: "registered", nSoFar: expect.any(Number) });
     expect(progress.join("\n")).toMatch(/listing acme\/widgets on json-file for N so far[\s\S]*N so far/);
-    // Through a provider that waits on the network: an abort ends the call.
-    writeFileSync(join(s.dir, ".pr-rla.yml"), readFileSync(join(s.dir, ".pr-rla.yml"), "utf8").replace(/^provider: .*$/m, "provider: github"));
+    // Through a provider that waits on the network: an abort ends the call. P1: status runs only the registered
+    // provider, so this one is an audit registered with github (registering a single repo contacts nothing).
+    const g = setupAuditRepo({ changes: [], provider: "github" });
+    g.clock.now = T("2026-07-15T00:00:00Z");
+    expect(await registerCommand(g.ctx, {})).toBe(0);
     const hang = (async (_u: string | URL | Request, init?: RequestInit) => {
       calls++;
       return new Promise<Response>((_r, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
     }) as typeof fetch;
     const ac = new AbortController();
-    const p = read.status({ dir: s.dir, offline: false }, { nowMs: () => T("2026-08-15T00:00:00Z"), fetch: hang, signal: ac.signal });
+    const p = read.status({ dir: g.dir, offline: false }, { nowMs: () => T("2026-08-15T00:00:00Z"), fetch: hang, signal: ac.signal });
     while (calls === 0) await new Promise((r) => setTimeout(r, 5));
     ac.abort(new Error("stopped by the job"));
     await expect(p).rejects.toThrow("stopped by the job");

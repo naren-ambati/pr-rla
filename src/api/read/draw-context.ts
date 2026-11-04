@@ -94,7 +94,7 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   let blocksPrefix = false;
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${lt.name}` });
   try {
-    const ledger = await ledgerFor(ctx, config, paths);
+    const ledger = await ledgerFor(ctx, config, paths, { command: "draw-context" });
     const counted = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
     const report = computeStatus({
       N: manifest.N,
@@ -116,7 +116,7 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   }
 
   const bytes = readProtocol(config);
-  const provider = await providerFor(ctx, config);
+  const provider = await providerFor(ctx, config, { registration: reg, command: "draw-context" });
   let description: ChangeDescription | null = null;
   let descriptionNote: string | undefined;
   if (!provider.describeChange) descriptionNote = `provider ${provider.name} has no describeChange; open the URL`;

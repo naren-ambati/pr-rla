@@ -167,7 +167,7 @@ describe("the registered ledger and the ledger anchors (bolt/u9-presence-verdict
     const c = await check7(s);
     const d = c.details.join("\n");
     expect(c.status).toBe("FAIL");
-    expect(d).toMatch(/FAIL the ledger verify loaded is not the registered one \(name github-issues → git-file/);
+    expect(d).toMatch(/FAIL the ledger in \.pr-rla\.yml is not the registered one \(name github-issues → git-file/);
     expect(d).toMatch(/FAIL ledger-index\.json \(sha256 [0-9a-f]{12}…\) is not the index draws\.json bound at sample time/);
     // git-file has no history to checkpoint, so the issue ledger's coverage rule does not apply to it
     expect(d).not.toMatch(/post-dates the last counted verdict/);

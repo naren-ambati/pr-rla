@@ -158,9 +158,7 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
   const v2reg = reg as SignedRecord<RegistrationRecordV2>;
   const providerId = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
   const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx));
-  const registered = v2reg.record.plugins.provider;
-  if (providerId.name !== registered.name || providerId.optionsSha256 !== registered.optionsSha256)
-    ctx.err(`note: the provider in .pr-rla.yml (${providerId.name}) differs from the registered one (${registered.name}, options ${registered.optionsSha256.slice(0, 8)}…); verify rebuilds the population with the provider it is given`);
+  // P1: planFreeze refused any provider that is not the registered one, so this is the registered provider (a built-in's version is the release that froze).
   const body: Omit<ManifestV2, "sha256"> = {
     schema: "pr-rla/manifest/v2",
     registrationSha256: v2reg.sha256,

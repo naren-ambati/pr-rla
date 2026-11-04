@@ -106,11 +106,13 @@ export async function checkpoint(ctx: ApiContext, opts: CheckpointOptions = {}, 
     pre = await checkPreconditions(git, { ...(opts.remote ? { remote: opts.remote } : {}), ...(opts.branch ? { branch: opts.branch } : {}) });
     if (!pre.ok) throw new AuditError(`checkpoint --push refused: ${pre.reason}`, EXIT.FAIL);
   }
-  const ledger = await ledgerFor(ctx, config, paths);
+  const ledger = await ledgerFor(ctx, config, paths, { command: "checkpoint" });
   if (!ledger.readHistory) throw new AuditError(`ledger ${ledger.name} has no readHistory, so it cannot be checkpointed (git-file's tamper trail is git history itself)`, EXIT.FAIL);
   const status = await ledgerStatus(paths, ledger, reg);
   const takenAt = isoNow(ctx);
-  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)), window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt, prevLineSha256: checkpointChainTip(paths.windowDir), ledgerIndexSha256: readIndexDocument(paths.windowDir)?.sha256 ?? null });
+  // P1: the line names the registered ledger (ledgerFor refused any other); a v1 registration names none, so the loaded one.
+  const identity = isRegistrationV2(reg) ? reg.record.plugins.ledger : await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx));
+  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity, window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt, prevLineSha256: checkpointChainTip(paths.windowDir), ledgerIndexSha256: readIndexDocument(paths.windowDir)?.sha256 ?? null });
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = isRegistrationV2(reg) ? reg.record.timestamping : timestampingFor(config, bundle);
   // Skew over 10 minutes refuses here, before anything is written (FR1.8).

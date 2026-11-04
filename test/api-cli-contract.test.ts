@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { buildProgram } from "../src/cli.js";
 import type { CommandContext } from "../src/commands/context.js";
 import { fixturePath } from "./helpers/fixtures.js";
+import { registerPluginInCopy } from "./helpers/rebind.js";
 
 /**
  * The CLI contract U5 owns (contracts.md §7): exit codes, `--json` errors in the documented form
@@ -68,6 +69,8 @@ describe("errors: a plain sentence and the next step on stderr; with --json, the
   it("a provider that cannot be reached: exit 1, and the JSON error carries the broker's message", async () => {
     const dir = recorded();
     writeFileSync(join(dir, ".pr-rla.yml"), readFileSync(join(dir, ".pr-rla.yml"), "utf8").replace(/^provider: .*$/m, "provider: github"));
+    // P1: draw-context runs only the registered provider, so the copy is registered with github.
+    await registerPluginInCopy(dir, "provider", { use: "github", options: {} });
     const c = { ...ctxIn(dir), sleep: async () => {} };
     expect(await cli(c, "draw-context", "7", "--json")).toBe(1);
     const e = JSON.parse(c.stdout.join("\n")).error;
