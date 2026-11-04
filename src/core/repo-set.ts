@@ -301,12 +301,23 @@ export function listedRepo(rule: RepoSetRule, r: RepoRef): ListedRepo {
 export async function ownerListing(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility">, set: RepoSetRule, refs?: readonly RepoRef[]): Promise<RepoListing> {
   const all = refs ?? (await listOwner(provider, set));
   const repos = all.map((r) => listedRepo(set, r)).sort((a, b) => cmp(a.repo, b.repo));
-  const seen = typeof provider.listingVisibility === "function" ? await provider.listingVisibility(set) : null;
+  // What the token can prove it sees. A failure to say is recorded, not fatal: the listing itself stands, and verify
+  // establishes its own token's visibility anyway.
+  let seen: Awaited<ReturnType<NonNullable<ScmProvider["listingVisibility"]>>> | null = null;
+  let failed: string | null = null;
+  if (typeof provider.listingVisibility === "function") {
+    try {
+      seen = await provider.listingVisibility(set);
+    } catch (e) {
+      failed = `the provider could not say what its token sees (${(e as Error).message})`;
+    }
+  }
   const visibility = Object.fromEntries(
     REPO_VISIBILITIES.map((v) => {
       const proof = seen?.visibilities?.[v];
       const listed = repos.filter((r) => r.visibility === v).length;
-      return [v, proof ? { listed, complete: proof.complete === true, reason: String(proof.reason) } : { listed, complete: null, reason: `provider ${provider.name} cannot say what its token sees (it has no listingVisibility)` }];
+      if (proof) return [v, { listed, complete: proof.complete === true, reason: String(proof.reason) }];
+      return [v, { listed, complete: failed ? false : null, reason: failed ?? `provider ${provider.name} cannot say what its token sees (it has no listingVisibility)` }];
     }),
   ) as RepoListing["visibility"];
   return { owner: set.owner, identity: seen?.identity ?? null, visibility, repos };

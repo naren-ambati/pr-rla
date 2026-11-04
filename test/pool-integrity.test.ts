@@ -59,6 +59,14 @@ describe("resolvePool: the pool a freeze lists", () => {
     expect(res.listing!.visibility.private).toEqual({ listed: 0, complete: null, reason: "provider stub cannot say what its token sees (it has no listingVisibility)" });
   });
 
+  it("records what the token proves it sees, and a provider that cannot say (or fails to) as not proven, without stopping the freeze", async () => {
+    const proof = { complete: true, reason: "owner" };
+    const seeing = { ...provider([ref("acme/a", { visibility: "private" })]), listingVisibility: async () => ({ identity: "me", visibilities: { public: proof, private: proof, internal: { complete: false, reason: "no" } } }) };
+    expect((await resolvePool(seeing, rule(), { now })).listing).toMatchObject({ identity: "me", visibility: { private: { listed: 1, complete: true, reason: "owner" }, internal: { listed: 0, complete: false } } });
+    const failing = { ...provider([ref("acme/a")]), listingVisibility: async () => Promise.reject(new Error("HTTP 500")) };
+    expect((await resolvePool(failing, rule(), { now })).listing!.visibility.private).toEqual({ listed: 0, complete: false, reason: "the provider could not say what its token sees (HTTP 500)" });
+  });
+
   it("refuses to skip: a registered repo it cannot probe, or whose probe fails, stops the freeze; a rate limit is rethrown as it is", async () => {
     const reg = { registered: [{ repo: "acme/x", repoId: "1" }], now };
     await expect(resolvePool(provider([ref("acme/a")]), rule(), reg)).rejects.toThrow(/cannot probe a repository \(it has no describeRepo\) to tell whether it is gone; nothing is skipped/);
@@ -181,6 +189,18 @@ describe("rebuildRepo: the frozen head against the current head (finding 3)", ()
     const empty: ScmProvider = { apiVersion: 1, name: "e", listChanges: async (req) => Promise.reject(new RepoEmptyError(req.repo)) };
     expect(await rebuildRepo(empty, args({ frozenHead: null, frozenEmpty: true }))).toMatchObject({ listed: { changes: [] }, fail: [], incomplete: [] });
     expect((await rebuildRepo(empty, args())).fail.join()).toMatch(/not found: the repository has no default branch now/);
+  });
+
+  it("a repo of a list renamed after freeze (no id to match): the probe's redirect finds it, and it is rebuilt there", async () => {
+    const p: ScmProvider = {
+      apiVersion: 1,
+      name: "x",
+      listChanges: async (req) => (req.repo === "acme/a" ? Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })) : { changes: [pr(req.repo, 1)], defaultBranch: "main", limitations: [], headSha: H0 }),
+      describeRepo: async () => ref("acme/renamed"),
+    };
+    const r = await rebuildRepo(p, args());
+    expect(r).toMatchObject({ current: "acme/renamed", fail: [], incomplete: [] });
+    expect(r.listed!.changes.map((c) => c.id)).toEqual(["x:acme/a#1"]);
   });
 
   it("a renamed repo is listed under its path now and compared under the manifest's", async () => {

@@ -117,6 +117,15 @@ describe("finding 1: an attribute changed after registration cannot take a repo 
 });
 
 describe("finding 8: a rename after freeze is matched by repo id", () => {
+  it("a repo of a registered list (no ids) renamed after freeze is found through GitHub's redirect, and PASSes", async () => {
+    const org = org30();
+    const s = await frozen(org, undefined, { repos: `[${ORG}/svc-01, ${ORG}/svc-02, ${ORG}/svc-03]` });
+    org.renameRepo("svc-02", "renamed-02");
+    const r = await verify(s);
+    expect(check(r, 5).status).toBe("PASS");
+    expect(lines(r, 5)).toContain("acme-org/svc-02 is named acme-org/renamed-02 now (matched by repo id): rebuilt under its new name");
+  });
+
   it("check 5 rebuilds the renamed repo under its new name and PASSes", async () => {
     const org = org30();
     const s = await frozen(org);

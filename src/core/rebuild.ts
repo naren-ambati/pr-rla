@@ -35,6 +35,8 @@ export interface RebuildArgs {
   window: AuditWindow;
   selector: Selector;
   signal?: AbortSignal;
+  /** Set when this rebuild already follows a rename its probe found (it follows one, never a chain). */
+  followedRename?: boolean;
 }
 
 export interface RepoRebuild {
@@ -64,7 +66,7 @@ function underName(l: ListChangesResult, from: string, to: string): ListChangesR
 }
 
 /** What a listing failure means for one repo: an empty repo, a rate limit, a gone repo (by probe), or a FAIL. */
-async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs & { current: string }, where: "current" | "frozen"): Promise<{ kind: "empty" } | { kind: "fail" | "incomplete"; reason: string }> {
+async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs & { current: string }, where: "current" | "frozen"): Promise<{ kind: "empty" } | { kind: "renamed"; to: string } | { kind: "fail" | "incomplete"; reason: string }> {
   if (isRepoEmpty(e)) {
     if (a.frozenEmpty) return { kind: "empty" };
     return { kind: "fail", reason: `frozen head ${a.frozenHead ? short(a.frozenHead) : "(none recorded)"} not found: the repository has no default branch now (${message(e)})` };
@@ -75,6 +77,8 @@ async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs
     const p = await probeRepo(provider, { repo: a.current });
     switch (p.kind) {
       case "exists":
+        // The probe found it under another path (a rename, found by the SCM's redirect): list it there.
+        if (p.ref.repo.toLowerCase() !== a.current.toLowerCase()) return { kind: "renamed", to: p.ref.repo };
         return { kind: "fail", reason: where === "frozen" && a.frozenHead ? `frozen head ${short(a.frozenHead)} not found (HTTP ${status}: ${message(e)}); the repository itself exists` : `HTTP ${status} on part of the repository although it exists (${message(e)})` };
       case "gone":
         return { kind: "incomplete", reason: `gone: its repo-level metadata answers HTTP ${p.status}${p.status === 404 ? " (deleted, or hidden from this token)" : " (hidden from this token)"}` };
@@ -109,7 +113,9 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
   };
   const settle = async (e: unknown, where: "current" | "frozen"): Promise<RepoRebuild> => {
     const c = await classifyFailure(provider, e, a, where);
-    if (c.kind === "empty") out.listed = { changes: [], defaultBranch: "", limitations: [] };
+    if (c.kind === "renamed" && !args.followedRename) return rebuildRepo(provider, { ...args, current: c.to, followedRename: true });
+    if (c.kind === "renamed") out.fail.push(`HTTP 404 on ${a.current}, which its probe finds at ${c.to}`);
+    else if (c.kind === "empty") out.listed = { changes: [], defaultBranch: "", limitations: [] };
     else out[c.kind].push(c.reason);
     return out;
   };

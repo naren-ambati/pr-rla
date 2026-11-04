@@ -196,6 +196,7 @@ export function fakeOrg(spec: OrgSpec) {
   let total = 0;
   const perRepo = new Map<string, number>();
   const active = new Map<string, number>();
+  const renamed = new Map<string, string>();
   let peakRepos = 0;
   let hung = false;
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -252,6 +253,8 @@ export function fakeOrg(spec: OrgSpec) {
     }
     if (meta || byId) {
       const s = full ? specs.get(full) : undefined;
+      // GitHub redirects a renamed repository's old path to its new one (301), on REST.
+      if (!s && full && renamed.has(full)) return new Response(null, { status: 301, headers: { location: `https://api.github.com/repos/${renamed.get(full)}` } });
       return s ? json(repoJson(full!, s)) : json({ message: "Not Found" }, 404);
     }
     const list = /^\/orgs\/([^/]+)\/repos$/.exec(url.pathname);
@@ -306,6 +309,7 @@ export function fakeOrg(spec: OrgSpec) {
       specs.set(`${spec.owner}/${to}`, { ...s, name: to, seedName: s.seedName ?? from });
       ids.set(`${spec.owner}/${to}`, id);
       ids.delete(old);
+      renamed.set(old, `${spec.owner}/${to}`);
     },
     /** Changes a repo's attributes in place (archive, visibility...), keeping its id and history. */
     updateRepo(name: string, change: Partial<Omit<RepoSpec, "name" | "seedName">>) {

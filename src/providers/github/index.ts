@@ -278,11 +278,17 @@ export class GitHubProvider implements ScmProvider {
     return out;
   }
 
-  /** True when `owner` is the account the token belongs to (`GET /user`); false without a token. */
+  /** True when `owner` is the account the token belongs to (`GET /user`); false without a token, or for a token that cannot read /user. */
   private async ownAccount(owner: string): Promise<boolean> {
     if (!this.http.authenticated) return false;
-    const { data } = await this.http.rest<{ login: string }>("/user");
-    return data.login.toLowerCase() === owner.toLowerCase();
+    try {
+      const { data } = await this.http.rest<{ login: string }>("/user");
+      return data.login.toLowerCase() === owner.toLowerCase();
+    } catch (e) {
+      // A GitHub App installation token (GITHUB_TOKEN in Actions) is not a user: it cannot read /user.
+      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) return false;
+      throw e;
+    }
   }
 
   /**
@@ -317,7 +323,13 @@ export class GitHubProvider implements ScmProvider {
     const publicProof = { complete: true, reason: "GitHub lists every public repository to anyone" };
     const none = (reason: string): ListingVisibility => ({ identity, visibilities: { public: publicProof, private: { complete: false, reason }, internal: { complete: false, reason } } });
     if (!this.http.authenticated) return none("no token: GitHub shows only public repositories");
-    const user = await this.http.rest<{ login: string }>("/user");
+    let user: { data: { login: string }; headers: Headers };
+    try {
+      user = await this.http.rest<{ login: string }>("/user");
+    } catch (e) {
+      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) return none(`the token cannot read /user (HTTP ${e.status}), as a GitHub App installation token (GITHUB_TOKEN in Actions) cannot: it sees only the repositories it was granted`);
+      throw e;
+    }
     identity = user.data.login;
     const scopes = user.headers.get("x-oauth-scopes");
     if (scopes === null) return none("the token sends no X-OAuth-Scopes header, so it is a fine-grained personal access token or a GitHub App token: it shows only the repositories it was granted, and GitHub has no API that says it was granted all of them");

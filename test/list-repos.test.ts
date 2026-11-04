@@ -92,6 +92,10 @@ describe("GitHub listRepos", () => {
     expect((await seen()).visibilities.private.complete).toBe(false);
     const anonymous = await github.create({}, ctxWith(org.fetch));
     expect(await anonymous.listingVisibility!(rule(ORG))).toMatchObject({ identity: null, visibilities: { public: { complete: true }, private: { complete: false, reason: "no token: GitHub shows only public repositories" } } });
+    // An installation token (GITHUB_TOKEN) cannot read /user: not complete, and not an error that stops a freeze.
+    const app = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).pathname === "/user" ? Promise.resolve(json({ message: "Resource not accessible by integration" }, {}, 403)) : org.fetch(input, init))) as typeof fetch;
+    const installation = await github.create({}, { ...ctxWith(app), env: { GITHUB_TOKEN: "synthetic" } });
+    expect((await installation.listingVisibility!(rule(ORG))).visibilities.private.reason).toMatch(/cannot read \/user \(HTTP 403\), as a GitHub App installation token/);
   });
 
   it("firstParentPath reads the compare API: the first-parent commits after the base, or null when the base is not on that chain", async () => {
