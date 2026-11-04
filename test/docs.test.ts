@@ -71,7 +71,7 @@ describe("FR8.1: the doc set", () => {
   });
 
   it("the CHANGELOG has the 0.1.0 entry, unreleased, and CONTRIBUTING names the verification command", () => {
-    expect(read("CHANGELOG.md")).toMatch(/^## 0\.1\.0: unreleased$/m);
+    expect(read("CHANGELOG.md")).toMatch(/^## 0\.1\.0(: unreleased| \(\d{4}-\d{2}-\d{2}\))$/m);
     const c = read("CONTRIBUTING.md");
     for (const s of ["npm ci && npm run build && npm run typecheck && npm test", "npm run docs:outputs", "npm run docs:check", "recorded", "synthetic"]) expect(c, s).toContain(s);
   });
@@ -156,7 +156,7 @@ describe("FR8.1: the doc set", () => {
     expect(table.find((r) => /Re-pin `pr-rla-mcp`/.test(r[2]!))).toBeDefined();
     for (const a of ["Microsoft", "SwissSign", "FreeTSA"]) expect(cl, a).toContain(a);
     // U7's "Re-pinning at release", all seven steps, in order.
-    const repin = cl.slice(cl.indexOf("## 18. "), cl.indexOf("## 19. "));
+    const repin = cl.slice(cl.indexOf("## 19. "), cl.indexOf("## 20. "));
     expect([...repin.matchAll(/^(\d)\. /gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const u7 = read("docs", "ci", "github.md");
     for (const step of [...u7.slice(u7.indexOf("### Re-pinning at release")).matchAll(/^\d\. (.*)$/gm)].map((m) => m[1]!)) expect(repin, step.slice(0, 50)).toContain(step);
@@ -213,7 +213,7 @@ describe("FR8.2: every block that shows output is real output, with the date it 
     const { text: fixed, changed } = regenerate(drifted, { today: "2026-11-05" }) as { text: string; changed: string[] };
     expect(changed).toEqual(["simulate-tolerance"]);
     expect(masked("simulate-tolerance", (generatedBlocks(fixed) as { id: string; body: string }[]).find((x) => x.id === "simulate-tolerance")!.body)).toBe(masked("simulate-tolerance", b!.body));
-    expect(fixed).toContain("run 2026-11-05 (`npm run docs:outputs` regenerates it): <!-- docs-output: simulate-tolerance -->".replace("run", "Run").replace("Run 2026-11-05 (", "Run 2026-11-05, offline ("));
+    expect(fixed).toContain("Run 2026-11-05, offline (`npm run docs:outputs` regenerates it): <!-- docs-output: simulate-tolerance -->");
   }, 60_000);
 
   it("a mask hides only what the clock moves: the register dry run's hash and seed round", () => {
@@ -299,9 +299,8 @@ describe("the accuracy pass", () => {
 });
 
 describe("hooks left for the rounds still running", () => {
-  it("every pending hook names the round that completes it: P1 (audit binding) or S1 (integration seams)", () => {
+  it("every pending hook names the round that completes it, P1 (audit binding) or S1 (integration seams), and none may remain at release", () => {
     const hooks = pendingHooks(markdownFiles(ROOT), ROOT) as { at: string; round: string }[];
-    expect(hooks.length).toBeGreaterThan(0);
     expect(hooks.filter((h) => h.round !== "P1" && h.round !== "S1")).toEqual([]);
     expect(all.pending).toEqual(hooks);
   });

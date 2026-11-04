@@ -1,6 +1,6 @@
 # Changelog: pr-rla-mcp
 
-Every release of `pr-rla-mcp`, newest first. It is released together with `pr-rla`, at the same version, and pins that exact `pr-rla` ([`docs/compatibility.md`](../../docs/compatibility.md) in the pr-rla repository). Below 1.0, a renamed tool or a removed result field is a minor version and is listed here.
+Every release of `pr-rla-mcp`, newest first. It is released together with `pr-rla`, at the same version, and at release pins that exact `pr-rla` (until then it links the repository's own) ([`docs/compatibility.md`](../../docs/compatibility.md) in the pr-rla repository). Below 1.0, a renamed tool or a removed result field is a minor version and is listed here.
 
 ## 0.1.0: unreleased
 

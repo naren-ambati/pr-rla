@@ -47,7 +47,7 @@ Every tool is annotated `readOnlyHint: true`. Every result is `structuredContent
 | `freeze_preview` | `dir?`, `window?`, `estimate?` | the population a freeze would write now (`freeze --dry-run`); with `estimate`, what a pooled freeze would cost instead (`freeze --dry-run --estimate`) | true |
 | `job_status` | `jobId` | `{ state: running \| done \| failed \| unknown, progress?, result?, error? }` | false |
 
-`draw_context` drops `linguist-generated` files when the registration's `exclude_generated` is on: only the files both the change's base commit and its landed commit mark generated, never a `.gitattributes`, and none at all when the change touches a `.gitattributes`. Everything the change's author, its SCM, the ledger or a plugin wrote (title, description, patches, file and check names, author, merger and labels, a verdict's reviewer and note, a ledger's error, the tracker's issue and labels) is in `untrusted` and between `<<<UNTRUSTED-CHANGE-CONTENT <id>>>>` and `<<<END <id>>>`, with a new random 128-bit id per call and its control characters escaped. The server passes the core's fence through and adds none. `freeze_preview` with `estimate` runs the org-pooled freeze's estimator (`freeze --dry-run --estimate`), which reads only, and counts one push-log request per repo.
+`draw_context` drops `linguist-generated` files when the registration's `exclude_generated` is on: only the files both the change's base commit and its landed commit mark generated, never a `.gitattributes`, and none at all when the change touches a `.gitattributes`. Everything the change's author, its SCM, the ledger or a plugin wrote (title, description, patches, file and check names, author, merger and labels, a verdict's reviewer and note, a ledger's error, the tracker's issue and labels) is in `untrusted` and between `<<<UNTRUSTED-CHANGE-CONTENT <id>>>>` and `<<<END <id>>>`, with a new random 128-bit id per call and its control characters escaped. The server passes the core's fence through and adds none. `freeze_preview` with `estimate` runs the org-pooled freeze's estimator (`freeze --dry-run --estimate`), which reads only, and counts at least one push-log request per repo for a provider that has a push log.
 
 <!-- pending S1: the integration-seams round fences all SCM, plugin and ledger text in read-only results ({words, foreign}) and hardens the server against hostile plugins; describe what changes in the results and errors once it merges. -->
 
@@ -59,7 +59,7 @@ The server never asks the client anything: no elicitation, no sampling, no roots
 
 ## Release
 
-Not published yet. `npm run build` starts from an empty `dist/`, and `npm pack` (which runs it first) ships `dist/`, this README, [`CHANGELOG.md`](CHANGELOG.md) and `package.json` only (`test/release.test.mjs`). The release pins `pr-rla` to the exact published version in place of the link ([`docs/release-checklist.md`](../../docs/release-checklist.md), step 16). Licence: decided by the founder before release.
+Not published yet. `npm run build` starts from an empty `dist/`, and `npm pack` (which runs it first) ships `dist/`, this README, [`CHANGELOG.md`](CHANGELOG.md) and `package.json` only (`test/release.test.mjs`). The release pins `pr-rla` to the exact published version in place of the link ([`docs/release-checklist.md`](../../docs/release-checklist.md), step 17). Licence: decided by the founder before release.
 
 ## Tests
 

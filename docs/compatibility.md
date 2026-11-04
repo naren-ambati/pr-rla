@@ -7,9 +7,9 @@ What pr-rla 0.1.0 runs on, what has been verified against live services and what
 | Node.js | Status |
 |---|---|
 | 22.15 or later | **Required** (`engines`: `>=22.15`, both packages). The plugin host needs `module.registerHooks`; on 22.13 and 22.14 an isolated plugin refuses to load with "needs Node 22.15 or later" (checked on 22.14.0 and 22.15.0, 2026-11-04) |
-| 22.23.2 | **Tested**: every verification of every bolt, including this release's three fresh-clone runs |
-| 24.20.0 | **Tested**: the root suite (BUILD-NOTES, "Bolt 11 (U10)", for the run on this release) |
-| 26.8.2 | **Tested**: the root suite. It stands in for "25 or later": on 25 and later an isolated plugin has no network at all (no `--allow-net`); Node 25.x itself was not installed |
+| 22.23.2 | **Tested**: every verification of every bolt, and the three fresh-clone runs of this branch (BUILD-NOTES, "Bolt 11 (U10)") |
+| 24.20.0 | **Tested**: the root suite of this branch, 95 files, 2,515 tests passed (2026-11-04; BUILD-NOTES, "Bolt 11 (U10)"), as in earlier rounds |
+| 26.8.2 | **Tested**: the root suite of this branch, 95 files, 2,506 tests passed (2026-11-04; on 25 or later one block of the hostile-plugin tests is not added). It stands in for "25 or later": on 25 and later an isolated plugin has no network at all (no `--allow-net`); Node 25.x itself was not installed |
 
 The CI integrations run Node 24 (the Action's `actions/setup-node` at `node-version: 24`; the GitLab and Bitbucket images `node:24-alpine` and `node:24`, pinned by digest).
 
@@ -18,10 +18,10 @@ The CI integrations run Node 24 (the Action's `actions/setup-node` at `node-vers
 | Platform | Status |
 |---|---|
 | macOS (Darwin 25.6.0, arm64) | **Tested**: everything in this repository ran here |
-| Linux | **Untested.** It is the CI templates' target (Linux runners and containers), and nothing in the code is macOS-specific that a test knows of, but no suite has run on Linux. The plugin host's permission model, the OpenSSH and OpenSSL oracle tests, and `/proc/<ppid>/environ` being outside the child's read scope are measured on macOS only |
+| Linux | **Untested.** It is the CI templates' target (Linux runners and containers), and nothing in the code is macOS-specific that a test knows of, but no suite has run on Linux. The plugin host's permission model and the OpenSSH and OpenSSL oracle tests are measured on macOS only, and whether `/proc/<ppid>/environ` stays outside an isolated plugin's read scope is unverified (macOS has no `/proc`) |
 | Windows | **Untested**, and not supported until it is. Known: pr-rla runs `git` and `ssh-keygen` by the absolute path it finds on PATH's absolute entries; a checkout with `core.autocrlf=true` FAILs check 7 (the working tree's CRLF ledger differs from its committed history: verify with `core.autocrlf=false`); the assistant guard reads PowerShell with its POSIX parser |
 
-This is short of NFR19, which asks for macOS **and** Linux tested: a Linux run is a release step ([`release-checklist.md`](release-checklist.md), step 10).
+This is short of NFR19, which asks for macOS **and** Linux tested: a Linux run is a release step ([`release-checklist.md`](release-checklist.md), step 11).
 
 ## Tools pr-rla runs
 
@@ -35,7 +35,7 @@ This is short of NFR19, which asks for macOS **and** Linux tested: a Linux run i
 
 | Provider | Population (`listChanges`) | Draw context (`describeChange`) | Org pools (`listRepos`, push log, visibility proof) |
 |---|---|---|---|
-| `github` (github.com) | **live**: github/gh-aw Q3 2026, 3,944 changes (2026-11-03); recorded and synthetic fixtures | **live** once (draw #13, 2026-11-04); recorded for the 36 issued gh-aw draws (2026-11-04) | `listRepos` **live** on the `navikt` org (223-repo subset, dry run and estimate, 2026-11-04); push log **live** on github/gh-aw (2026-11-04); the visibility proof (org owner, installation, `total_private_repos`) on fakes only |
+| `github` (github.com) | **live**: github/gh-aw Q3 2026, 3,944 changes (2026-11-03); recorded and synthetic fixtures | **live**, read-only, for the 36 issued gh-aw draws (three times, 2026-11-04), and once through `pr-rla-mcp` (draw #13); the raw responses of four draws are recorded, and all 36 descriptions are in the recorded audit's `changes.json` | `listRepos` **live** on the `navikt` org (223-repo subset, dry run and estimate, 2026-11-04); push log **live** on github/gh-aw (2026-11-04); the visibility proof (org owner, installation, `total_private_repos`) on fakes only |
 | `github` (Enterprise Server) | fake server only | fake server only | fake server only |
 | `gitlab` (gitlab.com) | **live**: gitlab-org/cli October 2026, anonymous (2026-11-03); recorded | recorded anonymously: gitlab-org/cli !4191 (2026-11-04) | `listRepos` on hand-made responses only; push log **live** on gitlab-org/cli (2026-11-04); no visibility proof (a rule with private repos is INCOMPLETE) |
 | `gitlab` (self-managed) | recorded anonymously: gitlab.freedesktop.org xorg/xserver (2026-11-04); with a token, unverified | unverified | unverified |
@@ -52,7 +52,7 @@ Private repositories and token scopes have not been exercised on any SCM: every 
 |---|---|---|
 | `git-file` | local git, real git 2.55.0 | local appends and commits; per-verdict signatures with real `ssh-keygen -Y sign` and software keys only (no hardware key, D7) |
 | `github-issues` | recorded public timelines (six GitHub issues, 2026-11-04); GitHub Enterprise Server on a mock | mock servers only (issues, labels, comments) |
-| `gitlab-issues` | synthetic, from the documented `resource_label_events` shape (it needs a token even on public projects: unverified); recorded label notes as evidence | mock servers only |
+| `gitlab-issues` | synthetic, from the documented `resource_label_events` shape: the endpoint answers 401 without a token even on public projects (seen live, 2026-11-04), so its JSON itself is unverified; recorded label notes as evidence | mock servers only |
 | Jira (the example plugin) | recorded from hibernate.atlassian.net, Jira Cloud, anonymously (2026-11-04) | mock servers only; Jira Data Center not supported |
 
 ## Time, beacon and log
@@ -74,7 +74,7 @@ Private repositories and token scopes have not been exercised on any SCM: every 
 
 ## Exit codes
 
-Every command's exit status is a stable contract ([`contracts.md` §7](design/phase-3-4/contracts.md); `src/cli/exit-codes.ts`). Existing codes never change meaning; codes 0–4 are phase 1–2's, 5 and 6 were added in this round.
+Every command's exit status is a stable contract ([`contracts.md` §7](design/phase-3-4/contracts.md); `src/cli/exit-codes.ts`). Existing codes never change meaning. Codes 0–3 are phase 1–2's; 4 and 5 were added in bolt 1, with the exit-code table, and 6 in the U8 fix round (the design's NFR16 counts 4 among phase 2's codes; the phase-2 code had none).
 
 | Code | Meaning | Commands |
 |---|---|---|
@@ -92,7 +92,7 @@ With no timestamp authority configured at all, `register` and `freeze` exit 0 wi
 
 | Thing | Version | Rule |
 |---|---|---|
-| `pr-rla`, `pr-rla-mcp` | semver, released together at one version | The first public release is 0.1.0. Below 1.0, a change to the CLI, an output or a record is a minor version and is listed in the [changelog](../CHANGELOG.md); adding a field is compatible. `pr-rla-mcp` pins its `pr-rla` exactly |
+| `pr-rla`, `pr-rla-mcp` | semver, released together at one version | The first public release is 0.1.0. Below 1.0, a change to the CLI, an output or a record is a minor version and is listed in the [changelog](../CHANGELOG.md); adding a field is compatible. `pr-rla-mcp` pins its `pr-rla` exactly at release (until then it links this checkout: [`release-checklist.md`](release-checklist.md)) |
 | `providerApiVersion`, `ledgerApiVersion` | 1 | Optional additions only. A required method or a changed meaning moves to 2, with two releases in which pr-rla loads both |
 | `pr-rla/http` (`HTTP_HELPER_VERSION`) | 1 | Versioned on its own, independent of the API versions |
 | The plugin host protocol | `pr-rla/ipc/v2` | The parent refuses a child that reports another protocol; the two always ship together |

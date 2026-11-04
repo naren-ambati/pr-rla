@@ -122,7 +122,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .description("append a pass/fail verdict for a draw to the ledger (git-file: commit it afterwards)")
     .option("--reviewer <id>", "who reviewed")
     .option("--note <text>", "one-line justification")
-    .option("--force", "append even if the change already has a verdict (shows as a relabel)")
+    .option("--force", "append even if the change already has a verdict (the first still counts; a different one shows as a relabel)")
     .option("--sign <key>", "sign this verdict with your registered SSH key (ssh-keygen -Y sign; a security key asks for a touch)")
     .action(function (this: Command, draw: string, verdict: string) {
       return run((ctx) => recordCommand(ctx, draw, verdict, this.opts()))();

@@ -55,7 +55,7 @@ The draw order is the audit. `status` walks the issued draws in order and stops 
 
 ## Simulation: the risk limit at the tolerance
 
-`pr-rla simulate` runs the scoring code itself (`evaluateSequence`, the function `status` uses) against an oracle population with a known number of defects: 20,000 simulated audits by default, each stopping at the test's own decision. At the tolerance, a certificate is a false one, and the risk limit requires at most 5% of runs to certify. Run 2026-11-04, offline (`npm run docs:outputs` regenerates it): <!-- docs-output: simulate-tolerance -->
+`pr-rla simulate` runs the same scores and stopping rule as `evaluateSequence`, the function `status` uses (`src/core/simulate.ts`; `test/simulate.test.ts` checks that every run decides as `evaluateSequence` does on the same draws), against an oracle population with a known number of defects: 20,000 simulated audits by default, each stopping at the test's own decision. At the tolerance, a certificate is a false one, and the risk limit requires at most 5% of runs to certify. Run 2026-11-04, offline (`npm run docs:outputs` regenerates it): <!-- docs-output: simulate-tolerance -->
 
 ```output
 $ pr-rla simulate --population 400 --defects 40
@@ -66,7 +66,7 @@ at or above the tolerance: certifying is a false certificate; the risk limit req
 (exit 0)
 ```
 
-A clean stratum, the shape of the gh-aw Q3 population (1,590 changes, 1% defective), certifies almost always, after about 44 distinct reviews. Run 2026-11-04, offline: <!-- docs-output: simulate-clean -->
+A clean stratum the size of the gh-aw Q3 stratum in the spec's count (1,590 changes; pr-rla's own N is 1,589), 1% defective, certifies almost always, after about 44 distinct reviews. Run 2026-11-04, offline: <!-- docs-output: simulate-clean -->
 
 ```output
 $ pr-rla simulate --population 1590 --defects 16
@@ -84,7 +84,7 @@ The spec's own simulation table (`design/spec.md`) gives 4.53% certified at 400 
 
 This is a choice about value, not about validity. The risk limit above holds for any N. But the sample size of the test barely depends on N: certifying takes 36, 56 or 75 draws, and the cap is 144, whatever the population. So the smaller the population, the less an audit saves:
 
-- At N = 150 the cap (144 draws) is about the size of the population. A clean stratum still certifies after about 36 distinct reviews, but a stratum near the tolerance runs on toward the cap and escalates, and then every change needs a review anyway.
+- At N = 150 the cap (144 draws) is about the size of the population. A clean stratum still certifies after about 36 distinct reviews, but a stratum at the tolerance escalates, usually well before the cap (a mean of 58 draws below), and then every change needs a review anyway.
 - Reviewing all N changes gives an exact count, with no risk at all, for at most 150 reviews.
 
 Run 2026-11-04, offline: <!-- docs-output: simulate-small -->
@@ -134,4 +134,4 @@ draw 36: index 1026 = github:github/gh-aw#53374 · draws.json: github:github/gh-
 (exit 0)
 ```
 
-Phase 1 cross-checked the formula with an independent Python implementation (BUILD-NOTES, "Status"), and `test/seed.test.ts` checks the 72-byte message byte by byte.
+Phase 1 cross-checked the v1 formula (the manifest binding) with an independent Python implementation (BUILD-NOTES, "Status"); for the v2 binding, `test/seed.test.ts` recomputes the index from the concatenated 72 bytes for draws 1, 2, 3 and 144, and the script above is the second implementation.

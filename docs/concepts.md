@@ -26,7 +26,7 @@ A window moves through four phases, `unregistered`, `registered`, `frozen` and `
 3. **`freeze`**, after the window closes and before the seed round publishes, lists every change, applies the registered selector, and writes the **manifest** (`audit/<window>.manifest.json`: every change of the stratum, sorted, with its merge commit, the default branch's head the history was walked from, and the provider's identity) and a signed, time-stamped **commitment** to it (`manifest-commitment.json`).
 4. **The seed round R** is derived, never chosen: the first drand quicknet round published at least 24 hours after the later of the window's close and the registration.
 5. **`sample`**, once R has published, checks R's BLS signature and computes the **draws** (`draws.json`): each draw is one change of the manifest, from R's randomness and the registration's hash. With an issue ledger it opens one issue per drawn change, in draw order.
-6. **Review and record.** A reviewer reads a draw (`pr-rla draw-context <n>`: its diff without generated files, its description, CI results and the protocol's checklist) and records `pass` or `fail` in the **ledger**: `pr-rla record <n> pass|fail` for `git-file`, or the verdict label on the draw's issue for an issue ledger.
+6. **Review and record.** A reviewer reads a draw (`pr-rla draw-context <n>`: its diff without generated files, its description, CI results and the protocol's checklist) and records `pass` or `fail` in the **ledger**: `pr-rla record <n> pass|fail --reviewer <you>` (or `--sign <key>` for a signed verdict) for `git-file`, or the verdict label on the draw's issue for an issue ledger.
 7. **`status`** counts the **longest fully labelled prefix** of draws and runs the test: CERTIFIED, `n more passing draws needed`, or ESCALATE.
 8. **`verify`**, run by anyone with the audit repository, checks seven properties from the records and the SCM.
 
@@ -34,7 +34,7 @@ A window moves through four phases, `unregistered`, `registered`, `frozen` and `
 
 | Check | What it establishes |
 |---|---|
-| 1. registration | the registration's signature and key, its timestamp tokens (k operators), and whether it is PROSPECTIVE or RETROSPECTIVE |
+| 1. registration | the registration's signature and key, that `review-protocol.md` still hashes to the registered value, the window re-derived from its days, its timestamp tokens (k operators), and whether it is PROSPECTIVE or RETROSPECTIVE |
 | 2. manifest before seed | the commitment is time-stamped before R published, and the manifest is the registered set, sorted |
 | 3. seed round | R is the derived round, from a proven registration time |
 | 4. BLS | R's signature verifies against the pinned quicknet key |
@@ -69,7 +69,7 @@ Every counted verdict has a **provenance** level, printed on every certificate (
 - **`account`**: an SCM account did it, at the server's time (an issue ledger), or the line is signed with the reviewer's registered SSH key;
 - **`presence`**: as `account`, signed with the reviewer's registered FIDO security key with the user-presence flag set, and printed as `presence (user-presence flag verified; key hardware not attested)`: pr-rla does not check that the key is hardware-backed, and has been tested with software keys only (threat T16).
 
-A registration fixes the minimum (`verdicts.min_provenance`: `account` by default with an issue ledger, `self-asserted` with `git-file`), the reviewers whose verdicts count (`verdicts.reviewers`), and for signed verdicts the reviewers' keys (`verdicts.allowed_signers`) and `require_signed`. A verdict below the minimum fails check 7. Bots, apps and unregistered reviewers are ignored with a reason.
+A registration fixes the minimum (`verdicts.min_provenance`: `account` by default with an issue ledger, `self-asserted` with `git-file`), the reviewers whose verdicts count (`verdicts.reviewers`), and for signed verdicts the reviewers' keys (`verdicts.allowed_signers`) and, with the `git-file` option `require_signed: true` (recorded as `verdicts.require_signed`), that every counted verdict is signed. A verdict below the minimum fails check 7. Bots, apps and unregistered reviewers are ignored with a reason.
 
 **Checkpoints.** A tracker's admin can delete issues and their history. `pr-rla checkpoint [--push]` hashes the ledger's verdict-event history, time-stamps the hash, and appends it to `audit/<window>/ledger-checkpoints.jsonl`; `verify` compares the history with every checkpoint. A ledger without a history it can return (`git-file`, whose history is git's) cannot be checkpointed.
 
@@ -83,7 +83,7 @@ The audit-binding round (P1) adds a time-stamped record of the ledger index as `
 
 ## Time evidence
 
-`register` and `freeze` send each configured timestamp authority one RFC 3161 request holding only the record's SHA-256 digest and a nonce, and store the tokens in the record. A time counts as proven when tokens from k = 2 independent operators agree with the record's own signed time (within 10 minutes plus each token's accuracy, 60 s for a token that states none). With fewer, every output says `TIMESTAMP NOT TAMPER-PROOF (n of k)`: the time is the signer's own clock, so `verify` is INCOMPLETE and the certificate is withheld. The signed time stays the seed's input; tokens bound it and never replace it ([`trusted-time.md`](trusted-time.md)).
+`register` and `freeze` send each configured timestamp authority one RFC 3161 request holding only the record's SHA-256 digest and a nonce, and store the tokens in the record. A time counts as proven when tokens from k independent operators (`timestamping.min_tokens`, default 2) agree with the record's own signed time (within 10 minutes plus each token's accuracy, 60 s for a token that states none). With fewer, every output says `TIMESTAMP NOT TAMPER-PROOF (n of k)`: the time is the signer's own clock, so `verify` is INCOMPLETE and the certificate is withheld. The signed time stays the seed's input; tokens bound it and never replace it ([`trusted-time.md`](trusted-time.md)).
 
 ## Providers and plugins
 

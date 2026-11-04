@@ -15,10 +15,10 @@ pr-rla makes a statistical claim about changes that landed without review, and i
 - a forged timestamp token or transparency-log entry that pr-rla accepts;
 - a way for a verdict to count above the provenance the registration requires, or for an assistant to record one through pr-rla's own surfaces (the MCP server, the `review-draw` skill);
 - a credential that reaches a host, a plugin or an output it should not, or a write that leaves a read-only context;
-- a plugin that escapes the isolation the security model states for its Node version.
+- a plugin that escapes the isolation the security model states for its Node version because of how pr-rla sets it up. Node's permission model itself is a seatbelt that malicious code can bypass (Node's own documentation says so, and the security model states it as a limit): a bypass of the model itself is Node's to fix, though a way pr-rla makes it easier is pr-rla's.
 
 [`docs/security-model.md`](docs/security-model.md) lists every threat pr-rla is designed against (T1–T18), how each is mitigated, and the limits it states plainly. A limit stated there (for example that `presence` does not attest key hardware, threat T16, or that an isolated plugin on Node 22 and 24 can still open its own sockets) is known, not a vulnerability, though a way to make it worse is.
 
 ## Supported versions
 
-None yet: nothing has been released. From the first public release (0.1.0), the latest release is the supported one.
+None yet: nothing has been released. Which releases receive security fixes is decided by the founder before release, with the contact above.

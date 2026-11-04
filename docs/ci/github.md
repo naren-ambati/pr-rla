@@ -120,4 +120,4 @@ Until release, `package.json` has `"pr-rla": "file:vendor/pr-rla-0.1.0.tgz"` and
 6. Replace `<owner>/pr-rla` and `<exact ref>` in these pages with the repository's address once it has one.
 7. Run `npm --prefix integrations/github-action ci` and `npm test`.
 
-Whether `pr-rla` ships an `npm-shrinkwrap.json`, which would pin the transitive dependencies for the GitLab and Bitbucket installs (they have no lockfile of their own), is the founder's decision, with a recommendation and its reasons: [`../release-checklist.md`](../release-checklist.md), step 4. The re-pinning above is that checklist's step 18.
+Whether `pr-rla` ships an `npm-shrinkwrap.json`, which would pin the transitive dependencies for the GitLab and Bitbucket installs (they have no lockfile of their own), is the founder's decision, with a recommendation and its reasons: [`../release-checklist.md`](../release-checklist.md), step 4. The re-pinning above is that checklist's step 19.

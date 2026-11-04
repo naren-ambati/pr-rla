@@ -44,7 +44,7 @@ Nothing here writes to a public service. The only writes are the Action's opt-in
 
 ## Rate limits
 
-pr-rla paces every request to a host with one shared budget whose defaults are the smallest limit the service publishes for the request's auth state; the limit a server reports in its rate-limit headers replaces the default for the rest of the run, and `rate_limits:` in `.pr-rla.yml` can raise or lower any rule (BUILD-NOTES, "Bolt 2 (U2a)", where every default is listed with its source). What a CI job meets:
+pr-rla paces every request to a host with one shared budget whose defaults are the smallest limit the service publishes for the request's auth state; the limit a server reports in its rate-limit headers replaces a primary rule's default for the rest of the run (secondary rules, such as GitHub's per-minute points, always apply), and `rate_limits:` in `.pr-rla.yml` can raise or lower any rule. The defaults and their sources are in BUILD-NOTES, "Bolt 2 (U2a)" (GitLab's issue- and note-creation limits were added in "Bolt 3 (U4)") and `src/net/rate-limits.ts`. What a CI job meets:
 
 | SCM | Authenticated | Anonymous | Checked |
 |---|---|---|---|

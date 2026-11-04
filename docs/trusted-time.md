@@ -4,7 +4,7 @@ A prospective audit is evidence only if its registration demonstrably existed be
 
 ## What is sent, and when
 
-`register` and `freeze` (and `checkpoint`, for a ledger checkpoint) send each configured authority one `TimeStampReq` holding only the SHA-256 digest of the signed record and a nonce. Nothing else leaves the machine. The tokens that come back are stored in the record's envelope (`timestamps`).
+`register` and `freeze` (and `checkpoint`, for a ledger checkpoint) send each configured authority one `TimeStampReq` holding only the SHA-256 digest of the signed record and a nonce. Nothing else leaves the machine. Each token that comes back is checked at once against the rules below; those that pass are stored in the record's envelope (`timestamps`), and one that fails is reported and not stored, since a stored bad token would make an honest record fail `verify` for good.
 
 - **k of n, by operator.** `timestamping: { authorities, min_tokens }` in `.pr-rla.yml`; `init` writes Sigstore, DigiCert, GlobalSign and Microsoft with k = 2. A time is proven when tokens from k distinct operators are accepted. Tokens from one operator count once, and only the authorities the registration names count: any other token is listed as `ignored (not registered)`.
 - **Each request** has a 15 s timeout and is retried for at most 5 minutes (half the tolerance below), on the broker's policy; Sectigo is spaced 15 s apart and FreeTSA 1 s, as they ask. There is no way to add tokens to a record later (no `--retry-timestamps`): a record that came out short is written again with `register --force` or `freeze --force`.
@@ -12,7 +12,7 @@ A prospective audit is evidence only if its registration demonstrably existed be
 
 | Outcome | What is written | Exit |
 |---|---|---|
-| k or more operators | the record with its tokens; `timestamps: n of n TSAs (…) · k = 2 · PROVEN` | 0 |
+| k or more operators | the record with its tokens; `timestamps: a of n TSAs (…) · k = <k> · PROVEN` (a tokens accepted, of n authorities configured) | 0 |
 | fewer than k (including 0 of k: every authority unreachable) | the record; `TIMESTAMP NOT TAMPER-PROOF (n of k)` and the exact command to run again | 5 |
 | no authority configured | the record; `TIMESTAMP NOT TAMPER-PROOF` | 0 |
 | clock skewed more than 10 minutes | nothing | 1 |
@@ -21,8 +21,8 @@ A prospective audit is evidence only if its registration demonstrably existed be
 
 `verify` checks every token offline against the trust bundle shipped in the package ([`src/timestamp/trust-bundle.json`](../src/timestamp/trust-bundle.json), version `2026-11`), with pkijs and asn1js parsing and pr-rla's own rules on top (`src/timestamp/verify.ts`). A token is accepted only if:
 
-1. the response is granted, and the token is CMS SignedData with TSTInfo content;
-2. its message imprint is SHA-256 over the record's digest, and its nonce is the request's;
+1. the token is CMS SignedData with TSTInfo content (the client also checked, when it asked, that the response's status was `granted` or `grantedWithMods`);
+2. its message imprint is the record's SHA-256 (its `sha256`), and its nonce is the request's;
 3. the signature over the signed attributes verifies under the signer certificate (a SHA-1 signature is refused);
 4. ESSCertID identifies the signer certificate;
 5. the signer certificate's extended key usage is exactly `timeStamping`, marked critical;
@@ -33,6 +33,8 @@ Every rule judges one certificate: the single certificate in the token that the 
 
 Each accepted token gives an upper bound `genTime + accuracy`: the record existed no later than that. `U_k` is the k-th smallest bound across distinct operators. The registration is **PROSPECTIVE** when `U_k` is before the window opens; the commitment must have its `U_k` before seed round R publishes. A time k operators do not prove leaves checks 1–3 INCOMPLETE: the record's time is the signer's own clock, and the seed round rests on it.
 
+A stored token from a registered authority that breaks any rule FAILs the check (an honest client never stores one); a token from an authority the registration does not name is ignored, whatever it holds.
+
 The record's signed time stays the seed's input. Tokens bound it and never replace it, so presenting a different token cannot move R, and a v2 record whose envelope has lost its `timestamps` FAILs.
 
 ## The authorities
@@ -40,21 +42,21 @@ The record's signed time stays the seed's input. Tokens bound it and never repla
 | Authority | Default | Anchor pinned | How the anchor is trusted |
 |---|---|---|---|
 | `sigstore` (Sigstore) | on | sigstore-tsa-selfsigned | independently: Sigstore's TUF `trusted_root.json` |
-| `digicert` (DigiCert) | on | DigiCert Trusted Root G4, and its TSA issuing CA | independently: macOS and Node's root stores |
-| `globalsign` (GlobalSign) | on | GlobalSign Root R6, and its TSA issuing CA | independently: macOS and Node's root stores |
+| `digicert` (DigiCert) | on | the root DigiCert Trusted Root G4; its TSA issuing CA is pinned too, as a constraint that adds no trust | independently: macOS and Node's root stores |
+| `globalsign` (GlobalSign) | on | the root GlobalSign Root R6; its TSA issuing CA is pinned as a constraint | independently: macOS and Node's root stores |
 | `microsoft` (Microsoft) | on | **the intermediate** Microsoft Public RSA Timestamping CA 2020 (its tokens omit the root) | **on first use**, from its own response (`independent: false`) |
-| `github` (GitHub) | off | Internal Services Root, and its TSA intermediate | independently: gh's TUF cache of tuf-repo.github.com |
-| `swisssign` (SwissSign) | off | SwissSign Signature Services Root 2020 - 2, and its TSA issuing CA | **on first use** (`independent: false`) |
+| `github` (GitHub) | off | the root Internal Services Root; its TSA intermediate is pinned as a constraint | independently: gh's TUF cache of tuf-repo.github.com |
+| `swisssign` (SwissSign) | off | the root SwissSign Signature Services Root 2020 - 2; its TSA issuing CA is pinned as a constraint | **on first use** (`independent: false`) |
 | `sectigo` (Sectigo) | off | Sectigo Public Time Stamping Root R46 | independently: macOS system roots (not in Node's) |
 | `freetsa` (FreeTSA) | off | its own root | **on first use** (`independent: false`) |
 
-All eight answered hash-only requests on 2026-11-03 (BUILD-NOTES, bolt 1), and their tokens are recorded in `test/fixtures/tsa/recorded-2026-11-03.json`. `register`, `verify` and `status` print each counted authority's anchor and how it is trusted, for example `microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)`. Confirming the three trust-on-first-use anchors from a second source is a release step ([`release-checklist.md`](release-checklist.md), step 5).
+All eight answered hash-only requests on 2026-11-03 (BUILD-NOTES, bolt 1), and their tokens are recorded in `test/fixtures/tsa/recorded-2026-11-03.json`. Only `register` has run against the real authorities; `freeze` and `checkpoint` with tokens have run on mock authorities. `register`, `verify` and `status` print each counted authority's anchor and how it is trusted, for example `microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)`. Confirming the three trust-on-first-use anchors from a second source is a release step ([`release-checklist.md`](release-checklist.md), step 5).
 
-**Another authority, or another anchor.** `--tsa-trust <file>` (on `register`, `freeze`, `checkpoint`, `status` and `verify`, repeatable) adds anchors the person running the command trusts: a JSON file shaped like the bundle (`{ "authorities": { "<id>": { "operator", "url", "anchors": [...], "intermediates": [...] } } }`, any subset). It can add an authority or certificates; it cannot change a shipped authority's operator or URL. `verify` never trusts anchors from the audit repository itself.
+**Another authority, or another anchor.** `--tsa-trust <file>` (on `register`, `freeze`, `checkpoint`, `status` and `verify`, repeatable) adds anchors the person running the command trusts: a JSON file shaped like the bundle (`{ "authorities": { "<id>": { "operator", "url", "anchors": [...], "intermediates": [...] } } }`, any subset). It can add an authority, anchors, intermediates and `issuingCAs`; it cannot change a shipped authority's operator or URL. An authority only such a file vouches for proves a time to whoever passes the same file, and to nobody else. `verify` never trusts anchors from the audit repository itself.
 
 ## Transparency logs (Rekor)
 
-pr-rla builds and verifies Rekor v1 `hashedrekord` entries and Rekor v2 entries, but submits nothing unless you pass `--submit --rekor-url <url>`: an entry in a public log is public and permanent, and no entry has ever been written to a real log. `--rekor-api v2` also prints that the v2 client is unverified against the production log and needs `--yes`. Rekor v2 carries no time, so for a schema-v2 record the tokens are the time evidence and a log entry adds at most one operator. A v1 record's time comes from its Rekor v1 `integratedTime`, and counts only under a key `verify` trusts: Sigstore's production logs (pinned in the package) or one you pass for that log with `verify --log-key <log url>=<pem file>`.
+pr-rla builds and verifies Rekor v1 `hashedrekord` entries and Rekor v2 entries, but submits nothing unless you pass `--submit` with a log URL (`--rekor-url <url>`, or `transparency_log.url` in `.pr-rla.yml`): an entry in a public log is public and permanent, and no entry has ever been written to a real log. `--rekor-api v2` also prints that the v2 client is unverified against the production log and needs `--yes`, and checks the log's response with `transparency_log.public_key_file`. Rekor v2 carries no time, so for a schema-v2 record the tokens are the time evidence and a log entry adds at most one operator. A v1 record's time comes from its Rekor v1 `integratedTime`, and counts only under a key `verify` trusts: Sigstore's production logs (pinned in the package) or one you pass for that log with `verify --log-key <log url>=<pem file>`, which then counts as the neutral operator `log at <host>`, never as Sigstore.
 
 ## Checking a token without pr-rla
 
