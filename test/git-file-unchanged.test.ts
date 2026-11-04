@@ -23,6 +23,8 @@ const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   tsa.nowMs = T(iso);
 };
+/** Distinct changes among the first 36 draws: one verdict each (time round B redrew them, so the count is read, not fixed). */
+const distinct36 = (s: Scenario) => (JSON.parse(readFileSync(join(s.dir, W, "draws.json"), "utf8")) as DrawsFile).draws.slice(0, 36).filter((d) => d.firstOccurrence).length;
 const shape = (r: Awaited<ReturnType<typeof runVerify>>) => r.checks.map((c) => ({ n: c.n, status: c.status, summary: c.summary, ...(c.n >= 6 ? { details: c.details } : {}) }));
 
 async function reviewed(opts: { leaveLast?: boolean } = {}): Promise<Scenario> {
@@ -57,21 +59,25 @@ afterAll(async () => {
 
 describe("finding 11: a git-file audit with no keys verifies as before U9", () => {
   it("clean: 7/7 PASS, check 7 prints only the provenance line", async () => {
-    const r = await runVerify((await reviewed()).ctx, {});
+    const s = await reviewed();
+    const k = distinct36(s);
+    const r = await runVerify(s.ctx, {});
     expect(shape(r)).toEqual([
       { n: 1, status: "PASS", summary: expect.any(String) },
       { n: 2, status: "PASS", summary: expect.any(String) },
       { n: 3, status: "PASS", summary: expect.any(String) },
       { n: 4, status: "PASS", summary: expect.any(String) },
       { n: 5, status: "PASS", summary: "population 200/200 match" },
-      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: [] },
-      { n: 7, status: "PASS", summary: "labels (prefix 36, 35 events)", details: ["VERDICT PROVENANCE: self-asserted (35) (registered minimum: self-asserted)"] },
+      // Time round B: check 6 says what it compared, and the derivation it compared against.
+      { n: 6, status: "PASS", summary: "36/36 draws reproduce", details: ["144 draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ registrationSha256 ‖ uint64be(i)) mod N over the 200 change ids in canonical order"] },
+      { n: 7, status: "PASS", summary: `labels (prefix 36, ${k} events)`, details: [`VERDICT PROVENANCE: self-asserted (${k}) (registered minimum: self-asserted)`] },
     ]);
   });
 
   it("a line not committed yet is noted, as before", async () => {
-    const r = await runVerify((await reviewed({ leaveLast: true })).ctx, {});
-    expect(r.checks.find((c) => c.n === 7)).toMatchObject({ status: "PASS", details: ["VERDICT PROVENANCE: self-asserted (35) (registered minimum: self-asserted)", "1 verdict line(s) not yet committed (no tamper trail for them until committed)"] });
+    const s = await reviewed({ leaveLast: true });
+    const r = await runVerify(s.ctx, {});
+    expect(r.checks.find((c) => c.n === 7)).toMatchObject({ status: "PASS", details: [`VERDICT PROVENANCE: self-asserted (${distinct36(s)}) (registered minimum: self-asserted)`, "1 verdict line(s) not yet committed (no tamper trail for them until committed)"] });
   });
 
   it("a rewritten history FAILs check 7 with the same finding", async () => {

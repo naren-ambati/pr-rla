@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { canonicalJson, sha256Hex } from "../../core/canonical.js";
 import { readConfined } from "../../io/confine.js";
 import type { Population } from "../../core/population.js";
-import { derivedRoundFor, isRegistrationV2, registeredRepos, registrationRepoSet, type AnyRegistration, type AuditParameters, type ManifestRepo, type RepoSet, type SignedRecord } from "../../core/records.js";
+import { derivedRoundFor, isRegistrationV2, registeredRepos, registrationRepoSet, reviewHorizonFor, type AnyRegistration, type AuditParameters, type ManifestRepo, type RepoSet, type SignedRecord } from "../../core/records.js";
 import { repoSetLabel, RepoSetError, resolvePool } from "../../core/repo-set.js";
 import { TSA_RETRY_DEADLINE_MS } from "../../net/contract.js";
 import { PR_RLA_VERSION } from "../../version.js";
@@ -218,6 +218,7 @@ export async function runPool(ctx: ApiContext, i: Pick<FreezeInputs, "config" | 
       log: (l) => (ctx.err(l), ctx.onProgress?.({ done: 0, message: l })),
       registered: i.reg ? registeredRepos(i.reg) : [],
       now: () => isoNow(ctx),
+      horizon: reviewHorizonFor(i.reg),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(o.checkpoint ? { checkpoint: o.checkpoint } : {}),
     });

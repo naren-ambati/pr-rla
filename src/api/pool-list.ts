@@ -2,7 +2,7 @@ import type { GoneRepo, ManifestRepo, PluginIdentity, RegisteredRepo, RepoListin
 import { assemblePopulation, buildPopulation, checkListed, listRepoChanges, type Population } from "../core/population.js";
 import { isTransientFailure, looksUnavailable, probeRepo } from "../core/failures.js";
 import { describeRepoSet, resolvePool, RepoSetError, type PoolResolution, type ResolvedRepo } from "../core/repo-set.js";
-import type { Selector } from "../core/selector.js";
+import type { ReviewHorizon, Selector } from "../core/selector.js";
 import { isRepoEmpty, type AuditWindow, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { canonicalJson } from "../core/canonical.js";
 
@@ -161,6 +161,8 @@ export interface PooledFreezeOptions {
   registered?: readonly RegisteredRepo[];
   /** The command's clock now (when a probe found a repo gone); default `startedAt`. */
   now?: () => string;
+  /** Which reviews `no-review` sees (`reviewHorizonFor(registration)`): `landing` (v2, the default) or `cutoff` (v1). */
+  horizon?: ReviewHorizon;
   /** Present for a real freeze of a list or rule: the run is checkpointed and can resume. Absent: nothing is written. */
   checkpoint?: CheckpointOptions;
 }
@@ -189,7 +191,7 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Lists the repos of a set and builds their pooled population, resuming a stopped run when there is one. */
 export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
-  const common = { window: o.window, selector: o.selector, cutoffIso: o.startedAt };
+  const common = { window: o.window, selector: o.selector, cutoffIso: o.startedAt, ...(o.horizon ? { horizon: o.horizon } : {}) };
   if (o.set.kind === "repo") {
     // A pool of one: no run to resume, and the provider's own errors reach the caller (an empty repo stops it, as before U8).
     const population = await buildPopulation(o.provider, { repo: o.set.repo, ...common, ...(o.signal ? { signal: o.signal } : {}) });
@@ -311,7 +313,7 @@ export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
 }
 
 /** One repo's checked listing; null when it answers 404/403 and the set is a registered list (the caller probes it). */
-async function listOne(o: PooledFreezeOptions, repo: string, at: { window: AuditWindow; selector: Selector; cutoffIso: string }): Promise<ListChangesResult | null> {
+async function listOne(o: PooledFreezeOptions, repo: string, at: { window: AuditWindow; selector: Selector; cutoffIso: string; horizon?: ReviewHorizon }): Promise<ListChangesResult | null> {
   let listed: ListChangesResult;
   try {
     listed = await listRepoChanges(o.provider, { repo, ...at, ...(o.signal ? { signal: o.signal } : {}) });

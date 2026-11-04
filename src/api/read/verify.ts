@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.js";
 import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
+import { auditVerdict, certificateFor, isCertified, verdictExitCode, verdictWithholdings, type Withholding } from "../../core/verdict.js";
+import { accessShortfall } from "../access.js";
 import { verifyAudit, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
@@ -11,30 +13,34 @@ import { AuditError } from "../errors.js";
 import { readCheckpoints } from "./checkpoints.js";
 import { readError } from "./errors.js";
 import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
-import { logPublicKey } from "../translog.js";
+import { verifierLogKeys } from "../translog.js";
 import { statusLine } from "./status.js";
 
 export interface VerifyOptions {
   /** Another window than the configured one. */
   window?: string;
   offline?: boolean;
-  logKey?: string;
+  /**
+   * The verifier's transparency-log keys, `<log url>=<pem file>` each (`--log-key`, repeatable; pass-2 review #6):
+   * a key counts only for entries of exactly that log, and never for a log pr-rla pins (the pinned key wins).
+   */
+  logKey?: readonly string[];
   beaconFile?: string;
   /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
   tsaTrust?: string[];
 }
 
-/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (U8). The read side imports nothing of src/cli. */
-export function verdictExitCode(verdict: VerifyReport["verdict"]): 0 | 1 | 6 {
-  return verdict === "VERIFIED" ? 0 : verdict === "INCOMPLETE" ? 6 : 1;
-}
+/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. The one map, src/core/verdict.ts. */
+export { verdictExitCode } from "../../core/verdict.js";
 
 /** The seven checks (core/verify.ts) plus what the certificate prints around them. */
 export interface VerifyResult extends VerifyReport {
   /** What `pr-rla verify` exits with for this verdict: 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (nothing failed, but not a verification). */
   exitCode: 0 | 1 | 6;
-  /** The certificate line, when the audit has draws. */
+  /** The certificate line, when the audit has draws: CERTIFIED only when `certified` (never on a verdict other than VERIFIED). */
   statusLine: string | null;
+  /** `isCertified(certificate)` (src/core/verdict.ts): the only "certified" a client may show; `status.sequence.state` is the SPRT's raw state. */
+  certified: boolean;
   /** Registered plugins that run with the verifier's environment and files (`PLUGIN TRUST: full`). */
   fullTrustPlugins: { name: string; version: string | null }[];
   /** The pr-rla release that verified. */
@@ -51,6 +57,8 @@ export interface VerifyResult extends VerifyReport {
 /** `verify` (FR3.1): a third party's check of the seven audit properties. Reads only; offline skips the population rebuild and every fetch. */
 export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise<VerifyResult> {
   const { config, paths } = configFor(ctx, opts.window);
+  // The verifier's own log keys, read and checked before anything else (a malformed --log-key is a usage error).
+  const logKeys = verifierLogKeys(ctx, opts.logKey);
   const registration = readRegistration(paths);
   const manifest = existsSync(paths.manifest) ? readManifest(paths) : null;
   const commitment = existsSync(paths.commitment) ? readCommitment(paths) : null;
@@ -112,19 +120,27 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
           }
         }, "the beacon relays did not give the round");
       },
-      logKey: (url) => logPublicKey(ctx, config, url, opts.logKey, !!opts.offline),
+      logKey: async (url) => logKeys.lookup(url),
       trustBundle: trustFor(ctx, opts.tsaTrust),
       ...(loaded ? { providerIdentity: loaded } : {}),
     },
   );
   if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);
+  // Time round B: reads refused to a provider or ledger that ran without its credential are not established (src/api/access.ts).
+  const actx = auditContextFor(ctx);
+  noteAccess(report, [
+    ...(provider ? [{ n: 5, w: accessShortfall(actx, `provider:${provider.name}`, `provider ${provider.name}`) }] : []),
+    ...(ledger ? [{ n: 7, w: accessShortfall(actx, `ledger:${ledger.name}`, `ledger ${ledger.name}`) }] : []),
+  ]);
+  if (logKeys.ignored.length) report.checks[0]?.details.push(...logKeys.ignored);
   const reg = registration.record;
   return {
     ...report,
-    statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }) : null,
+    statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }, report.certificate ?? undefined) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
     exitCode: verdictExitCode(report.verdict),
+    certified: isCertified(report.certificate),
     ...(errors.length ? { untrusted: { errors } } : {}),
   };
 }
@@ -141,6 +157,27 @@ function withProgress(ctx: ApiContext, provider: ScmProvider): ScmProvider {
       return r;
     },
   });
+}
+
+/**
+ * A check whose reads were refused to a plugin running without its credential (src/api/access.ts) is INCOMPLETE, even
+ * where those reads made it FAIL (a 404 to an anonymous read is not a deletion): the verdict, `ok`, the exit code and the
+ * certificate follow (src/core/verdict.ts). The FAIL lines stay in the details.
+ */
+function noteAccess(report: VerifyReport, found: { n: number; w: Withholding | null }[]): void {
+  const unread: Withholding[] = [];
+  for (const { n, w } of found) {
+    const c = report.checks.find((x) => x.n === n);
+    if (!w || !c) continue;
+    unread.push(w);
+    c.details.unshift(`INCOMPLETE ${w.reason}`);
+    c.summary = c.status === "FAIL" ? "not established: read without its credential (its FAIL findings below may be the refused reads)" : `${c.summary} · not established: read without its credential`;
+    c.status = "INCOMPLETE";
+  }
+  if (!unread.length) return;
+  report.verdict = auditVerdict(report.checks);
+  report.ok = report.verdict === "VERIFIED";
+  if (report.status) report.certificate = certificateFor(report.status.sequence.state, report.status.refusal, verdictWithholdings(report.checks), unread);
 }
 
 /**

@@ -113,7 +113,9 @@ describe("an isolated external provider freezes a pool through the plugin host (
     // listingVisibility crossed the host: the private and internal visibilities are proven complete, not INCOMPLETE.
     expect(c5.details).toContain("private repositories under acme-org: listed completely (synthetic: every repository is public)");
     expect(m.repoListing!.identity).toBe("synthetic");
-    expect(report.verdict).toBe("VERIFIED");
+    // Nothing fails; before sampling, and on self-asserted times (no timestamp authority), it is not a verification (time round B).
+    expect(report.checks.filter((c) => c.status === "FAIL")).toEqual([]);
+    expect(report.verdict).toBe("INCOMPLETE");
     // describeRepo crosses the host too, and a RepoUnavailableError keeps its code and status over IPC.
     const hosted = await providerFor(at("2026-10-20T13:00:00Z"), configFor(at("2026-10-20T13:00:00Z")).config);
     expect(await hosted.describeRepo!({ repo: "acme-org/svc-03" })).toMatchObject({ repo: "acme-org/svc-03", id: "503" });

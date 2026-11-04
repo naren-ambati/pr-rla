@@ -22,13 +22,13 @@ export function timestampingFor(config: PrRlaConfig, bundle: TrustBundle): Times
   return { authorities: [...authorities], minTokens, toleranceSeconds: TOLERANCE_SECONDS, defaultAccuracySeconds: DEFAULT_ACCURACY_SECONDS, bundle: bundle.version };
 }
 
-/** A v1 log entry's integratedTime, if its SET verifies under a key pinned in the package (status and register take no --log-key). */
+/** A v1 log entry's integratedTime, if its SET verifies under a key pinned in the package (status and register take no --log-key; the pinned operator is Sigstore). */
 export async function logBound(ctx: ApiContext, config: PrRlaConfig, signed: SignedRecord<unknown>): Promise<number | null> {
   const log = signed.log;
   if (!log || "apiVersion" in log) return null;
   const key = await logPublicKey(ctx, config, log.logUrl, undefined, true).catch(() => null);
   if (!key) return null;
-  return verifyLoggedEntry(log as LoggedEntry, signed, key).ok ? log.integratedTime : null;
+  return verifyLoggedEntry(log as LoggedEntry, signed, key.publicKeyPem).ok ? log.integratedTime : null;
 }
 
 /** Offline assessment of a v2 record's stored evidence (for register/freeze output and status). */

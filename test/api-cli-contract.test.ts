@@ -71,7 +71,7 @@ describe("errors: a plain sentence and the next step on stderr; with --json, the
     const c = { ...ctxIn(dir), sleep: async () => {} };
     expect(await cli(c, "draw-context", "7", "--json")).toBe(1);
     const e = JSON.parse(c.stdout.join("\n")).error;
-    expect(e).toMatchObject({ code: "FAILED", message: expect.stringMatching(/^GitHub GET \/repos\/github\/gh-aw\/pulls\/42597: gave up after 7 attempts \(no network\)$/) });
+    expect(e).toMatchObject({ code: "FAILED", message: expect.stringMatching(/^GitHub GET \/repos\/github\/gh-aw\/pulls\/58625: gave up after 7 attempts \(no network\)$/) });
   });
 
   it("draw-context: exit 0 with the context, 1 on a refusal; record, sample and the other writers keep their codes", async () => {
@@ -148,7 +148,9 @@ describe("the writers keep master's exit codes (the review's differential flows,
       [["status", "--checkpoint"], 1],
       [["checkpoint"], 1],
       [["checkpoint", "--push"], 1],
-      [["verify", "--offline"], 0],
+      // Time round B: master exited 0 here. --offline skips check 5, and the recorded audit's times are self-asserted
+      // (no timestamp authority): INCOMPLETE, exit 6, never VERIFIED.
+      [["verify", "--offline"], 6],
     ];
     for (const [argv, code] of steps) expect(await cli(ctxIn(dir), ...argv), argv.join(" ")).toBe(code);
   });

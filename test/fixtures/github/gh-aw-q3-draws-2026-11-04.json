@@ -1,5 +1,5 @@
 {
- "description": "Real GitHub API responses for describeChange on 4 of the 36 changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid. Kept: 4 of the 36 recorded changes (draws 5, 7, 13, 31).",
+ "description": "Real GitHub API responses for describeChange on 4 of the 36 changes the issued draws of test/fixtures/audits/gh-aw-q3-recorded named before time round B bound its draws to the registration (2026-11-04; they are no longer drawn, and the audit keeps their descriptions for this replay) (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid. Kept: 4 of the 36 recorded changes (draws 5, 7, 13, 31 as they were then).",
  "source": "recorded",
  "recordedAt": "2026-11-04T04:50:30.823Z",
  "changes": [

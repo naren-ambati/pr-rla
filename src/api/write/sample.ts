@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished } from "../../beacon/drand.js";
-import { derivedRoundFor, manifestSha256, repoLabel, type DrawsFile } from "../../core/records.js";
+import { compareChangeIds, derivedRoundFor, drawBinding, manifestSha256, repoLabel, type DrawsFile } from "../../core/records.js";
 import { computeDraws, QUICKNET, unixToIso } from "../../core/seed.js";
 import { effectiveCap, zeroFailureStop } from "../../core/sprt.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
@@ -48,6 +48,8 @@ export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise
   const commitment = readCommitment(paths);
   if (manifestSha256(manifest) !== manifest.sha256) throw new AuditError("manifest hash does not match its contents");
   if (commitment.record.manifestSha256 !== manifest.sha256) throw new AuditError("manifest commitment names a different manifest");
+  // Draw indexes point into the change ids in canonical order (contracts.md §5): the manifest must list them so.
+  if (manifest.changes.some((c, i) => i > 0 && compareChangeIds(manifest.changes[i - 1]!.id, c.id) >= 0)) throw new AuditError("manifest changes are not sorted by id (or one is listed twice): the draws cannot be taken from it");
   const p = reg.record.parameters;
   if (manifest.N < p.minPopulation) return { outcome: "below-minimum", N: manifest.N, minPopulation: p.minPopulation, line: `population ${manifest.N.toLocaleString("en-US")} < ${p.minPopulation}: review all ${manifest.N.toLocaleString("en-US")} instead` };
   const { round, publishesAt } = derivedRoundFor(reg);
@@ -63,7 +65,8 @@ export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise
   const prior = existsSync(paths.draws) ? readDraws(paths) : null;
   const issued = Math.min(cap, Math.max(opts.through ?? zeroFailureStop(p), prior?.issued ?? 0));
   const seen = new Set<string>();
-  const draws = computeDraws(beacon.randomness, manifest.sha256, manifest.N, cap).map((d) => {
+  // Schema v2: bound to the registration, so a re-freeze cannot move a draw; v1: to the manifest (records.ts drawBinding).
+  const draws = computeDraws(beacon.randomness, drawBinding(reg, manifest).hex, manifest.N, cap).map((d) => {
     const c = manifest.changes[d.index]!;
     const firstOccurrence = !seen.has(c.id);
     seen.add(c.id);

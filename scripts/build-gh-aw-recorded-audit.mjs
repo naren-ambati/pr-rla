@@ -8,7 +8,11 @@
 // Nothing leaves the machine. The draws' descriptions are added afterwards by
 // scripts/record-draw-descriptions.mjs, which reads GitHub (GETs only).
 //
-// Usage: npm run build && node scripts/build-gh-aw-recorded-audit.mjs <phase-1 population.json> [out-dir]
+// Usage: npm run build && node scripts/build-gh-aw-recorded-audit.mjs <phase-1 population.json> [out-dir] [protocol.md]
+//   protocol.md: the review protocol to register (default docs/design/review-protocol.example.md). Rebuilding the
+//   committed fixture passes its own review-protocol.md, which is the example as it was when the fixture was first built.
+//   The population can be the fixture's own changes.json as { listed: changes, selected: ids, limitations }: it holds
+//   exactly the changes the phase-1 dry run selected. (Time round B rebuilt the fixture that way: BUILD-NOTES.)
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -20,8 +24,8 @@ import { registerCommand } from "../dist/commands/register.js";
 import { sampleCommand } from "../dist/commands/sample.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const [populationFile, outArg] = process.argv.slice(2);
-if (!populationFile) throw new Error("usage: build-gh-aw-recorded-audit.mjs <phase-1 population.json> [out-dir]");
+const [populationFile, outArg, protocolArg] = process.argv.slice(2);
+if (!populationFile) throw new Error("usage: build-gh-aw-recorded-audit.mjs <phase-1 population.json> [out-dir] [protocol.md]");
 const out = resolve(outArg ?? join(here, "..", "test", "fixtures", "audits", "gh-aw-q3-recorded"));
 const pop = JSON.parse(readFileSync(populationFile, "utf8"));
 const selected = new Set(pop.selected);
@@ -29,7 +33,7 @@ const changes = pop.listed.filter((c) => selected.has(c.id));
 if (changes.length !== 1589) throw new Error(`expected the 1,589 changes of the phase-1 stratum, found ${changes.length}`);
 
 const work = mkdtempSync(join(tmpdir(), "prrla-gh-aw-"));
-const protocol = readFileSync(join(here, "..", "docs", "design", "review-protocol.example.md"), "utf8");
+const protocol = readFileSync(protocolArg ? resolve(protocolArg) : join(here, "..", "docs", "design", "review-protocol.example.md"), "utf8");
 writeFileSync(join(work, "review-protocol.md"), protocol);
 writeFileSync(
   join(work, "changes.json"),
@@ -104,7 +108,8 @@ writeFileSync(
     "A retrospective pr-rla audit of the Copilot stratum of https://github.com/github/gh-aw for 2026-07-01..2026-09-30, built offline by `scripts/build-gh-aw-recorded-audit.mjs`. It is a demonstration, not evidence: it was registered after the window closed.",
     "",
     "- **recorded**: the population in `changes.json` (the 1,589 changes the phase-1 read-only dry run of 2026-11-03T14:27Z to 14:49Z selected: Copilot PRs merged into main with no recorded human review and at most 200 changed lines), and the drand quicknet round 33,245,812 the draws come from.",
-    "- **recorded**: `changes.json` `descriptions`, the GitHub API's own responses for the issued draws (`scripts/record-draw-descriptions.mjs`, GETs only, 2026-11-04), with e-mail addresses replaced by `user-<hash>@example.invalid`.",
+    "- **recorded**: `changes.json` `descriptions`, the GitHub API's own responses for the issued draws (`scripts/record-draw-descriptions.mjs`, GETs only, 2026-11-04), with e-mail addresses replaced by `user-<hash>@example.invalid`. `recordedDescriptions` says when each was read: the first 36 are the changes the draws named before time round B bound the draws to the registration (kept for the replay in `test/fixtures/github/gh-aw-q3-draws-2026-11-04.json`), the next 36 the changes they name now.",
+    "- **rebuilt** in time round B (2026-11-04), when draws became bound to the registration: the same population, protocol and clock, a new signing key named inside the registration, so a new registration, manifest hash, commitment and draws (`node scripts/build-gh-aw-recorded-audit.mjs <population> <out> test/fixtures/audits/gh-aw-q3-recorded/review-protocol.md`, the population being this `changes.json` as `{ listed, selected, limitations }`).",
     "- **synthetic**: the registration, freeze and sample times (a fake clock: registered 2026-10-20T00:00Z, frozen 12:00Z, sampled 2026-10-21T00:00:05Z), the signing key (thrown away), and the review protocol (`docs/design/review-protocol.example.md` as it was when the fixture was built, before the U5 fix round added its base-commit rule for generated files). There are no verdicts: no one reviewed these changes for this fixture.",
     "- No timestamp authority and no transparency log: every time is self-asserted (TIMESTAMP NOT TAMPER-PROOF).",
     "",

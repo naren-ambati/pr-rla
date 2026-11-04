@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createPublicKey } from "node:crypto";
+import { computeDraws } from "../src/core/seed.js";
 import { loadOrCreateKey } from "../src/core/signing.js";
+import { recordedBeacon } from "./helpers/fixtures.js";
 
 /**
  * A single repo is a pool of one, and existing single-repo audits behave as master does (FR5.1; test-design U8; the
@@ -14,8 +17,92 @@ import { loadOrCreateKey } from "../src/core/signing.js";
  * registration, manifest and commitment bodies (signatures aside: ECDSA signatures are randomised).
  *
  * The fakes (test/helpers/fake-org.ts, fake-github.ts) are this checkout's, copied into the master tree, so both builds
- * read the same synthetic data. Fixture kind: synthetic. The intended differences for single repos are listed below.
+ * read the same synthetic data. Fixture kind: synthetic. The intended differences for single repos are listed below:
+ * U8's (a repo deleted after freeze is INCOMPLETE) and time round B's (`timeRoundB`, which rewrites master's results
+ * into what this branch must print, rule by rule, so that nothing else may differ).
  */
+type Dump = Record<string, Record<string, unknown>>;
+type Step = { value?: unknown; threw?: string; exitCode?: number | null; out: string[] };
+type VerifyValue = { ok: boolean; mode: string; checks: [number, string, string, string[]][] };
+
+/** Each scenario's record digests replaced by placeholders (the registration's differs by design, and the two after it hash it). */
+function placeholders(d: Dump): Dump {
+  let text = JSON.stringify(d);
+  for (const rec of Object.values(d)) {
+    for (const [f, tag] of [["audit/2026-q3/registration.json", "REG"], ["audit/2026-q3.manifest.json", "MANIFEST"], ["audit/2026-q3/manifest-commitment.json", "COMMITMENT"]] as const) {
+      const sha = (rec[f] as { sha256?: string } | null)?.sha256;
+      if (sha) text = text.split(sha).join(`<${tag}>`).split(sha.slice(0, 12)).join(`<${tag}12>`);
+    }
+  }
+  return JSON.parse(text) as Dump;
+}
+
+const UNPROVEN_R = "        INCOMPLETE R is derived from the registration time 2026-10-20T00:00:00Z, which no trusted evidence bounds (fewer than k timestamp authorities agree): it could have been written after round 33,245,812 was public, to choose R";
+const BELOW_MIN = (N: number) => `population ${N} < the registered minimum 150: the registration says review all ${N} instead (no draws)`;
+
+/**
+ * Time round B's single-repo changes, applied to master's (placeholder) dump; the result must be this branch's:
+ *  1. the registration names its signing key (`publicKeyPem`, inside the signed bytes), so its digest, and the
+ *     manifest's and commitment's after it, differ (placeholders hide that; the key is removed here and checked apart);
+ *  2. unproven times are not established: checks 1 and 2 WARN → INCOMPLETE ("not shown to precede R"), check 3 → INCOMPLETE
+ *     with the reason, the verdict INCOMPLETE (exit 6, `ok` false) instead of VERIFIED, and the INCOMPLETE line;
+ *  3. check 6 says why there are no draws when N is below the minimum;
+ *  4. the draws: bound to the registration, not the manifest (the draw lines are compared apart, against computeDraws).
+ */
+function timeRoundB(master: Dump): Dump {
+  const d = JSON.parse(JSON.stringify(master)) as Dump;
+  for (const [name, rec] of Object.entries(d)) {
+    const steps = rec.steps as Record<string, Step>;
+    const N = (rec["audit/2026-q3.manifest.json"] as { N?: number } | null)?.N ?? null;
+    const below = N !== null && N < 150;
+    const v = steps.verify!.value as VerifyValue;
+    v.ok = false;
+    for (const c of v.checks) {
+      if (c[0] === 1 && c[1] === "WARN") c[1] = "INCOMPLETE";
+      if (c[0] === 2 && c[1] === "WARN") [c[1], c[2]] = ["INCOMPLETE", c[2].replace(/, before R$/, ": not shown to precede R")];
+      if (c[0] === 3 && c[1] === "PASS") [c[1], c[2]] = ["INCOMPLETE", `${c[2]}, but the registration time it rests on is unproven`];
+      if (c[0] === 6 && below) c[2] = BELOW_MIN(N);
+    }
+    const vc = steps.verifyCommand!;
+    const failed = vc.value === 1;
+    vc.value = failed ? 1 : 6;
+    vc.out = vc.out.flatMap((l) => {
+      if (l.startsWith("1. WARN registration:")) return [l.replace("1. WARN", "1. INCOMPLETE")];
+      if (l.startsWith("2. WARN manifest before seed:")) return [l.replace("2. WARN", "2. INCOMPLETE").replace(/, before R$/, ": not shown to precede R")];
+      if (l.startsWith("3. PASS seed round:")) return [`${l.replace("3. PASS", "3. INCOMPLETE")}, but the registration time it rests on is unproven`, UNPROVEN_R];
+      if (l === "6. SKIP draws: not sampled yet" && below) return [`6. SKIP draws: ${BELOW_MIN(N)}`];
+      if (l.startsWith("registration after window close → ")) {
+        let x = l.replace(/, before R \(warn\)/, ": not shown to precede R (incomplete)").replace("first round ≥ 24 h after registration ✓", "first round ≥ 24 h after registration, but the registration time it rests on is unproven (incomplete)");
+        if (below) x = x.replace("not sampled yet (skipped)", `${BELOW_MIN(N)} (skipped)`);
+        return [x];
+      }
+      if (l === "VERIFIED") return ["INCOMPLETE: check 1 (registration), check 2 (manifest before seed), check 3 (seed round) could not be established; check 4 (BLS), check 6 (draws), check 7 (labels) skipped; nothing failed, but this is not a verification (exit 6)"];
+      return [l];
+    });
+    void name;
+  }
+  return d;
+}
+
+/** The draw lines of sample's and status's output, with what they draw replaced (compared against computeDraws apart). */
+function hideDraws(d: Dump): { dump: Dump; drawn: Record<string, string[]> } {
+  const out = JSON.parse(JSON.stringify(d)) as Dump;
+  const drawn: Record<string, string[]> = {};
+  for (const [name, rec] of Object.entries(out)) {
+    const steps = rec.steps as Record<string, Step>;
+    drawn[name] = [];
+    for (const k of ["sample", "status"]) {
+      steps[k]!.out = steps[k]!.out.map((l) => {
+        const m = /^  #\s+(\d+)  (\S+)  \S+$/.exec(l) ?? /^  blocking draw: #(\d+) (\S+) \S+$/.exec(l);
+        if (!m) return l;
+        if (k === "sample") drawn[name]!.push(m[2]!);
+        return l.replace(m[2]!, "<drawn>").replace(/https:\S+$/, "<url>");
+      });
+    }
+  }
+  return { dump: out, drawn };
+}
+
 const ROOT = join(__dirname, "..");
 const git = (...args: string[]) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
 
@@ -128,13 +215,34 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt"]);
       delete (before.github1!.steps as Record<string, unknown>).after;
       delete (now.github1!.steps as Record<string, unknown>).after;
-      // 2. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
-      expect(now).toEqual(before);
+      // 2. time round B: the registration names its signing key (the one the scenarios share), inside its signed bytes.
+      const pem = (k: string) => createPublicKey(readFileSync(k, "utf8")).export({ type: "spki", format: "pem" }).toString();
+      for (const rec of Object.values(now)) {
+        const reg = rec["audit/2026-q3/registration.json"] as { record: Record<string, unknown>; publicKeyPem: string };
+        expect(reg.record.publicKeyPem).toBe(pem(key));
+        expect(reg.publicKeyPem).toBe(pem(key));
+        delete reg.record.publicKeyPem;
+      }
+      // ... and the draws are bound to it: each build draws as its contract says (v1/master: the manifest's hash).
+      const a = hideDraws(placeholders(before));
+      const b = hideDraws(placeholders(now));
+      const ids = (dump: Dump, which: "manifest" | "registration") => {
+        const rec = dump.json400!;
+        const m = rec["audit/2026-q3.manifest.json"] as { sha256: string; changes: { id: string }[] };
+        const binding = which === "manifest" ? m.sha256 : (rec["audit/2026-q3/registration.json"] as { sha256: string }).sha256;
+        return computeDraws(recordedBeacon(33245812).randomness, binding, m.changes.length, 5).map((x) => m.changes[x.index]!.id);
+      };
+      expect(a.drawn.json400).toEqual(ids(before, "manifest"));
+      expect(b.drawn.json400).toEqual(ids(now, "registration"));
+      expect(b.drawn.json400).not.toEqual(a.drawn.json400);
+      // 3. nothing else: commands, their stdout, the records and verify's results are master's, after time round B's rules.
+      expect(b.dump).toEqual(timeRoundB(a.dump));
       // And the scenarios really ran: master's own outputs, checked here so that an empty dump cannot pass.
       const steps = (s: string) => now[s]!.steps as Record<string, { value?: unknown; threw?: string; out: string[] }>;
       expect(steps("json400").freeze!.value).toBe(0);
       expect((now.json400!["audit/2026-q3.manifest.json"] as { N: number }).N).toBe(400);
-      expect(steps("github1").verifyCommand!.out.at(-1)).toBe("VERIFIED");
+      expect(steps("github1").verifyCommand!.out.at(-1)).toMatch(/^INCOMPLETE: check 1 \(registration\)/);
+      expect((before.github1!.steps as Record<string, { out: string[] }>).verifyCommand!.out.at(-1)).toBe("VERIFIED");
       expect((now.github1!["audit/2026-q3.manifest.json"] as { repos: unknown[] }).repos).toEqual([{ repo: "acme/widgets", repoId: null, defaultBranch: "main", headSha: "29791b4e876b9ec17c0392c6208ab7f64bdcdbec" }]);
       expect(steps("githubEmpty").freeze!.threw).toBe("acme/widgets has no default branch");
       expect(steps("githubEmpty").statusBeforeFreeze!.threw).toBe("acme/widgets has no default branch");

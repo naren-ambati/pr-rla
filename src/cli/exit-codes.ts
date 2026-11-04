@@ -4,8 +4,10 @@
  * 2 ESCALATE or R not yet published · 3 population below the registered minimum ·
  * 4 stopped before finishing; re-running the printed command finishes it ·
  * 5 record written without enough timestamps (n of k, including 0 of k) ·
- * 6 verify INCOMPLETE: no check failed, but some of the population could not be rebuilt, or its completeness
- *   could not be established (gone or unreadable repos, a token that cannot be shown to see every private repo).
+ * 6 INCOMPLETE (src/core/verdict.ts): verify found no FAIL, but something was not established or a check was skipped
+ *   (a time not proven by k operators, a seed round resting on one, gone or unreadable repos, a token that cannot be
+ *   shown to see every private repo, --offline, before sample); status, when the SPRT reached its target but the
+ *   certificate is withheld for such a reason.
  */
 export const EXIT = {
   OK: 0,

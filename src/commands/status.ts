@@ -1,5 +1,5 @@
 import { AuditError } from "../api/errors.js";
-import { status, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
+import { status, statusExitCode, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
 import { checkpoint } from "../api/write/checkpoint.js";
 import { perRepoLines } from "../core/pooled-report.js";
 import { provenanceLabel } from "../core/presence/index.js";
@@ -8,7 +8,7 @@ import { checkpointCommand, checkpointExitCode } from "./checkpoint.js";
 import type { CommandContext } from "./context.js";
 
 // The status logic moved to the audit API in U5 (src/api/read/status.ts); re-exported for callers.
-export { statusLine, stratumChoices, timeStanding } from "../api/read/status.js";
+export { statusExitCode, statusLine, stratumChoices, timeStanding } from "../api/read/status.js";
 
 export interface StatusOptions {
   json?: boolean;
@@ -45,14 +45,6 @@ async function statusJsonWithCheckpoint(ctx: CommandContext, opts: StatusOptions
   }
 }
 
-/** The exit code of a status result (contracts.md §7): 1 not registered, 2 ESCALATE, 3 below the minimum population. */
-export function statusExitCode(r: StatusResult): number {
-  if (r.phase === "unregistered") return 1;
-  if (r.phase !== "sampled" || !r.verdictsRead) return 0;
-  if (r.refusal) return 3;
-  return r.sequence.state === "ESCALATE" ? 2 : 0;
-}
-
 async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<number> {
   const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
   if (opts.json) {
@@ -77,7 +69,8 @@ export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): 
   for (const note of r.verdictNotes) ctx.out(`  ${note}`);
   if (r.belowMinimum.length) ctx.out(`  ${r.belowMinimum.length} counted verdict(s) are below the registered ${provenanceLabel(r.minProvenance)} provenance; verify check 7 will FAIL them (draws ${r.belowMinimum.map((d) => `#${d}`).join(", ")})`);
   if (r.unsigned.length) ctx.out(`  ${r.unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${r.unsigned.map((d) => `#${d}`).join(", ")})`);
-  if (r.checkpointAdvised) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
+  for (const w of r.certificate.withheld) ctx.out(`  ${r.certificate.state === "INCOMPLETE" ? "not established" : "certificate withheld"} (${w.verdict}): ${w.reason}`);
+  if (r.checkpointAdvised) ctx.out(`  ${r.certificate.state === "CERTIFIED" ? "CERTIFIED" : "target reached"}: run "pr-rla checkpoint" and commit it to anchor the verdict history`);
   if (r.perRepo) for (const l of perRepoLines(r.perRepo)) ctx.out(l);
   ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
 }

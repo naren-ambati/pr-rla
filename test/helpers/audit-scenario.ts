@@ -58,6 +58,8 @@ export interface Scenario {
    * `verify --log-key`. The audit repo names the log URL (for --submit) but never supplies the key verify trusts.
    */
   logKeyFile: string | null;
+  /** The same key as `verify --log-key` takes it since time round B: `[<log url>=<file>]`, scoped to the mock log ([] without one). */
+  logKeyArgs: string[];
 }
 
 /**
@@ -75,9 +77,11 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   writeFileSync(join(dir, "changes.json"), JSON.stringify({ schema: "pr-rla/changes/v1", repo: REPO, defaultBranch: "main", changes: opts.changes }, null, 1));
   writeFileSync(join(dir, "review-protocol.md"), "# Protocol\nA change fails if it introduces a user-visible bug or a security weakness.\n");
   let logKeyFile: string | null = null;
+  let logKeyArgs: string[] = [];
   if (opts.log) {
     logKeyFile = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "mock-rekor.pub");
     writeFileSync(logKeyFile, opts.log.publicKeyPem);
+    logKeyArgs = [`${opts.log.url}=${logKeyFile}`];
   }
   writeFileSync(
     join(dir, ".pr-rla.yml"),
@@ -101,7 +105,7 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   const fetchImpl = opts.fetch ?? globalThis.fetch;
   const tsaTrust = opts.tsa?.server ? [opts.tsa.server.trust()] : [];
   const ctx = makeCtx(dir, clock, out, fetchImpl, tsaTrust);
-  return { dir, clock, out, ctx, git, fetch: fetchImpl, tsaTrust, logKeyFile };
+  return { dir, clock, out, ctx, git, fetch: fetchImpl, tsaTrust, logKeyFile, logKeyArgs };
 }
 
 function makeCtx(dir: string, clock: { now: number }, out: string[], fetchImpl: typeof fetch, tsaTrust: TrustBundleExtra[]): CommandContext {
@@ -131,5 +135,5 @@ export function cloneScenario(s: Scenario): Scenario {
   const out: string[] = [];
   const git = (...args: string[]) => execFileSync("git", [...GIT_TEST_CONFIG, ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const clock = { ...s.clock };
-  return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, logKeyFile: s.logKeyFile, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
+  return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, logKeyFile: s.logKeyFile, logKeyArgs: s.logKeyArgs, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
 }

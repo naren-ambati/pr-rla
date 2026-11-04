@@ -62,11 +62,34 @@ describe("claim D stopping rule (spec table)", () => {
     expect(r.escalateReason).toBe("target-unreachable");
   });
 
-  it("escalates at the cap", () => {
+  it("with a registered cap of 60, a fail every 15 draws escalates as soon as the target is out of reach (target-unreachable, not the cap)", () => {
     const seq = Array.from({ length: 200 }, (_, i) => (i % 15 === 7 ? "fail" : "pass")) as ("pass" | "fail")[];
     const r = evaluateSequence(seq, { ...D, cap: 60 });
     expect(r.state).toBe("ESCALATE");
-    expect(r.draws).toBeLessThanOrEqual(60);
+    expect(r.escalateReason).toBe("target-unreachable");
+    expect(r.draws).toBeLessThan(60);
+  });
+
+  it("escalates at the cap (cap-reached): the last draw the cap allows is a fail one pass short of the target", () => {
+    // Registered cap 36 = the zero-failure stop: 35 passes (LLR 2.981, within one pass of 2.996, so still reachable), then a fail.
+    const seq = [...Array(35).fill("pass"), "fail", ...Array(10).fill("pass")] as ("pass" | "fail")[];
+    const r = evaluateSequence(seq, { ...D, cap: 36 });
+    expect(r).toMatchObject({ state: "ESCALATE", escalateReason: "cap-reached", draws: 36, passes: 35, fails: 1 });
+    // One draw earlier the same sequence was still CONTINUE, and a pass at the cap certifies instead.
+    expect(evaluateSequence(seq.slice(0, 35), { ...D, cap: 36 }).state).toBe("CONTINUE");
+    expect(evaluateSequence(Array(36).fill("pass"), { ...D, cap: 36 }).state).toBe("CERTIFIED");
+  });
+
+  it("under the default cap (144) cap-reached cannot fire for claim D's parameters, so target-unreachable always comes first", () => {
+    // Reaching the cap without stopping needs LLR(cap-1) in [target - pass, target): below it, target-unreachable fired at
+    // cap-1; at or above it, the sequence certified. No split of the 143 draws before the cap lands there.
+    const s = scores(D);
+    const cap = effectiveCap(D);
+    const landing = Array.from({ length: cap }, (_, f) => (cap - 1 - f) * s.pass + f * s.fail).filter((llr) => llr >= s.target - s.pass && llr < s.target);
+    expect(landing).toEqual([]);
+    // And the cap-36 case above is one where it can: 35 passes land there.
+    expect(35 * s.pass).toBeGreaterThanOrEqual(s.target - s.pass);
+    expect(35 * s.pass).toBeLessThan(s.target);
   });
 
   it("rejects invalid parameters", () => {

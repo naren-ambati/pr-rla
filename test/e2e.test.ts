@@ -99,7 +99,9 @@ describe("an honest retrospective audit, end to end (json-file provider, mock ti
     expect(d.round).toBe(R);
     expect(d.issued).toBe(36);
     expect(d.draws).toHaveLength(144);
-    expect(d.draws.map((x) => x.index)).toEqual(computeDraws(recordedBeacon(R).randomness, m.sha256, 400, 144).map((x) => x.index));
+    // Time round B: schema v2 draws are bound to the registration's sha256, not the manifest's.
+    const reg = readJ<SignedRecord<unknown>>(honest, `${W}/registration.json`);
+    expect(d.draws.map((x) => x.index)).toEqual(computeDraws(recordedBeacon(R).randomness, reg.sha256, 400, 144).map((x) => x.index));
   });
 
   it("status: 36 passes certify claim D", async () => {
@@ -111,11 +113,12 @@ describe("an honest retrospective audit, end to end (json-file provider, mock ti
   it("verify: all seven checks pass, timestamps are tamper-evident", async () => {
     const s = cloneScenario(honest);
     // The verifier passes the log's key (--log-key); the audit repo only names the log's URL.
-    const report = await runVerify(s.ctx, { logKey: s.logKeyFile! });
+    const report = await runVerify(s.ctx, { logKey: s.logKeyArgs });
     expect(report.checks.map((c) => `${c.n}:${c.status}`)).toEqual(["1:PASS", "2:PASS", "3:PASS", "4:PASS", "5:PASS", "6:PASS", "7:PASS"]);
     expect(report.timestampTamperProof).toBe(true);
-    expect(report.checks[0]!.details.join("\n")).toMatch(/registration logged at .* \(SET and inclusion proof verified under the verifier's --log-key\)/);
-    expect(await verifyCommand(s.ctx, { logKey: s.logKeyFile! })).toBe(0);
+    // pass-2 review #6: the verifier's key counts for its own log only, under a neutral operator name, never "Sigstore".
+    expect(report.checks[0]!.details.join("\n")).toMatch(/registration logged at .* \(SET and inclusion proof verified under the verifier's --log-key for http:\/\/127\.0\.0\.1:\d+; operator log at 127\.0\.0\.1:\d+\)/);
+    expect(await verifyCommand(s.ctx, { logKey: s.logKeyArgs })).toBe(0);
     const text = s.out.join("\n");
     expect(text).toMatch(/registration after window close → RETROSPECTIVE \(a demonstration\) · manifest logged .* before R ✓ · R = 33,245,812: first round ≥ 24 h after registration ✓ · BLS ✓ · population 400\/400 match ✓ · 36\/36 draws reproduce ✓ · labels/);
     expect(text).toMatch(/VERIFIED$/);
@@ -184,7 +187,7 @@ describe("tamper fixtures: verify must FAIL", () => {
     const reg = readJ<SignedRecord<unknown> & { log: { integratedTime: number } }>(s, `${W}/registration.json`);
     reg.log.integratedTime -= 30 * 86400; // pretend it was registered before the window
     writeJ(s, `${W}/registration.json`, reg);
-    const report = await runVerify(s.ctx, { logKey: s.logKeyFile! });
+    const report = await runVerify(s.ctx, { logKey: s.logKeyArgs });
     expect(report.checks[0]!.status).toBe("FAIL");
     expect(report.checks[0]!.details.join(" ")).toMatch(/signedEntryTimestamp does not verify/);
   });
@@ -219,7 +222,7 @@ describe("tamper fixtures: verify must FAIL", () => {
 });
 
 describe("local-only registration (no transparency log)", () => {
-  it("verify passes with TIMESTAMP NOT TAMPER-PROOF", async () => {
+  it("verify is INCOMPLETE with TIMESTAMP NOT TAMPER-PROOF, and no certificate is printed (time round B)", async () => {
     const s = setupAuditRepo({ changes: makeChanges(400) });
     at(s, "2026-10-20T00:00:00Z");
     await registerCommand(s.ctx, {});
@@ -230,11 +233,21 @@ describe("local-only registration (no transparency log)", () => {
     await sampleCommand(s.ctx, {});
     await reviewDraws(s, 36);
     s.out.length = 0;
-    expect(await verifyCommand(s.ctx, {})).toBe(0);
+    // Before time round B this was VERIFIED, exit 0, and CERTIFIED: on times nothing but the signer's clock vouches for.
+    expect(await verifyCommand(s.ctx, {})).toBe(6);
     const text = s.out.join("\n");
-    expect(text).toMatch(/1\. WARN registration/);
+    expect(text).toMatch(/1\. INCOMPLETE registration/);
+    expect(text).toMatch(/2\. INCOMPLETE manifest before seed: manifest written \(signed time, unproven\) .*: not shown to precede R/);
+    expect(text).toMatch(/3\. INCOMPLETE seed round: R = 33,245,812: first round ≥ 24 h after registration, but the registration time it rests on is unproven/);
     expect(text).toMatch(/TIMESTAMP NOT TAMPER-PROOF/);
-    expect(text).toMatch(/VERIFIED$/);
+    expect(text).toMatch(/· target reached · CERTIFICATE WITHHELD \(verify check 1 \(registration\) incomplete; verify check 2 \(manifest before seed\) incomplete; verify check 3 \(seed round\) incomplete\) ·/);
+    expect(text).not.toMatch(/CERTIFIED \(risk|\nVERIFIED$/);
+    expect(s.out.at(-1)).toBe("INCOMPLETE: check 1 (registration), check 2 (manifest before seed), check 3 (seed round) could not be established; nothing failed, but this is not a verification (exit 6)");
+    // status says the same, and exits 6 with the reasons
+    s.out.length = 0;
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
+    expect(s.out).toContain("  certificate withheld (INCOMPLETE): registration time unproven (TIMESTAMP NOT TAMPER-PROOF)");
   });
 });
 
@@ -261,8 +274,9 @@ describe("status variants and refusals", () => {
     expect(s.out[1]).toMatch(/blocking draw: #37 /);
     await reviewDraws(s, 56, [once]);
     s.out.length = 0;
-    await statusCommand(s.ctx, {});
-    expect(s.out[0]).toMatch(/prefix 56\/56 · fails 1 .* CERTIFIED \(risk 5%\)/);
+    // The SPRT certifies at 56; with no timestamp authority the certificate is withheld (time round B), exit 6.
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/prefix 56\/56 · fails 1 .* target reached · CERTIFICATE WITHHELD \(registration time unproven/);
   });
 
   it("the prefix rule: a gap blocks later labels", async () => {

@@ -136,6 +136,24 @@ export interface BrokerStats {
   busyMs: number;
   /** Per host: attempts, how many carried credentials, and how many were GraphQL. */
   byHost: Map<string, { requests: number; authenticated: number; graphql: number }>;
+  /**
+   * Responses of 401, 403 or 404 (after redirects), by caller (time round B): with the caller's credential standing
+   * (`AuditContext.credentialStanding`) they tell "not there" from "not readable without the credential you withheld".
+   */
+  denied: DeniedRead[];
+  /** 2xx responses by caller: a caller with any is not wholly refused (src/api/access.ts). */
+  answered: Map<string, number>;
+}
+
+/** A read the server refused or did not show (HTTP 401, 403 or 404). */
+export interface DeniedRead {
+  pluginId: string;
+  status: 401 | 403 | 404;
+  method: string;
+  host: string;
+  path: string;
+  /** Whether the request carried a credential (an authorization or private-token header). */
+  authenticated: boolean;
 }
 
 export interface Broker {
@@ -269,7 +287,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   const log = deps.log ?? (() => {});
   const deadline = deps.tsaDeadlineMs ?? TSA_RETRY_DEADLINE_MS;
   const governor = new RateGovernor(p.budgets, now);
-  const stats: BrokerStats = { requests: 0, busyMs: 0, byHost: new Map() };
+  const stats: BrokerStats = { requests: 0, busyMs: 0, byHost: new Map(), denied: [], answered: new Map() };
 
   // Step 1.
   function checkHost(call: Call, url: URL): void {
@@ -413,6 +431,8 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         url = next;
         continue;
       }
+      if (res.status >= 200 && res.status < 300) stats.answered.set(call.pluginId, (stats.answered.get(call.pluginId) ?? 0) + 1);
+      if (res.status === 401 || res.status === 403 || res.status === 404) stats.denied.push({ pluginId: call.pluginId, status: res.status, method, host: url.host, path: url.pathname, authenticated: g.authenticated });
       return withUrl(res, url.href);
     }
   }

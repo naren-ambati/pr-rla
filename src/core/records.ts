@@ -167,6 +167,13 @@ export interface RegistrationRecordV2 {
   /** The pr-rla release that wrote the record. */
   prRlaVersion: string;
   /**
+   * The SPKI PEM of the P-256 key that signs this registration and the audit's commitment (time round B),
+   * inside the signed and time-stamped bytes, so the registration cannot be re-signed under another key.
+   * verify FAILs check 1 when the envelope's key is not this one. Absent only in registrations written
+   * before the field existed (test fixtures; nothing was released): verify then WARNs that it can be re-keyed.
+   */
+  publicKeyPem?: string;
+  /**
    * A `rule` registration only (U8): the repositories the rule matched when it was registered, by stable id, sorted by
    * repo. Freeze includes every one of them that still exists, whatever its archive state, visibility or name by then,
    * so nothing the auditee changes after registration takes a repository out of the pool. Absent in registrations
@@ -341,8 +348,41 @@ export function manifestSha256(m: Omit<Manifest, "sha256"> | Manifest | Omit<Man
   return hashCanonical(m as unknown as Record<string, unknown>, ["sha256"]);
 }
 
+/**
+ * The canonical order of change ids (contracts.md §5, "Draws"): ascending by UTF-16 code units, which is
+ * JavaScript's `<` on strings (equivalently: the ids' UTF-16BE encodings compared byte by byte). Ids are unique.
+ */
+export function compareChangeIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function sortChanges<T extends { id: string }>(changes: readonly T[]): T[] {
-  return [...changes].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return [...changes].sort((a, b) => compareChangeIds(a.id, b.id));
+}
+
+/** How an audit's draws are derived: what they are bound to besides the beacon's randomness. */
+export type DrawDerivation = "registration" | "manifest";
+
+/**
+ * The 32-byte value each draw hashes with the randomness (contracts.md §5, "Draws"), keyed on the signed
+ * registration's schema, never on a field of an unsigned file:
+ *  - schema v2: the registration's sha256. Nothing chosen at freeze can move a draw: the draws are a function of
+ *    the registration, the beacon and the population's sorted change ids, so freezing again (another frozenAt,
+ *    funnel, limitations, version or provider description) gives the same draws (time review finding 2);
+ *  - schema v1: the manifest's sha256, as v1 audits were drawn (read-only compatibility, NFR7).
+ */
+export function drawBinding(reg: SignedRecord<AnyRegistration>, manifest: Pick<AnyManifest, "sha256">): { hex: string; derivation: DrawDerivation } {
+  return isRegistrationV2(reg) ? { hex: reg.sha256, derivation: "registration" } : { hex: manifest.sha256, derivation: "manifest" };
+}
+
+/**
+ * Which reviews `unreviewed: no-review` sees (time round B). Schema v2: `landing`, the reviews submitted at or before
+ * the change's own mergedAt, so the population is a function of the registration and the SCM's record of each change
+ * at landing, and nothing done after landing or chosen at freeze changes N. Schema v1: `cutoff`, as of the freeze time,
+ * as v1 manifests were made. (`no-human-review` already counts only reviews submitted at or before mergedAt.)
+ */
+export function reviewHorizonFor(reg: SignedRecord<AnyRegistration> | null): "landing" | "cutoff" {
+  return reg && !isRegistrationV2(reg) ? "cutoff" : "landing";
 }
 
 export function beaconParams(): RegistrationRecord["beacon"] {

@@ -46,7 +46,11 @@ describe("verify on an untouched pooled freeze", () => {
     expect(c5.details).toContain("history walked from the frozen heads of 30 repo(s)");
     expect(report.checks.find((c) => c.n === 2)!.status).not.toBe("FAIL");
     expect(report.checks.find((c) => c.n === 2)!.details.join("\n")).toMatch(/commitment|frozen with pr-rla/);
-    expect(report.ok).toBe(true);
+    // Nothing fails. Frozen but not sampled, on self-asserted times: INCOMPLETE, not ok (time round B; U8 asserted ok here).
+    expect(report.checks.filter((c) => c.status === "FAIL")).toEqual([]);
+    expect(report.checks.find((c) => c.n === 6)!.status).toBe("SKIP");
+    expect(report.verdict).toBe("INCOMPLETE");
+    expect(report.ok).toBe(false);
   });
 
   it("offline, check 5 is skipped and the rest still run", async () => {

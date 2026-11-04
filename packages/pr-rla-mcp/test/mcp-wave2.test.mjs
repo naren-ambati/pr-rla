@@ -145,7 +145,8 @@ describe("a pooled audit through the MCP tools (bolt/u8-org-pooled-freeze × bol
     const out = [];
     const code = await verifyCommand(nodeContext({ cwd: dir, env: { PR_RLA_APPROVALS_FILE: process.env.PR_RLA_APPROVALS_FILE }, nowMs: () => T("2026-10-21T03:00:00Z"), fetch: noNet, out: (l) => out.push(l), err: () => {} }), {});
     assert.equal(code, 6);
-    assert.match(out.at(-1), /^INCOMPLETE: check 5 \(population\) could not be completed; nothing failed, but this is not a verification \(exit 6\)$/);
+    // Time round B: the INCOMPLETE line names every check not established (here also the self-asserted times) and every skip.
+    assert.match(out.at(-1), /^INCOMPLETE: (check \d \([a-z ]+\), )*check 5 \(population\)(, check \d \([a-z ]+\))* could not be established(; .* skipped)?; nothing failed, but this is not a verification \(exit 6\)$/);
   });
 
   it("draw_context serves a pooled draw: its repo-qualified change, the provider's description in the fence", async () => {

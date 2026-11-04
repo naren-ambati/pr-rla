@@ -35,7 +35,8 @@ export async function auditList(ctx: ApiContext): Promise<{ dir: string; windows
     if (r.phase === "frozen" || r.phase === "sampled") s.N = r.N;
     if (r.phase === "sampled") {
       s.drawsIssued = r.drawsIssued;
-      if (r.verdictsRead) s.certified = r.sequence.state === "CERTIFIED";
+      // The certificate rule status prints (src/core/verdict.ts): not certified while something withholds it.
+      if (r.verdictsRead) s.certified = r.certified;
     }
     windows.push(s);
   }

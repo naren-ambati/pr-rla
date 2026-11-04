@@ -178,6 +178,10 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     verdicts,
     prRlaVersion: PR_RLA_VERSION,
   };
+  // Time round B: the population must be fixed by the registration and the SCM's record at landing. Labels are not:
+  // freeze reads them as they are then, so whoever can relabel before the freeze can change N, and so the draws.
+  if (config.selector.labels.length)
+    ctx.err(`note: the stratum selects by labels (${config.selector.labels.join(", ")}), which can change after a change lands; freeze reads them as they are then, so whoever can relabel before the freeze can change N and the draws. A stratum without labels cannot be moved that way`);
   if (!opts.dryRun && existsSync(paths.registration) && !opts.force)
     throw new AuditError(`${paths.registration} exists. A new registration replaces the selector; use --force only if the old one was never shown to anyone.`);
   const url = opts.submit && !opts.dryRun ? submitUrl(config, opts.rekorUrl) : null;
@@ -187,7 +191,8 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
   }
   // A dry run writes nothing, not even a key, and asks no authority: it signs with a throwaway in-memory key.
   const key = opts.dryRun ? ephemeralKey() : loadOrCreateKey(resolve(config.dir, opts.key ?? config.signingKey));
-  let signed: SignedRecord<RegistrationRecordV2> = signRecord(record, key);
+  // The signing key goes inside the signed and time-stamped bytes, so the registration cannot be re-keyed (time round B).
+  let signed: SignedRecord<RegistrationRecordV2> = signRecord({ ...record, publicKeyPem: key.publicKeyPem }, key);
   const r = derivedRoundFor(signed);
   const claimed: AuditMode = Date.parse(record.registeredAt) < Date.parse(record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
   const plan: RegistrationPlan = {

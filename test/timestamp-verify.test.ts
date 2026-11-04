@@ -6,6 +6,7 @@ import { rootCertificates } from "node:tls";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../src/core/canonical.js";
+import { verifyAudit } from "../src/core/verify.js";
 import { beaconParams, derivedRoundFor, effectiveTime, type LoggedEntry, type RegistrationRecord, type RegistrationRecordV2, type SignedRecord, type TimestampEvidence } from "../src/core/records.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, type TrustBundle } from "../src/timestamp/bundle.js";
 import { parseTimeStampResp } from "../src/timestamp/client.js";
@@ -217,6 +218,12 @@ describe("k-of-n by operator", () => {
     const v1: SignedRecord<RegistrationRecord> = { ...(reg({ log }) as unknown as SignedRecord<RegistrationRecord>), record: { ...(reg({}).record as unknown as RegistrationRecord), schema: "pr-rla/registration/v1" }, timestamps: [] };
     expect(derivedRoundFor(v1).round).toBe(33245912);
     expect(effectiveTime(v1, v1.record.registeredAt).source).toBe("log");
+    // pass-2 review #2: that is still the v1 contract (every verifier derives the same R), but this entry's SET was never
+    // verified, so the time R rests on is not evidence: verify's check 3 is INCOMPLETE, never PASS (time round B).
+    const report = await verifyAudit({ registration: v1, manifest: null, commitment: null, draws: null, currentProtocolSha256: null }, { provider: null, ledger: null, beacon: async () => null, logKey: async () => null, trustBundle: bundle });
+    expect(report.derivedRound).toBe(33245912);
+    expect(report.checks[2]).toMatchObject({ n: 3, status: "INCOMPLETE", summary: "R = 33,245,912: first round ≥ 24 h after registration, but the registration time it rests on is unproven" });
+    expect(report.verdict).not.toBe("VERIFIED");
   });
 });
 

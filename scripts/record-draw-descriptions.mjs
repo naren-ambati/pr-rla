@@ -7,22 +7,35 @@
 // example domains are kept).
 //
 // The recording keeps the exchanges of the changes named by --keep (all of them without it).
+// --only <id,...> describes only those changes of the issued draws. --merge keeps the descriptions changes.json
+// already holds (recorded earlier, for other draws) and adds or replaces the ones recorded now; without it,
+// changes.json holds exactly the ones recorded now.
 //
-// Usage: GITHUB_TOKEN=$(gh auth token) node scripts/record-draw-descriptions.mjs <audit dir> <recording.json> [--keep <id,id,...>]
+// Usage: GITHUB_TOKEN=$(gh auth token) node scripts/record-draw-descriptions.mjs <audit dir> <recording.json> [--keep <id,id,...>] [--only <id,id,...>] [--merge]
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createAuditContext, openProvider } from "../dist/api/context.js";
 import { changeDescriptionProblems } from "../dist/sdk/provider.js";
 
-const [dirArg, outArg, keepFlag, keepArg] = process.argv.slice(2);
-if (!dirArg || !outArg || (keepFlag !== undefined && (keepFlag !== "--keep" || !keepArg))) throw new Error("usage: record-draw-descriptions.mjs <audit dir> <recording.json> [--keep <id,id,...>]");
-const keep = keepArg ? new Set(keepArg.split(",")) : null;
+const [dirArg, outArg, ...flags] = process.argv.slice(2);
+const flag = (name) => {
+  const i = flags.indexOf(name);
+  if (i < 0) return null;
+  if (!flags[i + 1] || flags[i + 1].startsWith("--")) throw new Error(`${name} needs a comma-separated list of change ids`);
+  return new Set(flags[i + 1].split(","));
+};
+if (!dirArg || !outArg || flags.some((f, i) => f.startsWith("--") && !["--keep", "--only", "--merge"].includes(f) && !(i > 0 && ["--keep", "--only"].includes(flags[i - 1]))))
+  throw new Error("usage: record-draw-descriptions.mjs <audit dir> <recording.json> [--keep <id,id,...>] [--only <id,id,...>] [--merge]");
+const keep = flag("--keep");
+const only = flag("--only");
+const merge = flags.includes("--merge");
 const dir = resolve(dirArg);
 const draws = JSON.parse(readFileSync(join(dir, "audit", "2026-q3", "draws.json"), "utf8"));
 const manifest = JSON.parse(readFileSync(join(dir, "audit", "2026-q3.manifest.json"), "utf8"));
 const issued = draws.draws.filter((d) => d.draw <= draws.issued);
-const ids = [...new Set(issued.map((d) => d.changeId))];
+const ids = [...new Set(issued.map((d) => d.changeId))].filter((id) => !only || only.has(id));
+if (only && ids.length !== only.size) throw new Error(`--only names changes that no issued draw names: ${[...only].filter((id) => !ids.includes(id)).join(", ")}`);
 const byId = new Map(manifest.changes.map((c) => [c.id, c]));
 
 const KEEP = /(noreply\.github\.com|@example\.(com|org|net|invalid))$/i;
@@ -73,14 +86,16 @@ for (const id of ids) {
 const kept = keep ? ids.filter((id) => keep.has(id)) : ids;
 const changesFile = join(dir, "changes.json");
 const changes = JSON.parse(readFileSync(changesFile, "utf8"));
-changes.descriptions = descriptions;
-changes.recordedDescriptions = `GitHub API, read-only (pr-rla's broker in read-only mode, GETs only), ${recordedAt.toISOString()}: describeChange for the ${ids.length} changes of the ${draws.issued} issued draws; e-mail addresses in recorded text replaced by user-<hash>@example.invalid`;
+const distinct = new Set(issued.map((d) => d.changeId)).size;
+const now = `GitHub API, read-only (pr-rla's broker in read-only mode, GETs only), ${recordedAt.toISOString()}: describeChange for ${only ? `${ids.length} of the ${distinct}` : `the ${distinct}`} changes of the ${draws.issued} issued draws; e-mail addresses in recorded text replaced by user-<hash>@example.invalid`;
+changes.descriptions = merge ? { ...(changes.descriptions ?? {}), ...descriptions } : descriptions;
+changes.recordedDescriptions = merge && changes.recordedDescriptions ? `${changes.recordedDescriptions}. Then: ${now}` : now;
 writeFileSync(changesFile, JSON.stringify(changes));
 writeFileSync(
   resolve(outArg),
   JSON.stringify(
     {
-      description: `Real GitHub API responses for describeChange on ${keep ? `${kept.length} of the ${ids.length}` : `the ${ids.length}`} changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid.${keep ? ` Kept: ${kept.length} of the ${ids.length} recorded changes (draws ${issued.filter((d) => keep.has(d.changeId)).map((d) => d.draw).join(", ")}).` : ""}`,
+      description: `Real GitHub API responses for describeChange on ${keep || only ? `${kept.length} of the ${distinct}` : `the ${ids.length}`} changes of the issued draws of test/fixtures/audits/gh-aw-q3-recorded (github/gh-aw, Q3 2026 Copilot stratum), recorded read-only. Trimmed to the fields pr-rla reads; e-mail addresses in recorded text replaced by user-<hash>@example.invalid.${keep ? ` Kept: ${kept.length} of the ${ids.length} changes recorded in this run (draws ${issued.filter((d) => keep.has(d.changeId)).map((d) => d.draw).join(", ")}).` : ""}`,
       source: "recorded",
       recordedAt: recordedAt.toISOString(),
       changes: kept,

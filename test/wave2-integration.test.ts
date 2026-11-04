@@ -226,7 +226,10 @@ describe("the ledger index anchor with pooled draws (bolt/u8-org-pooled-freeze �
     expect(c5.status).toBe("PASS");
     expect(c7.status).not.toBe("FAIL");
     expect(c7.details.join("\n")).not.toMatch(/ledger-index|draw → issue/);
-    expect(r.verdict).toBe("VERIFIED");
+    // Time round B: the pool's times are self-asserted (no timestamp authority), so checks 1–3 are INCOMPLETE and the
+    // verdict is INCOMPLETE; every other check passes.
+    expect(r.checks.filter((c) => c.status === "INCOMPLETE" || c.status === "SKIP" || c.status === "FAIL").map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE"]);
+    expect(r.verdict).toBe("INCOMPLETE");
   });
 
   it("an index edited across repos FAILs check 7 even while a gone repo makes check 5 INCOMPLETE: the verdict is FAILED, exit 1", async () => {
