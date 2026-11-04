@@ -1,0 +1,92 @@
+{
+ "description": "Public microsoft/vscode issue timeline(s) #345779, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. A maintainer applied bug once (later labels are other labels): mapped to pass, a clean first verdict, PASS.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "first-label",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "microsoft/vscode",
+  "labels": {
+   "pass": "bug",
+   "fail": "feature-request"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/microsoft/vscode",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "bug",
+    "id": "256129993"
+   },
+   "fail": {
+    "name": "feature-request",
+    "id": "272689392"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:microsoft/vscode#345779",
+    "number": 345779,
+    "id": "I_kwDOAn8RLM8AAAABcGVcZw",
+    "url": "https://github.com/microsoft/vscode/issues/345779",
+    "createdAt": "2026-11-03T10:24:27Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 1,
+    "changeId": "github:microsoft/vscode#345779",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "ulugbekna",
+    "recordedAt": "2026-11-03T10:24:29Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "16353531",
+     "viaApp": null,
+     "eventId": "35006984985"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "findings": [],
+   "warnings": [],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "35006984985",
+    "at": "2026-11-03T10:24:29Z",
+    "actor": {
+     "login": "ulugbekna",
+     "kind": "human",
+     "id": "16353531"
+    },
+    "action": "add",
+    "label": "bug",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/bug","bodySha256":null,"status":200,"headers":{},"response":{"id":256129993,"node_id":"MDU6TGFiZWwyNTYxMjk5OTM=","name":"bug"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/feature-request","bodySha256":null,"status":200,"headers":{},"response":{"id":272689392,"node_id":"MDU6TGFiZWwyNzI2ODkzOTI=","name":"feature-request"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345779","bodySha256":null,"status":200,"headers":{},"response":{"number":345779,"node_id":"I_kwDOAn8RLM8AAAABcGVcZw","html_url":"https://github.com/microsoft/vscode/issues/345779","created_at":"2026-11-03T10:24:27Z","repository_url":"https://api.github.com/repos/microsoft/vscode","state":"closed","labels":[{"name":"bug"},{"name":"insiders-released"},{"name":"agents-window"},{"name":"sessions-list"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345779/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":35006984320,"event":"assigned","created_at":"2026-11-03T10:24:29Z","actor":{"login":"ulugbekna","id":16353531,"type":"User"},"performed_via_github_app":null},{"id":35006984985,"event":"labeled","created_at":"2026-11-03T10:24:29Z","actor":{"login":"ulugbekna","id":16353531,"type":"User"},"label":{"name":"bug"},"performed_via_github_app":null},{"id":35006985378,"event":"labeled","created_at":"2026-11-03T10:24:29Z","actor":{"login":"ulugbekna","id":16353531,"type":"User"},"label":{"name":"agents-window"},"performed_via_github_app":null},{"id":35006985749,"event":"labeled","created_at":"2026-11-03T10:24:30Z","actor":{"login":"ulugbekna","id":16353531,"type":"User"},"label":{"name":"sessions-list"},"performed_via_github_app":null},{"id":35015148438,"event":"closed","created_at":"2026-11-03T12:01:27Z","actor":{"login":"ulugbekna","id":16353531,"type":"User"},"performed_via_github_app":null},{"id":35015241647,"event":"labeled","created_at":"2026-11-03T12:02:34Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"label":{"name":"unreleased"},"performed_via_github_app":null},{"id":35015244919,"event":"milestoned","created_at":"2026-11-03T12:02:37Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"performed_via_github_app":null},{"id":35016379533,"event":"referenced","created_at":"2026-11-03T12:16:10Z","actor":{"login":"divyansh-1214","id":190655535,"type":"User"},"performed_via_github_app":null},{"id":35056810038,"event":"unlabeled","created_at":"2026-11-03T19:25:14Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"label":{"name":"unreleased"},"performed_via_github_app":null},{"id":35056811434,"event":"labeled","created_at":"2026-11-03T19:25:15Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"label":{"name":"insiders-released"},"performed_via_github_app":null},{"id":35060906789,"event":"demilestoned","created_at":"2026-11-03T20:14:33Z","actor":{"login":"ntrogh","id":1908215,"type":"User"},"performed_via_github_app":null},{"id":35060906859,"event":"milestoned","created_at":"2026-11-03T20:14:33Z","actor":{"login":"ntrogh","id":1908215,"type":"User"},"performed_via_github_app":null},{"id":35060957006,"event":"demilestoned","created_at":"2026-11-03T20:15:10Z","actor":{"login":"ntrogh","id":1908215,"type":"User"},"performed_via_github_app":null},{"id":35060957075,"event":"milestoned","created_at":"2026-11-03T20:15:10Z","actor":{"login":"ntrogh","id":1908215,"type":"User"},"performed_via_github_app":null}]}
+ ]
+}

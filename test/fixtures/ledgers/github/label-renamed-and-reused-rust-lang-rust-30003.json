@@ -1,0 +1,135 @@
+{
+ "description": "Public rust-lang/rust issue timeline(s) #30003, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. T-libs (id 211668062) was applied and removed in 2017, then renamed T-libs-api; a new label (id 2011781731) took the name T-libs. By name alone the old events look like the new label's; the id kept in the index tells them apart: FAIL. C-bug, applied after T-libs was removed, is mapped to fail: a WARN relabel.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "label-rename",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "rust-lang/rust",
+  "labels": {
+   "pass": "T-libs",
+   "fail": "C-bug"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/rust-lang/rust",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "T-libs",
+    "id": "211668062"
+   },
+   "fail": {
+    "name": "C-bug",
+    "id": "650731663"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:rust-lang/rust#30003",
+    "number": 30003,
+    "id": "MDU6SXNzdWUxMTg0MDc5NDY=",
+    "url": "https://github.com/rust-lang/rust/issues/30003",
+    "createdAt": "2015-11-23T15:41:52Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 1,
+    "changeId": "github:rust-lang/rust#30003",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "brson",
+    "recordedAt": "2017-05-04T16:51:21Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "147214",
+     "viaApp": null,
+     "eventId": "1069292152"
+    }
+   },
+   {
+    "draw": 1,
+    "changeId": "github:rust-lang/rust#30003",
+    "verdict": "fail",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "Mark-Simulacrum",
+    "recordedAt": "2017-07-24T18:08:40Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "5047365",
+     "viaApp": null,
+     "eventId": "1176625117"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": false,
+   "findings": [
+    "verdict label \"T-libs\" in rust-lang/rust is not the label the draws were published with (id 211668062, now 2011781731): it was renamed or removed, and a new label took its name"
+   ],
+   "warnings": [
+    "draw #1: relabel pass→fail; the first verdict (pass, 2017-05-04T16:51:21Z) counts"
+   ],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "1069292152",
+    "at": "2017-05-04T16:51:21Z",
+    "actor": {
+     "login": "brson",
+     "kind": "human",
+     "id": "147214"
+    },
+    "action": "add",
+    "label": "T-libs",
+    "draw": 1
+   },
+   {
+    "id": "1069292441",
+    "at": "2017-05-04T16:51:34Z",
+    "actor": {
+     "login": "brson",
+     "kind": "human",
+     "id": "147214"
+    },
+    "action": "remove",
+    "label": "T-libs",
+    "draw": 1
+   },
+   {
+    "id": "1176625117",
+    "at": "2017-07-24T18:08:40Z",
+    "actor": {
+     "login": "Mark-Simulacrum",
+     "kind": "human",
+     "id": "5047365"
+    },
+    "action": "add",
+    "label": "C-bug",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/T-libs","bodySha256":null,"status":200,"headers":{},"response":{"id":2011781731,"node_id":"MDU6TGFiZWwyMDExNzgxNzMx","name":"T-libs"}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/C-bug","bodySha256":null,"status":200,"headers":{},"response":{"id":650731663,"node_id":"MDU6TGFiZWw2NTA3MzE2NjM=","name":"C-bug"}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30003","bodySha256":null,"status":200,"headers":{},"response":{"number":30003,"node_id":"MDU6SXNzdWUxMTg0MDc5NDY=","html_url":"https://github.com/rust-lang/rust/issues/30003","created_at":"2015-11-23T15:41:52Z","repository_url":"https://api.github.com/repos/rust-lang/rust","state":"closed","labels":[{"name":"P-low"},{"name":"I-needs-decision"},{"name":"T-lang"},{"name":"C-bug"},{"name":"S-candidate-for-closing"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30003/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":1069291971,"event":"labeled","created_at":"2017-05-04T16:51:14Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"P-low"},"performed_via_github_app":null},{"id":1069292152,"event":"labeled","created_at":"2017-05-04T16:51:21Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-libs"},"performed_via_github_app":null},{"id":1069292393,"event":"labeled","created_at":"2017-05-04T16:51:31Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-lang"},"performed_via_github_app":null},{"id":1069292441,"event":"unlabeled","created_at":"2017-05-04T16:51:34Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-libs"},"performed_via_github_app":null},{"id":1069292691,"event":"labeled","created_at":"2017-05-04T16:51:45Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"I-needs-decision"},"performed_via_github_app":null},{"id":1176625117,"event":"labeled","created_at":"2017-07-24T18:08:40Z","actor":{"login":"Mark-Simulacrum","id":5047365,"type":"User"},"label":{"name":"C-bug"},"performed_via_github_app":null},{"id":2197887810,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"solson","id":26806,"type":"User"},"performed_via_github_app":null},{"id":2197887812,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"eddyb","id":77424,"type":"User"},"performed_via_github_app":null},{"id":2197887813,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"nikomatsakis","id":155238,"type":"User"},"performed_via_github_app":null},{"id":2197887815,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"joshtriplett","id":162737,"type":"User"},"performed_via_github_app":null},{"id":2197887817,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"pnkfelix","id":173127,"type":"User"},"performed_via_github_app":null},{"id":2197887818,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"aturon","id":709807,"type":"User"},"performed_via_github_app":null},{"id":2197887821,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"Centril","id":855702,"type":"User"},"performed_via_github_app":null},{"id":2197887822,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"huonw","id":1203825,"type":"User"},"performed_via_github_app":null},{"id":2197887823,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"cramertj","id":5963049,"type":"User"},"performed_via_github_app":null},{"id":2197887825,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"withoutboats","id":9063376,"type":"User"},"performed_via_github_app":null},{"id":23876581918,"event":"labeled","created_at":"2026-03-25T05:09:58Z","actor":{"login":"Enselic","id":115040,"type":"User"},"label":{"name":"S-candidate-for-closing"},"performed_via_github_app":null},{"id":23880553376,"event":"subscribed","created_at":"2026-03-25T07:56:31Z","actor":{"login":"hanna-kruppe","id":2311707,"type":"User"},"performed_via_github_app":null},{"id":28048920119,"event":"closed","created_at":"2026-07-16T03:31:26Z","actor":{"login":"Enselic","id":115040,"type":"User"},"performed_via_github_app":null}]}
+ ]
+}

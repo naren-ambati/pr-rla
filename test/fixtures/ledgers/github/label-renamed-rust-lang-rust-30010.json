@@ -1,0 +1,94 @@
+{
+ "description": "Public rust-lang/rust issue timeline(s) #30010, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. I-enhancement was applied in 2015 and later renamed C-enhancement. REST events still say I-enhancement, and the name no longer exists: FAIL.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "label-rename",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "rust-lang/rust",
+  "labels": {
+   "pass": "I-enhancement",
+   "fail": "C-bug"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/rust-lang/rust",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "I-enhancement",
+    "id": null
+   },
+   "fail": {
+    "name": "C-bug",
+    "id": "650731663"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:rust-lang/rust#30010",
+    "number": 30010,
+    "id": "MDU6SXNzdWUxMTg0NjI1NzU=",
+    "url": "https://github.com/rust-lang/rust/issues/30010",
+    "createdAt": "2015-11-23T20:12:37Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 1,
+    "changeId": "github:rust-lang/rust#30010",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "steveklabnik",
+    "recordedAt": "2015-11-23T20:13:53Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "27786",
+     "viaApp": null,
+     "eventId": "472504092"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": false,
+   "findings": [
+    "verdict label \"I-enhancement\" no longer exists in rust-lang/rust (deleted or renamed); a verdict under a deleted or renamed label cannot be checked"
+   ],
+   "warnings": [],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "472504092",
+    "at": "2015-11-23T20:13:53Z",
+    "actor": {
+     "login": "steveklabnik",
+     "kind": "human",
+     "id": "27786"
+    },
+    "action": "add",
+    "label": "I-enhancement",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/I-enhancement","bodySha256":null,"status":404,"headers":{},"response":{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/labels#get-a-label","status":"404"}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/C-bug","bodySha256":null,"status":200,"headers":{},"response":{"id":650731663,"node_id":"MDU6TGFiZWw2NTA3MzE2NjM=","name":"C-bug"}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30010","bodySha256":null,"status":200,"headers":{},"response":{"number":30010,"node_id":"MDU6SXNzdWUxMTg0NjI1NzU=","html_url":"https://github.com/rust-lang/rust/issues/30010","created_at":"2015-11-23T20:12:37Z","repository_url":"https://api.github.com/repos/rust-lang/rust","state":"closed","labels":[{"name":"C-enhancement"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30010/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":472503972,"event":"mentioned","created_at":"2015-11-23T20:13:46Z","actor":{"login":"alexcrichton","id":64996,"type":"User"},"performed_via_github_app":null},{"id":472503974,"event":"subscribed","created_at":"2015-11-23T20:13:46Z","actor":{"login":"alexcrichton","id":64996,"type":"User"},"performed_via_github_app":null},{"id":472504090,"event":"labeled","created_at":"2015-11-23T20:13:53Z","actor":{"login":"steveklabnik","id":27786,"type":"User"},"label":{"name":"A-build"},"performed_via_github_app":null},{"id":472504092,"event":"labeled","created_at":"2015-11-23T20:13:53Z","actor":{"login":"steveklabnik","id":27786,"type":"User"},"label":{"name":"I-enhancement"},"performed_via_github_app":null},{"id":472637431,"event":"closed","created_at":"2015-11-23T22:23:01Z","actor":{"login":"alexcrichton","id":64996,"type":"User"},"performed_via_github_app":null},{"id":1343689630,"event":"mentioned","created_at":"2017-11-15T19:16:52Z","actor":{"login":"alexcrichton","id":64996,"type":"User"},"performed_via_github_app":null},{"id":1343689632,"event":"subscribed","created_at":"2017-11-15T19:16:52Z","actor":{"login":"alexcrichton","id":64996,"type":"User"},"performed_via_github_app":null}]}
+ ]
+}

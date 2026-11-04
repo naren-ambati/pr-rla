@@ -1,0 +1,94 @@
+{
+ "description": "Public microsoft/vscode issue timeline(s) #345652, recorded read-only through github-issues with a token. Trimmed to the fields pr-rla reads; no request header recorded. The vs-code-engineering GitHub App applied unreleased. REST reports actor.type Bot and performed_via_github_app null: the bot rule, not the app field, keeps it from counting.",
+ "source": "recorded",
+ "tracker": "github",
+ "case": "app-applied",
+ "recordedAt": "2026-11-04T00:23:32.000Z",
+ "options": {
+  "repo": "microsoft/vscode",
+  "labels": {
+   "pass": "unreleased",
+   "fail": "insiders-released"
+  }
+ },
+ "index": {
+  "schema": "pr-rla/ledger-index/v1",
+  "ledger": "github-issues",
+  "tracker": "https://api.github.com/repos/microsoft/vscode",
+  "window": "recorded",
+  "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "registrationSha256": null,
+  "labels": {
+   "pass": {
+    "name": "unreleased",
+    "id": "2101828608"
+   },
+   "fail": {
+    "name": "insiders-released",
+    "id": "2101830183"
+   },
+   "draw": {
+    "name": "pr-rla:draw",
+    "id": null
+   }
+  },
+  "issues": [
+   {
+    "draw": 1,
+    "changeId": "github:microsoft/vscode#345652",
+    "number": 345652,
+    "id": "I_kwDOAn8RLM8AAAABb8pXdA",
+    "url": "https://github.com/microsoft/vscode/issues/345652",
+    "createdAt": "2026-11-02T20:35:22Z"
+   }
+  ],
+  "repeats": []
+ },
+ "observed": {
+  "verdicts": [
+   {
+    "draw": 1,
+    "changeId": "github:microsoft/vscode#345652",
+    "verdict": "pass",
+    "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "reviewer": "vs-code-engineering[bot]",
+    "recordedAt": "2026-11-03T20:03:50Z",
+    "provenance": {
+     "level": "account",
+     "source": "scm-label-event",
+     "actorId": "122617954",
+     "viaApp": null,
+     "eventId": "35060017599"
+    }
+   }
+  ],
+  "integrity": {
+   "ok": true,
+   "findings": [
+    "draw #1: unreleased applied by bot account vs-code-engineering[bot] (2026-11-03T20:03:50Z); not counted"
+   ],
+   "warnings": [],
+   "tamperTrail": true
+  },
+  "history": [
+   {
+    "id": "35060017599",
+    "at": "2026-11-03T20:03:50Z",
+    "actor": {
+     "login": "vs-code-engineering[bot]",
+     "kind": "bot",
+     "id": "122617954"
+    },
+    "action": "add",
+    "label": "unreleased",
+    "draw": 1
+   }
+  ]
+ },
+ "exchanges": [
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/unreleased","bodySha256":null,"status":200,"headers":{},"response":{"id":2101828608,"node_id":"MDU6TGFiZWwyMTAxODI4NjA4","name":"unreleased"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/insiders-released","bodySha256":null,"status":200,"headers":{},"response":{"id":2101830183,"node_id":"MDU6TGFiZWwyMTAxODMwMTgz","name":"insiders-released"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345652","bodySha256":null,"status":200,"headers":{},"response":{"number":345652,"node_id":"I_kwDOAn8RLM8AAAABb8pXdA","html_url":"https://github.com/microsoft/vscode/issues/345652","created_at":"2026-11-02T20:35:22Z","repository_url":"https://api.github.com/repos/microsoft/vscode","state":"closed","labels":[{"name":"bug"},{"name":"unreleased"},{"name":"inbox-one"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345652/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":34952758286,"event":"assigned","created_at":"2026-11-02T20:35:22Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35046707666,"event":"labeled","created_at":"2026-11-03T17:26:08Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"label":{"name":"bug"},"performed_via_github_app":null},{"id":35047121162,"event":"labeled","created_at":"2026-11-03T17:30:37Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"label":{"name":"inbox-one"},"performed_via_github_app":null},{"id":35059509249,"event":"milestoned","created_at":"2026-11-03T19:57:38Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35059902719,"event":"closed","created_at":"2026-11-03T20:02:27Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35060017599,"event":"labeled","created_at":"2026-11-03T20:03:50Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"label":{"name":"unreleased"},"performed_via_github_app":null},{"id":35062261322,"event":"referenced","created_at":"2026-11-03T20:31:04Z","actor":{"login":"wingwkyuen","id":1064514,"type":"User"},"performed_via_github_app":null}]}
+ ]
+}
