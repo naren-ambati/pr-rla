@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { EXIT } from "../src/cli/exit-codes.js";
 import { writeFileAtomic } from "../src/io/atomic.js";
 import { PR_RLA_VERSION } from "../src/version.js";
@@ -24,7 +24,9 @@ describe("the network-deny harness (NFR11)", () => {
     const keys = join(__dirname, "..", "src", "translog", "keys.ts");
     const hits = walk(join(__dirname, "..", "src")).filter((f) => f !== keys && /rekor\.sigstore\.dev/.test(readFileSync(f, "utf8")));
     expect(hits).toEqual([]);
-    const importers = walk(join(__dirname, "..", "src")).filter((f) => /from "(\.\.?\/)+(translog\/)?keys\.js"/.test(readFileSync(f, "utf8"))).map((f) => f.split("/src/")[1]);
+    // Resolved, so src/core/presence/keys.ts (U9's SSH keys, unrelated) is not mistaken for the log keys.
+    const importsKeys = (f: string) => [...readFileSync(f, "utf8").matchAll(/from "(\.\.?\/[^"]+)\.js"/g)].some((m) => resolve(dirname(f), `${m[1]}.ts`) === keys);
+    const importers = walk(join(__dirname, "..", "src")).filter(importsKeys).map((f) => f.split("/src/")[1]);
     expect(importers.sort()).toEqual(["commands/translog.ts", "core/verify.ts"]); // read side only: logPublicKey and verify's key-source note
   });
 });

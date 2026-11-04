@@ -23,6 +23,9 @@ import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAutho
  * the coverage rule) are time-stamped records, so their tokens are judged by the trusted-time rules:
  * only the registration's own authorities count, and the checkpoint's bytes (its index hash too)
  * are what the tokens sign.
+ *
+ * bolt/u9-presence-verdicts × fix/ledgers-selector: check 7's ledger identity (U9) sits beside the
+ * ledger anchors (the index binding is a local file, judged whatever ledger is loaded).
  */
 const W = "audit/2026-q3";
 let tsa: MockTsaServer;
@@ -123,5 +126,22 @@ describe("ledger checkpoints under the trusted-time rules (fix/ledgers-selector 
     expect(d).toMatch(/WARN the ledger index changed since the latest checkpoint \(2026-10-21T03:00:00Z/);
     // the edited line's tokens no longer count, so it covers nothing either
     expect(d).toMatch(/WARN no time-stamped ledger checkpoint post-dates the last counted verdict/);
+  });
+});
+
+describe("the registered ledger and the ledger anchors (bolt/u9-presence-verdicts × fix/ledgers-selector)", () => {
+  it("swapping the registered issue ledger for git-file FAILs check 7 on identity, and an edited index still FAILs its binding", async () => {
+    const s = clone(labelled);
+    const yml = join(s.dir, ".pr-rla.yml");
+    writeFileSync(yml, readFileSync(yml, "utf8").replace("ledger: { use: github-issues, options: { repo: acme/audit } }\n", ""));
+    const idx = join(s.dir, W, "ledger-index.json");
+    writeFileSync(idx, readFileSync(idx, "utf8").replace('"window": "2026-q3"', '"window": "2026-q4"'));
+    const c = await check7(s);
+    const d = c.details.join("\n");
+    expect(c.status).toBe("FAIL");
+    expect(d).toMatch(/FAIL the ledger verify loaded is not the registered one \(name github-issues → git-file/);
+    expect(d).toMatch(/FAIL ledger-index\.json \(sha256 [0-9a-f]{12}…\) is not the index draws\.json bound at sample time/);
+    // git-file has no history to checkpoint, so the issue ledger's coverage rule does not apply to it
+    expect(d).not.toMatch(/post-dates the last counted verdict/);
   });
 });

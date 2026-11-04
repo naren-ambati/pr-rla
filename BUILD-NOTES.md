@@ -1925,3 +1925,19 @@ npm --prefix examples/ledgers/jira test    → # pass 1 · # fail 0
 ```
 
 - **The load flakes.** Earlier full runs, at load averages of 40–197, failed only plugin-host wall-clock tests: the heartbeat test, the Jira-through-host test and once the Gitea-through-host 30 s bound. Master `3059cfb`, from a scratch copy at the same load, failed the same two (heartbeat, Jira host), and the heartbeat test failed master's two-file run once too. They are the flakes the tracker assigns to the plugin and broker round; nothing in this integration touches the plugin host, and no test was changed for them.
+
+### Merge 3: `bolt/u9-presence-verdicts` (5fe1072)
+
+Merged before U5 and U8, on the coordinator's instruction. U9 branched from master `a360348`, before `4b72ecb`.
+
+- **Conflicts, each resolved by keeping both sides:**
+  - `src/core/verify.ts`: the SDK import keeps the ledger round's `recordedBeforeSeed` and drops `provenanceRank`, whose only use U9 replaced with `verdictRuleFailures`. Check 7 keeps the ledger round's `lastCountedAt` beside U9's `read` / `countedVerdicts`. The rest auto-merged and was read through: U9's ledger identity, `require_signed` and provenance ceiling, the ledger round's index binding (both branches of check 7), checkpoint chain and coverage, the coverage fix above, and trusted time's checks 1 and 2.
+  - `src/commands/status.ts`: the imports carry trusted time's `anchorLines` and `logBound` with U9's `auditContextFor`. Both rounds' status bodies auto-merged.
+  - `scripts/demo-ledgers.mjs`: U9's one audit per fixture, registered on the ledger it verifies with, sampled with `--through 1` as the ledger round needs (the recorded tracker holds one issue, and the index binding FAILs an issued draw with no issue). Its output is what both rounds recorded: the relabel VERIFIED with check 7 WARN (foreignIssues, no checkpoint), the deleted issue FAILED.
+  - `docs/design/phase-3-4/contracts.md` (§1) and `docs/security-model.md`: both rounds' new sections kept, the ledger round's and trusted time's first.
+  - `BUILD-NOTES.md`: U9's two sections go before this one, which stays last.
+- **A test that contradicted another branch:** trusted time's `net-io.test.ts › no source file names a default Rekor log` lists the files that import the log keys with a pattern matching any relative `keys.js`. U9's `src/core/presence/` imports its own SSH-key module, `./keys.js`, so the list grew by three files that never touch `src/translog/keys.ts`. The check now resolves each relative import and compares it with `src/translog/keys.ts`. It is still exact (the same two importers) and no weaker: a new importer at any depth fails it.
+- **Timing changes outside U9's unit** (`8c1166f`, the plugin-host heartbeat test widened to 2 s; `063f34a`, the Jira-through-host test given 180 s) came in with the merge. When `fix/plugins-broker` lands, its versions replace them.
+- **Integration test** (`test/wave2-integration.test.ts`): an audit registered on github-issues and verified with git-file swapped in FAILs check 7 on U9's identity rule, and an edited index still FAILs the ledger round's binding (a local file, judged whatever ledger is loaded); git-file gets no checkpoint-coverage WARN. Without U9 it fails on the identity assertion.
+- **Not yet joined:** U9's `src/io/git-safe.ts` is the one safe-git helper so far. The ledger round's git transport and the checkpoint reader still call git directly, as on master. U5's equivalent lands with U5, and the two become one there.
+- **Verified** (in this worktree, 2026-11-04T05:52Z, load average 70): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 61 files, **802 passed | 1 skipped (803)** · gitea 1 pass · jira 1 pass · `demo-presence`, `demo-sdk-carry-overs`, `demo-plugin-host`, `demo-broker`, `demo-ledgers` exit 0.
