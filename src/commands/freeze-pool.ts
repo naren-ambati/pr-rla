@@ -39,6 +39,7 @@ export interface RunArgs {
 
 export async function runFreezeRepos(ctx: CommandContext, config: PrRlaConfig, a: RunArgs): Promise<PooledFreeze> {
   const checkpointed = a.repoSet.kind !== "repo" && !a.dryRun && a.reg !== null && isRegistrationV2(a.reg);
+  if (a.resume !== undefined && a.force) throw new CommandError("--resume continues a stopped run and --force starts over; use one of them");
   if (a.resume !== undefined && !checkpointed) throw new CommandError("--resume continues a pooled freeze of a registered repo list or rule; this freeze has nothing to resume");
   const stats = auditContextFor(ctx).broker.stats;
   const requests0 = stats.requests;

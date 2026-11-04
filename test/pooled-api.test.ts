@@ -277,10 +277,10 @@ describe("the checkpoint store belongs to freeze alone (components.md: verify mu
     expect(existsSync(join(__dirname, "..", "src", "api", "freeze-store.ts"))).toBe(true);
   });
 
-  it("only the pooled run imports the store", () => {
+  it("only the pooled run imports the store (the library index re-exports it)", () => {
     const importers = readdirSync(join(__dirname, "..", "src"), { recursive: true })
       .map(String)
-      .filter((f) => f.endsWith(".ts") && /from\s+"[^"]*freeze-store\.js"/.test(src(f)))
+      .filter((f) => f.endsWith(".ts") && f !== "index.ts" && /from\s+"[^"]*freeze-store\.js"/.test(src(f)))
       .sort();
     expect(importers).toEqual(["api/pooled-freeze.ts"]);
   });

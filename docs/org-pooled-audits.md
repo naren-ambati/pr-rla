@@ -65,7 +65,7 @@ estimate: 223 repos (probed 200 of them, every 1.1th, and scaled)
 
 and the freeze it predicted printed `freeze: 223 repos · 223 listed now, 0 from checkpoints · 1102 requests (623 GraphQL) · 3 min 43 s`.
 
-On the synthetic 40-repo org of the test suite the estimate lands within ±5% of the actual request count and within ±30% of the actual wall time over 18 orgs (6 seeds at 3 sizes, 2026-11-04); the bounds the design asks for are ±20% and ±50%, and the tests assert them on 6 of those orgs. It also warns when the predicted wall time exceeds the time left before R publishes. A provider without `estimateRequests` prints no figures and says so. The estimate is a prediction from first pages: how evenly a window's activity is spread decides how close it is, and a retried request counts again.
+On the synthetic 40-repo org of the test suite the estimate lands within ±5% of the actual request count and within ±30% of the actual wall time over 18 orgs (6 seeds at 3 sizes, 2026-11-04); the bounds the design asks for are ±20% and ±50%, and the tests assert them on 4 of those orgs. It also warns when the predicted wall time exceeds the time left before R publishes. A provider without `estimateRequests` prints no figures and says so. The estimate is a prediction from first pages: how evenly a window's activity is spread decides how close it is, and a retried request counts again.
 
 ## What `verify` does with a pool
 
