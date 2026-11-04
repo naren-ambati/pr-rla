@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import * as read from "pr-rla/api/read";
@@ -445,6 +445,24 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     };
     expect(await bareStatus({})).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD" } } });
     expect(await bareStatus({ tsaTrust: [trustFile] })).toMatchObject({ code: 0, json: { certified: true, certificate: { state: "CERTIFIED" } } });
+    // The anchors come only from the operator's flag (or context), never from the audited repo: the same trust file
+    // committed in the repo and named by its .pr-rla.yml and its pr-rla.lock.json proves nothing.
+    const yml = join(s.dir, ".pr-rla.yml");
+    const lock = join(s.dir, "pr-rla.lock.json");
+    const original = readFileSync(yml, "utf8");
+    const anchors = JSON.stringify(tsa.trust());
+    writeFileSync(join(s.dir, "tsa-trust.json"), anchors);
+    writeFileSync(yml, `${original}tsa_trust: [tsa-trust.json]\ntsaTrust: [tsa-trust.json]\ntrust_bundle: tsa-trust.json\n`);
+    writeFileSync(lock, `${JSON.stringify({ schema: "pr-rla/lock/v1", plugins: {}, tsaTrust: ["tsa-trust.json"], trust: JSON.parse(anchors) }, null, 2)}\n`);
+    try {
+      expect(await bareStatus({})).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD" } } });
+      // ... while the operator's flag naming that very file proves the times: it is the flag, not the file's place, that counts.
+      expect(await bareStatus({ tsaTrust: [join(s.dir, "tsa-trust.json")] })).toMatchObject({ code: 0, json: { certified: true } });
+    } finally {
+      writeFileSync(yml, original);
+      rmSync(lock, { force: true });
+      rmSync(join(s.dir, "tsa-trust.json"), { force: true });
+    }
 
     // A second line is appended and committed, then taken out again: the committed history is rewritten.
     appendFileSync(ledger, line(first[0]!));
