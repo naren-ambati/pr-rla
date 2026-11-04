@@ -133,7 +133,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .command("verify")
     .description("third-party check of the seven audit properties")
     .option("--offline", "skip the population rebuild and any network fetch")
-    .option("--log-key <pem>", "trusted transparency-log public key")
+    .option("--log-key <pem>", "a transparency-log public key you trust (PEM file); without it only Sigstore's pinned log keys are trusted")
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")

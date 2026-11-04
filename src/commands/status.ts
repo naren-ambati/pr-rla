@@ -11,15 +11,19 @@ import type { PrRlaConfig, WindowPaths } from "../config.js";
 import type { Selector } from "../core/selector.js";
 import { notTamperProof } from "../timestamp/verify.js";
 import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
-import { assessRecord } from "./timestamps.js";
+import { assessRecord, logBound } from "./timestamps.js";
 
 /**
- * The audit mode and the honest-output note for status. v1: tamper-evident iff logged.
- * v2: the stored tokens are checked offline; the mode is proven by U_k when k operators agree,
- * and the note says TIMESTAMP NOT TAMPER-PROOF (n of k) when the registration or the commitment falls short.
+ * The audit mode and the honest-output note for status. v1: tamper-evident iff its log entries verify
+ * under a pinned log key (an entry in any other log is unverified). v2: the stored tokens are checked
+ * offline; the mode is proven by U_k when k operators agree, and the note says TIMESTAMP NOT TAMPER-PROOF
+ * (n of k) when the registration or the commitment falls short.
  */
 export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean }> {
-  if (!isRegistrationV2(reg)) return { mode: auditMode(reg), note: reg.log ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: !!reg.log };
+  if (!isRegistrationV2(reg)) {
+    const logged = (await logBound(ctx, config, reg)) !== null && (!existsSync(paths.commitment) || (await logBound(ctx, config, readCommitment(paths))) !== null);
+    return { mode: auditMode(reg), note: logged ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: logged };
+  }
   const v2 = reg as SignedRecord<RegistrationRecordV2>;
   const bundle = trustFor(ctx);
   const ts = v2.record.timestamping;

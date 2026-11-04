@@ -210,9 +210,9 @@ ledger: git-file                # verdicts in audit/<window>/verdicts.jsonl
 timestamping:                   # RFC 3161 tokens bound the registration and freeze times. Only the
   authorities: [sigstore, digicert, globalsign, microsoft]   # record's SHA-256 digest and a nonce are sent.
   min_tokens: 2                 # k: distinct operators that must agree; [] above = none (TIMESTAMP NOT TAMPER-PROOF)
-# transparency_log:             # used only with --submit / by verify; no default on purpose
+# transparency_log:             # used only with --submit; no default on purpose
 #   url: https://<your-rekor>
-#   public_key_file: rekor.pub
+#   public_key_file: rekor.pub  # checks a --rekor-api v2 submission only; verify trusts pinned keys or --log-key
 `;
 
 export const PROTOCOL_TEMPLATE = `# Review protocol

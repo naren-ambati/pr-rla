@@ -86,9 +86,17 @@ describe("register --submit --rekor-api v2", () => {
     const reg = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/registration.json"), "utf8")) as SignedRecord<RegistrationRecordV2>;
     expect(reg.log).toMatchObject({ apiVersion: "v2", logIndex: 0 });
     expect(s.out.join("\n")).toMatch(/in Rekor v2 log .* \(v2 entries carry no time; unverified against the production log\)/);
-    const c1 = (await runVerify(s.ctx, { offline: true })).checks[0]!;
+    // transparency_log.public_key_file checked the submission; verify never trusts it (review finding 3).
+    const plain = (await runVerify(s.ctx, { offline: true })).checks[0]!;
+    expect(plain.status).toBe("PASS");
+    expect(plain.details.join("\n")).toMatch(/registration log entry unverified: no trusted key for http:\/\/127\.0\.0\.1:\d+ .*so its inclusion proof is not evidence/);
+    expect(plain.details.join("\n")).not.toMatch(/signed checkpoint verified/);
+    // The verifier's own copy of the log key, outside the audit repo.
+    const keyFile = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "rekor-v2.pub");
+    writeFileSync(keyFile, log.publicKeyPem);
+    const c1 = (await runVerify(s.ctx, { offline: true, logKey: keyFile })).checks[0]!;
     expect(c1.status).toBe("PASS");
-    expect(c1.details.join("\n")).toMatch(/registration in Rekor v2 log .* index 0 \(inclusion proof and signed checkpoint verified; v2 entries carry no time/);
+    expect(c1.details.join("\n")).toMatch(/registration in Rekor v2 log .* index 0 \(inclusion proof and signed checkpoint verified under the verifier's --log-key; v2 entries carry no time/);
     expect(c1.details.join("\n")).toMatch(/registration timestamps: 2 of 2 TSAs \(test-a, test-b\) · k = 2 · PROVEN/);
   });
 

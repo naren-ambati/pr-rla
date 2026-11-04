@@ -454,7 +454,7 @@ export async function checkToken(input: TokenCheckInput): Promise<TokenCheck> {
   return out;
 }
 
-/** Time evidence from a Rekor v1 entry whose SET verified: one more bound, from operator Sigstore. */
+/** Time evidence from a Rekor v1 entry whose SET verified under a trusted log key: one more bound, from operator Sigstore. */
 export interface LogTimeEvidence {
   operator: string;
   integratedTime: number;

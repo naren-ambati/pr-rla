@@ -46,6 +46,11 @@ export interface Scenario {
   git: (...args: string[]) => string;
   fetch: typeof fetch;
   tsaTrust: TrustBundleExtra[];
+  /**
+   * The mock log's public key, written OUTSIDE the audit repo: the verifier's own copy, passed as
+   * `verify --log-key`. The audit repo names the log URL (for --submit) but never supplies the key verify trusts.
+   */
+  logKeyFile: string | null;
 }
 
 /**
@@ -56,13 +61,17 @@ export interface Scenario {
  * `tsa` configures mock timestamp authorities: their ids go into .pr-rla.yml and their test roots
  * into the context's trust (as a verifier would pass them with --tsa-trust).
  */
-export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; logKeyFile?: boolean; provider?: string; fetch?: typeof fetch; tsa?: { ids: string[]; k?: number; server?: MockTsaServer } }): Scenario {
+export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor; provider?: string; fetch?: typeof fetch; tsa?: { ids: string[]; k?: number; server?: MockTsaServer } }): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "prrla-audit-"));
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   git("init", "-q");
   writeFileSync(join(dir, "changes.json"), JSON.stringify({ schema: "pr-rla/changes/v1", repo: REPO, defaultBranch: "main", changes: opts.changes }, null, 1));
   writeFileSync(join(dir, "review-protocol.md"), "# Protocol\nA change fails if it introduces a user-visible bug or a security weakness.\n");
-  if (opts.log) writeFileSync(join(dir, "rekor.pub"), opts.log.publicKeyPem);
+  let logKeyFile: string | null = null;
+  if (opts.log) {
+    logKeyFile = join(mkdtempSync(join(tmpdir(), "prrla-verifier-")), "mock-rekor.pub");
+    writeFileSync(logKeyFile, opts.log.publicKeyPem);
+  }
   writeFileSync(
     join(dir, ".pr-rla.yml"),
     [
@@ -71,7 +80,7 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
       "window: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }",
       "selector: { kinds: [pull_request, direct_push], authors: any, unreviewed: no-human-review }",
       "audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }",
-      ...(opts.log ? [`transparency_log: { url: "${opts.log.url}", public_key_file: rekor.pub }`] : []),
+      ...(opts.log ? [`transparency_log: { url: "${opts.log.url}" }`] : []),
       // No authority unless the test brings mock ones: the suite never reaches a real timestamp authority.
       `timestamping: { authorities: [${(opts.tsa?.ids ?? []).join(", ")}], min_tokens: ${opts.tsa?.k ?? 2} }`,
       "",
@@ -85,7 +94,7 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
   const fetchImpl = opts.fetch ?? globalThis.fetch;
   const tsaTrust = opts.tsa?.server ? [opts.tsa.server.trust()] : [];
   const ctx = makeCtx(dir, clock, out, fetchImpl, tsaTrust);
-  return { dir, clock, out, ctx, git, fetch: fetchImpl, tsaTrust };
+  return { dir, clock, out, ctx, git, fetch: fetchImpl, tsaTrust, logKeyFile };
 }
 
 function makeCtx(dir: string, clock: { now: number }, out: string[], fetchImpl: typeof fetch, tsaTrust: TrustBundleExtra[]): CommandContext {
@@ -115,5 +124,5 @@ export function cloneScenario(s: Scenario): Scenario {
   const out: string[] = [];
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const clock = { ...s.clock };
-  return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
+  return { dir, clock, out, git, fetch: s.fetch, tsaTrust: s.tsaTrust, logKeyFile: s.logKeyFile, ctx: makeCtx(dir, clock, out, s.fetch, s.tsaTrust) };
 }
