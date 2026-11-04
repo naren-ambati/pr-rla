@@ -5,7 +5,8 @@
   "names": "Names the level, the unit, a requirement, a file or a test, or shows the configuration and the level enum: no statement about people or hardware",
   "mechanism": "Describes the flag, the key types or the per-verdict signature mechanism (what is signed, what is checked, what one touch signs): no statement that a person or hardware was verified; the limit is stated in the same section",
   "ssh-keygen": "Describes OpenSSH's own behaviour (ssh-keygen, git verify-commit, the sk-dummy middleware, FIDO flag bits)",
-  "output": "A message pr-rla prints while signing or checking: it describes the key, its flag and the level given, never a person"
+  "output": "A message pr-rla prints while signing or checking: it describes the key, its flag and the level given, never a person",
+  "notes": "This round's build notes (P4): the findings, the tests that cover them and what was measured; the limit itself is stated in the security model and printed on every certificate"
  },
  "reasons": {
   "history": [
@@ -248,6 +249,18 @@
    "ERR touch your security key to sign this one verdict (SHA256:+a0aCzWHbFROse3NRc50SwBKkzg8GVY7GfvbziTKReo)",
    "signed: the verdict is signed by bob's sk-ssh-ed25519@openssh.com key SHA256:+a0aCzWHbFROse3NRc50SwBKkzg8GVY7GfvbziTKReo without the user-presence flag (no touch): account",
    "verdict on draw #5 (gitea:acme/widgets#1138) is signed by bob's sk-ssh-ed25519@openssh.com key SHA256:+a0aCzWHbFROse3NRc50SwBKkzg8GVY7GfvbziTKReo without the user-presence flag (no touch): account"
+  ],
+  "notes": [
+   "› E3; presence-verifier.test.ts › P4 finding 2 …; presence-fixtures.test.ts › FR9.5 (4); e2e-presence.test.ts › FR9.1, › FR9.3",
+   "› signatures over the v1 bytes …; presence-verifier.test.ts › P4 finding 5 …; presence-oracle.test.ts › P4: … (3); presence-fixtures.test.ts › P4: bob's touch for another manifest … (fixture draws #15, #16)",
+   "Wording (LOW): the security model's \"unambiguous\" touch request, a bare presence in git-file's description; the deny-list missed 9 of 12 claims",
+   "presence-wording.test.ts (12, five new: the 12 probes, limit wording, source prose, the whole tree, the vetted list); e2e-presence.test.ts › finding 9",
+   "Tests: no symlinked-directory or audit_dir test; exp2(a) asserted presence ≤ 1",
+   "A sentence \"mentions\" when it names presence, the UP flag, hardware, a security key or a YubiKey, or a touch in a sentence about keys or people (\"touches no file\" is not a mention).",
+   "The deny-list still runs over whole texts, with the printed label read as bare presence.",
+   "2026-11-04T06:49:18Z: the sk-dummy fixture remade with scripts/make-presence-fixtures.mjs (the README's v2 recipe, printf and ssh-keygen -Y sign), with the round-1 sk-dummy build (scratchpad/u9/openssh-10.3p1/regress/misc/sk-dummy/sk-dummy.so) and macOS's OpenSSH_10.3p1 (LibreSSL 3.3.6): 16 verdicts, ten software keys in a temporary directory deleted afterwards, \"source\": \"synthetic\". ssh-keygen's own -Y verify gives Good for #15 and #16 over the bytes each was made over; pr-rla refuses both for this audit.",
+   "After: 1016 passed, 1 skipped (1017): p4-review-regressions 10 (new), git-file-history 32 (was 22), presence-wording 12 (7), presence-verifier 43 (41), presence-oracle 36 (33), presence-fixtures 14 (13); e2e-presence, u9-review-regressions, git-file-unchanged and single-repo-anchor keep their counts, with assertions changed as above.",
+   "Any new printed or documented sentence about presence, a touch, hardware or a security key needs the limit wording or an entry in the vetted list."
   ]
  }
 }
