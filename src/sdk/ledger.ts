@@ -13,6 +13,34 @@ export const SUPPORTED_LEDGER_API_VERSIONS: readonly number[] = [1];
 
 export type Verdict = "pass" | "fail";
 
+/**
+ * How much a verdict's `reviewer` and `recordedAt` can be trusted (contracts.md §1):
+ * `self-asserted` (whatever the writer typed: git-file), `account` (an SCM or tracker account
+ * did it, at a server-assigned time: issue ledgers), `presence` (U9: a signature with the
+ * user-presence flag). Added in phase 3 within API version 1.
+ */
+export type ProvenanceLevel = "self-asserted" | "account" | "presence";
+export const PROVENANCE_LEVELS: readonly ProvenanceLevel[] = ["self-asserted", "account", "presence"];
+
+/** Orders provenance levels; an absent level is `self-asserted`. */
+export function provenanceRank(level: ProvenanceLevel | undefined): number {
+  return PROVENANCE_LEVELS.indexOf(level ?? "self-asserted");
+}
+
+/** Where a verdict came from (optional, phase 3). Absent means `self-asserted`. */
+export interface VerdictProvenance {
+  level: ProvenanceLevel;
+  source: "git-commit" | "git-signed-commit" | "scm-label-event" | "jira-field-change" | (string & {});
+  /** The tracker's stable account id of the actor, when it has one. */
+  actorId?: string;
+  /** GitHub's `performed_via_github_app` slug; non-null makes the verdict ineligible. */
+  viaApp?: string | null;
+  /** The tracker's id of the event the verdict was read from. */
+  eventId?: string;
+  /** Allowed-signers principal, for git-signed-commit (U9). */
+  signer?: string;
+}
+
 export interface VerdictEvent {
   /** Draw number (1-based) the reviewer was working from. */
   draw: number;
@@ -24,6 +52,42 @@ export interface VerdictEvent {
   /** ISO-8601 UTC. Self-asserted unless the ledger backs it with an external timestamp. */
   recordedAt: string;
   note?: string;
+  /** Optional (phase 3): where the verdict came from. Issue ledgers set `account` with the label event. */
+  provenance?: VerdictProvenance;
+}
+
+/** An account in a ledger's history. `id` is the tracker's stable account id, when it has one. */
+export interface LedgerActor {
+  login: string;
+  kind: "human" | "bot";
+  id?: string;
+}
+
+/**
+ * One event of a ledger's verdict history (contracts.md §1), the unit a checkpoint hashes.
+ * Issue ledgers list every add and remove of a verdict label (or field value) on an indexed issue.
+ */
+export interface LedgerHistoryEvent {
+  /** The tracker's event id. */
+  id: string;
+  /** Server time, ISO 8601 UTC. */
+  at: string;
+  actor: LedgerActor;
+  action: "add" | "remove" | "edit" | "delete-issue" | "transfer";
+  label: string | null;
+  draw: number | null;
+  /** Not hashed: anything the ledger wants to keep for display. */
+  raw?: unknown;
+}
+
+/** What `publishDraws` is told about the audit (optional second argument, phase 3). */
+export interface PublishContext {
+  window: string;
+  /** The registration's protocol hash, which every verdict on the draws is made under. */
+  protocolSha256: string;
+  registrationSha256?: string;
+  /** The audited repository, for issue titles. */
+  repo?: string;
 }
 
 export interface DrawForLedger {
@@ -41,6 +105,8 @@ export interface LedgerIntegrityReport {
   findings: string[];
   /** True when the ledger has an external tamper trail (git history, issue events). */
   tamperTrail: boolean;
+  /** Optional (phase 3): findings that make check 7 WARN (a relabel, a removal later replaced). */
+  warnings?: string[];
 }
 
 export interface LedgerContext {
@@ -50,6 +116,13 @@ export interface LedgerContext {
   env: Readonly<Record<string, string | undefined>>;
   log: (message: string) => void;
   fetch: typeof fetch;
+  /** Optional (phase 3): how the ledger waits; the conformance kit injects one that records waits. */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Optional (phase 3): the registered reviewers (`verdicts.reviewers`), for the integrity
+   * analysis. null or absent: any account that is not a bot or an app.
+   */
+  reviewers?: readonly string[] | null;
 }
 
 export interface Ledger {
@@ -58,10 +131,12 @@ export interface Ledger {
   /** All verdict events, in the order they were recorded. */
   readVerdicts(): Promise<VerdictEvent[]>;
   appendVerdict(event: VerdictEvent): Promise<void>;
-  /** Optional: publish draws for reviewers (e.g. open one issue per draw, in draw order). */
-  publishDraws?(draws: DrawForLedger[]): Promise<void>;
+  /** Optional: publish draws for reviewers (e.g. open one issue per draw, in draw order). Idempotent. */
+  publishDraws?(draws: DrawForLedger[], context?: PublishContext): Promise<void>;
   /** Optional: check the ledger's own history (append-only, no relabels). */
   verifyIntegrity?(): Promise<LedgerIntegrityReport>;
+  /** Optional (phase 3): the canonical verdict-event history, for checkpoints. Without it a ledger cannot be checkpointed. */
+  readHistory?(): Promise<LedgerHistoryEvent[]>;
 }
 
 /** An environment variable a plugin may receive, and the hosts its value may be sent to. */
@@ -83,6 +158,11 @@ export interface LedgerDefinition<Options = Record<string, unknown>> {
   readonly writePaths?: (options: Options) => string[];
   /** Optional (phase 3): credentials, sent as `prrla-cred:<ENV>` placeholders and swapped only for these hosts. */
   readonly credentials?: readonly LedgerCredential[];
+  /**
+   * Optional (phase 3): the provenance its verdicts carry. `account` for issue-tracker ledgers.
+   * `register` takes it as the default `verdicts.min_provenance` (FR3.8); absent means `self-asserted`.
+   */
+  readonly provenance?: ProvenanceLevel;
   create(options: Options, context: LedgerContext): Ledger | Promise<Ledger>;
 }
 
@@ -116,6 +196,7 @@ export function assertLedgerDefinition(value: unknown, source: string): asserts 
   if (def.writePaths !== undefined && typeof def.writePaths !== "function") throw new Error(`${source}: ledger "${def.name}" writePaths must be a function of the options`);
   if (def.credentials !== undefined && !(Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c.env === "string" && Array.isArray(c.hosts))))
     throw new Error(`${source}: ledger "${def.name}" credentials must be a list of { env, hosts }`);
+  if (def.provenance !== undefined && !PROVENANCE_LEVELS.includes(def.provenance)) throw new Error(`${source}: ledger "${def.name}" provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
 }
 
 export function verdictEventProblems(value: unknown): string[] {
@@ -129,4 +210,138 @@ export function verdictEventProblems(value: unknown): string[] {
   if (typeof v.reviewer !== "string" || v.reviewer.length === 0) p.push("reviewer must be a non-empty string");
   if (typeof v.recordedAt !== "string" || Number.isNaN(Date.parse(v.recordedAt))) p.push("recordedAt must be an ISO timestamp");
   return p;
+}
+
+// ---------------------------------------------------------------------------
+// Verdict history (phase 3, same API version): pure helpers shared by the core,
+// the built-in issue ledgers, external ledgers (the Jira example) and the ledger kit,
+// so every ledger applies the same first-eligible-event and relabel rules.
+// ---------------------------------------------------------------------------
+
+const BOT_SUFFIX = "[bot]";
+
+/**
+ * Why a verdict event cannot count, or null if it can (functional-design.md §U4):
+ * a bot account (`[bot]` login), an app (`viaApp`), or, when reviewers are registered,
+ * an account that is not on the list. Entries match a login (case-insensitive) or
+ * `id:<account id>`. An ineligible event is ignored and reported, so its draw stays unlabelled.
+ */
+export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "provenance">, reviewers?: readonly string[] | null): string | null {
+  const login = event.reviewer.trim().toLowerCase();
+  if (login.endsWith(BOT_SUFFIX)) return `applied by bot account ${event.reviewer}`;
+  const app = event.provenance?.viaApp;
+  if (app) return `applied by app "${app}"`;
+  if (reviewers) {
+    const id = event.provenance?.actorId;
+    const listed = reviewers.some((r) => {
+      const entry = r.trim();
+      return entry.toLowerCase() === login || (id !== undefined && (entry === `id:${id}` || entry === id));
+    });
+    if (!listed) return `${event.reviewer} is not a registered reviewer`;
+  }
+  return null;
+}
+
+/** A history event as it is hashed into a checkpoint: no `raw`, keys fixed. */
+export type CanonicalHistoryEvent = Omit<LedgerHistoryEvent, "raw">;
+
+/** Sorts by time then id and drops `raw`: the list `eventsSha256` is computed over (canonical JSON). */
+export function canonicalHistory(events: readonly LedgerHistoryEvent[]): CanonicalHistoryEvent[] {
+  return events
+    .map((e) => ({ id: e.id, at: e.at, actor: { login: e.actor.login, kind: e.actor.kind, ...(e.actor.id !== undefined ? { id: e.actor.id } : {}) }, action: e.action, label: e.label, draw: e.draw }))
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+const sameEvent = (a: CanonicalHistoryEvent, b: CanonicalHistoryEvent) =>
+  a.at === b.at && a.action === b.action && a.label === b.label && a.draw === b.draw && a.actor.login === b.actor.login && a.actor.kind === b.actor.kind && a.actor.id === b.actor.id;
+
+/** What changed between a checkpointed history and the current one: events gone, and events whose content changed. New events are normal. */
+export function historyDiff(checkpointed: readonly LedgerHistoryEvent[], current: readonly LedgerHistoryEvent[]): { missing: string[]; changed: string[] } {
+  const now = new Map(canonicalHistory(current).map((e) => [e.id, e]));
+  const missing: string[] = [];
+  const changed: string[] = [];
+  for (const e of canonicalHistory(checkpointed)) {
+    const c = now.get(e.id);
+    if (!c) missing.push(e.id);
+    else if (!sameEvent(e, c)) changed.push(e.id);
+  }
+  return { missing, changed };
+}
+
+export function historyEventProblems(value: unknown): string[] {
+  if (!value || typeof value !== "object") return ["history event must be an object"];
+  const e = value as Partial<LedgerHistoryEvent>;
+  const p: string[] = [];
+  if (typeof e.id !== "string" || e.id.length === 0) p.push("id must be a non-empty string");
+  if (typeof e.at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/.test(e.at)) p.push("at must be ISO-8601 UTC (…Z)");
+  if (!e.actor || typeof e.actor.login !== "string" || (e.actor.kind !== "human" && e.actor.kind !== "bot")) p.push("actor must be { login, kind }");
+  if (!["add", "remove", "edit", "delete-issue", "transfer"].includes(e.action as string)) p.push("action must be add, remove, edit, delete-issue or transfer");
+  if (e.label !== null && typeof e.label !== "string") p.push("label must be a string or null");
+  if (e.draw !== null && !(typeof e.draw === "number" && Number.isInteger(e.draw) && e.draw >= 1)) p.push("draw must be a positive integer or null");
+  return p;
+}
+
+/** One add or remove of a verdict label (or field value) on one draw's issue. `verdict: null`: the tracker no longer says which label (it was deleted). */
+export interface VerdictLabelEvent {
+  id: string;
+  at: string;
+  action: "add" | "remove";
+  verdict: Verdict | null;
+  reviewer: string;
+  provenance?: VerdictProvenance;
+}
+
+export interface DrawHistoryAnalysis {
+  /** The first eligible add: the draw's verdict. */
+  counted: VerdictLabelEvent | null;
+  /** Relabels and removals later replaced (check 7 WARN). */
+  warnings: string[];
+  /** Removal after counting with nothing in its place, or a history the tracker altered (check 7 FAIL). */
+  failures: string[];
+  /** Informational: ineligible verdict events (also reported by the core as ignored). */
+  notes: string[];
+}
+
+/**
+ * The integrity rules of functional-design.md §U4 and FR4.3 for one draw, on its verdict-label events:
+ * - the first eligible add counts (never removed: PASS);
+ * - after it, the same verdict removed and added again: WARN `relabel (same verdict)`;
+ * - the opposite verdict added (a swap, or both labels present): WARN `relabel pass→fail; the first verdict counts`;
+ * - the counted verdict removed and nothing left in its place at the end: FAIL (removal after counting);
+ * - an event whose label the tracker has since erased: FAIL.
+ */
+export function analyzeDrawHistory(draw: number, events: readonly VerdictLabelEvent[], opts: { reviewers?: readonly string[] | null; labelOf: (v: Verdict) => string }): DrawHistoryAnalysis {
+  const out: DrawHistoryAnalysis = { counted: null, warnings: [], failures: [], notes: [] };
+  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const present = new Set<Verdict>();
+  let lastRemoval: VerdictLabelEvent | null = null;
+  for (const e of sorted) {
+    if (e.verdict === null) {
+      out.failures.push(`draw #${draw}: label event ${e.id} (${e.at}) no longer names its label: the verdict label was deleted and the tracker erased it from the history`);
+      continue;
+    }
+    const label = opts.labelOf(e.verdict);
+    if (e.action === "remove") {
+      present.delete(e.verdict);
+      if (out.counted) lastRemoval = e;
+      continue;
+    }
+    if (!out.counted) {
+      const why = verdictIneligibility(e, opts.reviewers);
+      present.add(e.verdict);
+      if (why) out.notes.push(`draw #${draw}: ${label} ${why} (${e.at}); not counted`);
+      else out.counted = e;
+      continue;
+    }
+    const first = out.counted.verdict as Verdict;
+    if (e.verdict === first) {
+      if (!present.has(first)) out.warnings.push(`draw #${draw}: ${label} removed and added again (relabel, same verdict); the first event (${out.counted.at}) counts`);
+    } else {
+      out.warnings.push(`draw #${draw}: relabel ${first}→${e.verdict}${present.has(first) ? " (both labels present)" : ""}; the first verdict (${first}, ${out.counted.at}) counts`);
+    }
+    present.add(e.verdict);
+  }
+  if (out.counted && present.size === 0 && lastRemoval)
+    out.failures.push(`draw #${draw}: the counted ${opts.labelOf(out.counted.verdict as Verdict)} verdict was removed at ${lastRemoval.at} and nothing replaced it (removal after counting)`);
+  return out;
 }
