@@ -1,6 +1,6 @@
 # Security model
 
-This page states what pr-rla protects and what it does not. It starts with external plugins (threat T6 in `docs/design/phase-3-4/nfr-design.md`); the other parts of the model are added as their units land.
+This page states what pr-rla protects and what it does not. It covers external plugins (threat T6 in `docs/design/phase-3-4/nfr-design.md`) and trusted time (T17); the other parts of the model are added as their units land.
 
 ## External plugins (T6)
 
@@ -45,3 +45,31 @@ Measured on 2026-11-03 with Node 22.23.2, 24.20.0 and 26.8.2 on macOS. Node 25 i
 - **Strong isolation needs the operating system.** For a plugin you do not trust, run pr-rla itself in a container or VM with no ambient credentials. pr-rla ships no sandbox.
 - **Install hygiene is yours.** Install plugins with `npm ci --ignore-scripts` (pr-rla plugins need no install scripts; `plugin add` warns when one declares them). npm 11's `allow-scripts` and `min-release-age` help where available.
 - **The host needs Node 22.15 or later** (`module.registerHooks`, which links a plugin against pr-rla's own SDK). On an older Node an isolated plugin fails to load with that message; tested only on 22.23.2, 24.20.0 and 26.8.2.
+
+## Trusted time (T17, and the trusted-time review of 2026-11-04)
+
+A registration's or a commitment's time is proven by RFC 3161 tokens from k = 2 independent timestamp-authority operators. A forged token is the cheapest way to fake a prospective audit or to pick the draws after the seed is public, so `verify` decides what counts using only what the verifier brings: the package and the verifier's own flags. Nothing in the audit repo can add trust.
+
+### What verify trusts, and from where
+
+| Evidence | Trusted when | Never from |
+|---|---|---|
+| An RFC 3161 token | its chain reaches an anchor pinned in the package for that authority (`src/timestamp/trust-bundle.json`), or in a file the verifier passes with `--tsa-trust` | the audit repo |
+| A token toward k | it is accepted, and its authority is one the registration names in `timestamping.authorities` | any other authority, even a bundled one (`ignored (not registered)`) |
+| A transparency-log entry | its key is pinned in the package (Sigstore's production Rekor v1 and v2 logs, from Sigstore's TUF `trusted_root.json`) or passed with `verify --log-key` | `.pr-rla.yml`'s `transparency_log.public_key_file`, any file in the audit repo, the log URL in the record's unsigned envelope |
+| The time a v2 record counts as | its own signed `registeredAt` or `frozenAt`, always | the envelope: dropping `timestamps` FAILs, it never hands the time to a log |
+
+### One signer certificate for every rule
+
+pr-rla finds the one certificate in the token that the CMS signer identifier names (issuer and serial, or subject key identifier; RFC 5652 §5.3), and checks the signature key, ESSCertID, the critical `timeStamping` EKU and the chain on that certificate alone. It refuses a token when no certificate or more than one matches the identifier, when two certificates carry the signer's issuer and serial, or when the library checked the signature under any other key. A test runs 80 signer-identity mutations of the eight authorities' recorded tokens past `openssl ts -verify`: every one OpenSSL rejects, pr-rla rejects too (and pr-rla also rejects the duplicate and appended-twin cases that OpenSSL accepts). The one known difference is that OpenSSL cannot read a subject-key-identifier signer at all; pr-rla accepts a consistent one, and no bundled authority uses that form.
+
+### Chains
+
+Every intermediate must be a CA allowed to issue certificates (critical `cA`, `keyCertSign`, its path length honoured, and an EKU, if it has one, that allows timestamping). DigiCert's and GlobalSign's anchors are general-purpose roots (DigiCert Trusted Root G4, GlobalSign Root R6), and so are SwissSign's and GitHub's; for those four the bundle also pins the operator's TSA issuing CA, and only a signer issued directly by it counts as that operator.
+
+### The limits, stated plainly
+
+- **Three anchors are trust on first use.** Microsoft's (pinned at its intermediate, because its tokens omit the root), SwissSign's and FreeTSA's were taken from the authorities' own responses. Every output that counts one prints `anchor pinned on first use … independent: false`. Confirming them from a second source is a release-checklist item.
+- **A pinned issuing CA must be updated when an operator rotates it.** A token signed under a new issuing CA fails until the bundle carries it (NFR21's release diff). Old tokens keep verifying, because issuing CAs are only added.
+- **A v1 audit logged to a log whose key is not pinned** verifies at most as `time unproven` unless the verifier passes that log's key with `--log-key`.
+- **The parsing library still verifies the signature** (pkijs); pr-rla checks that it did so under the signer certificate's key, byte for byte.
