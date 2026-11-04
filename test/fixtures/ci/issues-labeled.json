@@ -1,0 +1,8 @@
+{
+  "_fixture": "synthetic: the shape of GitHub's `issues` webhook payload for action `labeled`; only issue.number and repository.full_name are read. Written for U7 on 2026-11-04.",
+  "action": "labeled",
+  "label": { "name": "pr-rla:pass" },
+  "issue": { "number": 7, "title": "pr-rla draw #7: acme/widgets#1007", "state": "open" },
+  "repository": { "full_name": "acme/audit" },
+  "sender": { "login": "alice" }
+}

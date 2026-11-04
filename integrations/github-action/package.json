@@ -1,0 +1,13 @@
+{
+  "name": "pr-rla-github-action",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Installs the pinned pr-rla for the composite action in this directory (action.yml). Not a published package.",
+  "dependencies": {
+    "pr-rla": "file:vendor/pr-rla-0.1.0.tgz"
+  },
+  "engines": {
+    "node": ">=22.15"
+  }
+}
