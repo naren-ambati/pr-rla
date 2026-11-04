@@ -93,10 +93,13 @@ function hideDraws(d: Dump): { dump: Dump; drawn: Record<string, string[]> } {
     drawn[name] = [];
     for (const k of ["sample", "status"]) {
       steps[k]!.out = steps[k]!.out.map((l) => {
-        const m = /^  #\s+(\d+)  (\S+)  \S+$/.exec(l) ?? /^  blocking draw: #(\d+) (\S+) \S+$/.exec(l);
+        // A draw that repeats an earlier change says so ("drawn before"). The draws differ from run to run (the key, and
+        // so the registration the draws are bound to, is made per run), so a repeat comes and goes: it is drawn, and
+        // its line is hidden like any other.
+        const m = /^  #\s+(\d+)  (\S+)  \S+(?:  \(drawn before: reuses its verdict\))?$/.exec(l) ?? /^  blocking draw: #(\d+) (\S+) \S+$/.exec(l);
         if (!m) return l;
         if (k === "sample") drawn[name]!.push(m[2]!);
-        return l.replace(m[2]!, "<drawn>").replace(/https:\S+$/, "<url>");
+        return l.replace(m[2]!, "<drawn>").replace(/https:\S+.*$/, "<url>");
       });
     }
   }
@@ -221,6 +224,16 @@ export default defineConfig({
   execFileSync(process.execPath, [join(ROOT, "node_modules", "vitest", "vitest.mjs"), "run", "--config", cfg, "--root", work], { cwd: work, env: { ...process.env, ANCHOR_ROOT: root, ANCHOR_OUT: out, ANCHOR_KEY: key }, stdio: "pipe", timeout: 290_000 });
   return JSON.parse(readFileSync(out, "utf8")) as Record<string, Record<string, unknown>>;
 }
+
+it("hideDraws counts a repeated draw and hides its line like any other (the comparison below flaked when a run drew a repeat)", () => {
+  const rec = (lines: string[]) => ({ steps: { sample: { out: lines }, status: { out: [] } } });
+  const h = hideDraws({
+    a: rec(["  #  1  json:acme/widgets#7  https://x/7", "  #  2  json:acme/widgets#7  https://x/7  (drawn before: reuses its verdict)"]),
+    b: rec(["  #  1  json:acme/widgets#7  https://x/7", "  #  2  json:acme/widgets#9  https://x/9"]),
+  });
+  expect(h.drawn).toEqual({ a: ["json:acme/widgets#7", "json:acme/widgets#7"], b: ["json:acme/widgets#7", "json:acme/widgets#9"] });
+  expect((h.dump.a!.steps as Record<string, Step>).sample!.out).toEqual((h.dump.b!.steps as Record<string, Step>).sample!.out);
+});
 
 describe("single-repo audits behave as master does (a pool of one), against the master build itself", () => {
   it("json-file (400 changes), a GitHub repo, an empty GitHub repo, and a GitHub repo whose head moved after freeze in six honest ways: every output, record and verify result is master's, but for the listed U8 and P3 changes", { timeout: 300_000 }, () => {
