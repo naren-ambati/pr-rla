@@ -3141,3 +3141,13 @@ Merged after U5 and P4 on the coordinator's instruction. P3 was cut from `integr
   - `test/plugin-host.test.ts` (P3 × plugins-broker): an isolated plugin's 5 ms `blindRateLimitWaitMs` reaches the broker as 1 s, then 2 s, and a body-only 403 comes back at once. Without the host change the test fails (checked).
   - `pushLog` over v2 is P3's own `pooled-plugin` test, unchanged, now on the v2 frames.
 - **Verified** (in this worktree, 2026-11-04, load average 1–7): build 0 · typecheck 0 (both tsconfigs) · `npm test` 86 files, **1311 passed (1311)** · `packages/pr-rla-mcp` `npm test` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.
+- **Verified from three fresh clones of `integrate/wave2` at `45f1c9d`** (2026-11-04, 08:43Z–08:57Z, Node v22.23.2, load average 3–17), each run the same: `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 86 files, **1311 passed (1311)** · `packages/pr-rla-mcp` **59 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0.
+
+### Merge 9: `bolt/u7-ci-integrations` (d83d991)
+
+Merged on top of `45f1c9d` on the coordinator's instruction. U7 was cut from `0fa9ad8` and changes nothing under `src/`.
+
+- **Conflicts:** only `BUILD-NOTES.md`; U7's section goes before this one. `README.md` auto-merged: U7's "CI integrations" section sits before "Architecture", with P4's and P3's edits around it unchanged. `package.json`, `package-lock.json` (`ajv` 8.20.0) and `.gitignore` (the `vendor/` exception) merged cleanly.
+- **Tests:** U7's 202 tests (46 + 113 + 43) pass against the integrated build unchanged. They run `dist/cli.js`, so they run P4's and P3's code: the merged suite is 89 files, 1513 passed.
+- **The Action's pin, re-taken from the integrated build** (`node scripts/pack-action-tarball.mjs`): `vendor/pr-rla-0.1.0.tgz` is now `npm pack` of this tree, sha512 `umZUL1XC…nB0Xg==` in the Action's lockfile (it was U7's snapshot of `0fa9ad8`, `P9hXc6xR…dng==`). The tarball gains P4's and P3's modules (`core/head-proof`, `core/ledger-path`, `io/executables`). Packing twice gives the same bytes (sha256 `71fff18d…`). `npm --prefix integrations/github-action ci` installs it, `pr-rla --version` prints 0.1.0, and its `verify --help` lists P3's `--verbose`.
+- **Fixed on the way:** the first re-pin shipped `dist/commands/freeze-pool.*`, compiled from a file U5 removed. tsc never deletes the output of a deleted source, and this worktree's `dist/` predates merge 6. A fresh clone does not have the problem, but a maintainer's checkout does. The pack script now removes `dist/` before it builds; with a stale file planted in `dist/`, the tarball is byte-identical to a clean one.

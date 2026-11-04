@@ -19,6 +19,8 @@ const vendor = join(action, "vendor");
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+// A clean build: tsc never removes the output of a source that was deleted or moved, and npm pack would ship it.
+rmSync(join(root, "dist"), { recursive: true, force: true });
 run("npm", ["run", "build"], root);
 mkdirSync(vendor, { recursive: true });
 for (const f of existsSync(vendor) ? readdirSync(vendor) : []) if (/^pr-rla-.*\.tgz$/.test(f)) rmSync(join(vendor, f));
