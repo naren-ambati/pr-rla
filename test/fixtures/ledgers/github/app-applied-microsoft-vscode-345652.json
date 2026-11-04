@@ -9,7 +9,8 @@
   "labels": {
    "pass": "unreleased",
    "fail": "insiders-released"
-  }
+  },
+  "foreign_issues": true
  },
  "index": {
   "schema": "pr-rla/ledger-index/v1",
@@ -37,13 +38,12 @@
     "draw": 1,
     "changeId": "github:microsoft/vscode#345652",
     "number": 345652,
-    "id": "I_kwDOAn8RLM8AAAABb8pXdA",
+    "id": "6170498932",
     "url": "https://github.com/microsoft/vscode/issues/345652",
     "createdAt": "2026-11-02T20:35:22Z"
    }
   ],
-  "repeats": [],
-  "foreignIssues": true
+  "repeats": []
  },
  "observed": {
   "verdicts": [
@@ -86,10 +86,11 @@
    }
   ]
  },
+ "amended": "2026-11-04T09:29:16Z (P1): each recorded issue response gained its numeric `id`, read live with one anonymous GET of the same issue (github-issues names an issue by that id now, not its node id), and the index took the same id; foreignIssues moved from the index to the test-only ledger option foreign_issues. Nothing else changed.",
  "exchanges": [
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/unreleased","bodySha256":null,"status":200,"headers":{},"response":{"id":2101828608,"node_id":"MDU6TGFiZWwyMTAxODI4NjA4","name":"unreleased"}},
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/insiders-released","bodySha256":null,"status":200,"headers":{},"response":{"id":2101830183,"node_id":"MDU6TGFiZWwyMTAxODMwMTgz","name":"insiders-released"}},
-{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345652","bodySha256":null,"status":200,"headers":{},"response":{"number":345652,"node_id":"I_kwDOAn8RLM8AAAABb8pXdA","html_url":"https://github.com/microsoft/vscode/issues/345652","created_at":"2026-11-02T20:35:22Z","repository_url":"https://api.github.com/repos/microsoft/vscode","state":"closed","labels":[{"name":"bug"},{"name":"unreleased"},{"name":"inbox-one"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345652","bodySha256":null,"status":200,"headers":{},"response":{"number":345652,"id":6170498932,"node_id":"I_kwDOAn8RLM8AAAABb8pXdA","html_url":"https://github.com/microsoft/vscode/issues/345652","created_at":"2026-11-02T20:35:22Z","repository_url":"https://api.github.com/repos/microsoft/vscode","state":"closed","labels":[{"name":"bug"},{"name":"unreleased"},{"name":"inbox-one"}],"body":null}},
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345652/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":34952758286,"event":"assigned","created_at":"2026-11-02T20:35:22Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35046707666,"event":"labeled","created_at":"2026-11-03T17:26:08Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"label":{"name":"bug"},"performed_via_github_app":null},{"id":35047121162,"event":"labeled","created_at":"2026-11-03T17:30:37Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"label":{"name":"inbox-one"},"performed_via_github_app":null},{"id":35059509249,"event":"milestoned","created_at":"2026-11-03T19:57:38Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35059902719,"event":"closed","created_at":"2026-11-03T20:02:27Z","actor":{"login":"meganrogge","id":29464607,"type":"User"},"performed_via_github_app":null},{"id":35060017599,"event":"labeled","created_at":"2026-11-03T20:03:50Z","actor":{"login":"vs-code-engineering[bot]","id":122617954,"type":"Bot"},"label":{"name":"unreleased"},"performed_via_github_app":null},{"id":35062261322,"event":"referenced","created_at":"2026-11-03T20:31:04Z","actor":{"login":"wingwkyuen","id":1064514,"type":"User"},"performed_via_github_app":null}]}
  ]
 }

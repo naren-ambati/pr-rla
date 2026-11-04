@@ -26,7 +26,7 @@ export interface IndexedIssue {
   changeId: string;
   /** GitHub issue number or GitLab iid (as a string for Jira keys). */
   number: number | string;
-  /** The tracker's global id (GitHub node id, GitLab id, Jira id). */
+  /** The tracker's own numeric id, as a string (GitHub's issue `id`, not its node id; GitLab's `id`; Jira's id). */
   id: string;
   url: string;
   createdAt: string;
@@ -43,13 +43,8 @@ export interface LedgerIndex {
   labels: Record<Verdict | "draw", IndexedLabel>;
   issues: IndexedIssue[];
   repeats: { draw: number; changeId: string; sameAs: number }[];
-  /**
-   * Set by hand on an index built around issues pr-rla did not open (the recorded public timelines
-   * the ledger tests replay): their bodies carry no pr-rla marker and their other labels are not
-   * stray. A ledger reading such an index skips the body-marker check and the stray-label warning.
-   * `publishDraws` never writes it, and `verify` WARNs when an audit's index has it.
-   */
-  foreignIssues?: true;
+  // (P1) No `foreignIssues`: issues pr-rla did not open are a test-only ledger option now (`foreign_issues`),
+  // never an index field, and an audit index that carries one FAILs check 7.
 }
 
 export function indexPath(windowDir: string): string {

@@ -1,7 +1,8 @@
-import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
-import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
-import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
-import { ledgerPathFindings } from "./ledger-path.js";
+import type { Ledger, ProvenanceLevel, VerdictEvent } from "../sdk/ledger.js";
+import { checkpointRecord, type CheckpointArtifact } from "./checkpoint.js";
+import type { LedgerIndexDocument } from "./ledger-anchor.js";
+import { ledgerGate, type GateLedger, type LedgerGate } from "./ledger-gate.js";
+import type { ReadPublications } from "./ledger-publication.js";
 import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
@@ -42,7 +43,7 @@ import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
 import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
-import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
+import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, type VerdictRules } from "./presence/provenance.js";
 
 /**
  * INCOMPLETE (U8): no FAIL, but part of what the check covers could not be checked (a repo that could not be rebuilt,
@@ -79,6 +80,8 @@ export interface VerifyArtifacts {
   checkpointsUnchained?: number;
   /** The window's ledger-index.json (null when there is none): check 7 compares its hash with the one draws.json bound. */
   ledgerIndex?: LedgerIndexDocument | null;
+  /** The window's ledger-publication.json (null when there is none): check 7 holds the index to it (P1). */
+  ledgerPublications?: ReadPublications | null;
 }
 
 export interface VerifyDeps {
@@ -104,6 +107,8 @@ export interface VerifyDeps {
   logKey: (logUrl: string) => Promise<string | null>;
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
+  /** Test-only options the ledger runs with (P1, src/ledger-traits.ts): check 7 FAILs each. */
+  ledgerTestOnlyOptions?: readonly string[];
   /**
    * What the configured provider is (P1). For a v2 registration it must be the registered provider (name,
    * source, files, trust, every option), or check 5 FAILs; verify then does not open it (`provider` is null).
@@ -128,12 +133,16 @@ export interface VerifyReport {
 
 const n = (x: number) => x.toLocaleString("en-US");
 
-/** Adds anchor findings (ledger index binding, checkpoint coverage) to a check: FAIL beats WARN beats whatever it was. */
-function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): boolean {
-  c.details.push(...f.fails.map((d) => `FAIL ${d}`), ...f.warns.map((d) => `WARN ${d}`), ...f.notes);
-  if (f.fails.length) c.status = "FAIL";
-  else if (f.warns.length && c.status === "PASS") c.status = "WARN";
-  return f.fails.length > 0;
+/** The first verdict of every change in the counted prefix (check 7 and status hold these to the registered rules). */
+export function countedFirstVerdicts(status: StatusReport, draws: readonly { changeId: string }[]): VerdictEvent[] {
+  const ids = new Set(draws.slice(0, status.sequence.draws).map((d) => d.changeId));
+  return status.firstVerdicts.filter((v) => ids.has(v.changeId));
+}
+
+/** A record's tokens assessed under the registration's timestamping, printing nothing (check 7's gate prints). */
+async function assessTokens(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], deps: VerifyDeps): Promise<TimeEvidenceSummary> {
+  const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
+  return assessTimestamps({ timestamps: signed.timestamps ?? [], data, digestHex: sha256Hex(data), signedTimeIso, timestamping, bundle: deps.trustBundle, log: null });
 }
 
 /**
@@ -485,20 +494,46 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   // 7. Label (verdict) events of the counted prefix.
   const c7: VerifyCheck = { n: 7, name: "labels", status: "PASS", summary: "labels", details: [] };
   let status: StatusReport | null = null;
-  // P1: the ledger in .pr-rla.yml must be the registered one (name, source, files, trust, every option): one comparison for every plugin and command (src/core/plugin-binding.ts).
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-  const idDiffs = registeredLedger && deps.ledgerIdentity ? identityDiffs(registeredLedger, deps.ledgerIdentity) : [];
+  // Every checkpoint's and publication's tokens, assessed under the registration's rules (local: no request).
+  const checkpoints = a.checkpoints ?? [];
+  const checkpointStamps = new Map<CheckpointArtifact, TimeEvidenceSummary>();
+  const publicationStamps: (TimeEvidenceSummary | null)[] = [];
+  if (isRegistrationV2(reg)) {
+    for (const cp of checkpoints) if (cp.line.timestamps.length) checkpointStamps.set(cp, await assessTokens({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, deps));
+    for (const p of a.ledgerPublications?.publications ?? []) publicationStamps.push(await assessTokens(p, p.record.publishedAt, reg.record.timestamping, deps));
+  }
+  const gateBase = {
+    registration: reg,
+    manifestSha256: m?.sha256 ?? null,
+    drawsFile: a.draws,
+    draws: recomputed,
+    seedPublishesAt: derived.publishesAt,
+    ledgerIdentity: deps.ledgerIdentity ?? null,
+    testOnlyOptions: deps.ledgerTestOnlyOptions ?? [],
+    ledgerIndex: a.ledgerIndex,
+    publications: a.ledgerPublications ?? null,
+    publicationStamps,
+    checkpoints,
+    checkpointProblems: a.checkpointProblems ?? [],
+    checkpointsUnchained: a.checkpointsUnchained ?? 0,
+    checkpointStamps,
+  };
+  /** The gate's lines (src/core/ledger-gate.ts, shared with status): FAIL beats WARN beats whatever check 7 was. */
+  const applyGate = (g: LedgerGate) => {
+    c7.details.push(...g.lines.map((l) => l.text));
+    if (g.fails.length) c7.status = "FAIL";
+    else if (g.warns.length && c7.status === "PASS") c7.status = "WARN";
+  };
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
-    if (idDiffs.length) {
+    // What is local is checked even when the tracker is not read: the ledger's identity, the index and its publication, the checkpoint file.
+    const g = ledgerGate({ ...gateBase, ledger: null });
+    c7.details.push(...g.lines.map((l) => l.text));
+    if (g.fails.length) {
       c7.status = "FAIL";
       c7.summary = "labels FAIL";
-      c7.details.push(`FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): verify did not read it; verify with the registered ledger and options`);
-    }
-    // The index file is local: its hash is checked even when the tracker is not read.
-    if (a.draws && a.ledgerIndex !== undefined) {
-      if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
     }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
@@ -512,19 +547,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         return null;
       }
     };
-    let lastCountedAt: string | null = null;
     const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
     const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
-    // U9: the ledger read must be the registered one, or nothing it says counts as registered (the API never opens another; a direct caller of the core may).
-    if (idDiffs.length) {
-      c7.status = "FAIL";
-      c7.details.push(`FAIL the ledger in .pr-rla.yml is not the registered one (${idDiffs.join("; ")}): verify with the registered ledger and options`);
-    }
-    if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
-      c7.status = "FAIL";
-      c7.details.push(`FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})`);
-    }
+    const idDiffs = registeredLedger && deps.ledgerIdentity ? identityDiffs(registeredLedger, deps.ledgerIdentity) : [];
     // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
     const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
     // P4: each verdict signature must be made for this audit as verified above: the registration, the manifest (check 2) and the seed (check 4).
@@ -535,6 +561,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c7.details.push(...counted.notes, ...counted.findings, ...counted.warnings);
       if ((counted.notes.length || counted.warnings.length) && c7.status === "PASS") c7.status = "WARN";
     }
+    let countedFirst: VerdictEvent[] = [];
     if (verdicts) {
       status = computeStatus({
         N: m.N,
@@ -547,80 +574,36 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         reviewers: regVerdicts?.reviewers ?? null,
         ineligible: counted!.ineligible,
       });
-      const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
-      const firstFor = new Map(status.firstVerdicts.map((v) => [v.changeId, v]));
-      lastCountedAt = [...countedIds].map((id) => firstFor.get(id)?.recordedAt).filter((t): t is string => !!t).sort((x, y) => Date.parse(x) - Date.parse(y)).at(-1) ?? null;
-      for (const id of countedIds) {
-        const v = firstFor.get(id);
-        if (v && recordedBeforeSeed(v.recordedAt, derived.publishesAt)) {
-          c7.status = "FAIL";
-          c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
-        }
-        // FR3.8, FR9.4: a counted verdict below the registered minimum provenance FAILs; FR9.1: so does one
-        // its registered reviewer did not sign, under require_signed.
-        for (const failure of v ? verdictRuleFailures(v, rules) : []) {
-          c7.status = "FAIL";
-          c7.details.push(failure);
-        }
-      }
+      countedFirst = countedFirstVerdicts(status, recomputed);
       c7.details.push(`${provenanceLine(status.provenance)} (${rulesLine(rules)})`);
       if (rules.minProvenance === "presence" || status.provenance.some((p) => p.level === "presence")) c7.details.push(PRESENCE_LIMIT);
       for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
       for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
       if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";
     }
+    // The ledger's integrity report and, with checkpoints, its history now: read here, judged by the gate.
+    let integrity: GateLedger["integrity"] = null;
     if (ledger.verifyIntegrity) {
-      const integ = await attempt("verifyIntegrity", () => ledger.verifyIntegrity!());
-      if (integ) {
-        c7.details.push(...integ.findings, ...(integ.warnings ?? []));
-        if (!integ.ok) c7.status = "FAIL";
-        else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
-        // P4: the git-file ledger walked must be at the path the registration records.
-        if (ledger.name === "git-file") addAnchor(c7, ledgerPathFindings(reg, integ.location));
-      }
-    } else {
-      c7.details.push(`ledger ${ledger.name} has no integrity check`);
-      if (c7.status === "PASS") c7.status = "WARN";
-    }
-    const checkpoints = a.checkpoints ?? [];
-    const stampedBy = new Map<CheckpointArtifact, boolean>();
-    for (const p of a.checkpointProblems ?? []) {
-      c7.status = "FAIL";
-      c7.details.push(`FAIL checkpoint file: ${p}`);
-    }
-    // P1: a checkpoint names the ledger whose history it hashed; one taken of another ledger proves nothing about the registered one.
-    if (registeredLedger)
-      for (const cp of checkpoints) {
-        const d = cp.line.ledger && typeof cp.line.ledger === "object" ? identityDiffs(registeredLedger, cp.line.ledger) : ["ledger (none recorded)"];
-        if (d.length) {
-          c7.status = "FAIL";
-          c7.details.push(`FAIL checkpoint ${cp.line.takenAt} was taken of a ledger that is not the registered one (${d.join("; ")})`);
-        }
-      }
-    if (checkpoints.length && !ledger.readHistory) {
-      c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
-      if (c7.status === "PASS") c7.status = "WARN";
-    } else if (checkpoints.length) {
-      const current = await attempt("readHistory", () => ledger.readHistory!());
-      if (current) {
-        for (const cp of checkpoints) {
-          const problems = compareWithCheckpoint(cp, current, status?.firstVerdicts ?? []);
-          if (problems.length) {
-            c7.status = "FAIL";
-            c7.details.push(...problems.map((p) => `FAIL ${p}`));
-          }
-          if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
-          // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
-          if (cp.line.timestamps.length && isRegistrationV2(reg)) {
-            const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7);
-            // Coverage counts only what the trusted-time rules count: ignored (unregistered) or failing tokens time-stamp nothing.
-            stampedBy.set(cp, ts.counted.length > 0);
-          }
-        }
+      try {
+        integrity = { report: await ledger.verifyIntegrity(), error: null };
+      } catch (e) {
+        integrity = { report: null, error: (e as Error).message };
       }
     }
-    if (a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
-    addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0, timeStamped: (cp) => stampedBy.get(cp) ?? cp.line.timestamps.length > 0 }));
+    let history: GateLedger["history"] = null;
+    if (checkpoints.length && ledger.readHistory) {
+      try {
+        history = { events: await ledger.readHistory(), error: null };
+      } catch (e) {
+        history = { events: null, error: (e as Error).message };
+      }
+    }
+    applyGate(
+      ledgerGate({
+        ...gateBase,
+        ledger: { name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: verdicts, counted: countedFirst, firstVerdicts: status?.firstVerdicts ?? [], integrity, history },
+      }),
+    );
     c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
   }
   checks.push(c7);

@@ -8,6 +8,7 @@ import { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { canonicalJson, sha256Hex } from "pr-rla";
 
 export const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const REPO = resolve(PKG, "..", "..");
@@ -149,11 +150,32 @@ export async function mockGitHub({ delayMs = 0, echo = false } = {}) {
   return { url: `http://127.0.0.1:${port}`, requests, state, close: () => new Promise((r) => server.close(r)) };
 }
 
-/** The recorded audit with the built-in GitHub provider pointed at a mock GitHub Enterprise Server. */
+/**
+ * pr-rla's P1: every tool runs only the provider the registration names. A copy that points .pr-rla.yml at another
+ * provider names it in its registration too, as a registration made with it would. The record is not re-signed, so
+ * this is only for tests whose subject is not check 1's signature.
+ */
+export function registerProviderInCopy(dir, identity) {
+  const p = join(dir, "audit", "2026-q3", "registration.json");
+  const reg = JSON.parse(readFileSync(p, "utf8"));
+  reg.record.plugins.provider = identity;
+  writeFileSync(p, `${JSON.stringify(reg, null, 2)}\n`);
+}
+const digest = (options, keys) => sha256Hex(canonicalJson(keys ? Object.fromEntries(keys.filter((k) => k in options).map((k) => [k, options[k]])) : options));
+/** A built-in provider's identity, as register records it (the built-in's version is not compared). */
+export const builtinProviderIdentity = (name, options, populationOptions = []) => ({ name, source: "builtin", version: "0.1.0", integrity: null, optionsSha256: digest(options), populationOptionsSha256: digest(options, populationOptions), trust: "builtin" });
+/** A locked external provider's identity, from the copy's pr-rla.lock.json (as register records it). */
+export function lockedProviderIdentity(dir, use, options = {}) {
+  const e = JSON.parse(readFileSync(join(dir, "pr-rla.lock.json"), "utf8")).plugins[use];
+  return { name: e.name, source: e.source, version: e.version, integrity: e.treeSha256, optionsSha256: digest(options), populationOptionsSha256: digest(options, []), trust: e.trust };
+}
+
+/** The recorded audit with the built-in GitHub provider pointed at a mock GitHub Enterprise Server (and registered with it). */
 export function onlineAudit(baseUrl) {
   return copyAudit((dir) => {
     const cfg = readFileSync(join(dir, ".pr-rla.yml"), "utf8").replace(/^provider: .*$/m, `provider: { use: github, options: { base_url: "${baseUrl}" } }`);
     writeFileSync(join(dir, ".pr-rla.yml"), cfg);
+    registerProviderInCopy(dir, builtinProviderIdentity("github", { base_url: baseUrl }, ["base_url", "api_url", "graphql_url"]));
   });
 }
 

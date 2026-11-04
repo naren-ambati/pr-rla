@@ -28,6 +28,7 @@ export function reportTimestamps(ctx: CommandContext, summary: TimeEvidenceSumma
   if (summary.proven) return EXIT.OK;
   ctx.out(`  ${notTamperProof(summary)}`);
   if (rerun.startsWith("pr-rla checkpoint")) ctx.out(`  to make it tamper-proof, take another checkpoint (lines are only ever added): ${rerun}`);
+  else if (rerun.startsWith("pr-rla sample")) ctx.out(`  to make it tamper-proof, publish again (records are only ever added) before anyone records a verdict on these issues: ${rerun}`);
   else ctx.out(`  to make it tamper-proof, ${rerun.startsWith("pr-rla register") ? "register" : "freeze"} again before anything is shown to anyone: ${rerun}`);
   return EXIT.TIMESTAMPS_SHORT;
 }

@@ -30,7 +30,7 @@ function trimGitHub(url, body) {
   const p = new URL(url).pathname;
   if (/\/issues\/\d+\/events$/.test(p) || /\/issues\/events$/.test(p))
     return body.map((e) => ({ ...pick(e, ["id", "event", "created_at"]), actor: ghUser(e.actor), ...(e.label ? { label: { name: e.label.name } } : {}), performed_via_github_app: e.performed_via_github_app ? pick(e.performed_via_github_app, ["slug", "name"]) : null, ...(e.issue ? { issue: { number: e.issue.number, pull_request: !!e.issue.pull_request } } : {}) }));
-  if (/\/issues\/\d+$/.test(p)) return { ...pick(body, ["number", "node_id", "html_url", "created_at", "repository_url", "state"]), labels: (body.labels ?? []).map((l) => ({ name: l.name })), body: null };
+  if (/\/issues\/\d+$/.test(p)) return { ...pick(body, ["number", "id", "node_id", "html_url", "created_at", "repository_url", "state"]), labels: (body.labels ?? []).map((l) => ({ name: l.name })), body: null };
   if (/\/labels\/[^/]+$/.test(p)) return pick(body, ["id", "node_id", "name"]);
   if (/^\/repos\/[^/]+\/[^/]+$/.test(p)) return pick(body, ["id", "full_name"]);
   return body;
@@ -137,13 +137,15 @@ async function recordGitHub() {
     const issues = [];
     for (const [k, n] of spec.issues.entries()) {
       const meta = spec.issueMeta?.[n] ?? (await ghGet(`/repos/${spec.repo}/issues/${n}`)).body;
-      issues.push({ draw: k + 1, changeId: `github:${spec.repo}#${n}`, number: n, id: meta.node_id, url: meta.html_url, createdAt: meta.created_at });
+      // P1: an issue is named by its numeric id (the node id can change format).
+      issues.push({ draw: k + 1, changeId: `github:${spec.repo}#${n}`, number: n, id: meta.id === undefined ? meta.node_id : String(meta.id), url: meta.html_url, createdAt: meta.created_at });
     }
-    const index = { schema: "pr-rla/ledger-index/v1", ledger: "github-issues", tracker: `https://api.github.com/repos/${spec.repo}`, window: "recorded", protocolSha256: "0".repeat(64), registrationSha256: null, labels, issues, repeats: [], foreignIssues: true };
+    // These are issues pr-rla did not open: the test-only option foreign_issues reads them (P1: never an index field).
+    const index = { schema: "pr-rla/ledger-index/v1", ledger: "github-issues", tracker: `https://api.github.com/repos/${spec.repo}`, window: "recorded", protocolSha256: "0".repeat(64), registrationSha256: null, labels, issues, repeats: [] };
     const windowDir = mkdtempSync(join(tmpdir(), "prrla-record-"));
     writeFileSync(join(windowDir, "ledger-index.json"), JSON.stringify(index, null, 2));
     const { exchanges, broker } = recorder();
-    const ledger = await githubIssues.create({ repo: spec.repo, labels: spec.labels }, { cwd: windowDir, windowDir, env: token ? { GITHUB_TOKEN: token } : {}, log: (m) => console.error(m), fetch: broker.bind("ledger:github-issues") });
+    const ledger = await githubIssues.create({ repo: spec.repo, labels: spec.labels, foreign_issues: true }, { cwd: windowDir, windowDir, env: token ? { GITHUB_TOKEN: token } : {}, log: (m) => console.error(m), fetch: broker.bind("ledger:github-issues") });
     const verdicts = await ledger.readVerdicts();
     const integrity = await ledger.verifyIntegrity();
     const history = await ledger.readHistory();
@@ -153,7 +155,7 @@ async function recordGitHub() {
       tracker: "github",
       case: spec.case,
       recordedAt,
-      options: { repo: spec.repo, labels: spec.labels },
+      options: { repo: spec.repo, labels: spec.labels, foreign_issues: true },
       index,
       observed: { verdicts, integrity, history },
     }, exchanges);

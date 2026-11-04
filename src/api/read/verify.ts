@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.js";
 import { isRegistrationV2 } from "../../core/records.js";
 import { verifyAudit, type VerifyReport } from "../../core/verify.js";
-import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
+import { ledgerTraits, registeredCeiling, testOnlyLedgerOptions } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
 import { identityDiffs } from "../../core/plugin-binding.js";
 import { bindingIdentity } from "../../registry.js";
@@ -10,6 +10,7 @@ import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
 import { readCheckpoints } from "./checkpoints.js";
+import { readPublications } from "./publications.js";
 import { readError } from "./errors.js";
 import { callerOf, readOnlyContext, auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { logPublicKey } from "../translog.js";
@@ -97,13 +98,14 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   }
   const ledgerSkipped = !ledgerBound ? `the ledger in .pr-rla.yml is not the registered one, so it was not read` : skipLedger ? `offline: ledger ${lt!.name} lives in ${lt!.hosts.join(", ")}; run verify without --offline to check the verdicts` : null;
   const report = await verifyAudit(
-    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
+    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir), ledgerPublications: readPublications(paths.windowDir) },
     {
       provider,
       ledger,
       ...(ledgerSkipped ? { ledgerSkipped } : {}),
       ...(lt ? { provenanceCeiling: registeredCeiling(regV2 ? regV2.record.plugins.ledger : null, lt) } : {}),
       ledgerIdentity,
+      ledgerTestOnlyOptions: testOnlyLedgerOptions(config.ledger),
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {

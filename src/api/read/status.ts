@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { buildPopulation } from "../../core/population.js";
 import { perRepoRows, type RepoRow } from "../../core/pooled-report.js";
 import { PRESENCE_LIMIT, auditBinding, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
-import { certificateWithheld, gitFileLedgerGate } from "../../core/ledger-path.js";
+import type { GateLedger } from "../../core/ledger-gate.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
 import { describeRepoSet } from "../../core/repo-set.js";
 import { unixToIso } from "../../core/seed.js";
@@ -14,8 +14,9 @@ import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { builtinLedgerName } from "../../registry.js";
 import { provenanceRank, type ProvenanceLevel, type VerdictEvent } from "../../sdk/ledger.js";
 import { anchorLines, notTamperProof } from "../../timestamp/verify.js";
-import { latestCheckpointAt } from "./checkpoints.js";
-import { readOnlyContext, auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { latestCheckpointAt, readCheckpoints } from "./checkpoints.js";
+import { localLedgerGate } from "./ledger-gate.js";
+import { bindRegisteredPlugin, readOnlyContext, auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { assessRecord, logBound } from "../timestamps.js";
 
 /**
@@ -74,15 +75,32 @@ export type StatusResult =
       verdictNotes: string[];
       /** A pooled audit's per-repo counts (U8): descriptive; the risk limit applies to the pool. */
       perRepo?: RepoRow[];
-      /** The built-in git-file ledger's integrity walk and path rule, as check 7 runs them (P4); null for other ledgers. */
+      /** The ledger's integrity report and git-file's path rule, as check 7 judges them (P4; every ledger since P1); null for a ledger with no integrity check. */
       ledgerIntegrity: { ok: boolean; findings: string[]; fails: string[]; warnings: string[] } | null;
+      /**
+       * Check 7's gate as status ran it (P1, src/core/ledger-gate.ts): every FAIL and WARN verify's check 7 gives for the same
+       * files and ledger read. `shown`: the lines status prints besides its own (the binding, the publication, the
+       * checkpoints and their coverage). Any FAIL withholds CERTIFIED (`certificateWithheld`).
+       */
+      ledgerGate: { fails: string[]; warns: string[]; shown: string[] };
       /** Why CERTIFIED is withheld although the sequence certifies: what check 7 would FAIL (P4). Empty otherwise. */
       certificateWithheld: string[];
       /** The certificate line (or the refusal), as the CLI prints it first. */
       line: string;
     } & TimeStanding &
       StatusReport)
-  | ({ phase: "sampled"; window: string; verdictsRead: false; ledger: string; verdictsSkipped: string; N: number; drawsIssued: number; line: string } & TimeStanding);
+  | ({
+      phase: "sampled";
+      window: string;
+      verdictsRead: false;
+      ledger: string;
+      verdictsSkipped: string;
+      N: number;
+      drawsIssued: number;
+      line: string;
+      /** Check 7's local rules, without the tracker (P1): the index binding, its publication record, the checkpoint file. */
+      ledgerGate: { fails: string[]; warns: string[] };
+    } & TimeStanding);
 
 /**
  * The audit mode and the honest-output note for status. v1: tamper-evident iff its log entries verify
@@ -212,12 +230,17 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     return { phase: "frozen", window, N: manifest.N, line, ...standing, ...seed };
   }
   const draws = readDraws(paths);
+  // P1: status reads only the registered ledger, and refuses any other before anything is read (even offline).
+  await bindRegisteredPlugin(ctx, config, reg, "ledger", { command: "status" });
+  const ledgerIdentity = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
   if (opts.skipTrackerLedger) {
     const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx));
     if (lt.hosts.length > 0) {
       const verdictsSkipped = `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; read its verdicts with offline: false`;
       const line = `${mode} · frozen N ${fmt(manifest.N)} · ${draws.issued} draw(s) issued · verdicts not read (${verdictsSkipped})${timestampNote}`;
-      return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing };
+      // Check 7's local rules still run (the index, its publication, the checkpoint file): what verify would FAIL without reading the tracker.
+      const g = await localLedgerGate(ctx, config, paths, { registration: reg, manifest, draws, ledger: null, ledgerIdentity });
+      return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing, ledgerGate: { fails: g.fails, warns: g.warns } };
     }
   }
   const ledger = await ledgerFor(ctx, config, paths, { command: "status" });
@@ -241,10 +264,40 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length).map((v) => v.draw) : [];
   const verdictNotes = [...(minProvenance === "presence" || report.provenance.some((p) => p.level === "presence") ? [PRESENCE_LIMIT] : []), ...capped.notes, ...capped.warnings];
   const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
-  // P4: status runs check 7's git-file integrity walk and path rule (local), and withholds CERTIFIED where check 7 would FAIL.
-  const gate = builtinLedgerName(config.ledger.use) === "git-file" ? await gitFileLedgerGate(ledger, reg) : null;
-  const withheld = report.sequence.state === "CERTIFIED" ? certificateWithheld({ gate, below: belowMinimum.length, unsigned: unsigned.length }) : [];
-  const ledgerIntegrity = gate ? { ok: !gate.fails.length, findings: gate.integrity?.findings ?? [], fails: gate.fails, warnings: gate.warns } : null;
+  // P1 (with the seam review): check 7's gate, the one verify runs (src/core/ledger-gate.ts), over what status read:
+  // nothing verify FAILs there can show as CERTIFIED here. The ledger's integrity report and history come from the
+  // same read as the verdicts (an issue ledger reads its tracker once).
+  let integrity: GateLedger["integrity"] = null;
+  if (ledger.verifyIntegrity) {
+    try {
+      integrity = { report: await ledger.verifyIntegrity(), error: null };
+    } catch (e) {
+      integrity = { report: null, error: (e as Error).message };
+    }
+  }
+  let history: GateLedger["history"] = null;
+  if (ledger.readHistory && readCheckpoints(paths.windowDir).checkpoints.length) {
+    try {
+      history = { events: await ledger.readHistory(), error: null };
+    } catch (e) {
+      history = { events: null, error: (e as Error).message };
+    }
+  }
+  const countedFirst = report.firstVerdicts.filter((v) => counted.has(v.changeId));
+  const gate = await localLedgerGate(ctx, config, paths, {
+    registration: reg,
+    manifest,
+    draws,
+    ledgerIdentity,
+    ledger: { name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: capped.verdicts, counted: countedFirst, firstVerdicts: report.firstVerdicts, integrity, history },
+  });
+  const withheld = report.sequence.state === "CERTIFIED" ? gate.withheld : [];
+  // P4's view of the integrity rule (the integrity report and git-file's path), kept for its callers.
+  const integrityLines = gate.lines.filter((l) => l.rule === "integrity");
+  // Its warnings are the path rule's, as P4 printed them (the report's own warnings are check 7's WARN lines, not repeated here).
+  const ledgerIntegrity = integrity ? { ok: !integrityLines.some((l) => l.level === "fail"), findings: integrity.report?.findings ?? [], fails: integrityLines.filter((l) => l.level === "fail").map((l) => l.text.replace(/^FAIL /, "")), warnings: integrityLines.filter((l) => l.level === "warn" && l.text.startsWith("WARN ")).map((l) => l.text.replace(/^WARN /, "")) } : null;
+  // The rest of the gate, as status prints it: what status does not already say its own way (the verdict rules, the integrity report).
+  const shown = gate.lines.filter((l) => l.level !== "note" && l.rule !== "integrity" && l.rule !== "provenance" && l.rule !== "signatures");
   let checkpointAdvised = false;
   if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
     const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
@@ -254,5 +307,23 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   const line =
     report.refusal ??
     statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector, withheld }) + timestampNote;
-  return { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...report, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld, line };
+  return {
+    phase: "sampled",
+    window,
+    verdictsRead: true,
+    ledger: ledger.name,
+    ...standing,
+    ...report,
+    minProvenance,
+    belowMinimum,
+    checkpointAdvised,
+    requireSigned,
+    unsigned,
+    verdictNotes,
+    ...(perRepo ? { perRepo } : {}),
+    ledgerIntegrity,
+    ledgerGate: { fails: gate.fails, warns: gate.warns, shown: shown.map((l) => l.text) },
+    certificateWithheld: withheld,
+    line,
+  };
 }

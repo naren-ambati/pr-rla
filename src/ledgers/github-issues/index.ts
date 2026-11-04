@@ -28,6 +28,8 @@ export interface GitHubIssuesOptions {
   token_env?: string;
   /** Verdict and draw label names (defaults pr-rla:pass, pr-rla:fail, pr-rla:draw). */
   labels?: { pass?: string; fail?: string; draw?: string };
+  /** Test only (P1): read issues pr-rla did not open (recorded public timelines). An audit that sets it FAILs check 7. */
+  foreign_issues?: boolean;
 }
 
 export const GITHUB_ISSUES_LABELS = { pass: "pr-rla:pass", fail: "pr-rla:fail", draw: "pr-rla:draw" } as const;
@@ -53,6 +55,8 @@ interface GhEvent {
 }
 interface GhIssue {
   number: number;
+  /** The issue's numeric id: its identity (P1). The node id can change format; the id does not. */
+  id: number;
   node_id: string;
   html_url: string;
   created_at: string;
@@ -90,7 +94,7 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
 
   constructor(options: GitHubIssuesOptions, ctx: LedgerContext) {
     const o = options ?? ({} as GitHubIssuesOptions);
-    super({ ...GITHUB_ISSUES_LABELS, ...o.labels }, ctx);
+    super({ ...GITHUB_ISSUES_LABELS, ...o.labels }, ctx, o.foreign_issues === true);
     const { apiUrl, repoPath, enterprise } = endpoints(o);
     const token = (o.token_env ? ctx.env[o.token_env] : undefined) ?? ctx.env.GITHUB_TOKEN ?? ctx.env.GH_TOKEN ?? (enterprise ? ctx.env.GH_ENTERPRISE_TOKEN : undefined);
     this.where = o.repo;
@@ -128,7 +132,7 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
     let url: string | null = `/issues?state=all&labels=${encodeURIComponent(drawLabel)}&per_page=100`;
     while (url) {
       const r: Awaited<ReturnType<LedgerHttp["get"]>> = await this.http.get<GhIssue[]>(url);
-      for (const i of r.data as GhIssue[]) out.push({ number: i.number, id: i.node_id, url: i.html_url, createdAt: isoUtc(i.created_at), body: i.body });
+      for (const i of r.data as GhIssue[]) out.push({ number: i.number, id: String(i.id), url: i.html_url, createdAt: isoUtc(i.created_at), body: i.body });
       url = nextLink(r.headers);
     }
     return out;
@@ -136,7 +140,7 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
 
   protected async createIssue(title: string, body: string, drawLabel: string): Promise<Omit<IndexedIssue, "draw" | "changeId">> {
     const r = await this.http.request<GhIssue>("POST", "/issues", { body: { title, body, labels: [drawLabel] } });
-    return { number: r.data.number, id: r.data.node_id, url: r.data.html_url, createdAt: isoUtc(r.data.created_at) };
+    return { number: r.data.number, id: String(r.data.id), url: r.data.html_url, createdAt: isoUtc(r.data.created_at) };
   }
 
   protected async readIssue(issue: IndexedIssue): Promise<TrackerIssue> {
@@ -154,7 +158,7 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
       }
       url = nextLink(page.headers);
     }
-    return { state: "ok", id: r.data.node_id, number: r.data.number, body: r.data.body ?? null, currentLabels: r.data.labels.map((l) => (typeof l === "string" ? l : l.name)), events };
+    return { state: "ok", id: String(r.data.id), number: r.data.number, body: r.data.body ?? null, currentLabels: r.data.labels.map((l) => (typeof l === "string" ? l : l.name)), events };
   }
 
   protected async applyLabel(issue: IndexedIssue, label: string): Promise<void> {

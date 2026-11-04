@@ -112,6 +112,29 @@ describe("the ledger index is bound to the draws (finding 3)", () => {
     expect(c.details.join("\n")).toMatch(/ledger index: draw #2 is .*, but draws\.json draws .* there/);
   });
 
+  it("re-binding a two-sided swap with the issue bodies swapped too (pass-2 review's B) does not help: the index is not what was published", async () => {
+    const s = clone(honest);
+    const p = join(s.dir, W, "ledger-index.json");
+    const idx = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
+    const a = idx.issues.find((i) => i.draw === 2)!;
+    const b = idx.issues.find((i) => i.draw === 3)!;
+    for (const k of ["number", "id", "url"] as const) [(a as unknown as Record<string, unknown>)[k], (b as unknown as Record<string, unknown>)[k]] = [(b as unknown as Record<string, unknown>)[k], (a as unknown as Record<string, unknown>)[k]];
+    const f = fake.clone();
+    const ia = f.issues.get(a.number as number)!;
+    const ib = f.issues.get(b.number as number)!;
+    [ia.body, ib.body] = [ib.body, ia.body]; // GitHub's REST issue and timeline show no body edit
+    writeFileSync(p, JSON.stringify(idx, null, 2));
+    const dp = join(s.dir, W, "draws.json");
+    const draws = JSON.parse(readFileSync(dp, "utf8")) as DrawsFile;
+    writeFileSync(dp, JSON.stringify({ ...draws, ledgerIndexSha256: ledgerIndexSha256(idx) }, null, 2));
+    const c = (await runVerify({ ...s.ctx, fetch: f.fetch }, {})).checks.find((x) => x.n === 7)!;
+    // The markers now agree with the index, and the hash is rebound: only the publication record and the draw order object.
+    expect(c.details.join("\n")).not.toMatch(/carries no pr-rla marker|says in its body that it is draw/);
+    expect(c.status).toBe("FAIL");
+    expect(c.details.join("\n")).toMatch(/FAIL the ledger index is not an append-only extension of what was published: draw #2: publication #1 lists issue #\d+/);
+    expect(c.details.join("\n")).toMatch(/FAIL the ledger index: draw #3 is issue #\d+, not after draw #2's #\d+/);
+  });
+
   it("a deleted index FAILs; an index draws.json never bound only WARNs", async () => {
     const gone = clone(honest);
     rmSync(join(gone.dir, W, "ledger-index.json"));
@@ -228,23 +251,74 @@ describe("checkpoints (finding 9)", () => {
     });
 
     it("a checkpoint line with its time-stamp tokens stripped WARNs, and (being edited) breaks the next link", async () => {
+      // P1 (pass-2 review): the middle line, so there is a next link to break (the last line has none).
       const s = clone(three);
       const l = lines(s);
-      const stripped = JSON.stringify({ ...JSON.parse(l[2]!), timestamps: [] });
-      writeFileSync(join(s.dir, W, "ledger-checkpoints.jsonl"), `${[l[0], l[1], stripped].join("\n")}\n`);
+      const stripped = JSON.stringify({ ...JSON.parse(l[1]!), timestamps: [] });
+      writeFileSync(join(s.dir, W, "ledger-checkpoints.jsonl"), `${[l[0], stripped, l[2]].join("\n")}\n`);
       const c = await check7(s);
-      expect(c.details.join("\n")).toMatch(/WARN checkpoint 2026-10-21T05:00:00Z carries no time-stamp tokens/);
+      expect(c.details.join("\n")).toMatch(/WARN checkpoint 2026-10-21T04:00:00Z carries no time-stamp tokens/);
+      expect(c.status).toBe("FAIL");
+      expect(c.details.join("\n")).toMatch(/FAIL checkpoint file: ledger-checkpoints\.jsonl:3: the chain is broken/);
     });
 
-    it("a changed index since the latest checkpoint WARNs", async () => {
+    it("editing the newest line's index hash: the WARN, and its tokens no longer cover the line (rule 2): FAIL", async () => {
+      // P1 (pass-2 review): this test asserted only the WARN; the edit is inside the time-stamped bytes, so check 7 FAILs.
       const s = clone(three);
       const p = join(s.dir, W, "ledger-checkpoints.jsonl");
       const l = lines(s);
       const other = JSON.stringify({ ...JSON.parse(l[2]!), ledgerIndexSha256: "0".repeat(64) });
-      // the edited last line has no successor, so the chain does not object; the index hash does
+      // the edited last line has no successor, so the chain does not object; the index hash and the tokens do
       writeFileSync(p, `${[l[0], l[1], other].join("\n")}\n`);
       const c = await check7(s);
       expect(c.details.join("\n")).toMatch(/WARN the ledger index changed since the latest checkpoint \(2026-10-21T05:00:00Z/);
+      expect(c.status).toBe("FAIL");
+      expect(c.details.join("\n")).toMatch(/FAIL checkpoint 2026-10-21T05:00:00Z token from test-a: rule 2/);
+    });
+
+    it("the legitimate path: more draws published after the latest checkpoint WARN that the index changed, and nothing FAILs", async () => {
+      const s = clone(three);
+      at(s, "2026-10-21T05:30:00Z");
+      expect(await sampleCommand(s.ctx, { through: 40 })).toBe(0);
+      const c = await check7(s);
+      expect(c.details.join("\n")).toMatch(/WARN the ledger index changed since the latest checkpoint \(2026-10-21T05:00:00Z: index [0-9a-f]{12}…, now [0-9a-f]{12}…\): more draws were published since/);
+      expect(c.details.filter((d) => d.startsWith("FAIL "))).toEqual([]);
+      expect(c.status).toBe("WARN");
+    });
+
+    it("a remap after the latest checkpoint (two issues swapped both ways, their bodies too, draws.json rebound): FAIL", async () => {
+      const s = clone(three);
+      const p = join(s.dir, W, "ledger-index.json");
+      const idx = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
+      const [a, b] = [idx.issues[1]!, idx.issues[4]!];
+      for (const k of ["number", "id", "url"] as const) [(a as unknown as Record<string, unknown>)[k], (b as unknown as Record<string, unknown>)[k]] = [(b as unknown as Record<string, unknown>)[k], (a as unknown as Record<string, unknown>)[k]];
+      const f = fake.clone();
+      const ia = f.issues.get(a.number as number)!;
+      const ib = f.issues.get(b.number as number)!;
+      [ia.body, ib.body] = [ib.body, ia.body];
+      writeFileSync(p, JSON.stringify(idx, null, 2));
+      const dp = join(s.dir, W, "draws.json");
+      writeFileSync(dp, JSON.stringify({ ...(JSON.parse(readFileSync(dp, "utf8")) as DrawsFile), ledgerIndexSha256: ledgerIndexSha256(idx) }, null, 2));
+      const c = (await runVerify({ ...s.ctx, fetch: f.fetch }, {})).checks.find((x) => x.n === 7)!;
+      expect(c.status).toBe("FAIL");
+      expect(c.details.join("\n")).toMatch(/FAIL the ledger index is not an append-only extension of what was published/);
+    });
+
+    it("a checkpoint short of tokens (1 of 2) after the last verdict does not cover it (pass-2 review #5): only a proven one does", async () => {
+      const s = clone(honest);
+      at(s, "2026-10-21T03:00:00Z");
+      tsa.behaviour["test-b"] = { status: 2 };
+      try {
+        expect(await checkpointCommand(s.ctx, {})).toBe(5);
+      } finally {
+        delete tsa.behaviour["test-b"];
+      }
+      const c = await check7(s);
+      // Before P1 (and after the wave-2 integration), a line with one counted token covered the last verdict.
+      expect(c.details.join("\n")).toMatch(/WARN no time-stamped ledger checkpoint post-dates the last counted verdict .*the latest checkpoint is 2026-10-21T03:00:00Z \(2026-10-21T03:00:00Z carries tokens, but they do not prove, by k registered authorities, that it existed at or after the last verdict\)/);
+      at(s, "2026-10-21T03:10:00Z");
+      expect(await checkpointCommand(s.ctx, {})).toBe(0);
+      expect((await check7(s)).details.join("\n")).not.toMatch(/no time-stamped ledger checkpoint post-dates/);
     });
   });
 });

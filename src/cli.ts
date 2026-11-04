@@ -104,6 +104,8 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .description("fetch and BLS-verify seed round R, compute the draws, write audit/<window>/draws.json")
     .option("--through <n>", "issue draws 1..n (default: the zero-failure stopping point)", (v) => Number(v))
     .option("--beacon-file <path>", "use a recorded quicknet beacon (still BLS-verified) instead of fetching")
+    .option("--key <path>", "the registration's signing key, which signs the ledger publication record (issue ledgers)")
+    .option("--tsa-trust <file>", "extra timestamp-authority anchors (repeatable)", collect)
     .action(function (this: Command) {
       return run((ctx) => sampleCommand(ctx, this.opts()))();
     });

@@ -62,7 +62,7 @@ describe("the index must agree with the tracker (finding 3)", () => {
     editIndex(windowDir, (i) => {
       const e = i.issues.find((x) => x.draw === 3)!;
       e.number = one.number;
-      e.id = one.node_id;
+      e.id = String(one.id);
     });
     const l = await open();
     const r = await integrity(l);

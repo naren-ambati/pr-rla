@@ -30,6 +30,8 @@ export interface GitLabIssuesOptions {
   token_env?: string;
   /** Verdict and draw label names (defaults pr-rla-pass, pr-rla-fail, pr-rla-draw). */
   labels?: { pass?: string; fail?: string; draw?: string };
+  /** Test only (P1): read issues pr-rla did not open (recorded public timelines). An audit that sets it FAILs check 7. */
+  foreign_issues?: boolean;
 }
 
 export const GITLAB_ISSUES_LABELS = { pass: "pr-rla-pass", fail: "pr-rla-fail", draw: "pr-rla-draw" } as const;
@@ -83,7 +85,7 @@ export class GitLabIssuesLedger extends IssueTrackerLedger {
 
   constructor(options: GitLabIssuesOptions, ctx: LedgerContext) {
     const o = options ?? ({} as GitLabIssuesOptions);
-    super({ ...GITLAB_ISSUES_LABELS, ...o.labels }, ctx);
+    super({ ...GITLAB_ISSUES_LABELS, ...o.labels }, ctx, o.foreign_issues === true);
     const { api, projectPath } = endpoints(o);
     const token = ctx.env[o.token_env ?? "GITLAB_TOKEN"];
     this.where = String(o.project);

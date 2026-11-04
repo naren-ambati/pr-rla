@@ -29,6 +29,7 @@ const empty = (): AnchorFindings => ({ fails: [], warns: [], notes: [] });
 interface IndexShape {
   issues?: unknown;
   repeats?: unknown;
+  /** Not an index field (P1): an index that carries it FAILs. */
   foreignIssues?: unknown;
 }
 
@@ -51,7 +52,8 @@ export function indexBindingFindings(draws: DrawsFile, index: LedgerIndexDocumen
   else if (bound !== index.sha256) out.fails.push(`ledger-index.json (sha256 ${index.sha256.slice(0, 12)}…) is not the index draws.json bound at sample time (${bound.slice(0, 12)}…): the draw → issue mapping was edited after the draws were published`);
   const v = index.value as IndexShape | null;
   if (!v || typeof v !== "object") return out;
-  if (v.foreignIssues === true) out.warns.push("the ledger index sets foreignIssues: the issues' body markers and stray labels are not checked (an index for recorded public timelines; not for a real audit)");
+  // P1: foreign issues are a test-only ledger option now (recorded public timelines), never an index field.
+  if (v.foreignIssues !== undefined) out.fails.push("the ledger index carries foreignIssues, which turns off the issues' body-marker check: an audit's index never carries it (it is a test-only ledger option for recorded public timelines)");
   if (!Array.isArray(v.issues)) return out;
   const byNumber = new Map(draws.draws.map((d) => [d.draw, d]));
   const issueDraws = new Set<number>();
@@ -79,10 +81,10 @@ export function indexBindingFindings(draws: DrawsFile, index: LedgerIndexDocumen
  * only thing that notices history deleted from the tracker, so one must have been taken, with
  * time-stamp tokens, at or after the last counted verdict; and a line with no tokens proves nothing
  * about when it was taken. `lastCountedAt` is the latest `recordedAt` among the counted verdicts, or
- * null when none is counted. `timeStamped` says whether a checkpoint's tokens count: verify passes
- * the trusted-time verdict (at least one verified token from an authority the registration names),
- * so a line carrying only ignored or failing tokens does not cover the last verdict; without it, any
- * token counts.
+ * null when none is counted. `timeStamped` says whether a checkpoint's tokens count: check 7's gate
+ * passes the trusted-time verdict (P1, pass-2 review #5: proven by k registered authorities, with U_k at
+ * or after the last counted verdict), so a line whose tokens are short, ignored or failing does not
+ * cover it; without it, any token counts.
  */
 export function checkpointCoverage(checkpoints: readonly CheckpointArtifact[], opts: { checkpointable: boolean; lastCountedAt: string | null; ledgerIndexSha256: string | null; unchained: number; timeStamped?: (cp: CheckpointArtifact) => boolean }): AnchorFindings {
   const out = empty();
@@ -95,7 +97,7 @@ export function checkpointCoverage(checkpoints: readonly CheckpointArtifact[], o
     if (covering.length === 0) {
       const latest = checkpoints.map((c) => c.line.takenAt).sort().at(-1);
       const unstamped = after.filter((c) => c.line.timestamps.length > 0);
-      const why = unstamped.length ? ` (${unstamped.map((c) => c.line.takenAt).join(", ")} carr${unstamped.length === 1 ? "ies" : "y"} tokens, but none from a registered authority verified)` : "";
+      const why = unstamped.length ? ` (${unstamped.map((c) => c.line.takenAt).join(", ")} carr${unstamped.length === 1 ? "ies" : "y"} tokens, but they do not prove, by k registered authorities, that it existed at or after the last verdict)` : "";
       out.warns.push(
         `no time-stamped ledger checkpoint post-dates the last counted verdict (${opts.lastCountedAt}); ${latest ? `the latest checkpoint is ${latest}` : "there is none"}${why}. Issue history deleted after the last checkpoint cannot be detected: run "pr-rla checkpoint" now that the verdicts are in`,
       );
