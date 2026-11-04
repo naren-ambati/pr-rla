@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createAuditContext, openLedger } from "../src/api/context.js";
 import githubIssues from "../src/ledgers/github-issues/index.js";
 import { WritePathNotAllowed } from "../src/net/contract.js";
+import { approvalsFile, approveBuiltin } from "../src/plugins/approvals.js";
 import type { DrawForLedger, Ledger } from "../src/sdk/ledger.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerHarness } from "../src/testing/index.js";
 import { FakeGitHubIssues, type FakeUser } from "./helpers/fake-issue-trackers.js";
@@ -217,6 +218,8 @@ describe("github-issues on GitHub Enterprise Server (FR4.8) and through the brok
 
     const fake = new FakeGitHubIssues(GHES, "corp/audit");
     const dir = tmp();
+    // A GHES token goes to a non-default origin: approved here, as `pr-rla plugin approve github-issues` would.
+    approveBuiltin(approvalsFile(), "GH_ENTERPRISE_TOKEN", GHES.replace(/\/api\/v3$/, ""), "2026-11-04T00:00:00Z");
     const actx = createAuditContext({ mode: "read-write", fetch: fake.fetch, env: { GH_ENTERPRISE_TOKEN: "ghe-token" } });
     const l = await openLedger(actx, cfg.ledger, dir, dir);
     await l.publishDraws!(DRAWS, PUB);

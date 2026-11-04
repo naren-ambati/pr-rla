@@ -2,7 +2,7 @@ import { createBroker, type Broker, type BrokerMode, type Credential, type Recor
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
 import { localConsent, type LocalConsent } from "../plugins/approvals.js";
-import { credentialGrants } from "../plugins/host.js";
+import { builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
@@ -199,20 +199,53 @@ export function requireReadWrite(ctx: AuditContext, operation: string): void {
   if (ctx.mode === "read-only") throw new AuditApiError(`${operation} writes, and this audit context is read-only`, "READ_ONLY_VIOLATION", `run "pr-rla ${operation}" yourself from the CLI`);
 }
 
+/**
+ * A built-in's environment for these options (finding 1, for built-ins): each variable it would
+ * send stays only when every origin it goes to is a built-in default, approved on this machine, or
+ * accepted for this run (`--accept-lock-grants`), and is https. Any other set variable is withheld,
+ * so the built-in runs anonymously, and one line names the command that approves it.
+ */
+export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "log">, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; granted: BuiltinCredentialUse[] } {
+  const env: Record<string, string | undefined> = { ...ctx.env };
+  const granted: BuiltinCredentialUse[] = [];
+  const withheld: string[] = [];
+  const accepted: string[] = [];
+  for (const u of builtinCredentialUses(kind, name, options)) {
+    if (!ctx.env[u.env]) continue;
+    const line = `${u.env} -> ${u.origins.join(", ") || "no origin"}`;
+    const https = u.origins.length > 0 && u.origins.every((o) => o.startsWith("https://"));
+    const sources = u.origins.map((o) => ctx.consent.builtin(u.env, o));
+    if (https && sources.every((x) => x !== null)) {
+      granted.push(u);
+      if (sources.includes("accepted")) accepted.push(line);
+    } else {
+      withheld.push(`${line}${https ? "" : " (not https)"}`);
+      delete env[u.env];
+    }
+  }
+  if (withheld.length) ctx.log(`${kind} ${use}: ${withheld.join("; ")} ${withheld.length > 1 ? "are" : "is"} not approved on this machine, so withheld (the ${kind} runs without ${withheld.length > 1 ? "them" : "it"}); to approve: pr-rla plugin approve ${use}`);
+  if (accepted.length) ctx.log(`${kind} ${use}: accepting ${accepted.join("; ")} from .pr-rla.yml for this run, not approved on this machine; --accept-lock-grants is only for a repo you control`);
+  return { env, granted };
+}
+
+/** What a built-in may send, for the broker's grant (its recorder scrubs these values). */
+const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => granted.map((u) => ({ env: u.env, hosts: u.origins.map((o) => new URL(o).host) }));
+
 /** Opens the configured provider with its fetch bound to the broker as `provider:<name>`. */
 export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {
   if (!builtinProviderName(spec.use)) return openExternalProvider(ctx, spec, cwd);
   const def = await loadProviderDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_PROVIDERS).includes(def as never);
   const id = `provider:${def.name}`;
+  const { env, granted } = builtinEnvironment(ctx, "provider", def.name, spec.use, spec.options);
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
     hosts: def.hosts?.(spec.options as never) ?? [],
-    credentials: def.credentials ?? [],
+    credentials: builtinGrantCredentials(granted),
     ...(builtin && PROVIDER_BUDGET_FAMILY[def.name] ? { budgetFamily: PROVIDER_BUDGET_FAMILY[def.name] } : {}),
   });
   for (const host of ctx.pendingRateLimits()) ctx.log(`rate_limits: ${host} has no default budget (not a known public host or a host of provider ${def.name}); the override is not used`);
-  return createProvider(spec, { cwd, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep });
+  return createProvider(spec, { cwd, env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep });
 }
 
 const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const;
@@ -241,13 +274,13 @@ async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   const def = await loadLedgerDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
   const id = `ledger:${def.name}`;
+  const { env, granted } = builtinEnvironment(ctx, "ledger", def.name, spec.use, spec.options);
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
     hosts: def.hosts?.(spec.options as never) ?? [],
     writePaths: def.writePaths?.(spec.options as never) ?? [],
-    // A credential's hosts for these options: its declared hosts, or the https host of the URL option it names (hostFromOption).
-    credentials: credentialGrants(def.credentials ?? [], spec.options),
+    credentials: builtinGrantCredentials(granted),
     ...(builtin && LEDGER_BUDGET_FAMILY[def.name] ? { budgetFamily: LEDGER_BUDGET_FAMILY[def.name] } : {}),
   });
-  return createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });
+  return createLedger(spec, { cwd, windowDir, env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });
 }

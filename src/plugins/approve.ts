@@ -1,4 +1,6 @@
-import { approvePlugin, grantsOf, grantText, readApprovals, type LocalConsent } from "./approvals.js";
+import type { PluginSpec } from "../registry.js";
+import { approveBuiltin, approvePlugin, checkBuiltinPair, grantsOf, grantText, parseHttpsOrigin, readApprovals, type LocalConsent } from "./approvals.js";
+import { builtinCredentialUses } from "./builtin-credentials.js";
 import { verifyLocked, type LockEntry, type PluginTrust } from "./lock.js";
 
 /**
@@ -44,6 +46,55 @@ export function planPluginApproval(consent: LocalConsent, auditDir: string, use:
     record(approvedAt) {
       approvePlugin(consent.file, use, entry, approvedAt);
       return `approved ${use} on this machine (${consent.file}); a change to its files, trust or grants needs a new approval`;
+    },
+  };
+}
+
+/** Approved on this machine or a built-in default; `--accept-lock-grants` settles nothing for good. */
+const settled = (consent: LocalConsent, env: string, origin: string) => {
+  const s = consent.builtin(env, origin);
+  return s === "approved" || s === "default";
+};
+
+/**
+ * The approval of what a built-in provider or ledger, with the options the audit gives it, would send
+ * beyond the built-in defaults: each variable that is set here, to each origin it would go to. Only
+ * https origins can be approved (a token is never sent in clear text).
+ */
+export function planBuiltinApproval(consent: LocalConsent, kind: "provider" | "ledger", name: string, spec: PluginSpec, env: Readonly<Record<string, string | undefined>>): ApprovalPlan {
+  const uses = builtinCredentialUses(kind, name, spec.options);
+  const set = uses.filter((u) => !!env[u.env]);
+  const pairs = set.flatMap((u) => u.origins.map((origin) => ({ env: u.env, origin })));
+  const plain = pairs.filter((p) => !p.origin.startsWith("https://"));
+  const open = pairs.filter((p) => p.origin.startsWith("https://") && !settled(consent, p.env, p.origin));
+  const lines = [
+    `${kind} ${spec.use} (built in) with this audit's options would send:`,
+    ...(set.length ? set.map((u) => `  ${u.env} -> ${u.origins.join(", ")}${u.origins.every((o) => settled(consent, u.env, o)) ? " (approved already, or a built-in default)" : ""}`) : [`  nothing: none of ${uses.map((u) => u.env).join(", ") || "its variables"} is set here`]),
+    ...plain.map((p) => `  ${p.env} -> ${p.origin} cannot be approved: not https, so it is never sent`),
+  ];
+  return {
+    lines,
+    nothing: open.length ? null : set.length ? `nothing to approve for ${spec.use}${plain.length ? " (only https origins can be approved)" : ""}` : `nothing to approve for ${spec.use}; set the variable you use and run this again, or: pr-rla plugin approve --env <ENV> --origin <https-url>`,
+    question: `Let built-in providers and ledgers on this machine send ${open.map((p) => `${p.env} to ${p.origin}`).join(", ")}?`,
+    record(approvedAt) {
+      for (const p of open) approveBuiltin(consent.file, p.env, p.origin, approvedAt);
+      return `approved ${open.map((p) => `${p.env} -> ${p.origin}`).join(", ")} for built-in providers and ledgers on this machine (${consent.file})`;
+    },
+  };
+}
+
+/** `plugin approve --env <ENV> --origin <url>`: one credential for built-ins, without an audit repo. */
+export function planBuiltinPairApproval(consent: LocalConsent, env: string, origin: string): ApprovalPlan {
+  checkBuiltinPair(env, origin);
+  const o = parseHttpsOrigin(origin)!;
+  const lines = [`built-in providers and ledgers may send ${env} to ${o}`];
+  return {
+    lines,
+    nothing: o && settled(consent, env, o) ? `${env} -> ${o} is approved already, or a built-in default` : null,
+    question: `Let built-in providers and ledgers on this machine send ${env} to ${o}?`,
+    record(approvedAt) {
+      const a = approveBuiltin(consent.file, env, origin, approvedAt);
+      return `approved ${a.env} -> ${a.origin} for built-in providers and ledgers on this machine (${consent.file})`;
     },
   };
 }

@@ -162,7 +162,9 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     });
   plugin
     .command("approve [use]")
-    .description("approve, on this machine, what a plugin someone else locked may send (its credentials and their origins) and its trust")
+    .description("approve, on this machine, what a plugin someone else locked may send (its credentials and their origins) and its trust; or, with --env and --origin, a credential for built-in providers and ledgers")
+    .option("--env <name>", "with --origin: the environment variable built-ins may send")
+    .option("--origin <url>", "with --env: the https origin they may send it to, e.g. https://ghe.example.com")
     .option("--yes", "approve what is printed without asking")
     .action(function (this: Command, use: string | undefined) {
       return run((ctx) => pluginApproveCommand(ctx, use, this.opts()))();

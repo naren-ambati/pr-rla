@@ -8,7 +8,7 @@ import { CORRECTNESS_NOT_SAFETY, fixtureName, hostedProviderConformance, readRec
 import { inspectPlugin as inspect, lockEntryFor as entryFor } from "../plugins/entry.js";
 import { NETWORK_DENIED_FROM_NODE } from "../plugins/host.js";
 import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, verifyLocked, writeLock, type LockedCredential, type LockEntry, type PluginTrust, type ResolvedPlugin } from "../plugins/lock.js";
-import { planPluginApproval, recordLockApproval } from "../plugins/approve.js";
+import { planBuiltinApproval, planBuiltinPairApproval, planPluginApproval, recordLockApproval } from "../plugins/approve.js";
 import { auditContextFor, CommandError, isoNow, type CommandContext } from "./context.js";
 
 /**
@@ -160,6 +160,9 @@ export async function pluginLockCommand(ctx: CommandContext, use: string, opts: 
 
 export interface PluginApproveOptions {
   yes?: boolean;
+  /** With `origin`: approve this credential for built-in providers and ledgers. */
+  env?: string;
+  origin?: string;
 }
 
 /**
@@ -169,9 +172,18 @@ export interface PluginApproveOptions {
  */
 export async function pluginApproveCommand(ctx: CommandContext, use: string | undefined, opts: PluginApproveOptions): Promise<number> {
   const consent = auditContextFor(ctx).consent;
-  if (!use) throw new CommandError("plugin approve needs the plugin's use (as in .pr-rla.yml)");
+  if ((opts.env === undefined) !== (opts.origin === undefined)) throw new CommandError("plugin approve: --env and --origin go together (the variable and the https origin built-ins may send it to)");
+  if (use !== undefined && opts.env !== undefined) throw new CommandError("plugin approve: give a plugin's use, or --env and --origin, not both");
+  if (use === undefined && opts.env === undefined) throw new CommandError("plugin approve needs the plugin's use (as in .pr-rla.yml), or --env <ENV> --origin <https-url> for a built-in's credential");
   const config = configIn(ctx);
-  const plan = planPluginApproval(consent, config?.dir ?? ctx.cwd, use);
+  const c = use === undefined ? null : configured(config, use);
+  const builtin = c && use !== undefined ? (c.kind === "provider" ? builtinProviderName(use) : builtinLedgerName(use)) : null;
+  const plan =
+    use === undefined
+      ? planBuiltinPairApproval(consent, opts.env!, opts.origin!)
+      : builtin && c
+        ? planBuiltinApproval(consent, c.kind, builtin, { use, options: c.options }, ctx.env)
+        : planPluginApproval(consent, config?.dir ?? ctx.cwd, use);
   for (const l of plan.lines) ctx.out(l);
   if (plan.nothing) {
     ctx.out(plan.nothing);
