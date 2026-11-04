@@ -85,6 +85,16 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
   return a;
 }
 
+/**
+ * Gives an ApiContext an AuditContext made elsewhere, so several calls share one broker and its
+ * per-host budgets (`pr-rla/api/read` does this per caller session and audit directory).
+ * The modes must agree.
+ */
+export function bindAuditContext(ctx: ApiContext, actx: AuditContext): void {
+  if ((ctx.mode ?? "read-write") !== actx.mode) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode cannot use a ${actx.mode} AuditContext`);
+  auditContexts.set(ctx, actx);
+}
+
 /** The fetch broker for this call: shared by every caller, on the context's clock. */
 export function brokerFor(ctx: ApiContext): BrokerFetch {
   return auditContextFor(ctx).broker.fetch;

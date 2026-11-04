@@ -10,6 +10,7 @@ export default defineConfig({
       "pr-rla/provider": src("sdk/provider.ts"),
       "pr-rla/ledger": src("sdk/ledger.ts"),
       "pr-rla/testing": src("testing/index.ts"),
+      "pr-rla/api/read": src("api/read/index.ts"),
     },
   },
   test: {

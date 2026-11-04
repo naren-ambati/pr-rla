@@ -6,6 +6,7 @@ import { Command } from "commander";
 import { checkpointCommand } from "./commands/checkpoint.js";
 import { AuditError } from "./api/errors.js";
 import { nodeContext, type CommandContext } from "./commands/context.js";
+import { drawContextCommand } from "./commands/draw-context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
 import { pluginAddCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
@@ -97,6 +98,15 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--beacon-file <path>", "use a recorded quicknet beacon (still BLS-verified) instead of fetching")
     .action(function (this: Command) {
       return run((ctx) => sampleCommand(ctx, this.opts()))();
+    });
+
+  program
+    .command("draw-context <draw>")
+    .description("what a reviewer reads for an issued draw: its diff (generated files dropped), description, CI results, protocol checklist and verdict state")
+    .option("--max-patch-bytes <n>", "bytes of patches to show in all (default 204800, at most 1048576)")
+    .option("--json", "machine-readable output")
+    .action(function (this: Command, draw: string) {
+      return run((ctx) => drawContextCommand(ctx, draw, this.opts()))();
     });
 
   program
