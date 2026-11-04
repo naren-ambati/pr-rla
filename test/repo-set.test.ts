@@ -253,8 +253,9 @@ describe("FR5.2: the pooled population is the union of per-repo populations unde
   it("each repo is listed from its own head", async () => {
     const heads: Record<string, string | undefined> = {};
     const p: ScmProvider = { ...stub("github", sizes), listChanges: async (req) => ((heads[req.repo] = req.head), stub("github", sizes).listChanges(req)) };
-    await buildPooledPopulation(p, { repos: [{ repo: "acme/a", head: "aa" }, { repo: "acme/b" }], ...args });
-    expect(heads).toEqual({ "acme/a": "aa", "acme/b": undefined });
+    const head = "a".repeat(40); // a commit id: a pinned head that is not one is refused (the ledger round's headSha rule)
+    await buildPooledPopulation(p, { repos: [{ repo: "acme/a", head }, { repo: "acme/b" }], ...args });
+    expect(heads).toEqual({ "acme/a": head, "acme/b": undefined });
   });
 
   it("checks every repo's listing: a change from another repo, or one outside the window, is refused", () => {

@@ -2159,3 +2159,29 @@ Merged before U5 and U8, on the coordinator's instruction. U9 branched from mast
 - **Integration test** (`test/wave2-integration.test.ts`): an audit registered on github-issues and verified with git-file swapped in FAILs check 7 on U9's identity rule, and an edited index still FAILs the ledger round's binding (a local file, judged whatever ledger is loaded); git-file gets no checkpoint-coverage WARN. Without U9 it fails on the identity assertion.
 - **Not yet joined:** U9's `src/io/git-safe.ts` is the one safe-git helper so far; git-file and its history walk use it. The only other git caller in `src/` is `src/io/git-transport.ts` (`checkpoint --push`, a write path, unchanged since it was added). U5's equivalent helper lands with U5, and the two become one there.
 - **Verified** (in this worktree, 2026-11-04T05:52Z, load average 70): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 61 files, **802 passed | 1 skipped (803)** · gitea 1 pass · jira 1 pass · `demo-presence`, `demo-sdk-carry-overs`, `demo-plugin-host`, `demo-broker`, `demo-ledgers` exit 0.
+
+### Merge 4: `bolt/u8-org-pooled-freeze` (ec073d7)
+
+Merged after U9 and before U5, on the coordinator's instruction. U8 branched from master `a360348`.
+
+- **Conflicts, each resolved by keeping both sides:**
+  - `src/core/population.ts`: U8 split `buildPopulation` into `listRepoChanges`, `checkListed` and `assemblePopulation`. The ledger round's pinned-head check (`isCommitId`) moves into `listRepoChanges`, the one place every listing passes through. A single repo, a pooled build and check 5's rebuild therefore all refuse a head that is not a commit id, before asking the provider. On the ledger branch it covered only the single-repo path. `readManifest` validates every `repos[].headSha` on read, as the ledger round left it.
+  - `src/commands/sample.ts`: U8's `repoLabel(manifest)` passed to `publishDraws`, then the ledger round's index binding.
+  - `src/config.ts`: U9's `allowedSigners` beside U8's `freeze` settings, with both parsers.
+  - `src/providers/github/index.ts`: the ledger round's `completeCommit` and U8's `listRepos`, `describeRepo`, `listingVisibility`, `firstParentPath` and `estimateRequests`, all kept.
+  - `src/commands/status.ts` (U9's `requireSigned`, U8's `perRepo`) and `src/commands/verify.ts` (the ledger round's `readIndexDocument`, U8's `EXIT`): both lines kept.
+  - `test/timestamps-e2e.test.ts`: both sides' imports.
+  - `README.md` (the kit lines, the limitations), `contracts.md` §5 (U9's `verdicts` row and U8's `registeredRepos` row) and `docs/security-model.md` (U8's section after U9's): both sides kept, line by line.
+  - `BUILD-NOTES.md`: U8's two sections go before this one.
+- **Timing margins outside both units.** U9 and U8 each widened the same two tests; U8's margins were kept, being the wider:
+  - the heartbeat test: a 5 s silence timeout with a 6.5 s call (U9 had 2 s with 4 s);
+  - the Jira-through-host test: 240 s (U9 had 180 s).
+
+  U8's other robustness changes came in unopposed: `maintenance.auto=false` and `gc.auto=0` in `audit-scenario.ts`, the 60 s `hookTimeout` and the Gitea-through-host bound. `fix/plugins-broker`'s rewrites replace the two plugin-host tests when it lands, and U5's `maintenance.auto=false` meets U8's then.
+- **A test that contradicted the stricter rule.** U8's `repo-set.test.ts › each repo is listed from its own head` pinned a head of `"aa"`, which the pinned-head rule now refuses in a pooled build too. The stricter behaviour is kept: the test pins a 40-hex head and asserts the same property (each repo listed from its own head).
+- **Integration tests** (`test/wave2-integration.test.ts`, synthetic: U8's fake org and the fake tracker on one router):
+  - a pooled build refuses a non-commit-id head before any provider call, and lists from a real one;
+  - a pooled audit with github-issues: `sample` binds the index to draws spanning the pool's repos, and check 5 PASSes, check 7 does not FAIL, and the verdict is VERIFIED;
+  - an index edited across repos FAILs check 7 while a deleted repo makes check 5 INCOMPLETE: the verdict is FAILED, `ok` false, exit 1, never INCOMPLETE.
+- **Still to write when U5 lands:** pooled freeze and INCOMPLETE through the MCP `verify` tool; INCOMPLETE in `status` through U5's API.
+- **Verified** (in this worktree, 2026-11-04T06:02Z, load average 23–45): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 71 files, **985 passed | 1 skipped (986)** · gitea 1 pass · jira 1 pass · all five demo scripts exit 0.

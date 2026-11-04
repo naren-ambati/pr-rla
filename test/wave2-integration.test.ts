@@ -5,13 +5,19 @@ import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
-import { runVerify } from "../src/commands/verify.js";
+import { runVerify, verifyExitCode } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
 import { checkpointRecord, type LedgerCheckpointLine } from "../src/core/checkpoint.js";
+import { buildPooledPopulation } from "../src/core/population.js";
+import { normalizeSelector } from "../src/core/selector.js";
+import type { ScmProvider } from "../src/sdk/provider.js";
 import type { DrawsFile, TimestampEvidence } from "../src/core/records.js";
+import { ledgerIndexSha256, type LedgerIndex } from "../src/ledgers/issue-index.js";
 import { isoMs, readToken } from "../src/timestamp/verify.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { FakeGitHubIssues } from "./helpers/fake-issue-trackers.js";
+import { fakeOrg, orgSpec, type FakeOrg } from "./helpers/fake-org.js";
+import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAuthority } from "./helpers/test-tsa.js";
 
 /**
@@ -26,6 +32,9 @@ import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAutho
  *
  * bolt/u9-presence-verdicts × fix/ledgers-selector: check 7's ledger identity (U9) sits beside the
  * ledger anchors (the index binding is a local file, judged whatever ledger is loaded).
+ *
+ * bolt/u8-org-pooled-freeze × fix/ledgers-selector: the ledger index binds pooled draws (repo-qualified
+ * change ids across the org's repos), and a FAIL in check 7 outranks U8's INCOMPLETE in check 5.
  */
 const W = "audit/2026-q3";
 let tsa: MockTsaServer;
@@ -143,5 +152,85 @@ describe("the registered ledger and the ledger anchors (bolt/u9-presence-verdict
     expect(d).toMatch(/FAIL ledger-index\.json \(sha256 [0-9a-f]{12}…\) is not the index draws\.json bound at sample time/);
     // git-file has no history to checkpoint, so the issue ledger's coverage rule does not apply to it
     expect(d).not.toMatch(/post-dates the last counted verdict/);
+  });
+});
+
+describe("the ledger index anchor with pooled draws (bolt/u8-org-pooled-freeze × fix/ledgers-selector)", () => {
+  let org: FakeOrg;
+  let tracker: FakeGitHubIssues;
+  let pool: PoolScenario;
+  const IDX = "audit/2026-q3/ledger-index.json";
+  const readP = <X>(p: string) => JSON.parse(readFileSync(join(pool.dir, p), "utf8")) as X;
+  /** `github:acme-org/svc-01#12` or `github:acme-org/svc-01@<sha>` → `acme-org/svc-01`. */
+  const repoOf = (changeId: string) => changeId.replace(/^[^:]+:/, "").replace(/[#@].*$/, "");
+  const verifyPool = () => pool.clock.run(runVerify(pool.ctxFor(route), { offline: false }));
+  /** The org's repos go to the synthetic org; the audit repo's issues to the fake tracker (both api.github.com). */
+  const route = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    return new URL(url).pathname.startsWith("/repos/acme/audit") ? tracker.fetch(input, init) : org.fetch(input, init);
+  }) as typeof fetch;
+
+  beforeAll(async () => {
+    org = fakeOrg(orgSpec({ eligible: 8 }));
+    tracker = new FakeGitHubIssues();
+    pool = setupPoolAudit(org, { extra: "ledger: { use: github-issues, options: { repo: acme/audit } }" });
+    const ctx = pool.ctxFor(route);
+    expect(await pool.clock.run(registerCommand(ctx, {}))).toBe(0);
+    await pool.advance(12 * 3600_000);
+    expect(await pool.clock.run(freezeCommand(ctx, {}))).toBe(0);
+    await pool.advance(13 * 3600_000); // 2026-10-21T01:00Z: R has published
+    expect(await pool.clock.run(sampleCommand(ctx, { through: 30 }))).toBe(0);
+    tracker.setTime("2026-10-21T02:00:00Z");
+    for (const d of readP<DrawsFile>("audit/2026-q3/draws.json").draws.slice(0, 30)) if (d.firstOccurrence) tracker.label(tracker.issueByDraw(d.draw).number, "pr-rla:pass", alice);
+    pool.git("add", "-A");
+    pool.git("commit", "-qm", "pooled draws and ledger index");
+  }, 180_000);
+
+  it("a pooled build refuses a pinned head that is not a commit id, before asking the provider (the ledger round's headSha rule, now in U8's per-repo listing)", async () => {
+    let asked = 0;
+    const provider = { name: "github", listChanges: async () => (asked++, { changes: [], defaultBranch: "main", limitations: [] }) } as unknown as ScmProvider;
+    const args = { window: { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" }, selector: normalizeSelector({ kinds: ["pull_request"], unreviewed: "no-human-review" }), cutoffIso: "2026-10-20T00:00:00Z" };
+    await expect(buildPooledPopulation(provider, { repos: [{ repo: "acme-org/svc-00", head: "HEAD~1" }], ...args })).rejects.toThrow(/the pinned default-branch head "HEAD~1" is not a commit id/);
+    expect(asked).toBe(0);
+    await buildPooledPopulation(provider, { repos: [{ repo: "acme-org/svc-00", head: "0".repeat(40) }], ...args });
+    expect(asked).toBe(1);
+  });
+
+  it("sample binds the index to draws across the pool's repos, and check 7's binding and check 5 both pass", async () => {
+    const draws = readP<DrawsFile>("audit/2026-q3/draws.json");
+    const index = readP<LedgerIndex>(IDX);
+    expect(draws.ledgerIndexSha256).toBe(ledgerIndexSha256(index));
+    expect(new Set(index.issues.map((i) => repoOf(i.changeId))).size).toBeGreaterThan(1); // the draws span the pool's repos
+    const r = await verifyPool();
+    const c5 = r.checks.find((c) => c.n === 5)!;
+    const c7 = r.checks.find((c) => c.n === 7)!;
+    expect(c5.status).toBe("PASS");
+    expect(c7.status).not.toBe("FAIL");
+    expect(c7.details.join("\n")).not.toMatch(/ledger-index|draw → issue/);
+    expect(r.verdict).toBe("VERIFIED");
+  });
+
+  it("an index edited across repos FAILs check 7 even while a gone repo makes check 5 INCOMPLETE: the verdict is FAILED, exit 1", async () => {
+    const idxPath = join(pool.dir, IDX);
+    const original = readFileSync(idxPath, "utf8");
+    try {
+      const index = JSON.parse(original) as LedgerIndex;
+      const a = index.issues[0]!;
+      const b = index.issues.find((i) => repoOf(i.changeId) !== repoOf(a.changeId))!;
+      [a.changeId, b.changeId] = [b.changeId, a.changeId]; // two draws' changes swapped between repos
+      writeFileSync(idxPath, JSON.stringify(index, null, 2));
+      const gone = readP<{ changes: { repo: string }[] }>("audit/2026-q3.manifest.json").changes[0]!.repo.split("/")[1]!;
+      org.removeRepo(gone);
+      const r = await verifyPool();
+      expect(r.checks.find((c) => c.n === 5)!.status).toBe("INCOMPLETE");
+      const c7 = r.checks.find((c) => c.n === 7)!;
+      expect(c7.status).toBe("FAIL");
+      expect(c7.details.join("\n")).toMatch(/FAIL ledger-index\.json \(sha256 [0-9a-f]{12}…\) is not the index draws\.json bound at sample time/);
+      expect(r.verdict).toBe("FAILED");
+      expect(r.ok).toBe(false);
+      expect(verifyExitCode(r)).toBe(1);
+    } finally {
+      writeFileSync(idxPath, original);
+    }
   });
 });
