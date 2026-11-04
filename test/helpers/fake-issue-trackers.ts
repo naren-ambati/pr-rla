@@ -54,6 +54,8 @@ interface GhEvent {
 
 interface GhIssueState {
   number: number;
+  /** The issue's numeric id (what github-issues compares since P1); it rises with the number, as GitHub's do. */
+  id: number;
   node_id: string;
   title: string;
   body: string;
@@ -159,7 +161,7 @@ export class FakeGitHubIssues extends FakeClock {
   /** An issue made directly (as if a previous run created it), with its body. */
   seedIssue(title: string, body: string, labels: string[] = []): number {
     const n = this.nextIssue++;
-    this.issues.set(n, { number: n, node_id: `I_kw${n}`, title, body, labels: [...labels], created_at: this.tick(), events: [], gone: null, movedTo: null });
+    this.issues.set(n, { number: n, id: 4_100_000_000 + n * 7, node_id: `I_kw${n}`, title, body, labels: [...labels], created_at: this.tick(), events: [], gone: null, movedTo: null });
     return n;
   }
 
@@ -187,7 +189,7 @@ export class FakeGitHubIssues extends FakeClock {
   }
   private issueJson(i: GhIssueState) {
     const where = i.movedTo ?? this.repo;
-    return { number: i.number, node_id: i.node_id, title: i.title, body: i.body, html_url: `https://github.example/${where}/issues/${i.number}`, created_at: i.created_at, repository_url: `${this.api}/repos/${where}`, labels: i.labels.map((name) => ({ name })) };
+    return { number: i.number, id: i.id, node_id: i.node_id, title: i.title, body: i.body, html_url: `https://github.example/${where}/issues/${i.number}`, created_at: i.created_at, repository_url: `${this.api}/repos/${where}`, labels: i.labels.map((name) => ({ name })) };
   }
 
   handle(url: URL, method: string, body: unknown): Response {

@@ -68,6 +68,8 @@ export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): 
   if (r.phase !== "sampled" || !r.verdictsRead || r.refusal) return;
   for (const f of r.ledgerIntegrity?.fails ?? []) ctx.out(`  ledger integrity FAILs: ${f}`);
   for (const w of r.ledgerIntegrity?.warnings ?? []) ctx.out(`  WARN ${w}`);
+  // P1: the rest of check 7's gate, as verify prints it (the index binding, its publication, the checkpoints and their coverage).
+  for (const l of r.ledgerGate.shown) ctx.out(`  ${l}`);
   if (r.blockingDraw) ctx.out(`  blocking draw: #${r.blockingDraw.draw} ${r.blockingDraw.changeId} ${r.blockingDraw.url}`);
   ctx.out(`  distinct changes reviewed: ${r.distinctReviewed} · draws counted: ${r.sequence.draws}${r.beyondStop ? ` · ${r.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
   for (const i of r.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);

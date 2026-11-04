@@ -144,7 +144,7 @@ export function sameAccount(a: Actor, b: Actor): boolean {
  * author; approval precedes merge"). It must be an APPROVED or CHANGES_REQUESTED review that
  *  - a non-bot account submitted,
  *  - was submitted at or before the change landed (`mergedAt`): a later approval is not a review
- *    of what landed, and
+ *    of what landed, and one whose time is unknown (`timeUnknown`) cannot be shown to precede it, and
  *  - was not submitted by the change's author (compared by `Actor.id` where both have one, by
  *    login otherwise): an author's own approval is not a second pair of eyes.
  * A review that does not count stays in the manifest's record of the change; it just does not hide
@@ -152,6 +152,8 @@ export function sameAccount(a: Actor, b: Actor): boolean {
  */
 export function isHumanDecision(change: Pick<ChangeRecord, "author" | "mergedAt">, review: Review): boolean {
   if (review.author.kind !== "human" || (review.state !== "APPROVED" && review.state !== "CHANGES_REQUESTED")) return false;
+  // P1 (pass-2 review #4): a decision whose time the SCM does not give cannot be shown to precede the merge.
+  if (review.timeUnknown) return false;
   if (Date.parse(review.submittedAt) > Date.parse(change.mergedAt)) return false;
   return !sameAccount(review.author, change.author);
 }

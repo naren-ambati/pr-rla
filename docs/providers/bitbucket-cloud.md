@@ -54,7 +54,7 @@ Change ids are `bitbucket-cloud:<workspace>/<slug>#<id>` and `bitbucket-cloud:<w
 | activity `approval` | `APPROVED`, at its date |
 | activity `changes_requested` | `CHANGES_REQUESTED`, at its date |
 | activity `comment` by anyone but the author | one `COMMENTED` per user, at the first |
-| participant with final `state: approved` / `changes_requested` and no such activity | that state, at `participated_on` |
+| participant with final `state: approved` / `changes_requested` and no such activity | that state, at `participated_on`; without `participated_on`, with `timeUnknown` (dated at the merge; P1), which is no human decision |
 
 Bitbucket removes an approval from the activity when it is withdrawn, so a revoked approval leaves no `DISMISSED` record. `changedLines` is the sum of `lines_added` + `lines_removed` over `GET …/pullrequests/{id}/diffstat`.
 

@@ -14,6 +14,9 @@
 //     use: pr-rla-ledger-jira                     # or ./examples/ledgers/jira/index.mjs
 //     options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }
 //
+// `foreign_issues: true` is for tests only (recorded public changelogs of issues pr-rla did not open): it
+// skips the summary-marker check. pr-rla's check 7 FAILs an audit whose ledger options set it.
+//
 // Credentials: JIRA_EMAIL and JIRA_TOKEN (an Atlassian API token), sent as
 // `Authorization: prrla-basic:JIRA_EMAIL:JIRA_TOKEN`: the broker builds the Basic header for the
 // host of options.base_url only (an https site; hostFromOption below). Without them the ledger reads
@@ -23,6 +26,16 @@
 // the field's allowed values from the first issue's edit metadata and keeps the two option ids in the
 // ledger index (`options: { pass, fail }`). A field renamed from "fail" to "Fail" still reads, and a
 // changelog entry that sets the field to any other option is a FAIL, never silently dropped.
+//
+// The index is the auditee's file, so its option ids are not taken on trust (pass-2 review #3): every read
+// learns again, from Jira (GET /rest/api/3/customFieldOption/{id}, which a reader of the project may call),
+// which value each of the two ids is now, and FAILs when the pass id is not the pass value or the fail id
+// not the fail value; and a changelog entry whose to/from id is one verdict while its toString/fromString
+// names the other FAILs too. pr-rla binds the index itself by time (its ledger publication record).
+//
+// Each issue's summary is its marker (`pr-rla draw #N (<window>): <change>`). Jira, unlike GitHub's REST API,
+// records a summary edit in the issue's changelog, so the marker is checked twice: the summary must name
+// this draw, window and change, and the changelog must show no edit of it.
 //
 // Jira deletes an issue's changelog with the issue, and admins can delete issues: run
 // `pr-rla checkpoint` after verdicts; checkpoints are not optional with Jira.
@@ -39,8 +52,12 @@ function settings(o) {
   if (typeof o.project !== "string" || !/^[A-Z][A-Z0-9_]+$/.test(o.project)) throw new Error(`jira: options.project must be a project key, e.g. AUD`);
   if (typeof o.field !== "string" || !/^customfield_\d+$/.test(o.field)) throw new Error(`jira: options.field must be the verdict field's id, e.g. customfield_10050`);
   const base = o.base_url.replace(/\/+$/, "");
-  return { base, host: new URL(base).host, project: o.project, field: o.field, values: { pass: o.values?.pass ?? "pass", fail: o.values?.fail ?? "fail" }, issueType: o.issue_type ?? "Task" };
+  return { base, host: new URL(base).host, project: o.project, field: o.field, values: { pass: o.values?.pass ?? "pass", fail: o.values?.fail ?? "fail" }, issueType: o.issue_type ?? "Task", foreignIssues: o.foreign_issues === true };
 }
+
+const same = (a, b) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase();
+/** The marker an issue's summary carries: `pr-rla draw #N (<window>): <change>`. */
+export const summaryMarker = (window, draw, changeId) => `pr-rla draw #${draw} (${window}): ${changeId}`;
 
 /** Jira times carry an offset and milliseconds (2023-07-28T03:43:22.045-0700): UTC, with milliseconds kept. */
 export function isoUtc(t) {
@@ -67,20 +84,27 @@ export function jiraActor(a) {
 export function fieldEvents(histories, s) {
   const events = [];
   const unrecognised = [];
+  /** Items whose option id is one verdict while the value Jira wrote beside it names the other (an index with its ids swapped). */
+  const swapped = [];
+  /** Edits of the issue's summary, where the draw's marker lives (pr-rla never edits it). */
+  const summaryEdits = [];
   const verdictOf = (id) => (id === s.options.pass ? "pass" : id === s.options.fail ? "fail" : null);
+  const other = (v) => (v === "pass" ? "fail" : "pass");
   for (const h of histories) {
     h.items.forEach((it, n) => {
-      if (it.fieldId !== s.field && !(it.fieldId === undefined && it.field === s.field)) return;
       const base = { at: isoUtc(h.created), actor: jiraActor(h.author) };
+      if (it.fieldId === "summary" || (it.fieldId === undefined && it.field === "summary")) summaryEdits.push({ ...base, from: it.fromString ?? null, to: it.toString ?? null });
+      if (it.fieldId !== s.field && !(it.fieldId === undefined && it.field === s.field)) return;
       const from = verdictOf(it.from == null ? null : String(it.from));
       const toId = it.to == null ? null : String(it.to);
       const to = verdictOf(toId);
+      for (const [v, text, id] of [[from, it.fromString, it.from], [to, it.toString, it.to]]) if (v && same(text, s.values[other(v)])) swapped.push({ ...base, id: `${h.id}:${n}`, optionId: String(id), verdict: v, value: text });
       if (from) events.push({ ...base, id: `${h.id}:${n}:remove`, action: "remove", verdict: from });
       if (to) events.push({ ...base, id: `${h.id}:${n}:add`, action: "add", verdict: to });
       else if (toId !== null) unrecognised.push({ ...base, id: `${h.id}:${n}`, optionId: toId, value: it.toString ?? null });
     });
   }
-  return { events, unrecognised };
+  return { events, unrecognised, swapped, summaryEdits };
 }
 
 class JiraLedger {
@@ -155,6 +179,23 @@ class JiraLedger {
   }
 
   /** The select options' ids for the two verdict values, from an issue's edit metadata (what the field offers now). */
+  /**
+   * What the index's two option ids are in the field now, learnt again at every read (pass-2 review #3):
+   * GET /rest/api/3/customFieldOption/{id}, which anyone who may browse the project may call. Each problem is a FAIL.
+   */
+  async checkOptions(options) {
+    const out = [];
+    for (const v of ["pass", "fail"]) {
+      const id = options[v];
+      const r = await this.request("GET", `/rest/api/3/customFieldOption/${encodeURIComponent(id)}`, undefined, [401, 403, 404]);
+      if (r.status === 404) out.push(`the index's ${v} option id ${id} is no option of field ${this.s.field} on ${this.s.host} now (deleted): a verdict set to it cannot be checked`);
+      else if (r.status !== 200) out.push(`the index's ${v} option id ${id} could not be read from ${this.s.host} (HTTP ${r.status}), so the option ids the index names cannot be checked against the field; give verify credentials that may browse project ${this.s.project}`);
+      else if (!same(r.data?.value, this.s.values[v]))
+        out.push(`the index names option ${id} as the ${v} verdict, but on ${this.s.host} it is "${String(r.data?.value)}", not "${this.s.values[v]}"${same(r.data?.value, this.s.values[v === "pass" ? "fail" : "pass"]) ? ": the index's option ids are swapped" : ""}; the field's options disagree with the index`);
+    }
+    return out;
+  }
+
   async learnOptions(key) {
     const meta = (await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(key)}/editmeta`)).data;
     const allowed = meta.fields?.[this.s.field]?.allowedValues ?? [];
@@ -187,9 +228,10 @@ class JiraLedger {
     const sx = { ...this.s, options: index.options };
     const fields = (await this.request("GET", "/rest/api/3/field")).data;
     if (!fields.some((f) => f.id === this.s.field)) s.failures.push(`verdict field ${this.s.field} no longer exists on ${this.s.host}: the verdicts recorded in it cannot be checked`);
+    else s.failures.push(...(await this.checkOptions(index.options)));
     let readable = null;
     for (const i of index.issues) {
-      const r = await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(i.key)}?fields=project`, undefined, [404]);
+      const r = await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(i.key)}?fields=project,summary`, undefined, [404]);
       if (r.status === 404) {
         readable ??= this.canReadProject();
         if (await readable) s.failures.push(`draw #${i.draw} issue ${i.key} deleted (HTTP 404): Jira deleted its changelog with it`);
@@ -212,6 +254,14 @@ class JiraLedger {
         if (page.isLast === true || page.values.length === 0 || (page.isLast === undefined && startAt >= page.total)) break;
       }
       const parsed = fieldEvents(histories, sx);
+      // The marker: the summary names this draw (foreign_issues, test only: issues pr-rla did not open, which carry none).
+      if (!this.s.foreignIssues) {
+        const want = summaryMarker(index.window, i.draw, i.changeId);
+        if (r.data.fields?.summary !== want) s.failures.push(`draw #${i.draw} issue ${i.key}'s summary is ${JSON.stringify(r.data.fields?.summary ?? null)}, not ${JSON.stringify(want)}: it is not the issue pr-rla opened for this draw`);
+        for (const e of parsed.summaryEdits) s.failures.push(`draw #${i.draw} issue ${i.key}'s summary, where its draw marker lives, was edited at ${e.at} (from ${JSON.stringify(e.from)} to ${JSON.stringify(e.to)}); pr-rla never edits it`);
+      }
+      for (const w of parsed.swapped)
+        s.failures.push(`draw #${i.draw}: the changelog entry at ${w.at} sets option ${w.optionId}, which the index names the ${w.verdict} verdict, but Jira wrote its value as "${w.value}", the other verdict: the index's option ids are not the field's`);
       for (const u of parsed.unrecognised)
         s.failures.push(`draw #${i.draw}: the verdict field was set to ${u.value === null ? "an option" : `"${u.value}"`} (option id ${u.optionId}) at ${u.at}, which is neither the ${this.s.values.pass} option (${index.options.pass}) nor the ${this.s.values.fail} option (${index.options.fail}); a verdict set that way cannot be counted`);
       const events = parsed.events.map((e) => ({ ...e, reviewer: e.actor.login, provenance: { level: "account", source: "jira-field-change", actorId: e.actor.id, viaApp: null, eventId: e.id } }));
@@ -242,7 +292,7 @@ class JiraLedger {
 
   // --- writes --------------------------------------------------------------------
   summary(d, window) {
-    return `pr-rla draw #${d.draw} (${window}): ${d.changeId}`;
+    return summaryMarker(window, d.draw, d.changeId);
   }
 
   /** Issues already opened for this window, by their summary marker (after a lost response or a lost index). */

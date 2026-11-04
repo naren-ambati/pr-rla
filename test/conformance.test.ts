@@ -247,9 +247,19 @@ describe("conformance kit: a check that has nothing to check says so (finding 10
   });
 
   it("a check whose expectation the fixture does not declare is skipped, not ok", async () => {
-    const r = await runProviderConformance(under("good"), [{ name: "ids only", request: fixture.request, expect: { ids: fixture.expect.ids! }, http: true }]);
+    // P1 (pass-2 review): a run whose fixtures declare only ids checked almost nothing, and the report said ok. Each such
+    // check is now a coverage FAIL, unless the caller names it in skipChecks with the reason (then a skip that says why).
+    const idsOnly = { name: "ids only", request: fixture.request, expect: { ids: fixture.expect.ids! }, http: true };
+    const bare = await runProviderConformance(under("good"), [idsOnly]);
+    expect(bare.ok).toBe(false);
+    expect(bare.results.filter((x) => x.fixture === "(check coverage)" && !x.ok).map((x) => x.check).sort()).toEqual(["actors", "bot-detection", "classification", "merge-strategies", "review-state-mapping", "revoked-approval"]);
+    expect(formatConformanceReport(bare)).toMatch(/^FAIL \(check coverage\) › classification: no fixture exercises "classification" .*name it in options\.skipChecks with the reason/m);
+    const why = { classification: "c", "merge-strategies": "m", "review-state-mapping": "r", actors: "a", "bot-detection": "b", "revoked-approval": "v" } as const;
+    const r = await runProviderConformance(under("good"), [idsOnly], { skipChecks: why });
     expect(r.ok, formatConformanceReport(r)).toBe(true);
-    const skipped = Object.fromEntries(r.results.filter((x) => x.skipped).map((x) => [x.check, x.message]));
+    expect(r.results.filter((x) => x.fixture === "(check coverage)").map((x) => [x.check, x.skipped, x.message])).toContainEqual(["classification", true, "not exercised by this run: c"]);
+    expect((await runProviderConformance(under("good"), [idsOnly], { skipChecks: { ...why, nonsense: "x" } as never })).results.find((x) => x.fixture === "(check coverage)" && x.check === "normalization")).toMatchObject({ ok: false });
+    const skipped = Object.fromEntries(r.results.filter((x) => x.skipped && x.fixture === "ids only").map((x) => [x.check, x.message]));
     expect(skipped).toMatchObject({
       classification: "the fixture declares neither pullRequests nor directPushes",
       "merge-strategies": "the fixture declares neither prCommits nor mergeShas",
@@ -258,7 +268,7 @@ describe("conformance kit: a check that has nothing to check says so (finding 10
     });
     for (const c of ["classification", "merge-strategies", "review-state-mapping", "actors"]) expect(r.results.find((x) => x.check === c)).toMatchObject({ ok: true, skipped: true });
     // ...and a pagination expectation that is absent is skipped too (ids is declared here, so it runs).
-    const noPaging = await runProviderConformance(under("good"), [{ ...fixture, expect: { pullRequests: fixture.expect.pullRequests! } }]);
+    const noPaging = await runProviderConformance(under("good"), [{ ...fixture, expect: { pullRequests: fixture.expect.pullRequests! } }], { skipChecks: why });
     expect(noPaging.results.find((x) => x.check === "pagination")).toMatchObject({ ok: true, skipped: true, message: "the fixture declares neither ids nor minPages" });
   });
 });

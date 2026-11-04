@@ -297,7 +297,7 @@ describe("GitHub Enterprise Server (base_url)", () => {
         http: true,
         rateLimitFault: GITHUB_RATE_LIMIT,
       },
-    ]);
+    ], { skipChecks: { "merge-strategies": "a GHES routing fixture (base_url); the github.com scenario run in this file exercises the rest", "review-state-mapping": "as for merge-strategies", actors: "as for merge-strategies", "bot-detection": "as for merge-strategies", "revoked-approval": "as for merge-strategies" } });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 });

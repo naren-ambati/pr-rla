@@ -9,7 +9,8 @@
   "labels": {
    "pass": "T-libs",
    "fail": "C-bug"
-  }
+  },
+  "foreign_issues": true
  },
  "index": {
   "schema": "pr-rla/ledger-index/v1",
@@ -37,13 +38,12 @@
     "draw": 1,
     "changeId": "github:rust-lang/rust#30003",
     "number": 30003,
-    "id": "MDU6SXNzdWUxMTg0MDc5NDY=",
+    "id": "118407946",
     "url": "https://github.com/rust-lang/rust/issues/30003",
     "createdAt": "2015-11-23T15:41:52Z"
    }
   ],
-  "repeats": [],
-  "foreignIssues": true
+  "repeats": []
  },
  "observed": {
   "verdicts": [
@@ -127,10 +127,11 @@
    }
   ]
  },
+ "amended": "2026-11-04T09:29:16Z (P1): each recorded issue response gained its numeric `id`, read live with one anonymous GET of the same issue (github-issues names an issue by that id now, not its node id), and the index took the same id; foreignIssues moved from the index to the test-only ledger option foreign_issues. Nothing else changed.",
  "exchanges": [
 {"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/T-libs","bodySha256":null,"status":200,"headers":{},"response":{"id":2011781731,"node_id":"MDU6TGFiZWwyMDExNzgxNzMx","name":"T-libs"}},
 {"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/labels/C-bug","bodySha256":null,"status":200,"headers":{},"response":{"id":650731663,"node_id":"MDU6TGFiZWw2NTA3MzE2NjM=","name":"C-bug"}},
-{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30003","bodySha256":null,"status":200,"headers":{},"response":{"number":30003,"node_id":"MDU6SXNzdWUxMTg0MDc5NDY=","html_url":"https://github.com/rust-lang/rust/issues/30003","created_at":"2015-11-23T15:41:52Z","repository_url":"https://api.github.com/repos/rust-lang/rust","state":"closed","labels":[{"name":"P-low"},{"name":"I-needs-decision"},{"name":"T-lang"},{"name":"C-bug"},{"name":"S-candidate-for-closing"}],"body":null}},
+{"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30003","bodySha256":null,"status":200,"headers":{},"response":{"number":30003,"id":118407946,"node_id":"MDU6SXNzdWUxMTg0MDc5NDY=","html_url":"https://github.com/rust-lang/rust/issues/30003","created_at":"2015-11-23T15:41:52Z","repository_url":"https://api.github.com/repos/rust-lang/rust","state":"closed","labels":[{"name":"P-low"},{"name":"I-needs-decision"},{"name":"T-lang"},{"name":"C-bug"},{"name":"S-candidate-for-closing"}],"body":null}},
 {"method":"GET","url":"https://api.github.com/repos/rust-lang/rust/issues/30003/events?per_page=100","bodySha256":null,"status":200,"headers":{},"response":[{"id":1069291971,"event":"labeled","created_at":"2017-05-04T16:51:14Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"P-low"},"performed_via_github_app":null},{"id":1069292152,"event":"labeled","created_at":"2017-05-04T16:51:21Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-libs"},"performed_via_github_app":null},{"id":1069292393,"event":"labeled","created_at":"2017-05-04T16:51:31Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-lang"},"performed_via_github_app":null},{"id":1069292441,"event":"unlabeled","created_at":"2017-05-04T16:51:34Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"T-libs"},"performed_via_github_app":null},{"id":1069292691,"event":"labeled","created_at":"2017-05-04T16:51:45Z","actor":{"login":"brson","id":147214,"type":"User"},"label":{"name":"I-needs-decision"},"performed_via_github_app":null},{"id":1176625117,"event":"labeled","created_at":"2017-07-24T18:08:40Z","actor":{"login":"Mark-Simulacrum","id":5047365,"type":"User"},"label":{"name":"C-bug"},"performed_via_github_app":null},{"id":2197887810,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"solson","id":26806,"type":"User"},"performed_via_github_app":null},{"id":2197887812,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"eddyb","id":77424,"type":"User"},"performed_via_github_app":null},{"id":2197887813,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"nikomatsakis","id":155238,"type":"User"},"performed_via_github_app":null},{"id":2197887815,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"joshtriplett","id":162737,"type":"User"},"performed_via_github_app":null},{"id":2197887817,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"pnkfelix","id":173127,"type":"User"},"performed_via_github_app":null},{"id":2197887818,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"aturon","id":709807,"type":"User"},"performed_via_github_app":null},{"id":2197887821,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"Centril","id":855702,"type":"User"},"performed_via_github_app":null},{"id":2197887822,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"huonw","id":1203825,"type":"User"},"performed_via_github_app":null},{"id":2197887823,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"cramertj","id":5963049,"type":"User"},"performed_via_github_app":null},{"id":2197887825,"event":"subscribed","created_at":"2019-03-12T17:19:35Z","actor":{"login":"withoutboats","id":9063376,"type":"User"},"performed_via_github_app":null},{"id":23876581918,"event":"labeled","created_at":"2026-03-25T05:09:58Z","actor":{"login":"Enselic","id":115040,"type":"User"},"label":{"name":"S-candidate-for-closing"},"performed_via_github_app":null},{"id":23880553376,"event":"subscribed","created_at":"2026-03-25T07:56:31Z","actor":{"login":"hanna-kruppe","id":2311707,"type":"User"},"performed_via_github_app":null},{"id":28048920119,"event":"closed","created_at":"2026-07-16T03:31:26Z","actor":{"login":"Enselic","id":115040,"type":"User"},"performed_via_github_app":null}]}
  ]
 }

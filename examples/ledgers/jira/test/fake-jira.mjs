@@ -1,6 +1,7 @@
 // A synthetic Jira Cloud (fixtures built on it are `source: "synthetic"`), shaped like the recorded
 // hibernate.atlassian.net responses: changelog items for a single-select custom field carry
-// fieldtype "custom", the field id, option ids in from/to and values in fromString/toString.
+// fieldtype "custom", the field id, option ids in from/to and values in fromString/toString; a custom
+// field option reads as { self, value } (GET /rest/api/3/customFieldOption/{id}, as recorded 2026-11-04).
 const json = (status, body) => new Response(body === null ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 export const FIELD = "customfield_10050";
@@ -61,6 +62,12 @@ export class FakeJira {
   renameOption(which, to) {
     this.optionNames[which] = to;
   }
+  /** An admin edits an issue's summary (where pr-rla's draw marker lives); Jira records it in the changelog. */
+  editSummary(key, to, author = this.writer) {
+    const i = this.issue(key);
+    i.changelog.push({ id: String(this.historyId++), created: this.tick(), author, items: [{ field: "summary", fieldtype: "jira", fieldId: "summary", from: null, fromString: i.summary, to: null, toString: to }] });
+    i.summary = to;
+  }
   /** An unrelated field change (status), as real changelogs are full of. */
   touch(key) {
     this.issue(key).changelog.push({ id: String(this.historyId++), created: this.tick(), author: this.writer, items: [{ field: "status", fieldtype: "jira", fieldId: "status", from: "1", fromString: "Open", to: "3", toString: "In Progress" }] });
@@ -98,6 +105,11 @@ export class FakeJira {
     let m;
     if (this.unauthorized && (p.startsWith("/rest/api/3/issue/") || p.startsWith("/rest/api/3/project/"))) return json(404, { errorMessages: ["Issue does not exist or you do not have permission to see it."], errors: {} });
     if (p === "/rest/api/3/field" && method === "GET") return json(200, this.fields);
+    if ((m = /^\/rest\/api\/3\/customFieldOption\/([^/]+)$/.exec(p)) && method === "GET") {
+      const id = decodeURIComponent(m[1]);
+      const which = ["pass", "fail"].find((k) => this.options[k] === id);
+      return which ? json(200, { self: `${this.base}${p}`, value: this.optionNames[which] }) : json(404, { errorMessages: [`A custom field option with id '${id}' does not exist`], errors: {} });
+    }
     if ((m = /^\/rest\/api\/3\/project\/([^/]+)$/.exec(p)) && method === "GET") return decodeURIComponent(m[1]) === this.project ? json(200, { key: this.project }) : json(404, { errorMessages: ["No project could be found."], errors: {} });
     if (p === "/rest/api/3/search/jql" && method === "GET") {
       const all = [...this.issues.values()].filter((i) => !i.deleted && i.labels.includes("pr-rla-draw"));
@@ -114,7 +126,7 @@ export class FakeJira {
       const i = this.issues.get(decodeURIComponent(m[1]));
       if (!i || i.deleted) return json(404, { errorMessages: ["Issue does not exist or you do not have permission to see it."], errors: {} });
       const rest = m[2] ?? "";
-      if (rest === "" && method === "GET") return json(200, { id: i.id, key: i.movedTo ?? i.key, fields: { project: { key: i.movedTo ? i.movedTo.split("-")[0] : i.project } } });
+      if (rest === "" && method === "GET") return json(200, { id: i.id, key: i.movedTo ?? i.key, fields: { project: { key: i.movedTo ? i.movedTo.split("-")[0] : i.project }, ...((url.searchParams.get("fields") ?? "").split(",").includes("summary") ? { summary: i.summary } : {}) } });
       if (rest === "" && method === "PUT") {
         const name = body.fields[FIELD]?.value ?? null;
         const v = ["pass", "fail"].find((k) => this.optionNames[k] === name) ?? null;

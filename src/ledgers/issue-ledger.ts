@@ -41,7 +41,7 @@ export interface TrackerLabelEvent {
 export type TrackerIssue =
   | {
       state: "ok";
-      /** The tracker's own id of the issue it returned (GitHub node id, GitLab id): the index must name this one. */
+      /** The tracker's own numeric id of the issue it returned (GitHub's issue id, GitLab's id): the index must name this one. */
       id: string;
       /** The issue's number (GitHub) or iid (GitLab) as the tracker returned it. */
       number: number | string;
@@ -84,6 +84,12 @@ export abstract class IssueTrackerLedger implements Ledger {
   constructor(
     protected readonly labels: LabelNames,
     protected readonly ctx: LedgerContext,
+    /**
+     * Test only (P1): the issues were not opened by pr-rla (the recorded public timelines the ledger tests replay):
+     * their bodies carry no marker and their other labels are not stray, so neither is checked. An audit never
+     * sets it: verify FAILs check 7 when the registered ledger's options do (src/ledger-traits.ts).
+     */
+    protected readonly foreignIssues = false,
   ) {}
 
   // --- adapter ---------------------------------------------------------------
@@ -166,7 +172,7 @@ export abstract class IssueTrackerLedger implements Ledger {
         s.failures.push(`draw #${i.draw}: ${this.where} answered issue ${String(t.number)} (id ${t.id}) for the index's ${String(i.number)} (id ${i.id}); the index does not describe this issue`);
         continue;
       }
-      if (!index.foreignIssues) {
+      if (!this.foreignIssues) {
         const marker = findMarker(t.body, index.window);
         if (!marker) s.failures.push(`draw #${i.draw} issue ${i.url} carries no pr-rla marker for window ${index.window} in its body (edited away, or not the issue pr-rla opened for this draw)`);
         else if (marker.draw !== i.draw || marker.changeId !== i.changeId) s.failures.push(`draw #${i.draw} issue ${i.url} says in its body that it is draw #${marker.draw} (${marker.changeId}), not draw #${i.draw} (${i.changeId}): the index points the draw at another draw's issue`);
@@ -183,7 +189,7 @@ export abstract class IssueTrackerLedger implements Ledger {
         const verdict = this.verdictOf(index, e);
         if (verdict === undefined) {
           const isDraw = e.labelId !== null && index.labels.draw.id !== null ? e.labelId === index.labels.draw.id : e.labelName !== null && this.sameName(e.labelName, index.labels.draw.name);
-          if (!isDraw && !index.foreignIssues) otherLabels.set(e.labelName ?? `id ${e.labelId}`, (otherLabels.get(e.labelName ?? `id ${e.labelId}`) ?? 0) + 1);
+          if (!isDraw && !this.foreignIssues) otherLabels.set(e.labelName ?? `id ${e.labelId}`, (otherLabels.get(e.labelName ?? `id ${e.labelId}`) ?? 0) + 1);
           continue;
         }
         const provenance = { level: "account" as const, source: "scm-label-event", ...(e.actor.id !== undefined ? { actorId: e.actor.id } : {}), viaApp: e.viaApp, eventId: e.id };

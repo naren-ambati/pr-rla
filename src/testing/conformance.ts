@@ -135,7 +135,17 @@ export type ProviderUnderTest = ScmProvider | ((fixture: ConformanceFixture, har
 /** U3: what the kit needs beyond the provider: its definition, for the checks that read what it declares. */
 export interface ConformanceOptions {
   definition?: Pick<ProviderDefinition, "reviewGranularity">;
+  /**
+   * Optional (P1): checks that need an expectation no fixture of this run declares, named with the reason (e.g.
+   * `{ "revoked-approval": "the SCM keeps no withdrawn approval" }`). Without a reason, a check that no fixture
+   * exercises is a FAIL of its own ("(check coverage)"): a run whose fixtures declare only ids checked almost nothing.
+   */
+  skipChecks?: Partial<Record<ExpectationCheck, string>>;
 }
+
+/** The checks that run only when a fixture declares what they compare (P1: every run must exercise each, or say why not). */
+export const EXPECTATION_CHECKS = ["classification", "merge-strategies", "review-state-mapping", "actors", "bot-detection", "pagination", "revoked-approval"] as const;
+export type ExpectationCheck = (typeof EXPECTATION_CHECKS)[number];
 
 export interface ConformanceResult {
   fixture: string;
@@ -565,6 +575,15 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       push("push-log", pl.length === 0, pl.join("; "));
     }
   }
+  // P1 (pass-2 review: fixtures declaring only ids skipped most checks and the report still said ok): each check
+  // that needs an expectation must be exercised by some fixture, or be named in options.skipChecks with the reason.
+  for (const c of EXPECTATION_CHECKS) {
+    if (results.some((r) => r.check === c && !r.skipped)) continue;
+    const why = options.skipChecks?.[c];
+    if (why !== undefined) results.push({ fixture: "(check coverage)", check: c, ok: true, skipped: true, message: `not exercised by this run: ${why}` });
+    else results.push({ fixture: "(check coverage)", check: c, ok: false, message: `no fixture exercises "${c}" (each declares none of what it compares): declare it in a fixture's expect, or name it in options.skipChecks with the reason so the report says it was not run` });
+  }
+  for (const c of Object.keys(options.skipChecks ?? {})) if (!(EXPECTATION_CHECKS as readonly string[]).includes(c)) results.push({ fixture: "(check coverage)", check: "normalization", ok: false, message: `options.skipChecks names "${c}", which is not a check that needs an expectation (${EXPECTATION_CHECKS.join(", ")})` });
   return { ok: results.every((r) => r.ok), results };
 }
 

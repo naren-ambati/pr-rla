@@ -3327,6 +3327,148 @@ Branch `fix/s1-seams`, off `integrate/wave2` at `6b0ec01` (every unit merged but
 - **Before and after,** each new file run against a copy of `6b0ec01` with only that test file added: `s1-host` 10 of 11 fail there (the kept-hint control passes), `s1-misc` 3 of 3, `s1-token-kind` 4 of 4 (the OAuth App twin on its verdict, PASS where the CLI says INCOMPLETE; the classic and fine-grained twins, which agree on the verdict there, on item 2's fence; the credential layer on its new field), `s1-estimate` 5 of 6 (the batching equivalence passes on both), `s1-fence` 10 of 10, `mcp-s1` 2 of 2. Here every one passes.
 - **Verified from three fresh clones of `fix/s1-seams` at `c6a2adc`** (2026-11-04, 11:59Z–12:26Z, load average 21–71; `scratchpad/s1-verify.sh`, the integration's script for this branch; the commit after it edits only this line), each run the same: `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 94 files, **1548 passed (1548)** · `npm pack` of the clone equals the vendored tarball · `npm --prefix integrations/github-action ci` 0 vulnerabilities, `pr-rla --version` 0.1.0 · `packages/pr-rla-mcp` `npm ci` 0 vulnerabilities, **61 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo exits 0 (the six under `scripts/` and the MCP package's `demo-draw-context`). Node v22.23.2.
 
+## P1 audit binding (2026-11-04)
+
+Round P1, on branch `fix/p1-binding` off `integrate/wave2` at `45f1c9d` (every wave-2 unit, P3 and P4 merged), then merged with `integrate/wave2` at `47f74c6` (U7, U6, P2 and the integration's follow-ups; below). Its governing rule: **an audit runs only what its signed registration names, and nothing an auditee can rewrite after the verdicts decides which issue a verdict is read from.** The reviews showed the opposite on both counts: every command loaded whatever `.pr-rla.yml` named (a provider swapped for a forged `json-file` export verified, and between two built-ins verify said nothing), and permuting issues between draws in `ledger-index.json`, with the bodies swapped and `draws.json` rebound, turned a three-FAIL audit into CERTIFIED with 7/7 PASS.
+
+Every reproduction is a committed test. The new and changed tests were run against `45f1c9d`'s `src` (with this round's two new pure modules, `plugin-binding.ts` and `ledger-publication.ts`, copied in so the unit tests could load): **43 of 113 fail there**. The 70 that pass are controls (the honest paths, which both builds pass), the pure modules' own unit tests and the tests these files already had. Tests added after that run were run against `45f1c9d` the same way and fail there: the numeric-id test, the October GraphQL fixture's case, and the short-publication and `check7Gate` tests (no publication exists there).
+
+### Findings, fixes and evidence
+
+| Source | Finding | Fix | Regression test(s) | Before (`45f1c9d`) | After |
+|---|---|---|---|---|---|
+| master-ledgers #2, master-plugins #2 | The registered provider is never enforced. freeze only noted a name or options difference, verify WARNed at most, and between two built-ins it said nothing (`populationOptionsSha256` excused github → json-file) | One comparison, `src/core/plugin-binding.ts` (`identityDiffs`: name, source, integrity, trust, `optionsSha256`, and an external plugin's version). `freeze` refuses another provider; a dry run notes it and writes nothing. `draws`, `draw-context` and every other reader binds through `providerFor`. verify reads the configured provider's identity from its definition or lock entry (`bindingIdentity`, `src/registry.ts`), and check 5 FAILs on any difference with the registration, and on any difference in the manifest's own `provider` (offline too). The `populationOptionsSha256` escape is gone | `p1-identity` › the registered provider (5); `plugin-lock` › a plugin re-locked after registration; `e2e-u3` › a verifier whose provider options differ | github → json-file with a forged export: freeze wrote the manifest, verify VERIFIED. An external plugin re-locked after registration: a WARN | freeze refuses, naming the difference and what to do. verify FAILs check 5 ("the manifest's provider is not the registered one", "the provider loaded is not the registered one"), offline too |
+| master-ledgers #1 | verify never compares the loaded ledger with `plugins.ledger`; status, record, sample and checkpoint run any ledger | `ledgerFor` binds the ledger before opening it, in `sample` (before `draws.json` is written), `record`, `status`, `checkpoint`, `draws` and `draw-context`. verify FAILs check 7 and never opens a ledger the registration does not name, so that ledger's host receives nothing. A checkpoint line records the registered ledger's identity; a line naming another ledger FAILs check 7. U9's check (the loaded ledger is the registered one) uses the same comparison now: one rule, not two | `p1-identity` › the registered ledger (4: another built-in ledger, the same ledger pointed at another tracker, the refusal's next step, the checkpoint's identity); `e2e-github-issues` › FR3.8 (git-file switched in) | status and record ran the configured ledger. verify FAILed check 7 after reading the unregistered ledger, sending requests to its host | each command refuses before the ledger is opened (exit 1, `FAILED`, with the next step); verify FAILs check 7 without reading it |
+| master-plugins #7 | CLI `verify` and `status` run the broker read-write, so a ledger can POST under its `writePaths` while someone verifies | The read functions (`src/api/read/{verify,status,draws,draw-context,freeze-preview}.ts`) run on `readOnlyContext(ctx)` whatever context they are given. The CLI's `verify`, `status` and `freeze --dry-run` therefore never open a read-write broker. A read-only context names its reader (`AuditCaller`). The MCP server's is an `assistant`'s and is unchanged: placeholders for built-ins, this machine's approvals only, no `trust: full`, plugin text fenced in `untrusted`. The CLI's is the `person`'s: their approvals, `--accept-lock-grants`, approved `trust: full` plugins, failures quoted in place | `p1-read-only` (3); `packages/pr-rla-mcp` `mcp-readonly` | `record`'s write, and a ledger's POST during `verify` or `status`, both reached the tracker | `record` still writes. During `verify` and `status` the same POST is refused by the broker before it is sent, and so is a provider's POST in a dry run |
+| pass-2 #1 (HIGH) | The draw → issue binding is unauthenticated: permuting issues (cases B, C, D) turns a three-FAIL audit into CERTIFIED | The ledger publication record (`src/core/ledger-publication.ts`, `pr-rla/ledger-publication/v1`), described after this table | `p1-publication` (23: B, C, D and the control A; five rewrites of the record; the legitimate paths, publications short of tokens among them; the unit rules; an audit sampled before P1); `e2e-ledger-anchors` › the two-sided swap with body edits, the remap after the latest checkpoint, the legitimate path; `jira-example` › a Jira audit's publication | B, C, D: CERTIFIED, 7/7 PASS (the reviewer's run). D's `sample` rebound `draws.json` itself | B, C, D: check 7 FAILs ("the ledger index is not an extension of the latest proven publication", "the ledger index carries foreignIssues"). D: `sample` refuses. Every rewrite of the record FAILs. An honest audit, and `--through`, pass |
+| pass-2 #3 | Jira's option ids come from the unauthenticated index, so swapping `options.pass` and `options.fail` inverts every verdict | Every read asks Jira what each id is (`GET /rest/api/3/customFieldOption/{id}`). It FAILs when the pass id is not the pass value or the fail id not the fail value, and when a changelog item's id names one verdict while its `toString`/`fromString` names the other. The marker check the brief asked for is added too: the summary is the marker (`pr-rla draw #N (<window>): <change>`) and must name its draw. Jira records summary edits in the changelog, so an edited summary FAILs | `jira-example` › P1 (4) | the swap: every verdict inverted, integrity ok | integrity FAILs, on the field and on the changelog's own words. An edited or re-pointed summary FAILs |
+| pass-2 #4 | An unknown review time reads as "at the merge", so it counts as a decision before the merge and hides the change | `Review.timeUnknown` (SDK, optional, validated). Such a review stays on the record and is never a human decision (`isHumanDecision`). It covers: GitLab, an `approved_by` entry without `approved_at` and a reviewer state whose only time is its request (`created_at`); Bitbucket Data Center, a final status with no activity; Bitbucket Cloud, a participant's final state without `participated_on`. A GitLab approvals reset whose approvers cannot be read dismisses every approval standing before it, and every `approved_by` approval dated before it | `p1-review-times` (6) | each such review counted, and the change left the population | `timeUnknown`; the change stays in the population; the reset dismisses |
+| pass-2 #5 | Checkpoint coverage counts a line that merely has tokens | A checkpoint covers the last counted verdict only when its tokens are proven (k registered authorities, under trusted time's rules), with U_k at or after that verdict | `e2e-ledger-anchors` › a checkpoint short of tokens (1 of 2) | covered | not covered, and the WARN says why; a proven checkpoint covers |
+| pass-2 #7 | The GitHub ledger names an issue by `node_id`, and status never shows the index-binding or `foreignIssues` lines | The numeric `id`. Status runs check 7's gate (next row) and prints the lines verify prints, folding every FAIL into the certificate's withholding | `issue-ledger-binding` › numeric id; `p1-publication` › status (3) | a node-id format change FAILed every audit's index, and status printed CERTIFIED over a remap | a node-id change changes nothing. Status prints check 7's FAIL and WARN lines and never shows CERTIFIED where they FAIL |
+| seam review of `45f1c9d` (HIGH) | Status ignored the index binding: verify had one set of check-7 rules, status a partial copy | **One gate**, `ledgerGate` (`src/core/ledger-gate.ts`, pure), covering: the ledger's identity; `require_signed`; counted verdicts before the seed, below the registered provenance or unsigned; the ledger's integrity report and git-file's registered path and walk (P4); the checkpoint file and each checkpoint's ledger, tokens and comparison; the coverage; the index binding; the publication. verify's check 7 is built on it. Status runs it through `check7Gate` (`src/api/read/ledger-gate.ts`), over the window's files and what status read. P4's `gitFileLedgerGate` is folded in | `p1-publication` › status (the seam review's repro; a certifying two-sided swap, through the CLI and `read.status`; offline status) | status: CERTIFIED over an index check 7 FAILs | status: never CERTIFIED where the gate FAILs, with verify's lines |
+| brief item 8 | Tests that cannot fail | `e2e-ledger-anchors`: "a changed index since the latest checkpoint WARNs" asserted only the WARN while check 7 FAILed on the edited line's tokens; it now asserts both, and the legitimate path and a remap after the checkpoint are new tests. The stripped-tokens test strips a middle line (the last line has no next link). The remap tests add the two-sided swap with body edits. The four GraphQL fixtures: see below. The kits: the ledger kit's `transient-write-faults` FAILs on a factory that serves no fresh tracker (it was a skip reported ok) unless `skipCases` names it. The provider kit FAILs `(check coverage)` for each check that needs an expectation no fixture exercises, unless `options.skipChecks` names it with the reason, and `plugin check` names the checks its recordings exercise nowhere | as named; `conformance` › a check that has nothing to check; `ledger-conformance` › transient faults on writes | the named tests passed whatever the code did | they fail when the code is wrong (checked against `45f1c9d`) |
+
+**The publication record (pass-2 #1).**
+
+- **What `sample` writes.** When the ledger publishes draws, `sample` signs the index it left with the registration's key. The record holds `ledgerIndexSha256`, each draw's issue number, id and url, and the draws covered. `sample` has the registered k-of-n authorities time-stamp its digest (SHA-256 only) and appends the record to `ledger-publication.json`. Each later `sample --through` appends a record that must extend the previous one.
+- **When check 7 FAILs.** No proven publication. The current index is not an append-only extension of the latest proven one. A verdict was read from an issue no proven publication lists. A counted verdict is earlier than U_k of the first proven publication listing its issue (what a publication remade after the verdicts looks like).
+- **What requires it.** The signed registration: schema v2 and a ledger that publishes draws (a built-in issue ledger by name, an external one by its `publishDraws`). Never an unsigned file.
+- **Also in this round.** Issue numbers must rise strictly with the draws. `foreignIssues` is no longer an index field: an index carrying it FAILs. It is now the test-only ledger option `foreign_issues`, which check 7 also FAILs. `sample` refuses to publish over an index that is not the bound one, or that is out of draw order. The GitHub ledger names issues by their numeric `id`.
+
+### The recorded GraphQL fixtures
+
+- `github/gh-aw-2026-11-02.json`: the responses carry `totalCount` and `pageInfo` on every PR's labels and on every commit's parents and associated PRs. These are **derived from the recorded nodes**: each page held fewer nodes than it asked for, so `totalCount` is the count and `hasNextPage` is false. `p1-recorded-graphql` shows the provider pages by them: a labels page that says it has more, or a commit with more parents than it holds, makes the provider send a request the recording does not have.
+- `gitlab/gitlab-org-cli-2026-11-02.json`, `gitlab/freedesktop-xserver-2026-10-05.json` and `gitlab/gitlab-org-cli-2026-10.json`: every note carries GitLab's own tag (`systemNoteMetadata`), and `approvedBy`/`reviewers` carry their `pageInfo`. These are **taken live**: one anonymous read-only GET of the same GraphQL query per recorded POST (GitLab serves queries over GET). Every other field is as first recorded. The test rewrites every tagged approval into French. Read by its tag, nothing changes; with the tags taken away, the same bodies read as nothing. The October recording (17 queries) had to wait out gitlab.com's anonymous GraphQL rate limit (below).
+
+### Decisions and deviations
+
+1. **A built-in's version is not compared.** The registration records the release that registered. A later release verifying must not FAIL every audit made before it, so the version is shown in the identity lines and not compared. An external plugin's version is compared, with its files' integrity.
+2. **verify never runs a plugin the registration does not name.** The brief asked verify to FAIL on a mismatch. It now reads the configured plugin's identity from its definition or lock without running it, so a swapped plugin's code never runs on the verifier's machine and its host gets nothing.
+3. **Read-only for a person is not read-only for an assistant.** The CLI's reads keep the person's approvals and `trust: full` plugins; refusing them would stop a person verifying their own audit with the plugin they approved. The MCP server's stay as U5 made them. The broker refuses writes in both.
+4. **No authority registered.** Publication records are still signed and required, but rest on the auditee's key and clock, so check 7 WARNs `TIMESTAMP NOT TAMPER-PROOF` instead of FAILing every verdict. A publication short of tokens counts for nothing: `sample` exits 5, as `register`, `freeze` and `checkpoint` do, and says to publish again before anyone labels the new issues.
+5. **Jira gets the marker check, not an argument against it.** Jira's changelog records summary edits, so the summary can serve as the marker that GitHub's and GitLab's issue bodies are, and an edited one FAILs.
+6. **Beyond the brief.**
+   - Bitbucket Cloud's final participant state without `participated_on` is `timeUnknown` too: the same fail-open the review found on Data Center.
+   - The provider kit's coverage rule, for the review's "a provider fixture declaring only ids skips most checks and still ok". The Gitea example's own test now declares the recording's hand-checked expectations, as pr-rla's `gitea-example` does.
+7. **Issue numbers rise with draws.** pr-rla opens one issue per draw, in draw order, so a permutation breaks the index even before it meets the publication record. A Jira key is read by its number.
+8. **What check 7 FAILs and what it leaves INCOMPLETE** (time round B's model: FAIL is shown false, INCOMPLETE not established).
+   - A publication token that fails a rule FAILs check 7, as check 1 FAILs the registration's. An authority the verifier does not trust fails rule 6. So status, without anchors that prove the authorities, withholds an issue-ledger audit's certificate as FAILED (exit 1), not as INCOMPLETE (exit 6) as it does for the registration's and commitment's times alone. The CI docs say so.
+   - A publication short of tokens (fewer than k, none failing, nothing else wrong with it) proves nothing and shows nothing false. A verdict that only such publications bind, or whose only listing before the verdict is one, makes check 7 INCOMPLETE. The brief's text said FAIL; it predates P2's model, and the certificate is withheld either way.
+   - No publication listing the issue, a publication with a problem of its own, or a proven listing after the verdict all FAIL.
+   - The rules are in one place, `publicationFindings` (`src/core/ledger-publication.ts`).
+
+### Declined or partial
+
+Nothing in the brief is declined. Two items are narrower than written:
+
+- The provider's `version` is compared for external plugins only (decision 1).
+- `ledger-path.ts`'s status gate (`gitFileLedgerGate`, P4) is no longer a separate function: its rules are in the one gate, with P4's wording kept for the certificate's withholding reason ("the ledger's integrity check FAILs").
+
+### Live reads (all read-only, anonymous GETs, 2026-11-04, UTC)
+
+| When | What | Requests |
+|---|---|---|
+| 09:29 | `api.github.com`: each issue of the six recorded GitHub ledger fixtures, for its numeric `id` | 6 |
+| 10:03 | `hibernate.atlassian.net`: the Jira example's two recordings, re-recorded through the example ledger (the field list, both option ids, each issue's summary and changelog) | 12 |
+| 10:18–10:21 | `gitlab.com/api/graphql`: one GET of each recorded GraphQL query (`gitlab-org/cli` 2026-11-02, `freedesktop` `xserver` 2026-10-05) | 2 |
+| 10:23–11:18 | `gitlab.com/api/graphql`: the October recording's first queries, then a one-field probe every two minutes. Every one was answered HTTP 429 (the anonymous limit), and nothing from them was used | about 30 |
+| 11:20–11:21 | `gitlab.com/api/graphql`: one GET of each of the October recording's 17 queries, 20 s apart | 17 |
+| 11:31, 12:28 | `registry.npmjs.org`: `npm install --package-lock-only` in `scripts/pack-action-tarball.mjs` (the Action's re-pins; the dependencies its lockfile already names) | npm's own |
+
+Nothing was written anywhere. No timestamp request was made: every authority in the tests is a mock and receives SHA-256 digests only.
+
+### Tests
+
+At `45f1c9d`: 86 files, 1311 passed. At `c2fbb1d`, before the merge with `integrate/wave2`: 91 files, 1362 passed. After it, with `check7Gate` and the anchor fix below: 98 files, **2529 passed (2529)**.
+
+- **New files:** `test/p1-identity.test.ts` (9), `test/p1-read-only.test.ts` (3), `test/p1-publication.test.ts` (23), `test/p1-review-times.test.ts` (6), `test/p1-recorded-graphql.test.ts` (5), and the helper `test/helpers/rebind.ts`, which registers a copied audit's swapped plugin for tests that swap one on purpose.
+- **Changed:** `e2e-ledger-anchors`, `e2e-github-issues`, `issue-ledger-binding`, `jira-example`, `ledger-conformance`, `conformance`, `conformance-broker`, `checkpoint-chain`, `plugin-lock`, `plugin-host`, `registry`, `provider-caps`, `e2e-u3`, `json-provider`, `github-provider`, `gitlab-provider`, `bitbucket-cloud-provider`, `gitea-example`, `api-read-fix`, `api-cli-contract`, `u9-review-regressions`, `wave2-integration`, `helpers/fake-issue-trackers.ts`; `packages/pr-rla-mcp/test/{helpers,mcp-readonly}`; the Gitea and Jira examples' own tests.
+- Tests that swapped a plugin after registration to test something else now register the swapped plugin, since the registration signs it.
+
+### Files touched in this round
+
+- **Core:**
+  - new: `src/core/plugin-binding.ts`, `src/core/ledger-gate.ts`, `src/core/ledger-publication.ts`;
+  - `src/core/verify.ts` (check 5's two identity FAILs, check 7 on the gate);
+  - `src/core/ledger-anchor.ts` (coverage on proven tokens; `foreignIssues` FAILs);
+  - `src/core/ledger-path.ts` (its status gate folded into the gate);
+  - `src/core/selector.ts` (`isHumanDecision`).
+- **API:**
+  - `src/api/session.ts` (`bindRegisteredPlugin`, `providerFor`/`ledgerFor` with the registration, `readOnlyContext`, `callerOf`);
+  - `src/api/context.ts` (`AuditCaller`);
+  - `src/api/read/{verify,status,draws,draw-context,freeze-preview}.ts`, and new `src/api/read/{ledger-gate,publications}.ts`;
+  - `src/api/write/{sample,checkpoint,freeze,record}.ts`.
+- **Commands and CLI:** `src/commands/{sample,status,timestamps}.ts`, `src/cli.ts` (`sample --key`, `--tsa-trust`).
+- **Plugins, ledgers and providers:**
+  - `src/registry.ts` (`bindingIdentity`), `src/ledger-traits.ts` (`testOnlyLedgerOptions`);
+  - `src/ledgers/{issue-index,issue-ledger}.ts`, `src/ledgers/{github-issues,gitlab-issues}/index.ts`;
+  - `src/sdk/provider.ts` (`Review.timeUnknown`), `src/providers/gitlab/{index,normalize}.ts`, `src/providers/bitbucket-{cloud,data-center}/normalize.ts`;
+  - `src/testing/{conformance,ledger-conformance,index}.ts`, `src/plugins/check.ts`.
+- **Examples:** `examples/ledgers/jira/{index.mjs,scripts/record.mjs,test/fake-jira.mjs,fixtures/*}`, `examples/providers/gitea/test/conformance.test.mjs`.
+- **Scripts:** `scripts/demo-ledgers.mjs` (the publication), `scripts/record-ledger-fixtures.mjs` (numeric ids, `foreign_issues`).
+- **Docs:** `README.md`, `docs/security-model.md`, `docs/design/phase-3-4/contracts.md`, `docs/writing-a-provider.md`, `docs/providers/{gitlab,bitbucket-cloud,bitbucket-data-center}.md`, `docs/ci/{README,github,gitlab,bitbucket}.md`.
+- **Fixtures:** `test/fixtures/ledgers/github/*` (6), `test/fixtures/github/gh-aw-2026-11-02.json`, `test/fixtures/gitlab/*` (3).
+- **In the merge** (below): `integrations/github-action/scripts/report.mjs`, `integrations/github-action/{package-lock.json,vendor/pr-rla-0.1.0.tgz}` (re-pinned), `test/{ci-github-action,single-repo-anchor}.test.ts`, `test/helpers/ci-fixtures.ts`.
+
+### Merged with `integrate/wave2` (U7, U6, P2)
+
+P2 reached `integrate/wave2` as merge 11 (`0bd6b92`, re-pinned in `0d3545b`), and the coordinator asked P1 either to keep its logic in core functions or to merge P2 in itself. **This branch merged `integrate/wave2` (`0d3545b`, then `47f74c6`) rather than `fix/p2-time-b` alone.** P2 was cut from `0fa9ad8`, before P3 and P4, so merging it alone would have re-resolved P2 against P3 and P4 a second way. On top of the integration's own resolution, only P1 against P2 is left. The merges are `89e154a` and `97525d5`. `fix/p1-binding` contains `integrate/wave2` at `47f74c6`, so merging it there is a fast-forward unless `integrate/wave2` has moved since.
+
+- **Conflicts:**
+  - `src/api/read/status.ts`: P1's gate goes through P2's one certificate. Each kind of FAIL the gate finds is a FAILED withholding, `failedWithholdings(gate.withheld.map((w) => "verify check 7 would FAIL: " + w))`, beside the unproven times. This is the integration's line for P4's gate, now fed by P1's. The report keeps `ledgerGate { fails, warns, shown }` and `certificateWithheld`, and gains P2's `certificate` and `certified`. The gate also assesses the publication's and the checkpoints' tokens with `status --tsa-trust`'s anchors, as status assesses the registration's and the commitment's.
+  - `src/api/read/verify.ts`: P2's access note and scoped log keys. P1's binding replaces `noteProviderIdentity`: check 5 FAILs instead of WARNing.
+  - `src/core/verify.ts`: P2's verdict imports; check 7 stays on the gate.
+  - `src/api/write/sample.ts`: P2's registration-bound draws beside P1's publication.
+  - `contracts.md`: P2's exit-6 row, and the exit-5 row lists `sample`'s publication.
+  - `test/wave2-integration.test.ts`: P1's publication WARN and P2's INCOMPLETE times, both asserted.
+- **Where the rounds meet** (tests updated to the same intent; none weakened):
+  - **U7's credential tests** edited `.pr-rla.yml`'s ledger options after registration, which P1 refuses. The `token_env` test now registers its audit with `token_env` (`githubIssuesAudit({ tokenEnv })`). Both tests also assert that the same edit after registration is refused before the ledger opens: nothing is sent, and the job fails.
+  - **The Action without the owner's anchors** exits 1, not 6 (decision 8); its test says why. A git-file audit, which publishes nothing, still exits 6 there (`ci-job-scripts`).
+  - The three Action tests changed here were run on `integrate/wave2` at `47f74c6` without P1, and fail there.
+  - **The Action's report** read "check 7 SKIP" as "no verdicts read". Check 7 can now FAIL on what it checks locally, so `report.mjs` reads verify's `status` instead.
+  - **`single-repo-anchor`'s deleted repo** now also says `not established: read without its credential`. verify runs on its own read-only context, as a separate `pr-rla verify` process does, so time round B's access rule sees only verify's two anonymous 404 reads. The repo's earlier answered reads, made in the scenario's shared context, no longer mask them.
+  - **`single-repo-anchor` flaked about one run in forty** (seen once, in a fresh-clone run). The scenarios make a new signing key per run, and time round B binds the draws to the registration, which names that key, so the five draws differ from run to run. When a run drew a change twice, `sample` printed that draw with `(drawn before: reuses its verdict)`, which the test's draw-line pattern did not match: it saw 4 draws where `computeDraws` gave 5. The pattern now takes the suffix, and a synthetic test pins it (`8628d51`). This is in the integration's test, not P1's code.
+  - **`p1-publication`'s status test** asserts P2's line (`CERTIFICATE WITHHELD (… verify check 7 would FAIL: the draw → issue publication record FAILs)`), `certified: false`, a FAILED withholding and exit 1.
+- **The seam P2 and P5 read: `check7Gate(paths, registration, ledger, trust, o?)`** (`src/api/read/ledger-gate.ts`). The coordinator asked for it on 2026-11-04, for P5's offline verify core.
+  - **Inputs:** the audit directory (`WindowPaths`), the registration, and the loaded ledger (`LoadedLedger`: its identity from its definition or lock, its test-only options, and what was read from it, or null). `trust` is the anchors the caller accepts (`trustFor(ctx, tsaTrust)`). `o.draws` takes verify's recomputed draws.
+  - **What it does:** reads the window's files (the manifest's hash, `draws.json`, the index, the publications, the checkpoints), assesses their tokens offline, and runs the rules verify's check 7 runs. No request, no write.
+  - **What it returns:** `LedgerGate { fails, incompletes, warns, lines, withheld, unestablished }`. `fails` and `incompletes` hold every finding as a sentence, the same ones verify's check 7 prints. `withheld` and `unestablished` hold one short reason per kind.
+  - **Verify** runs the same rules through `assessedLedgerGate` (`src/core/ledger-gate.ts`), which now also does the token assessment the two callers used to repeat.
+  - **Status** calls `check7Gate` in its two places. It folds `withheld` into FAILED withholdings (`failedWithholdings(gate.withheld.map((w) => "verify check 7 would FAIL: " + w))`, the integration's line for P4's gate) and `unestablished` into INCOMPLETE ones ("verify check 7 would be INCOMPLETE: …").
+  - **Why `withheld`, not `fails`:** the certificate line names each kind once ("the draw → issue publication record FAILs"), where `fails` would put every FAIL sentence into it, one per verdict. The integration's P4 tests assert that wording. The full sentences are in `ledgerGate.fails` and `ledgerGate.incompletes`, and printed under the line.
+- **Left for P2's owner (and P5):** `noteAccess` (P2) turns check 7 INCOMPLETE whenever the ledger read was refused for want of a credential, even where the gate FAILs on local files alone (a remapped index). The certificate is withheld either way, but the exit is 6 rather than 1.
+- **Re-pinned** the Action's tarball after the merge (`node scripts/pack-action-tarball.mjs`, `71780d2`).
+
+### Unverified
+
+- Jira's `customFieldOption/{id}` for a project an anonymous caller cannot browse. The recordings are of a public project; the endpoint's documentation says anyone who may browse a project that uses the field can read it.
+- GitLab's `systemNoteMetadata` on a self-managed instance older than the one gitlab.com runs, and Bitbucket Cloud's `participated_on` on live data. Both follow the documented shapes and the fakes.
+- A publication record time-stamped by real authorities. Every test uses mock authorities; the token rules are trusted time's, unchanged.
+
+### Verified (command → output)
+
+The three fresh-clone runs are recorded in the next commit.
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
@@ -3654,3 +3796,25 @@ Merged on top of `47f74c6` on the coordinator's instruction. S1 was cut from `6b
 - **The MCP README's stale sentence** that `freeze_preview`'s estimate is `UNSUPPORTED` until U8 lands is removed (U8 landed at merge 6).
 - **U6's option-level guard test and the wording allow-list** pass: S1 adds no CLI option.
 - **Verified** (in this worktree, 2026-11-04, load average 38–128): build 0 · typecheck 0 · `npm test` 98 files, **2508 passed (2508)**.
+
+### Merge 13: `fix/p1-binding` (7b95398)
+
+Merged on top of `a8a145e` (merge 12) on the coordinator's instruction. P1 had already merged `integrate/wave2` at `47f74c6` (U7, U6, P2), so what is new here is P1 against S1. P1 was written before S1's rule (text from outside pr-rla is a piece, `said`; a line's prefix is tested with `wordsOf`) and S1 before P1's gate and its read-only contexts.
+
+- **Conflicts:**
+  - `src/api/context.ts`:
+    - the consent and plugin policy: an assistant's read-only context takes S1's `withoutAcceptLockGrants` and `approvedOnly`, and a person's keeps their own approvals and `--accept-lock-grants` (P1);
+    - `builtinEnv` keeps S1's `kinds` (derived from the real values, so P3's token-kind code reads them in either mode) and P1's rule that a person's read-only context gets the values, not placeholders.
+  - `src/core/verify.ts`: `VerifyDeps` carries P1's `ledgerIdentity` (a `BindingIdentity`) and S1's `ledgerFindingsArePrRlas`. check 7's integrity and history reads moved into P1's gate (below).
+  - `src/api/read/verify.ts`: P1's binding (`bindingIdentity`, `identityDiffs`, `onMismatch: "report"`, `ledgerSkipped`, publications, `ledgerTestOnlyOptions`) with S1's `fenceStatus` and `renderResult`. P1's own `fenced`/`errors` wrapper for check 4 and 7 is gone: S1's pieces replace it.
+  - `src/api/read/status.ts`: P1's gate (`check7Gate`, `ledgerGate { fails, incompletes, warns, shown }`) and S1's `fenceStatus`/`renderResult` over P2's `certificate`/`certified` and P4's `certificateWithheld`.
+  - `src/api/read/freeze-preview.ts`: P1's `readOnlyContext` with S1's `foreign` and `renderResult`.
+  - `test/api-read-fix.test.ts`: both helper imports.
+  - `BUILD-NOTES.md`: P1's section moved above "Integration: wave 2" with the other units' sections.
+  - The Action's tarball and lockfile: re-pinned (`node scripts/pack-action-tarball.mjs`).
+- **Where the rounds meet (not a textual conflict):**
+  - **Who reads decides the rendering, not the mode.** P1 runs every read function on `readOnlyContext(ctx)`, so `ctx.mode` is `read-only` for the CLI's `verify`, `status` and `freeze --dry-run` too. S1 chose its rendering by `ctx.mode`, which would have fenced the CLI's output. `read.verify`, `read.status`, `read.draws` and `freezePreview` now ask `callerOf(ctx)`: an assistant's result is fenced into `untrusted.errors`, a person's is quoted in place. Without it S1's CLI tests (quote in place) fail.
+  - **The one gate speaks S1's rule.** `src/core/ledger-gate.ts` now carries lines (`GateLine.text` and `LedgerGate.fails/incompletes/warns` are `Line`s). A ledger's integrity findings and warnings are foreign unless the ledger is git-file (`GateLedger.findingsArePrRlas`, as S1 had it in check 7), a failed `verifyIntegrity` or `readHistory` is `foreignError(e)`, and the `FAIL ` prefix is dropped with `dropPrefix`, never a string method. Verify's check 7 and status read the same lines, so they agree for the same audit. Status's `ledgerIntegrity.findings` and its `readVerdicts failed` note are pieces too.
+  - **The check-7 gate still feeds P2's `failedWithholdings`** (`verify check 7 would FAIL: …`), and verify's check 7 is built on the same `assessedLedgerGate`: one gate, two callers.
+  - `test/p1-publication.test.ts`: the cast of a `read.status` result to `{ ledgerGate }` goes through `unknown` (the result type gained S1's `untrusted?`); nothing asserted changed.
+- **Not changed:** the IPC v2 and plugin-host rules (S1's `reply()` never throws, the 2 KiB echoes, a whole-number request id, finite retry hints) were merged in merge 12 and P1 does not touch them. U6's option-level guard test and the wording allow-list pass: P1's `--key` and `--tsa-trust` were already classified.

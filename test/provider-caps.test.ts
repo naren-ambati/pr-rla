@@ -96,7 +96,7 @@ describe("GitLab: approvers are paged; approval resets are read by GitLab's own 
 
   it("a tagged reset that names nobody is counted in a diagnostic instead of passing quietly", async () => {
     const r = await list(fakeGitLab(sc, { pageSize: 3, anonymousReset: true }));
-    expect(r.diagnostics).toContainEqual({ label: "approval-reset notes that name no approver (approvals may be over-counted)", value: 1 });
+    expect(r.diagnostics).toContainEqual({ label: "approval-reset notes that name no approver (every approval before each was reset)", value: 1 });
   });
 
   it("buildReviews applies a tagged note whatever its text", () => {

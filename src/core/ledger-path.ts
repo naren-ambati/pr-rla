@@ -1,4 +1,3 @@
-import type { Ledger, LedgerIntegrityReport } from "../sdk/ledger.js";
 import { isRegistrationV2, type AnyRegistration, type PluginIdentity, type SignedRecord } from "./records.js";
 
 /**
@@ -8,7 +7,7 @@ import { isRegistrationV2, type AnyRegistration, type PluginIdentity, type Signe
  * `register` records the built-in git-file ledger's path from the audit repository's toplevel,
  * lexical and normalised (`ledgerPath`); the ledger's integrity check reports the path it walked
  * (`LedgerIntegrityReport.location`), refusing a symbolic link or another spelling on the way.
- * Check 7 and status compare the two.
+ * Check 7 compares the two, in the gate status runs too (src/core/ledger-gate.ts).
  */
 
 /** True when the registered ledger is the built-in git-file, whose path a registration records. */
@@ -35,44 +34,5 @@ export function ledgerPathFindings(reg: SignedRecord<AnyRegistration>, walked: s
   }
   if (walked === undefined || walked === null) out.fails.push(`the registration places the git-file ledger at ${registered} in a git repository, but the ledger read is in none: verify in a clone of the audit repository`);
   else if (walked !== registered) out.fails.push(`the ledger read is ${walked}, but the registration places it at ${registered}: verify with the registered audit_dir, window and file, in the repository the audit was registered in`);
-  return out;
-}
-
-export interface LedgerGate {
-  /** The ledger's integrity report (null: the check threw, see `fails`). */
-  integrity: LedgerIntegrityReport | null;
-  /** What makes check 7 FAIL: the integrity check's findings when it is not ok, and the path rule. */
-  fails: string[];
-  /** What makes check 7 WARN on the path (a registration without `ledgerPath`). */
-  warns: string[];
-}
-
-/**
- * The integrity walk and the path rule for a built-in git-file ledger, as check 7 judges them, for
- * status (P4: status never prints CERTIFIED where verify FAILs check 7). The walk is local: git
- * objects only. Null when the ledger is not git-file or has no integrity check.
- */
-export async function gitFileLedgerGate(ledger: Ledger, reg: SignedRecord<AnyRegistration>): Promise<LedgerGate | null> {
-  if (ledger.name !== "git-file" || !ledger.verifyIntegrity) return null;
-  let integrity: LedgerIntegrityReport;
-  try {
-    integrity = await ledger.verifyIntegrity();
-  } catch (e) {
-    return { integrity: null, fails: [`ledger ${ledger.name}: verifyIntegrity failed: ${(e as Error).message}`], warns: [] };
-  }
-  const path = ledgerPathFindings(reg, integrity.location);
-  return { integrity, fails: [...(integrity.ok ? [] : integrity.findings), ...path.fails], warns: path.warns };
-}
-
-/**
- * Why status withholds CERTIFIED although the sequence certifies (P4): what would make verify FAIL
- * check 7. The git-file ledger's integrity walk and path (`gate`), counted verdicts below the
- * registered minimum, and counted verdicts without a valid signature under `require_signed`.
- */
-export function certificateWithheld(i: { gate: LedgerGate | null; below: number; unsigned: number }): string[] {
-  const out: string[] = [];
-  if (i.gate?.fails.length) out.push("the ledger's integrity check FAILs");
-  if (i.below) out.push(`${i.below} counted verdict(s) below the registered provenance`);
-  if (i.unsigned) out.push(`${i.unsigned} counted verdict(s) without a valid signature`);
   return out;
 }

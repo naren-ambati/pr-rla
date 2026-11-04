@@ -295,7 +295,9 @@ describe("the Gitea example passes the conformance kit through the host", () => 
     // The recording declares only its ids and direct pushes, so the checks that read other expectations skip and say so
     // (merge strategies, review states, actors); U3's revoked-approval check has nothing to check (its one stale Codeberg approval
     // still counts). review-granularity runs on the traits the child describes.
-    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["merge-strategies", "review-state-mapping", "actors", "bot-detection", "revoked-approval"]);
+    expect(report.results.filter((r) => r.skipped && r.fixture !== "(check coverage)").map((r) => r.check)).toEqual(["merge-strategies", "review-state-mapping", "actors", "bot-detection", "revoked-approval"]);
+    // P1: plugin check names each check the recordings exercise nowhere, with why, rather than passing it.
+    expect(report.results.filter((r) => r.fixture === "(check coverage)").map((r) => `${r.check}: ${r.message}`)).toEqual(["merge-strategies", "review-state-mapping", "actors", "bot-detection", "revoked-approval"].map((c) => `${c}: not exercised by this run: the recordings plugin check was given declare no expectation for it`));
     expect(report.results.find((r) => r.check === "review-granularity")).toMatchObject({ ok: true });
     expect(report.results.find((r) => r.check === "review-granularity")?.skipped).toBeFalsy();
   });

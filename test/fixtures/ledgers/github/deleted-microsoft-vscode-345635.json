@@ -9,7 +9,8 @@
   "labels": {
    "pass": "bug",
    "fail": "feature-request"
-  }
+  },
+  "foreign_issues": true
  },
  "index": {
   "schema": "pr-rla/ledger-index/v1",
@@ -42,8 +43,7 @@
     "createdAt": "2026-11-02T19:45:30Z"
    }
   ],
-  "repeats": [],
-  "foreignIssues": true
+  "repeats": []
  },
  "observed": {
   "verdicts": [],
@@ -57,6 +57,7 @@
   },
   "history": []
  },
+ "amended": "2026-11-04T09:29:16Z (P1): each recorded issue response gained its numeric `id`, read live with one anonymous GET of the same issue (github-issues names an issue by that id now, not its node id), and the index took the same id; foreignIssues moved from the index to the test-only ledger option foreign_issues. Nothing else changed.",
  "exchanges": [
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/bug","bodySha256":null,"status":200,"headers":{},"response":{"id":256129993,"node_id":"MDU6TGFiZWwyNTYxMjk5OTM=","name":"bug"}},
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/feature-request","bodySha256":null,"status":200,"headers":{},"response":{"id":272689392,"node_id":"MDU6TGFiZWwyNzI2ODkzOTI=","name":"feature-request"}},

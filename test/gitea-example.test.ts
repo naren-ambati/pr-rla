@@ -175,7 +175,7 @@ describe("external Gitea plugin on recorded Codeberg responses: forgejo/docs, 20
         pagesServed: () => last.served(),
         http: true,
       },
-    ], { definition: await loadProviderDefinition("./examples/providers/gitea/index.mjs", ROOT) });
+    ], { definition: await loadProviderDefinition("./examples/providers/gitea/index.mjs", ROOT), skipChecks: { "revoked-approval": "the recorded window has no withdrawn approval; the synthetic scenario run in this file exercises it" } });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 

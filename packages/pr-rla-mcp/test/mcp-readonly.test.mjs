@@ -9,7 +9,7 @@ import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, renameSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { REPO, body, copyAudit, mockGitHub, onlineAudit, startServer, treeHash, waitForJob } from "./helpers.mjs";
+import { REPO, body, copyAudit, mockGitHub, onlineAudit, startServer, treeHash, waitForJob, registerProviderInCopy, builtinProviderIdentity, lockedProviderIdentity } from "./helpers.mjs";
 
 const TOOLS = ["audit_list", "draw_context", "draws", "freeze_preview", "job_status", "simulate", "status", "verify"];
 
@@ -318,6 +318,8 @@ describe("read-only mode keeps the operator's secrets and the roots (review 2 fi
     const dir = copyAudit((d) => {
       const p = join(d, ".pr-rla.yml");
       writeFileSync(p, readFileSync(p, "utf8").replace(/^provider: .*$/m, `provider: { use: github, options: { base_url: "${echo.url}", token_env: "SOME_OTHER_SECRET" } }`));
+      // P1: the provider a tool runs is the registered one, so the copy is registered with this one.
+      registerProviderInCopy(d, builtinProviderIdentity("github", { base_url: echo.url, token_env: "SOME_OTHER_SECRET" }, ["base_url", "api_url", "graphql_url"]));
     });
     const t = await startServer({ roots: [dir], env: { GITHUB_TOKEN: "ghp_READONLYTOKENxxxxxxxxxxxxxxxxxxxxxx", SOME_OTHER_SECRET: "sk-THIS-IS-NOT-A-GITHUB-TOKEN" } });
     try {
@@ -394,6 +396,8 @@ describe("read-only mode keeps the operator's secrets and the roots (review 2 fi
       writeFileSync(p, readFileSync(p, "utf8").replace(/^provider: .*$/m, "provider: { use: ./plugins/full.mjs, options: {} }"));
     });
     execFileSync(process.execPath, [join(REPO, "dist", "cli.js"), "plugin", "add", "./plugins/full.mjs", "--trust", "full", "--yes"], { cwd: dir, stdio: "ignore" });
+    // P1: the provider a tool runs is the registered one, so the copy is registered with this one.
+    registerProviderInCopy(dir, lockedProviderIdentity(dir, "./plugins/full.mjs"));
     const t = await startServer({ roots: [dir] });
     try {
       const r = body(await t.call("draw_context", { draw: 1 }));

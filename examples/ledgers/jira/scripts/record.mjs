@@ -8,7 +8,7 @@
 // Every request goes through pr-rla's fetch broker in READ-ONLY mode, so nothing can be written.
 // Author objects are cut to accountId and accountType (no names, no avatars).
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBroker } from "pr-rla";
@@ -16,7 +16,8 @@ import jira from "../index.mjs";
 
 const SITE = "https://hibernate.atlassian.net";
 const FIELD = "customfield_11702";
-const OPTIONS = { base_url: SITE, project: "HHH", field: FIELD, values: { pass: "Approved", fail: "Rejected" } };
+// foreign_issues (test only): these are issues pr-rla did not open, so their summaries carry no draw marker.
+const OPTIONS = { base_url: SITE, project: "HHH", field: FIELD, values: { pass: "Approved", fail: "Rejected" }, foreign_issues: true };
 // The option ids the site's changelog gives these values (seen in the recorded entries: to/from "10202" with
 // toString "Approved", "10203" with "Rejected"); the ledger matches events by them, not by the names.
 const OPTION_IDS = { pass: "10202", fail: "10203" };
@@ -28,7 +29,8 @@ function trim(url, body) {
   const p = new URL(url).pathname;
   if (p === "/rest/api/3/field") return body.filter((f) => f.id === FIELD).map((f) => pick(f, ["id", "name", "custom", "schema"]));
   if (/\/changelog$/.test(p)) return { ...pick(body, ["startAt", "maxResults", "total", "isLast"]), values: body.values.map((h) => ({ id: h.id, created: h.created, author: pick(h.author, ["accountId", "accountType"]), items: h.items.map((i) => pick(i, ["field", "fieldtype", "fieldId", "from", "fromString", "to", "toString"])) })) };
-  if (/\/issue\/[^/]+$/.test(p)) return { id: body.id, key: body.key, fields: { project: pick(body.fields?.project, ["key"]) } };
+  if (/\/issue\/[^/]+$/.test(p)) return { id: body.id, key: body.key, fields: { project: pick(body.fields?.project, ["key"]), ...(body.fields?.summary !== undefined ? { summary: body.fields.summary } : {}) } };
+  if (/\/customFieldOption\/[^/]+$/.test(p)) return pick(body, ["self", "value"]);
   return body;
 }
 
@@ -55,8 +57,11 @@ async function record(file, kase, keys, why) {
   const ledger = await jira.create(OPTIONS, { cwd: windowDir, windowDir, env: {}, log: () => {}, fetch: broker.bind("ledger:jira") });
   const observed = { verdicts: await ledger.readVerdicts(), integrity: await ledger.verifyIntegrity(), history: await ledger.readHistory() };
   const header = { description: `Public Jira Cloud changelogs (${SITE}, ${keys.join(", ")}), recorded read-only and anonymously through the example ledger. ${why}`, source: "recorded", tracker: "jira-cloud", case: kase, recordedAt, options: OPTIONS, index, observed };
-  const text = JSON.stringify({ ...header, exchanges: [] }, null, 1).replace(/"exchanges": \[\]\n}$/, `"exchanges": [\n${exchanges.map((e) => JSON.stringify(e)).join(",\n")}\n ]\n}`);
-  writeFileSync(new URL(`../fixtures/${file}`, import.meta.url), `${text}\n`);
+  // A hand-written `expected` block (the plugin round's: what `pr-rla plugin check` asserts) is kept across re-recordings.
+  const target = new URL(`../fixtures/${file}`, import.meta.url);
+  const expected = existsSync(target) ? JSON.parse(readFileSync(target, "utf8")).expected : undefined;
+  const text = JSON.stringify({ ...header, exchanges: [], ...(expected ? { expected } : {}) }, null, 1).replace('"exchanges": []', () => `"exchanges": [\n${exchanges.map((e) => JSON.stringify(e)).join(",\n")}\n ]`);
+  writeFileSync(target, `${text}\n`);
   console.error(`wrote fixtures/${file}: ${exchanges.length} exchanges`);
 }
 

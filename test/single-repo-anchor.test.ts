@@ -93,10 +93,13 @@ function hideDraws(d: Dump): { dump: Dump; drawn: Record<string, string[]> } {
     drawn[name] = [];
     for (const k of ["sample", "status"]) {
       steps[k]!.out = steps[k]!.out.map((l) => {
-        const m = /^  #\s+(\d+)  (\S+)  \S+$/.exec(l) ?? /^  blocking draw: #(\d+) (\S+) \S+$/.exec(l);
+        // A draw that repeats an earlier change says so ("drawn before"). The draws differ from run to run (the key, and
+        // so the registration the draws are bound to, is made per run), so a repeat comes and goes: it is drawn, and
+        // its line is hidden like any other.
+        const m = /^  #\s+(\d+)  (\S+)  \S+(?:  \(drawn before: reuses its verdict\))?$/.exec(l) ?? /^  blocking draw: #(\d+) (\S+) \S+$/.exec(l);
         if (!m) return l;
         if (k === "sample") drawn[name]!.push(m[2]!);
-        return l.replace(m[2]!, "<drawn>").replace(/https:\S+$/, "<url>");
+        return l.replace(m[2]!, "<drawn>").replace(/https:\S+.*$/, "<url>");
       });
     }
   }
@@ -222,6 +225,16 @@ export default defineConfig({
   return JSON.parse(readFileSync(out, "utf8")) as Record<string, Record<string, unknown>>;
 }
 
+it("hideDraws counts a repeated draw and hides its line like any other (the comparison below flaked when a run drew a repeat)", () => {
+  const rec = (lines: string[]) => ({ steps: { sample: { out: lines }, status: { out: [] } } });
+  const h = hideDraws({
+    a: rec(["  #  1  json:acme/widgets#7  https://x/7", "  #  2  json:acme/widgets#7  https://x/7  (drawn before: reuses its verdict)"]),
+    b: rec(["  #  1  json:acme/widgets#7  https://x/7", "  #  2  json:acme/widgets#9  https://x/9"]),
+  });
+  expect(h.drawn).toEqual({ a: ["json:acme/widgets#7", "json:acme/widgets#7"], b: ["json:acme/widgets#7", "json:acme/widgets#9"] });
+  expect((h.dump.a!.steps as Record<string, Step>).sample!.out).toEqual((h.dump.b!.steps as Record<string, Step>).sample!.out);
+});
+
 describe("single-repo audits behave as master does (a pool of one), against the master build itself", () => {
   it("json-file (400 changes), a GitHub repo, an empty GitHub repo, and a GitHub repo whose head moved after freeze in six honest ways: every output, record and verify result is master's, but for the listed U8 and P3 changes", { timeout: 300_000 }, () => {
     // master here, or origin/master in a fresh clone of this branch.
@@ -253,7 +266,9 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       const after = (now.github1!.steps as Record<string, { value?: { ok: boolean; checks: unknown[][] } }>).after!.value!;
       expect((before.github1!.steps as Record<string, { threw?: string }>).after!.threw).toMatch(/^GitHub POST \/graphql: HTTP 404/);
       expect(after.ok).toBe(false);
-      expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt"]);
+      //    P1: verify runs on its own read-only context (as a separate `pr-rla verify` does), so only its own reads count
+      //    for time round B's access rule: both were anonymous and answered 404, which a private repo answers too.
+      expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt · not established: read without its credential"]);
       delete (before.github1!.steps as Record<string, unknown>).after;
       delete (now.github1!.steps as Record<string, unknown>).after;
       // 2. P4: register signs the git-file ledger's path in and prints it (so its first line's hash covers the path), and

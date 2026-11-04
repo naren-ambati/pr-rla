@@ -181,21 +181,24 @@ describe("tampering with an issue-ledger history", () => {
 });
 
 describe("FR3.8: an issue-ledger audit rejects self-asserted verdicts", () => {
-  it("with the ledger switched to git-file, counted verdicts are self-asserted and check 7 FAILs each", async () => {
+  // P1: before, the ledger was switched to git-file in .pr-rla.yml and `record` wrote self-asserted lines there; now
+  // every command runs the registered ledger only. The lines an assistant appends by hand still never count.
+  it("with the ledger switched to git-file, record and status refuse, and verify FAILs check 7 without reading the unregistered ledger", async () => {
     const s = clone(honest);
     const cfg = readFileSync(join(s.dir, ".pr-rla.yml"), "utf8").replace("ledger: { use: github-issues, options: { repo: acme/audit } }\n", "ledger: git-file\n");
     writeFileSync(join(s.dir, ".pr-rla.yml"), cfg);
     const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
-    for (const d of draws.draws.slice(0, 36)) if (d.firstOccurrence) await recordCommand(s.ctx, String(d.draw), "pass", { reviewer: "alice" });
+    await expect(recordCommand(s.ctx, String(draws.draws[0]!.draw), "pass", { reviewer: "alice" })).rejects.toThrow(/^record refused: the ledger in \.pr-rla\.yml is not the registered one \(name github-issues → git-file; optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)\. The registration names ledger github-issues \(builtin, trust builtin, options [0-9a-f]{12}…\)/);
+    await expect(statusCommand(s.ctx, {})).rejects.toThrow(/^status refused: the ledger in \.pr-rla\.yml is not the registered one/);
+    const lines = draws.draws.slice(0, 36).filter((d) => d.firstOccurrence).map((d) => JSON.stringify({ draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256: readJ<SignedRecord<RegistrationRecordV2>>(s, `${W}/registration.json`).record.protocolSha256, reviewer: "alice", recordedAt: "2026-10-21T02:30:00Z" }));
+    writeFileSync(join(s.dir, W, "verdicts.jsonl"), `${lines.join("\n")}\n`);
     s.git("add", "-A");
     s.git("commit", "-qm", "self-asserted verdicts");
-    s.out.length = 0;
-    await statusCommand(s.ctx, {});
-    expect(s.out.join("\n")).toMatch(/counted verdict\(s\) are below the registered account provenance; verify check 7 will FAIL them/);
     const r = await runVerify(s.ctx, {});
     expect(check(r, 7).status).toBe("FAIL");
-    expect(check(r, 7).details.join("\n")).toMatch(/verdict on draw #\d+ \([a-z]+:acme\/widgets[#@][0-9a-f]+\) is self-asserted; the registration requires account/);
-    expect(check(r, 7).details.join("\n")).toMatch(/VERDICT PROVENANCE: self-asserted \(\d+\) \(registered minimum: account\)/);
+    expect(check(r, 7).details.join("\n")).toMatch(/FAIL the ledger in \.pr-rla\.yml is not the registered one \(name github-issues → git-file; optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\): verify did not read it/);
+    // The unregistered ledger is not read at all, so none of its self-asserted lines is counted, or even looked at.
+    expect(check(r, 7).details.join("\n")).not.toMatch(/VERDICT PROVENANCE/);
   });
 
   it("register refuses min_provenance account with a ledger that records only self-asserted verdicts", async () => {

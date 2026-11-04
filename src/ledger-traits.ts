@@ -57,3 +57,13 @@ export function registeredCeiling(registered: PluginIdentity | null, loaded: Led
   if (registered.source === "builtin") return maxProvenanceOf(true, registered.name, BUILTIN_LEDGERS[registered.name]?.provenance ?? "self-asserted");
   return maxProvenanceOf(false, registered.name, loaded.provenance);
 }
+
+/**
+ * Ledger options that exist for tests only (P1): `foreign_issues`, for recorded public timelines of issues pr-rla
+ * did not open, turns off the issues' marker check (the built-in issue ledgers and the Jira example; the name is
+ * reserved for every ledger). An audit never sets one: check 7 FAILs when the ledger's options (bound to the
+ * registration's) do.
+ */
+export function testOnlyLedgerOptions(spec: PluginSpec): string[] {
+  return spec.options.foreign_issues === true ? ["foreign_issues"] : [];
+}

@@ -209,7 +209,7 @@ describe("finding 3 (HIGH): verify compares the loaded ledger with the registere
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("options: { require_signed: true }", "options: { require_signed: true, file: v2.jsonl }"));
     const r = await runVerify(s.ctx, {});
     expect(c7(r).status).toBe("FAIL");
-    expect(c7(r).details.join("\n")).toMatch(/the ledger verify loaded is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/);
+    expect(c7(r).details.join("\n")).toMatch(/the ledger in \.pr-rla\.yml is not the registered one \(optionsSha256 [0-9a-f]{12}… → [0-9a-f]{12}…\)/);
   });
 
   it("a locally locked external ledger, swapped in at verify, that reports every draw as a signed PASS at account, FAILs check 7", async () => {
@@ -228,6 +228,7 @@ describe("finding 3 (HIGH): verify compares the loaded ledger with the registere
       join(s.dir, "evil-ledger.mjs"),
       `import { readFileSync } from "node:fs";
 import { join } from "node:path";
+globalThis.__prrlaEvilLedgerImported = true;
 export default {
   ledgerApiVersion: 1, name: "evil", provenance: "account",
   create: (_o, ctx) => ({
@@ -246,14 +247,16 @@ export default {
     await lockPlugin(s.dir, "./evil-ledger.mjs", { kind: "ledger", trust: "full" });
     const cfg = join(s.dir, ".pr-rla.yml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("ledger: { use: git-file, options: { require_signed: true } }", "ledger: { use: ./evil-ledger.mjs }"));
-    // fix/plugins-broker: a trust: full plugin nobody approved on this machine is not loaded at all.
-    await expect(runVerify(s.ctx, {})).rejects.toMatchObject({ code: "NOT_APPROVED" });
-    // Locked locally means approved locally (plugin add and plugin lock record it); then check 7 judges what it reports.
-    await lockPlugin(s.dir, "./evil-ledger.mjs", { kind: "ledger", trust: "full", approve: true });
-    const r = await runVerify(s.ctx, {});
-    expect(c7(r).status).toBe("FAIL");
-    expect(r.ok).toBe(false);
-    expect(c7(r).details.join("\n")).toMatch(/the ledger verify loaded is not the registered one \(name git-file → evil; source builtin → path; integrity none → [0-9a-f]{12}…/);
+    // P1: verify reads the plugin's identity from the lock and never runs a ledger the registration does not name, approved
+    // or not (fix/plugins-broker refused the unapproved one with NOT_APPROVED; now neither is imported). Check 7 FAILs.
+    for (const approve of [false, true]) {
+      await lockPlugin(s.dir, "./evil-ledger.mjs", { kind: "ledger", trust: "full", approve });
+      const r = await runVerify(s.ctx, {});
+      expect(c7(r).status).toBe("FAIL");
+      expect(r.ok).toBe(false);
+      expect(c7(r).details.join("\n")).toMatch(/the ledger in \.pr-rla\.yml is not the registered one \(name git-file → evil; source builtin → path; integrity none → [0-9a-f]{12}…; trust builtin → full; .*\): verify did not read it/);
+      expect((globalThis as { __prrlaEvilLedgerImported?: boolean }).__prrlaEvilLedgerImported, "the swapped-in ledger was imported").toBeUndefined();
+    }
   });
 });
 

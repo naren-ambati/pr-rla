@@ -1,19 +1,21 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.js";
-import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
+import { isRegistrationV2 } from "../../core/records.js";
 import { auditVerdict, certificateFor, isCertified, verdictExitCode, verdictWithholdings, type Withholding } from "../../core/verdict.js";
 import { accessShortfall } from "../access.js";
 import { verifyAudit, type VerifyCheck, type VerifyReport } from "../../core/verify.js";
-import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
+import { ledgerTraits, registeredCeiling, testOnlyLedgerOptions } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
-import { builtinLedgerName, pluginIdentity } from "../../registry.js";
+import { identityDiffs } from "../../core/plugin-binding.js";
+import { bindingIdentity, builtinLedgerName } from "../../registry.js";
 import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
 import { said } from "../../core/said.js";
 import { fenceStatus, renderResult } from "./untrusted.js";
 import { readCheckpoints } from "./checkpoints.js";
-import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { readPublications } from "./publications.js";
+import { callerOf, readOnlyContext, auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { verifierLogKeys } from "../translog.js";
 import { statusLine } from "./status.js";
 
@@ -63,6 +65,9 @@ export interface VerifyResult extends Omit<VerifyReport, "checks"> {
 
 /** `verify` (FR3.1): a third party's check of the seven audit properties. Reads only; offline skips the population rebuild and every fetch. */
 export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise<VerifyResult> {
+  // P1 (master-plugins-review #7): verify only reads, so it never runs read-write: the CLI's context becomes a
+  // read-only one for the same person, whose broker refuses every request that is not a read (a ledger cannot write).
+  ctx = readOnlyContext(ctx);
   const { config, paths } = configFor(ctx, opts.window);
   // The verifier's own log keys, read and checked before anything else (a malformed --log-key is a usage error).
   const logKeys = verifierLogKeys(ctx, opts.logKey);
@@ -76,31 +81,36 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   } catch {
     currentProtocol = null;
   }
+  // P1: what the configured plugins are, read from their definitions or locks (nothing runs yet). One that is not
+  // the registered plugin is never opened: checks 5 and 7 FAIL naming the difference, and nothing reaches its hosts.
+  const regV2 = isRegistrationV2(registration) ? registration : null;
+  const loaded = opts.offline ? null : await bindingIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
+  const providerBound = !loaded || !regV2 || identityDiffs(regV2.record.plugins.provider, loaded).length === 0;
+  const ledgerIdentity = await bindingIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx));
+  const ledgerBound = !regV2 || identityDiffs(regV2.record.plugins.ledger, ledgerIdentity).length === 0;
   // A ledger that lives in a tracker (it declares hosts) is not read offline: check 7 then SKIPs and says why.
   // An external ledger's hosts are its locked ones: it is not imported here.
-  const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx));
-  const skipLedger = !!opts.offline && lt.hosts.length > 0;
+  const lt = ledgerBound ? await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx)) : null;
+  const skipLedger = !ledgerBound || (!!opts.offline && lt!.hosts.length > 0);
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
-  const provider = opts.offline ? null : withProgress(ctx, await providerFor(ctx, config));
-  const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
+  const provider = opts.offline || !providerBound ? null : withProgress(ctx, await providerFor(ctx, config, { onMismatch: "report" }));
+  const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths, { onMismatch: "report" });
   // What the checks quote from outside pr-rla is carried as foreign text in their lines (src/core/said.ts) and
-  // rendered once, below: in read-only mode (an assistant reads the result) it moves to `untrusted.errors`.
+  // rendered once, below: when an assistant reads the result it moves to `untrusted.errors`; a person's is quoted in place.
   if (ledger) {
     const read = ledger.readVerdicts.bind(ledger);
     ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), read());
   }
-  // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
-  const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
-  // U9: the ledger's, compared in check 7; its ceiling is the registered ledger's.
-  const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) : null;
+  const ledgerSkipped = !ledgerBound ? `the ledger in .pr-rla.yml is not the registered one, so it was not read` : skipLedger ? `offline: ledger ${lt!.name} lives in ${lt!.hosts.join(", ")}; run verify without --offline to check the verdicts` : null;
   const report = await verifyAudit(
-    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
+    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir), ledgerPublications: readPublications(paths.windowDir) },
     {
       provider,
       ledger,
-      ...(skipLedger ? { ledgerSkipped: `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; run verify without --offline to check the verdicts` } : {}),
-      provenanceCeiling: registeredCeiling(isRegistrationV2(registration) ? registration.record.plugins.ledger : null, lt),
-      ...(ledgerIdentity ? { ledgerIdentity } : {}),
+      ...(ledgerSkipped ? { ledgerSkipped } : {}),
+      ...(lt ? { provenanceCeiling: registeredCeiling(regV2 ? regV2.record.plugins.ledger : null, lt) } : {}),
+      ledgerIdentity,
+      ledgerTestOnlyOptions: testOnlyLedgerOptions(config.ledger),
       ledgerFindingsArePrRlas: builtinLedgerName(config.ledger.use) === "git-file",
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
@@ -121,7 +131,6 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
       ...(loaded ? { providerIdentity: loaded } : {}),
     },
   );
-  if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);
   // Time round B: reads refused to a provider or ledger that ran without its credential are not established (src/api/access.ts).
   const actx = auditContextFor(ctx);
   noteAccess(report, [
@@ -130,10 +139,12 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   ]);
   if (logKeys.ignored.length) report.checks[0]?.details.push(...logKeys.ignored);
   const reg = registration.record;
+  // P1 made every read run read-only; what S1 fences is what an assistant reads, so the reader decides, not the mode.
+  const assistant = callerOf(ctx) !== "person";
   const result = {
     ...report,
-    // The verdicts' reviewers, notes and other ledger-written fields are fenced in read-only mode (S1); the CLI shows them as they are.
-    status: report.status && ctx.mode === "read-only" ? fenceStatus(report.status) : report.status,
+    // The verdicts' reviewers, notes and other ledger-written fields are fenced when an assistant reads (S1); the CLI shows them as they are.
+    status: report.status && assistant ? fenceStatus(report.status) : report.status,
     statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }, report.certificate ?? undefined) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
@@ -141,7 +152,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     certified: isCertified(report.certificate),
   };
   // One rendering for the whole result, by the mode: read-only says pr-rla's words and points into untrusted.errors.
-  return renderResult<VerifyResult>(ctx.mode ?? "read-write", result);
+  return renderResult<VerifyResult>(assistant ? "read-only" : "read-write", result);
 }
 
 /** The provider, reporting the population rebuild of check 5 as progress (an online verify of a large window takes minutes). */
@@ -178,18 +189,4 @@ function noteAccess(report: VerifyReport, found: { n: number; w: Withholding | n
   report.verdict = auditVerdict(report.checks);
   report.ok = report.verdict === "VERIFIED";
   if (report.status) report.certificate = certificateFor(report.status.sequence.state, report.status.refusal, verdictWithholdings(report.checks), unread);
-}
-
-/**
- * Check 5 rebuilt the population with the provider verify loaded; say so when that is not the
- * registered external plugin (another release, other files or options, another trust).
- */
-function noteProviderIdentity(report: VerifyReport, registered: PluginIdentity, loaded: PluginIdentity): void {
-  if (registered.source === "builtin" && loaded.source === "builtin") return;
-  const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
-  const diffs = (["name", "source", "version", "integrity", "optionsSha256", "trust"] as const).filter((k) => registered[k] !== loaded[k]).map((k) => `${k} ${show(registered[k])} → ${show(loaded[k])}`);
-  const c5 = report.checks.find((c) => c.n === 5);
-  if (!diffs.length || !c5) return;
-  c5.details.push(`WARN the provider verify loaded is not the registered one (${diffs.join("; ")}): the population was rebuilt with it`);
-  if (c5.status === "PASS") c5.status = "WARN";
 }

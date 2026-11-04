@@ -1,6 +1,8 @@
 // The bolt 3 demo (delivery-plan.md): a recorded public timeline with a remove and re-add shows WARN;
 // a deleted-issue fixture shows FAIL. Offline: every tracker answer is a read-only recording
-// (test/fixtures/ledgers/github, 2026-11-03), replayed; nothing is contacted or written.
+// (test/fixtures/ledgers/github, 2026-11-03), replayed; nothing is contacted or written. Part 2 runs
+// verify on an audit registered on the recorded tracker: since P1, check 7 also FAILs it, because issues
+// pr-rla did not publish (read with the test-only option foreign_issues) bind nothing.
 //   npm run build && node scripts/demo-ledgers.mjs
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +12,8 @@ import { nodeContext } from "../dist/commands/context.js";
 import { verifyQuicknetBeacon } from "../dist/beacon/drand.js";
 import githubIssues from "../dist/ledgers/github-issues/index.js";
 import { ledgerIndexSha256 } from "../dist/ledgers/issue-index.js";
+import { QUICKNET, computeDraws } from "../dist/core/seed.js";
+import { effectiveCap } from "../dist/core/sprt.js";
 
 const fixture = (f) => JSON.parse(readFileSync(new URL(`../test/fixtures/ledgers/github/${f}`, import.meta.url), "utf8"));
 /** Serves the recorded exchanges; an unrecorded request throws, so the demo stays offline. */
@@ -59,9 +63,10 @@ const offline = async (u) => {
   throw new Error(`demo: no network (${u})`);
 };
 /**
- * A 200-change json-file audit registered with `ledger` (verify FAILs check 7 on any other: U9), then
- * frozen and sampled offline. Sampling runs with git-file so no draw is published to a tracker: the
- * recorded issue stands for draw #1.
+ * A 200-change json-file audit registered with `ledger`, frozen, and its draws computed offline as
+ * `sample` computes them (seed round R from the recorded beacon). `sample` itself is not run: it would
+ * open issues on the tracker (and, since P1, every command runs only the registered ledger, so it can no
+ * longer be sampled with git-file instead). The recorded issue stands for draw #1.
  */
 async function auditOn(ledger) {
   const dir = mkdtempSync(join(tmpdir(), "prrla-demo-audit-"));
@@ -80,15 +85,27 @@ async function auditOn(ledger) {
   clock = Date.parse("2026-10-20T12:00:00Z");
   await run(["freeze"], offline);
   clock = Date.parse("2026-10-21T01:00:00Z");
-  writeFileSync(join(dir, ".pr-rla.yml"), yml("git-file"));
-  await run(["sample", "--through", "1"], offline); // one draw: the recorded tracker holds one issue
-  writeFileSync(join(dir, ".pr-rla.yml"), yml(ledger));
+  // The draws, as sample writes them (one issued: the recorded tracker holds one issue).
+  const manifest = JSON.parse(readFileSync(join(dir, "audit/2026-q3.manifest.json"), "utf8"));
+  const reg = JSON.parse(readFileSync(join(dir, "audit/2026-q3/registration.json"), "utf8"));
+  const cap = effectiveCap(reg.record.parameters);
+  const seen = new Set();
+  const draws = computeDraws(beacon.randomness, manifest.sha256, manifest.N, cap).map((d) => {
+    const c = manifest.changes[d.index];
+    const firstOccurrence = !seen.has(c.id);
+    seen.add(c.id);
+    return { draw: d.draw, index: d.index, changeId: c.id, url: c.url, mergeSha: c.mergeSha, firstOccurrence };
+  });
+  writeFileSync(join(dir, "audit/2026-q3/draws.json"), JSON.stringify({ schema: "pr-rla/draws/v1", repo: "acme/widgets", window: "2026-q3", manifestSha256: manifest.sha256, N: manifest.N, round: beacon.round, beacon, chainHash: QUICKNET.chainHash, issued: 1, cap, draws }, null, 2));
   return { dir, run };
 }
-console.log("  (a json-file audit of 200 changes per fixture, registered on github-issues, frozen and sampled offline)\n");
+console.log("  (a json-file audit of 200 changes per fixture, registered on github-issues, frozen, its draws computed offline)");
+console.log("  These issues were not opened by this audit's sample: their index is built by hand, and they are read with the");
+console.log("  test-only option foreign_issues. Since P1, check 7 FAILs both for that: no ledger publication record binds the");
+console.log("  draw → issue mapping by time, and an audit never runs a test-only option. The relabel and the deletion show as before.\n");
 for (const [f, ledger] of [
-  ["relabel-same-nodejs-node-67038.json", "{ use: github-issues, options: { repo: nodejs/node, labels: { pass: commit-queue-squash, fail: commit-queue-rebase } } }"],
-  ["deleted-microsoft-vscode-345635.json", "{ use: github-issues, options: { repo: microsoft/vscode, labels: { pass: bug, fail: feature-request } } }"],
+  ["relabel-same-nodejs-node-67038.json", "{ use: github-issues, options: { repo: nodejs/node, labels: { pass: commit-queue-squash, fail: commit-queue-rebase }, foreign_issues: true } }"],
+  ["deleted-microsoft-vscode-345635.json", "{ use: github-issues, options: { repo: microsoft/vscode, labels: { pass: bug, fail: feature-request }, foreign_issues: true } }"],
 ]) {
   const rec = fixture(f);
   const { dir, run } = await auditOn(ledger);

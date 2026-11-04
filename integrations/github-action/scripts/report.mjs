@@ -66,10 +66,11 @@ function build() {
     if (e.host) md.push("", `Host: ${cell(e.host)}`);
     if (e.next) md.push("", `Next: ${cell(e.next)}`);
   } else if (parsed) {
-    // status puts the sequence at the top; verify carries it as `status`. An offline verify of a tracker
-    // ledger skips check 7, so it read no verdicts: it has a verdict, and no state to report.
+    // status puts the sequence at the top; verify carries it as `status`, and only when check 7 read the verdicts.
+    // An offline verify of a tracker ledger reads none: it has a verdict, and no state to report. (Check 7 may still
+    // FAIL there on what it checks locally, P1: the index's publication, the checkpoint file.)
     const st = command === "verify" ? parsed.status : parsed;
-    const verdictsRead = command !== "verify" || !Array.isArray(parsed.checks) || parsed.checks.find((c) => c.n === 7)?.status !== "SKIP";
+    const verdictsRead = command !== "verify" || (st !== null && typeof st === "object");
     const state = verdictsRead ? stateOf(st, parsed.certificate) : "";
     out.state = state;
     if (verdictsRead && st && st.sequence) {

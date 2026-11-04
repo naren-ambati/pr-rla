@@ -91,9 +91,10 @@ async function build<F>(ledgerYaml: string, route: (url: string) => boolean, fak
 }
 
 /** A GitHub audit on `github-issues`; with `baseUrl`, a GitHub Enterprise Server at that origin (REST under /api/v3). */
-export async function githubIssuesAudit(o: { baseUrl?: string } = {}): Promise<TrackerAudit<FakeGitHubIssues>> {
+export async function githubIssuesAudit(o: { baseUrl?: string; tokenEnv?: string } = {}): Promise<TrackerAudit<FakeGitHubIssues>> {
   const fake = new FakeGitHubIssues(o.baseUrl ? `${o.baseUrl}/api/v3` : "https://api.github.com", "acme/audit");
-  return build(`ledger: { use: github-issues, options: { repo: acme/audit${o.baseUrl ? `, base_url: ${o.baseUrl}` : ""} } }`, (u) => u.startsWith(`${fake.api}/`), fake, { GITHUB_TOKEN: "test-token" });
+  // With `tokenEnv`, the ledger is registered with that token_env (the registration signs every option: P1).
+  return build(`ledger: { use: github-issues, options: { repo: acme/audit${o.baseUrl ? `, base_url: ${o.baseUrl}` : ""}${o.tokenEnv ? `, token_env: ${o.tokenEnv}` : ""} } }`, (u) => u.startsWith(`${fake.api}/`), fake, { GITHUB_TOKEN: "test-token", ...(o.tokenEnv ? { [o.tokenEnv]: "test-token" } : {}) });
 }
 
 /** A GitLab audit on `gitlab-issues` at gitlab.com; with `baseUrl`, a self-managed instance at that origin. */

@@ -20,15 +20,17 @@ const GHES = "https://ghe.example.com";
 
 let audit: TrackerAudit<FakeGitHubIssues>;
 let ghes: TrackerAudit<FakeGitHubIssues>;
+let tokenEnv: TrackerAudit<FakeGitHubIssues>;
 const all = (a: TrackerAudit<FakeGitHubIssues>) => a.firstDraws.length;
 const opened: MockApi[] = [];
 
 beforeAll(async () => {
   audit = await githubIssuesAudit();
   ghes = await githubIssuesAudit({ baseUrl: GHES });
-}, 180_000);
+  tokenEnv = await githubIssuesAudit({ tokenEnv: "AUDIT_TOKEN" });
+}, 240_000);
 afterAll(async () => {
-  await Promise.all([...opened.map((a) => a.stop()), audit?.tsa.stop(), ghes?.tsa.stop()]);
+  await Promise.all([...opened.map((a) => a.stop()), audit?.tsa.stop(), ghes?.tsa.stop(), tokenEnv?.tsa.stop()]);
 });
 
 interface Run {
@@ -101,18 +103,25 @@ describe("FR6.1: status on fixtures gives the right job outcome", () => {
     expect(x.denied).toEqual([]);
   });
 
-  it("the same audit without the owner's anchors: its times are not proven, so the state is WITHHELD, pr-rla exits 6 and the job fails unless fail-on leaves incomplete out", async () => {
+  it("the same audit without the owner's anchors: its times are not proven and its draw → issue publication is not either, so the state is WITHHELD, pr-rla exits 1 and the job fails whatever fail-on says", async () => {
     const x = await action({ dir: audit.dir, trackers: { [API]: certified() } });
     expect(x.r.conclusion).toBe("failure");
     // The output is the certificate's state, never the sequential test's raw CERTIFIED.
-    expect(x.r.outputs).toMatchObject({ state: "WITHHELD", prefix: "36/36", "exit-code": "6" });
+    expect(x.r.outputs).toMatchObject({ state: "WITHHELD", prefix: "36/36" });
     expect(json(x.r.outputs.json!)).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: false, certificate: { state: "WITHHELD" } });
     expect(summaryOf(x)).toContain("### WITHHELD");
     expect(summaryOf(x)).toMatch(/target reached · CERTIFICATE WITHHELD \(registration time unproven/);
     expect(summaryOf(x)).not.toMatch(/CERTIFIED \(risk/);
+    // P1: sample's ledger publication is time-stamped by the same authorities. Without the owner's anchors its tokens
+    // are not trusted, so no proven publication binds the draw → issue mapping: verify's check 7 FAILs that (as its
+    // check 1 FAILs the registration's tokens), and status withholds the certificate as FAILED, exit 1. An audit whose
+    // only withholding is an unproven time still exits 6 (ci-job-scripts: the git-file audit, which publishes nothing).
+    expect(x.r.outputs["exit-code"]).toBe("1");
+    expect(summaryOf(x)).toMatch(/verify check 7 would FAIL: the draw → issue publication record FAILs/);
+    expect(json(x.r.outputs.json!)).toMatchObject({ ledgerGate: { fails: expect.arrayContaining([expect.stringMatching(/^ledger publication #1 token from test-a: rule 6: authority "test-a" is not in the trust bundle/)]) } });
     const lenient = await action({ dir: audit.dir, trackers: { [API]: certified() }, inputs: { "fail-on": "escalate,refusal,timestamps" } });
-    expect(lenient.r.conclusion).toBe("success");
-    expect(summaryOf(lenient)).toContain("fail-on does not include incomplete, so the job passes");
+    expect(lenient.r.conclusion).toBe("failure");
+    // With them, the same audit is CERTIFIED (the first test).
   });
 
   it("reads the ledger with the job's token, and only reads: every request to the tracker is a GET", async () => {
@@ -267,19 +276,31 @@ describe("credentials in CI follow the local-consent model", () => {
   });
 
   it("a non-default token_env is ignored until approved for its origin: the job's own GITHUB_TOKEN is what api.github.com gets", async () => {
-    const mark = edit("options: { repo: acme/audit }", "options: { repo: acme/audit, token_env: AUDIT_TOKEN }");
-    const without = await action({ dir: audit.dir, trackers: { [API]: certified() }, edit: mark, env: { AUDIT_TOKEN: "audit-secret" } });
+    // The audit is registered with token_env (P1: the registration signs the ledger's options).
+    const labelled = () => labelGithub(tokenEnv, { pass: all(tokenEnv) });
+    const without = await action({ dir: tokenEnv.dir, trackers: { [API]: labelled() }, env: { AUDIT_TOKEN: "audit-secret" } });
     expect(authOf(without, API)).toEqual(new Set(["Bearer ghs_harness_token"]));
-    const withApproval = await action({ dir: audit.dir, trackers: { [API]: certified() }, edit: mark, env: { AUDIT_TOKEN: "audit-secret" }, inputs: { "approve-origins": `AUDIT_TOKEN=${API}` } });
+    const withApproval = await action({ dir: tokenEnv.dir, trackers: { [API]: labelled() }, env: { AUDIT_TOKEN: "audit-secret" }, inputs: { "approve-origins": `AUDIT_TOKEN=${API}` } });
     expect(authOf(withApproval, API)).toEqual(new Set(["Bearer audit-secret"]));
+    // Set in .pr-rla.yml after registration instead, token_env makes it another ledger than the registered one: status
+    // refuses before opening it, so nothing is sent, approved or not, and the job fails.
+    const mark = edit("options: { repo: acme/audit }", "options: { repo: acme/audit, token_env: AUDIT_TOKEN }");
+    const edited = await action({ dir: audit.dir, trackers: { [API]: certified() }, edit: mark, env: { AUDIT_TOKEN: "audit-secret" }, inputs: { "approve-origins": `AUDIT_TOKEN=${API}` } });
+    expect(edited.api.to(API)).toEqual([]);
+    expect(edited.r.conclusion).toBe("failure");
+    expect(edited.r.summary).toContain("status refused: the ledger in .pr-rla.yml is not the registered one");
   });
 
   it("the audited repository cannot approve its own credentials: a config naming another host gets no token", async () => {
     const origin = `${GHES}/api/v3`;
     const hostile = edit("options: { repo: acme/audit }", `options: { repo: acme/audit, base_url: ${GHES} }`);
+    // P1: a .pr-rla.yml edited after registration to name another host is not the registered ledger. status refuses
+    // before opening it, so that host gets nothing at all, and the job fails. (An audit registered on that host gets no
+    // token there without the job owner's approval: the self-hosted test above.)
     const x = await action({ dir: audit.dir, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) }, edit: hostile });
-    expect(x.api.to(origin).length).toBeGreaterThan(0);
-    expect(authOf(x, origin)).toEqual(new Set(["none"]));
+    expect(x.api.to(origin)).toEqual([]);
+    expect(x.r.conclusion).toBe("failure");
+    expect(x.r.summary).toContain("status refused: the ledger in .pr-rla.yml is not the registered one");
     expect(x.denied).toEqual([]);
   });
 

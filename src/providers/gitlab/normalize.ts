@@ -115,8 +115,12 @@ const RESET = /^reset approvals from (.+?) by pushing to the branch/i;
  *   that user's last approval becomes DISMISSED (it no longer stood);
  * - a user's non-system note on someone else's MR -> one COMMENTED at their first note.
  * Then reconciled with the REST approvals (`approved_by`, with `approved_at`) and
- * reviewer states, for approvals or states the notes do not show. A reviewer
- * state with no note has no review time; its review-request time is used.
+ * reviewer states, for approvals or states the notes do not show.
+ *
+ * Unknown times (P1, pass-2 review #4): an approval without `approved_at`, and a reviewer state with no
+ * note (its only time is the review request's, `created_at`), are kept with `timeUnknown` and are never
+ * a human decision. An approvals reset whose approvers cannot be read from its body dismisses every
+ * approval standing before it, and every `approved_by` approval dated before it.
  */
 export function buildReviews(args: {
   mrAuthor: string | null;
@@ -125,14 +129,16 @@ export function buildReviews(args: {
   reviewers: readonly GlReviewer[];
   mergedAt: string;
   actor: (u: GlUser | null) => Actor;
-  /** Called for an approval-reset note whose approvers it could not read from the body (the reset is then not applied). */
+  /** Called for an approval-reset note whose approvers it could not read from the body (every approval standing before it is then reset). */
   onUnreadableReset?: (note: GlNote) => void;
 }): Review[] {
   const out: (Review & { key: string })[] = [];
   const standing = new Map<string, number>();
   const commented = new Set<string>();
-  const add = (u: GlUser, state: ReviewState, at: string) => {
-    out.push({ author: args.actor(u), state, submittedAt: isoUtcSeconds(at), key: u.username });
+  /** When the latest approvals reset whose approvers were unreadable happened (every approval before it no longer stands). */
+  let unreadableResetAt: string | null = null;
+  const add = (u: GlUser, state: ReviewState, at: string, timeUnknown = false) => {
+    out.push({ author: args.actor(u), state, submittedAt: isoUtcSeconds(at), ...(timeUnknown ? { timeUnknown: true as const } : {}), key: u.username });
     return out.length - 1;
   };
   const dismiss = (username: string) => {
@@ -156,7 +162,12 @@ export function buildReviews(args: {
       else if (action === "approvals_reset" || (!tagged && RESET.test(body))) {
         // Who was reset is named in the note as @references (`reset approvals from @a and @b by pushing …`).
         const who = [...body.matchAll(/@([\w.-]+)/g)].map((m) => m[1]!);
-        if (who.length === 0) args.onUnreadableReset?.(n);
+        if (who.length === 0) {
+          // Whose approvals it reset cannot be read: every approval standing before it is reset (P1; it used to stand).
+          args.onUnreadableReset?.(n);
+          for (const w of [...standing.keys()]) dismiss(w);
+          unreadableResetAt = n.createdAt;
+        }
         for (const w of who) dismiss(w);
       }
     } else if (u !== args.mrAuthor && !commented.has(u)) {
@@ -165,13 +176,18 @@ export function buildReviews(args: {
     }
   }
   for (const a of args.approvals?.approved_by ?? []) {
-    if (!standing.has(a.user.username)) standing.set(a.user.username, add(a.user, "APPROVED", a.approved_at ?? args.mergedAt));
+    if (standing.has(a.user.username)) continue;
+    // No approved_at: the time is unknown, so it is no decision (P1). Dated before an unreadable reset: reset with it.
+    const i = add(a.user, "APPROVED", a.approved_at ?? args.mergedAt, !a.approved_at);
+    if (a.approved_at && unreadableResetAt !== null && Date.parse(a.approved_at) <= Date.parse(unreadableResetAt)) out[i]!.state = "DISMISSED";
+    else standing.set(a.user.username, i);
   }
   for (const r of args.reviewers) {
     const u = r.user.username;
+    // A reviewer state with no note: its only time (created_at) is when the review was requested, not when it was given (P1).
     const at = r.created_at ?? args.mergedAt;
-    if (r.state === "requested_changes" && !out.some((e) => e.key === u && e.state === "CHANGES_REQUESTED")) add(r.user, "CHANGES_REQUESTED", at);
-    if (r.state === "reviewed" && !out.some((e) => e.key === u)) add(r.user, "COMMENTED", at);
+    if (r.state === "requested_changes" && !out.some((e) => e.key === u && e.state === "CHANGES_REQUESTED")) add(r.user, "CHANGES_REQUESTED", at, true);
+    if (r.state === "reviewed" && !out.some((e) => e.key === u)) add(r.user, "COMMENTED", at, true);
   }
   return out
     .map(({ key: _key, ...r }) => r)

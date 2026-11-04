@@ -1,7 +1,9 @@
-import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
-import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
-import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
-import { ledgerPathFindings } from "./ledger-path.js";
+import type { Ledger, ProvenanceLevel, VerdictEvent } from "../sdk/ledger.js";
+import type { CheckpointArtifact } from "./checkpoint.js";
+import type { LedgerIndexDocument } from "./ledger-anchor.js";
+import { assessedLedgerGate, type Check7Artifacts, type GateLedger, type LedgerGate } from "./ledger-gate.js";
+import type { ReadPublications } from "./ledger-publication.js";
+import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -49,7 +51,7 @@ import { effectiveCap } from "./sprt.js";
 import { computeStatus, provenanceLine, type StatusReport } from "./status.js";
 import { auditVerdict, certificateFor, raiseStatus, verdictWithholdings, type AuditVerdict, type Certificate, type CheckStatus } from "./verdict.js";
 import { resolveWindow } from "./window.js";
-import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
+import { PRESENCE_LIMIT, auditBinding, countedVerdicts, provenanceLabel, rulesLine, signaturesCountFor, type VerdictRules } from "./presence/provenance.js";
 
 /**
  * A check's status and the audit verdict: the one model in src/core/verdict.ts (time round B). INCOMPLETE (U8): no
@@ -91,6 +93,8 @@ export interface VerifyArtifacts {
   checkpointsUnchained?: number;
   /** The window's ledger-index.json (null when there is none): check 7 compares its hash with the one draws.json bound. */
   ledgerIndex?: LedgerIndexDocument | null;
+  /** The window's ledger-publication.json (null when there is none): check 7 holds the index to it (P1). */
+  ledgerPublications?: ReadPublications | null;
 }
 
 export interface VerifyDeps {
@@ -105,8 +109,11 @@ export interface VerifyDeps {
    * counted at this level and check 7 WARNs. Absent: no cap.
    */
   provenanceCeiling?: ProvenanceLevel;
-  /** The identity of the ledger verify loaded (U9, after review): check 7 FAILs when it is not the registered one. */
-  ledgerIdentity?: PluginIdentity;
+  /**
+   * What the configured ledger is (U9, after review; P1): check 7 FAILs when it is not the registered one. verify
+   * then does not open it (`ledger` is null), so nothing it would say is read.
+   */
+  ledgerIdentity?: BindingIdentity;
   /**
    * The ledger is pr-rla's built-in git-file (S1): its integrity findings are pr-rla's own words (commit ids, the
    * registered path, counts). Any other ledger's findings and warnings are its text, quoted as foreign: an issue
@@ -122,11 +129,13 @@ export interface VerifyDeps {
   logKey: (logUrl: string) => Promise<TrustedLogKey | null>;
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
+  /** Test-only options the ledger runs with (P1, src/ledger-traits.ts): check 7 FAILs each. */
+  ledgerTestOnlyOptions?: readonly string[];
   /**
-   * What the verifier's provider is (its options hashed as at registration). When given for a v2
-   * registration, provider options that change the population must match the registered ones (check 5).
+   * What the configured provider is (P1). For a v2 registration it must be the registered provider (name,
+   * source, files, trust, every option), or check 5 FAILs; verify then does not open it (`provider` is null).
    */
-  providerIdentity?: PluginIdentity;
+  providerIdentity?: BindingIdentity;
 }
 
 export interface VerifyReport {
@@ -152,13 +161,12 @@ export interface VerifyReport {
 
 const n = (x: number) => x.toLocaleString("en-US");
 
-/** Adds anchor findings (ledger index binding, checkpoint coverage) to a check: FAIL beats WARN beats whatever it was. */
-function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): boolean {
-  c.details.push(...f.fails.map((d) => `FAIL ${d}`), ...f.warns.map((d) => `WARN ${d}`), ...f.notes);
-  if (f.fails.length) c.status = "FAIL";
-  else if (f.warns.length && c.status === "PASS") c.status = "WARN";
-  return f.fails.length > 0;
+/** The first verdict of every change in the counted prefix (check 7 and status hold these to the registered rules). */
+export function countedFirstVerdicts(status: StatusReport, draws: readonly { changeId: string }[]): VerdictEvent[] {
+  const ids = new Set(draws.slice(0, status.sequence.draws).map((d) => d.changeId));
+  return status.firstVerdicts.filter((v) => ids.has(v.changeId));
 }
+
 
 /**
  * Checks a record's transparency-log entry. v1 records: the entry is the time evidence (the caller makes the check
@@ -425,12 +433,21 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
 
   // 5. Population rebuilt from the SCM with the registered selector, diffed against the manifest.
   const c5: VerifyCheck = { n: 5, name: "population", status: "PASS", summary: "", details: [] };
+  // P1: the provider freeze ran (the manifest names it) must be the registered one; checked offline too, it is in the manifest.
+  const frozenWith = m && isManifestV2(m) && v2 ? identityDiffs((reg.record as RegistrationRecordV2).plugins.provider, m.provider) : [];
+  const frozenWithFail = frozenWith.length ? `FAIL the manifest was frozen with a provider that is not the registered one (${frozenWith.join("; ")}): its population is not the registered stratum` : null;
+  // P1: the provider in .pr-rla.yml must be the registered one, every option included (no escape through
+  // populationOptionsSha256): a population rebuilt by another provider, even another built-in, proves nothing.
+  const loadedDiffs = v2 && deps.providerIdentity ? identityDiffs((reg.record as RegistrationRecordV2).plugins.provider, deps.providerIdentity) : [];
+  const loadedFail = loadedDiffs.length ? `FAIL the provider in .pr-rla.yml is not the registered one (${loadedDiffs.join("; ")}): verify did not run it, so the population was not rebuilt; verify with the registered provider and options` : null;
   if (!m) {
     c5.status = "SKIP";
     c5.summary = "no manifest";
   } else if (!deps.provider) {
-    c5.status = "SKIP";
-    c5.summary = "offline: population not rebuilt";
+    const fails = [frozenWithFail, loadedFail].filter((f): f is string => f !== null);
+    c5.status = fails.length ? "FAIL" : "SKIP";
+    c5.summary = fails.length ? fails[0]!.replace(/^FAIL /, "").replace(/ \(.*$/, "") : "offline: population not rebuilt";
+    if (fails.length) c5.details.push(...fails, loadedFail ? "population not rebuilt" : "offline: population not rebuilt");
   } else {
     const provider = deps.provider;
     const set = registrationRepoSet(reg);
@@ -442,12 +459,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const aliases = manifestAliases(m.changes);
     const window = reg.record.window;
     const selector = reg.record.selector;
-    // Identical options cannot differ in the ones that change the population (a registration made before
-    // U3 hashed no population options, so the population hash alone would differ for nothing).
-    const registered = v2 ? (reg.record as RegistrationRecordV2).plugins.provider : null;
-    const id = deps.providerIdentity;
-    if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256)
-      c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
+    if (frozenWithFail) c5.details.push(frozenWithFail);
+    // A caller of the core that gives a provider it did not bind (the API never does: see above) still FAILs.
+    if (loadedFail) c5.details.push(loadedFail.replace("verify did not run it, so the population was not rebuilt", "the population was rebuilt with another provider"));
     // Every repo rebuilt from its frozen head and compared with the window as its current head shows it; the pool held to
     // the rule and the registered repos (src/core/rebuild.ts).
     // P3: each frozen head is held to the push log over the freeze span (the manifest's as-of time until R publishes),
@@ -620,12 +634,40 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   // 7. Label (verdict) events of the counted prefix.
   const c7: VerifyCheck = { n: 7, name: "labels", status: "PASS", summary: "labels", details: [] };
   let status: StatusReport | null = null;
+  const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
+  // Check 7's local rules (src/core/ledger-gate.ts, the gate status runs through check7Gate): the files here, every
+  // checkpoint's and publication's tokens assessed under the registration's rules (local: no request), and what the
+  // ledger gave when it was read.
+  const checkpoints = a.checkpoints ?? [];
+  const artifacts: Check7Artifacts = {
+    manifestSha256: m?.sha256 ?? null,
+    drawsFile: a.draws,
+    ledgerIndex: a.ledgerIndex,
+    publications: a.ledgerPublications ?? null,
+    checkpoints,
+    checkpointProblems: a.checkpointProblems ?? [],
+    checkpointsUnchained: a.checkpointsUnchained ?? 0,
+  };
+  const gateFor = (read: GateLedger | null) => assessedLedgerGate(reg, artifacts, { identity: deps.ledgerIdentity ?? null, testOnlyOptions: deps.ledgerTestOnlyOptions ?? [], read }, deps.trustBundle, recomputed ? { draws: recomputed } : {});
+  /** The gate's lines (shared with status): FAIL beats INCOMPLETE beats WARN beats whatever check 7 was. */
+  const applyGate = (g: LedgerGate) => {
+    c7.details.push(...g.lines.map((l) => l.text));
+    if (g.fails.length) c7.status = "FAIL";
+    else if (g.incompletes.length) c7.status = raiseStatus(c7.status, "INCOMPLETE");
+    else if (g.warns.length && c7.status === "PASS") c7.status = "WARN";
+  };
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
-    // The index file is local: its hash is checked even when the tracker is not read.
-    if (a.draws && a.ledgerIndex !== undefined) {
-      if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
+    // What is local is checked even when the tracker is not read: the ledger's identity, the index and its publication, the checkpoint file.
+    const g = await gateFor(null);
+    c7.details.push(...g.lines.map((l) => l.text));
+    if (g.fails.length) {
+      c7.status = "FAIL";
+      c7.summary = "labels FAIL";
+    } else if (g.incompletes.length) {
+      c7.status = "INCOMPLETE";
+      c7.summary = `${c7.summary} · not established: ${g.incompletes.length} local finding(s)`;
     }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
@@ -639,23 +681,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         return null;
       }
     };
-    let lastCountedAt: string | null = null;
     const read = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
     const rules: VerdictRules = { minProvenance: regVerdicts?.minProvenance ?? "self-asserted", requireSigned: regVerdicts?.require_signed === true };
-    // U9: the ledger read must be the registered one (name, source, files, options), or nothing it says counts as registered.
-    const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-    const loadedId = deps.ledgerIdentity;
-    const idDiffs = registeredLedger && loadedId ? (["name", "source", "integrity", "optionsSha256"] as const).filter((k) => registeredLedger[k] !== loadedId[k]) : [];
-    if (idDiffs.length) {
-      const show = (v: string | null) => (v === null ? "none" : /^[0-9a-f]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v);
-      c7.status = "FAIL";
-      c7.details.push(`FAIL the ledger verify loaded is not the registered one (${idDiffs.map((k) => `${k} ${show(registeredLedger![k])} → ${show(loadedId![k])}`).join("; ")}): verify with the registered ledger and options`);
-    }
-    if (rules.requireSigned && registeredLedger && !signaturesCountFor(registeredLedger)) {
-      c7.status = "FAIL";
-      c7.details.push(`FAIL require_signed needs the built-in git-file ledger, but the registration names ledger ${registeredLedger.name} (${registeredLedger.source})`);
-    }
+    const idDiffs = registeredLedger && deps.ledgerIdentity ? identityDiffs(registeredLedger, deps.ledgerIdentity) : [];
     // Verdict signatures count only in the registered built-in git-file ledger, read as registered; nothing counts above the registered ledger's ceiling.
     const verifiesSignatures = ledger.name === "git-file" && !idDiffs.length && (registeredLedger ? signaturesCountFor(registeredLedger) : false);
     // P4: each verdict signature must be made for this audit as verified above: the registration, the manifest (check 2) and the seed (check 4).
@@ -666,6 +695,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c7.details.push(...counted.notes, ...counted.findings, ...counted.warnings);
       if ((counted.notes.length || counted.warnings.length) && c7.status === "PASS") c7.status = "WARN";
     }
+    let countedFirst: VerdictEvent[] = [];
     if (verdicts) {
       status = computeStatus({
         N: m.N,
@@ -678,74 +708,32 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         reviewers: regVerdicts?.reviewers ?? null,
         ineligible: counted!.ineligible,
       });
-      const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
-      const firstFor = new Map(status.firstVerdicts.map((v) => [v.changeId, v]));
-      lastCountedAt = [...countedIds].map((id) => firstFor.get(id)?.recordedAt).filter((t): t is string => !!t).sort((x, y) => Date.parse(x) - Date.parse(y)).at(-1) ?? null;
-      for (const id of countedIds) {
-        const v = firstFor.get(id);
-        if (v && recordedBeforeSeed(v.recordedAt, derived.publishesAt)) {
-          c7.status = "FAIL";
-          c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
-        }
-        // FR3.8, FR9.4: a counted verdict below the registered minimum provenance FAILs; FR9.1: so does one
-        // its registered reviewer did not sign, under require_signed.
-        for (const failure of v ? verdictRuleFailures(v, rules) : []) {
-          c7.status = "FAIL";
-          c7.details.push(failure);
-        }
-      }
+      countedFirst = countedFirstVerdicts(status, recomputed);
       c7.details.push(`${provenanceLine(status.provenance)} (${rulesLine(rules)})`);
       if (rules.minProvenance === "presence" || status.provenance.some((p) => p.level === "presence")) c7.details.push(PRESENCE_LIMIT);
       for (const i of status.ignored) c7.details.push(said`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
       for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
       if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";
     }
+    // The ledger's integrity report and, with checkpoints, its history now: read here, judged by the gate.
+    let integrity: GateLedger["integrity"] = null;
     if (ledger.verifyIntegrity) {
-      const integ = await attempt("verifyIntegrity", () => ledger.verifyIntegrity!());
-      if (integ) {
-        // What a ledger reports about its own integrity is the ledger's text (S1): its status decides, its words are quoted.
-        const ours = deps.ledgerFindingsArePrRlas === true;
-        c7.details.push(...integ.findings.map((f) => (ours ? f : said`${foreign("the ledger's integrity finding", f)}`)), ...(integ.warnings ?? []).map((w) => (ours ? w : said`${foreign("the ledger's integrity warning", w)}`)));
-        if (!integ.ok) c7.status = "FAIL";
-        else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
-        // P4: the git-file ledger walked must be at the path the registration records.
-        if (ledger.name === "git-file") addAnchor(c7, ledgerPathFindings(reg, integ.location));
-      }
-    } else {
-      c7.details.push(`ledger ${ledger.name} has no integrity check`);
-      if (c7.status === "PASS") c7.status = "WARN";
-    }
-    const checkpoints = a.checkpoints ?? [];
-    const stampedBy = new Map<CheckpointArtifact, boolean>();
-    for (const p of a.checkpointProblems ?? []) {
-      c7.status = "FAIL";
-      c7.details.push(`FAIL checkpoint file: ${p}`);
-    }
-    if (checkpoints.length && !ledger.readHistory) {
-      c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
-      if (c7.status === "PASS") c7.status = "WARN";
-    } else if (checkpoints.length) {
-      const current = await attempt("readHistory", () => ledger.readHistory!());
-      if (current) {
-        for (const cp of checkpoints) {
-          const problems = compareWithCheckpoint(cp, current, status?.firstVerdicts ?? []);
-          if (problems.length) {
-            c7.status = "FAIL";
-            c7.details.push(...problems.map((p) => said`FAIL ${p}`));
-          }
-          if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
-          // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
-          if (cp.line.timestamps.length && isRegistrationV2(reg)) {
-            const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7, "WARN");
-            // Coverage counts only what the trusted-time rules count: ignored (unregistered) or failing tokens time-stamp nothing.
-            stampedBy.set(cp, ts.counted.length > 0);
-          }
-        }
+      try {
+        integrity = { report: await ledger.verifyIntegrity(), error: null };
+      } catch (e) {
+        integrity = { report: null, error: foreignError(e) };
       }
     }
-    if (a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
-    addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0, timeStamped: (cp) => stampedBy.get(cp) ?? cp.line.timestamps.length > 0 }));
-    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
+    let history: GateLedger["history"] = null;
+    if (checkpoints.length && ledger.readHistory) {
+      try {
+        history = { events: await ledger.readHistory(), error: null };
+      } catch (e) {
+        history = { events: null, error: foreignError(e) };
+      }
+    }
+    applyGate(await gateFor({ findingsArePrRlas: deps.ledgerFindingsArePrRlas === true, name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: verdicts, counted: countedFirst, firstVerdicts: status?.firstVerdicts ?? [], integrity, history }));
+    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)${c7.status === "INCOMPLETE" ? " · not established: the draw → issue mapping (a publication short of tokens)" : ""}`;
   }
   checks.push(c7);
 

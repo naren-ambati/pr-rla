@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { INDEX_FILE } from "../ledgers/issue-index.js";
 import { HostNotAllowed } from "../net/contract.js";
 import type { DrawForLedger } from "../sdk/ledger.js";
-import { runProviderConformance, type ConformanceFixture, type ConformanceReport } from "../testing/conformance.js";
+import { EXPECTATION_CHECKS, runProviderConformance, type ConformanceFixture, type ConformanceReport } from "../testing/conformance.js";
 import { LEDGER_CASES, runLedgerConformance, type CountedVerdict, type LedgerCase, type LedgerFixture } from "../testing/ledger-conformance.js";
 import { describePlugin, hostedLedger, hostedProvider, startPluginHost, type HostOptions, type PluginHost } from "./host.js";
 import { readGrants, type ResolvedPlugin } from "./lock.js";
@@ -101,7 +101,7 @@ export async function hostedProviderConformance(plugin: ResolvedPlugin, label: s
         return replay(input, init);
       }) as typeof fetch;
       return hostedProvider(h, rec.options ?? {}, harness.context({ fetch: guarded, cwd: "." }));
-    }, kit, { definition: { reviewGranularity: traits.reviewGranularity } });
+    }, kit, { definition: { reviewGranularity: traits.reviewGranularity }, skipChecks: Object.fromEntries(EXPECTATION_CHECKS.map((c) => [c, "the recordings plugin check was given declare no expectation for it"])) });
   } finally {
     for (const h of started) h.close();
   }

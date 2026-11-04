@@ -48,7 +48,7 @@ Change ids are `gitlab:<path>#<iid>` for an MR and `gitlab:<path>@<sha>` for a d
 
 ## Reviews and approvals
 
-Review events come from the MR's system notes (GraphQL `notes`), read by GitLab's own tag for each note (`systemNoteMetadata.action`: `approved`, `unapproved`, `requested_changes`, `reviewed`, `approvals_reset`; verified in GitLab's source and GraphQL reference on 2026-11-04), which does not change with the instance's language. A note with no tag (an older instance) is read by its English text, as the table shows. An `approvals_reset` note still learns WHOSE approvals it reset from the `@user` references in its body; GitLab exposes no structured list of them, so a tagged reset that names nobody is counted in a diagnostic ("approval-reset notes that name no approver") rather than applied. Then they are reconciled with `GET …/approvals` (`approved_by`, with `approved_at`) and `GET …/reviewers` (reviewer state):
+Review events come from the MR's system notes (GraphQL `notes`), read by GitLab's own tag for each note (`systemNoteMetadata.action`: `approved`, `unapproved`, `requested_changes`, `reviewed`, `approvals_reset`; verified in GitLab's source and GraphQL reference on 2026-11-04), which does not change with the instance's language. A note with no tag (an older instance) is read by its English text, as the table shows. An `approvals_reset` note still learns WHOSE approvals it reset from the `@user` references in its body; GitLab exposes no structured list of them, so a reset that names nobody resets every approval standing before it (and every `approved_by` approval dated before it), and is counted in a diagnostic ("approval-reset notes that name no approver"). Before P1 it was not applied, which left approvals standing that GitLab had reset. Then they are reconciled with `GET …/approvals` (`approved_by`, with `approved_at`) and `GET …/reviewers` (reviewer state):
 
 | GitLab | pr-rla `state` |
 |---|---|
@@ -57,8 +57,10 @@ Review events come from the MR's system notes (GraphQL `notes`), read by GitLab'
 | "unapproved this merge request", or "reset approvals from @user by pushing to the branch" | that user's last approval becomes `DISMISSED` (it no longer stood at merge) |
 | a note GitLab tagged `approvals_reset`, naming `@user` (any language) | the same: that user's last approval becomes `DISMISSED` |
 | a non-system note by anyone but the MR author | one `COMMENTED` per user, at their first note |
-| an `approved_by` entry with no note | `APPROVED` at `approved_at` |
-| reviewer state `requested_changes` / `reviewed` with no note | `CHANGES_REQUESTED` / `COMMENTED`, dated at the review request (`created_at`), because GitLab exposes no review time |
+| an `approved_by` entry with no note | `APPROVED` at `approved_at`; with no `approved_at`, `APPROVED` with `timeUnknown` (dated at the merge), which is no human decision |
+| reviewer state `requested_changes` / `reviewed` with no note | `CHANGES_REQUESTED` / `COMMENTED` with `timeUnknown`, dated at the review request (`created_at`), because GitLab exposes no review time: no human decision |
+
+A review whose time is unknown (`timeUnknown`, P1) stays in the manifest's record of the change but never hides it from the population: it cannot be shown to come before the merge.
 
 `mergedBy` is `merge_user` (falling back to the deprecated `merged_by`). For "merge when pipeline succeeds" and merge trains that is the user who set it, not GitLab's own merge job.
 

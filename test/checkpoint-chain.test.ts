@@ -107,7 +107,8 @@ describe("checkpoint coverage and the index binding, as pure functions", () => {
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }] })).fails).toEqual([expect.stringMatching(/draw #3 \(b\) has no issue/)]);
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "b")], repeats: [] })).fails).toEqual([expect.stringMatching(/draw #2 \(a\) repeats draw #1 but the index does not say so/)]);
     expect(indexBindingFindings(draws, { sha256: "h".repeat(64), value: null, error: "ledger-index.json is not valid JSON: x" }).fails).toEqual(["ledger-index.json is not valid JSON: x"]);
-    expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "b")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }], foreignIssues: true })).warns[0]).toMatch(/foreignIssues/);
+    // P1: foreignIssues is a test-only ledger option now; an audit index that carries it FAILs (it was a WARN).
+    expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "b")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }], foreignIssues: true })).fails).toEqual([expect.stringMatching(/^the ledger index carries foreignIssues, which turns off the issues' body-marker check/)]);
   });
 
   it("an external ledger's index without an issues list gets the hash check only", () => {

@@ -13,7 +13,7 @@ import { NoRecordedDescription } from "../../providers/json-file.js";
 import type { VerdictEvent } from "../../sdk/ledger.js";
 import { changeDescriptionProblems, type ChangeDescription } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, ledgerFor, providerFor, readDraws, readManifest, readProtocol, readRegistration, type ApiContext } from "../session.js";
+import { readOnlyContext, auditContextFor, configFor, ledgerFor, providerFor, readDraws, readManifest, readProtocol, readRegistration, type ApiContext } from "../session.js";
 import { countedLedgerVerdicts } from "./status.js";
 
 export type { DrawContext } from "../../core/draw-context.js";
@@ -73,6 +73,7 @@ export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerT
  * provider's description with linguist-generated files dropped under exclude_generated. Reads only.
  */
 export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Promise<DrawContext> {
+  ctx = readOnlyContext(ctx); // P1: it only reads
   const maxPatchBytes = opts.maxPatchBytes ?? DEFAULT_MAX_PATCH_BYTES;
   if (!Number.isInteger(maxPatchBytes) || maxPatchBytes < 0 || maxPatchBytes > MAX_PATCH_BYTES_LIMIT) throw new AuditError(`maxPatchBytes must be a whole number from 0 to ${MAX_PATCH_BYTES_LIMIT} (1 MiB)`);
   const { config, paths } = configFor(ctx, opts.window);
@@ -94,7 +95,7 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   let blocksPrefix = false;
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${lt.name}` });
   try {
-    const ledger = await ledgerFor(ctx, config, paths);
+    const ledger = await ledgerFor(ctx, config, paths, { command: "draw-context" });
     const counted = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
     const report = computeStatus({
       N: manifest.N,
@@ -116,7 +117,7 @@ export async function drawContext(ctx: ApiContext, opts: DrawContextOptions): Pr
   }
 
   const bytes = readProtocol(config);
-  const provider = await providerFor(ctx, config);
+  const provider = await providerFor(ctx, config, { registration: reg, command: "draw-context" });
   let description: ChangeDescription | null = null;
   let descriptionNote: string | undefined;
   if (!provider.describeChange) descriptionNote = `provider ${provider.name} has no describeChange; open the URL`;

@@ -251,13 +251,18 @@ describe("transient faults on writes (finding 10, tests that cannot fail)", () =
     expect(w.message).toMatch(/after the injected 429 on a record the ledger did not wait as long as Retry-After says/);
   });
 
-  it("a factory that serves no fresh tracker for publish-faults gets a skip that says what to serve, not a pass", async () => {
-    const clean = new FakeGitHubIssues();
-    const dir = mkdtempSync(join(tmpdir(), "prrla-wf-"));
-    const f: LedgerFixture = { ...base("writes", "idempotent-publish", { counted: {}, integrity: "PASS" }), http: true, draws: [draw(1, 101)], publish: PUB, forgetLocalState: () => rmSync(join(dir, "ledger-index.json")) };
-    const r = await runLedgerConformance(async (_f, h) => githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: clean.fetch, windowDir: dir, env: { GITHUB_TOKEN: "t" } })), [f]);
-    const w = r.results.find((x) => x.check === "transient-write-faults")!;
-    expect(w).toMatchObject({ ok: true, skipped: true });
-    expect(w.message).toMatch(/serve a fresh tracker .* for phase "publish-faults"|a clean publish makes \d+ write\(s\); two are needed/);
+  it("a factory that serves no fresh tracker for publish-faults FAILs the check (it used to pass as a skip), unless the caller says why", async () => {
+    const f: LedgerFixture = { ...base("writes", "idempotent-publish", { counted: {}, integrity: "PASS" }), http: true, draws: [draw(1, 101)], publish: PUB };
+    const run = (skipCases?: Record<string, string>) => {
+      // Each run on its own tracker and window, as the first: one tracker for every phase, so publish-faults gets no fresh one.
+      const t = new FakeGitHubIssues();
+      const d = mkdtempSync(join(tmpdir(), "prrla-wf-"));
+      return runLedgerConformance(async (_f, h) => githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: t.fetch, windowDir: d, env: { GITHUB_TOKEN: "t" } })), [{ ...f, forgetLocalState: () => rmSync(join(d, "ledger-index.json")) }], skipCases ? { skipCases } : {});
+    };
+    const w = (await run()).results.find((x) => x.check === "transient-write-faults")!;
+    expect(w).toMatchObject({ ok: false });
+    expect(w.message).toMatch(/serve a fresh tracker \(no issues, no local index\) for phase "publish-faults" so writes can be faulted, or name transient-write-faults in options\.skipCases with the reason/);
+    const named = (await run({ "transient-write-faults": "this factory has one tracker" })).results.find((x) => x.check === "transient-write-faults")!;
+    expect(named).toMatchObject({ ok: true, skipped: true, message: "not exercised by this run: this factory has one tracker" });
   });
 });

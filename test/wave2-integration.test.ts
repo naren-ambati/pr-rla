@@ -179,7 +179,7 @@ describe("ledger checkpoints under the trusted-time rules (fix/ledgers-selector 
     expect(c.details).toContain("checkpoint 2026-10-21T03:00:00Z token from test-d ignored (not registered: the registration names test-a, test-b)");
     expect(d).toMatch(/checkpoint 2026-10-21T03:00:00Z timestamps: 0 of 2 TSAs · k = 2 · TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)/);
     // ledgers' coverage rule takes trusted-time's verdict on the tokens, not their presence
-    expect(d).toMatch(/WARN no time-stamped ledger checkpoint post-dates the last counted verdict \(2026-10-21T02:[0-9:]+Z\); the latest checkpoint is 2026-10-21T03:00:00Z \(2026-10-21T03:00:00Z carries tokens, but none from a registered authority verified\)/);
+    expect(d).toMatch(/WARN no time-stamped ledger checkpoint post-dates the last counted verdict \(2026-10-21T02:[0-9:]+Z\); the latest checkpoint is 2026-10-21T03:00:00Z \(2026-10-21T03:00:00Z carries tokens, but they do not prove, by k registered authorities, that it existed at or after the last verdict\)/);
   });
 
   it("the index anchor is inside the time-stamped bytes: editing the newest line's ledgerIndexSha256 FAILs its tokens, not just the index WARN", async () => {
@@ -206,7 +206,7 @@ describe("the registered ledger and the ledger anchors (bolt/u9-presence-verdict
     const c = await check7(s);
     const d = c.details.join("\n");
     expect(c.status).toBe("FAIL");
-    expect(d).toMatch(/FAIL the ledger verify loaded is not the registered one \(name github-issues → git-file/);
+    expect(d).toMatch(/FAIL the ledger in \.pr-rla\.yml is not the registered one \(name github-issues → git-file/);
     expect(d).toMatch(/FAIL ledger-index\.json \(sha256 [0-9a-f]{12}…\) is not the index draws\.json bound at sample time/);
     // git-file has no history to checkpoint, so the issue ledger's coverage rule does not apply to it
     expect(d).not.toMatch(/post-dates the last counted verdict/);
@@ -264,7 +264,8 @@ describe("the ledger index anchor with pooled draws (bolt/u8-org-pooled-freeze �
     const c7 = r.checks.find((c) => c.n === 7)!;
     expect(c5.status).toBe("PASS");
     expect(c7.status).not.toBe("FAIL");
-    expect(c7.details.join("\n")).not.toMatch(/ledger-index|draw → issue/);
+    // The binding passes; the one line about the mapping is P1's: this pool registers no authority, so its publication is not time-stamped.
+    expect(c7.details.filter((d) => /ledger-index|draw → issue/.test(d))).toEqual([expect.stringMatching(/^WARN the ledger publication records are not time-stamped \(the registration names no timestamp authority\)/)]);
     // Time round B: the pool's times are self-asserted (no timestamp authority), so checks 1–3 are INCOMPLETE and the
     // verdict is INCOMPLETE; every other check passes.
     expect(r.checks.filter((c) => c.status === "INCOMPLETE" || c.status === "SKIP" || c.status === "FAIL").map((c) => `${c.n}:${c.status}`)).toEqual(["1:INCOMPLETE", "2:INCOMPLETE", "3:INCOMPLETE"]);

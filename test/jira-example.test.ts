@@ -173,3 +173,140 @@ describe("Jira example hardening (finding 5)", () => {
     expect(r.findings.join("\n")).not.toMatch(/deleted \(HTTP 404\)/);
   });
 });
+
+/**
+ * P1 (pass-2 review #3): the option ids came from the unauthenticated index, so swapping options.pass and
+ * options.fail inverted every verdict with integrity ok (the reviewer's jira-swap.test.ts). Every read now
+ * learns again from Jira what each id is (GET /rest/api/3/customFieldOption/{id}), and a changelog entry
+ * whose id is one verdict while its toString names the other FAILs. And Jira, unlike GitHub's REST API,
+ * records summary edits, so the summary marker the issues carry is checked, with its edit history.
+ */
+describe("P1: the Jira example learns its option ids again and checks its summary marker", () => {
+  type JiraFake = FakeJira & { renameOption(which: "pass" | "fail", to: string): void; editSummary(key: string, to: string): void; options: { pass: string; fail: string } };
+  const open = async (windowDir: string, fake: JiraFake, options: Record<string, unknown> = OPTIONS) => {
+    const mod = (await import(pathToFileURL(join(EX, "index.mjs")).href)) as { default: LedgerDefinition };
+    return mod.default.create(options, { cwd: windowDir, windowDir, env: {}, log: () => {}, fetch: fake.fetch });
+  };
+  const setup = async () => {
+    const { draw, PUB } = await cases();
+    const fake = (await fakeJira()) as JiraFake;
+    const windowDir = mkdtempSync(join(tmpdir(), "prrla-jira-p1-"));
+    await (await open(windowDir, fake)).publishDraws!([draw(1, 101), draw(2, 102), draw(3, 103)], PUB);
+    return { fake, windowDir, fresh: (o?: Record<string, unknown>) => open(windowDir, fake, o) };
+  };
+  const readIndex = (dir: string) => JSON.parse(readFileSync(join(dir, "ledger-index.json"), "utf8")) as Record<string, any>;
+  const writeIndex = (dir: string, i: unknown) => writeFileSync(join(dir, "ledger-index.json"), JSON.stringify(i));
+
+  it("the reviewer's swap: options.pass and options.fail exchanged in ledger-index.json FAILs integrity, on the field and on the changelog's own words", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    fake.set("AUD-1", "fail");
+    fake.set("AUD-2", "fail");
+    fake.set("AUD-3", "pass");
+    expect((await (await fresh()).readVerdicts()).map((v) => [v.draw, v.verdict])).toEqual([[1, "fail"], [2, "fail"], [3, "pass"]]);
+    const idx = readIndex(windowDir);
+    idx.options = { pass: idx.options.fail, fail: idx.options.pass };
+    writeIndex(windowDir, idx);
+    const l = await fresh();
+    const r = await l.verifyIntegrity!();
+    // Before P1: verdicts inverted to pass, pass, fail; integrity ok, no finding.
+    expect(r.ok).toBe(false);
+    expect(r.findings.join("\n")).toMatch(/the index names option 10002 as the pass verdict, but on acme\.atlassian\.net it is "fail", not "pass": the index's option ids are swapped; the field's options disagree with the index/);
+    expect(r.findings.join("\n")).toMatch(/the index names option 10001 as the fail verdict, but on acme\.atlassian\.net it is "pass"/);
+    expect(r.findings.join("\n")).toMatch(/draw #1: the changelog entry at .* sets option 10002, which the index names the pass verdict, but Jira wrote its value as "fail", the other verdict/);
+  });
+
+  it("an option renamed beyond its case, or deleted, disagrees with the index: FAIL", async () => {
+    const { fake, fresh } = await setup();
+    fake.renameOption("fail", "Rejected");
+    expect((await (await fresh()).verifyIntegrity!()).findings.join("\n")).toMatch(/the index names option 10002 as the fail verdict, but on acme\.atlassian\.net it is "Rejected", not "fail"; the field's options disagree with the index/);
+    fake.options.fail = "20002"; // the option the index names is gone from the field
+    expect((await (await fresh()).verifyIntegrity!()).findings.join("\n")).toMatch(/the index's fail option id 10002 is no option of field customfield_10050 on acme\.atlassian\.net now \(deleted\)/);
+  });
+
+  it("the summary is the marker: an edited summary FAILs, and so does an entry pointed at another draw's issue", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    fake.set("AUD-1", "pass");
+    expect((await (await fresh()).verifyIntegrity!()).ok).toBe(true);
+    fake.editSummary("AUD-2", "pr-rla draw #2 (2026-q3): json:acme/widgets#102 (edited)");
+    let r = await (await fresh()).verifyIntegrity!();
+    expect(r.ok).toBe(false);
+    expect(r.findings.join("\n")).toMatch(/draw #2 issue AUD-2's summary is "pr-rla draw #2 \(2026-q3\): json:acme\/widgets#102 \(edited\)", not "pr-rla draw #2 \(2026-q3\): json:acme\/widgets#102"/);
+    expect(r.findings.join("\n")).toMatch(/draw #2 issue AUD-2's summary, where its draw marker lives, was edited at .*; pr-rla never edits it/);
+    // Draws 1 and 3 swap issues (key, id and url, both sides): each issue's own summary names the other draw.
+    const idx = readIndex(windowDir);
+    const [one, , three] = idx.issues;
+    const keep = { key: one.key, id: one.id, url: one.url };
+    Object.assign(one, { key: three.key, id: three.id, url: three.url });
+    Object.assign(three, keep);
+    writeIndex(windowDir, idx);
+    r = await (await fresh()).verifyIntegrity!();
+    expect(r.findings.join("\n")).toMatch(/draw #3 issue AUD-1's summary is "pr-rla draw #1 \(2026-q3\): json:acme\/widgets#101", not "pr-rla draw #3 \(2026-q3\): json:acme\/widgets#103"/);
+    expect(r.findings.join("\n")).toMatch(/draw #1 issue AUD-3's summary is "pr-rla draw #3 /);
+  });
+
+  it("foreign_issues (test only) skips the summary marker, as the recorded hibernate changelogs need; the option check still runs", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    fake.editSummary("AUD-1", "a summary pr-rla did not write");
+    expect((await (await fresh({ ...OPTIONS, foreign_issues: true })).verifyIntegrity!()).ok).toBe(true);
+    const idx = readIndex(windowDir);
+    idx.options = { pass: idx.options.fail, fail: idx.options.pass };
+    writeIndex(windowDir, idx);
+    expect((await (await fresh({ ...OPTIONS, foreign_issues: true })).verifyIntegrity!()).findings.join("\n")).toMatch(/the index's option ids are swapped/);
+  });
+});
+
+describe("P1: a Jira audit's draw → issue mapping is bound by sample's publication record, as an issue ledger's", () => {
+  it("sample publishes the Jira index (keys, ids, option ids), and a two-sided remap of two issues FAILs check 7", async () => {
+    const { MockTsaServer, makeTestAuthority } = await import("./helpers/test-tsa.js");
+    const tsa = await new MockTsaServer([await makeTestAuthority({ id: "test-a" }), await makeTestAuthority({ id: "test-b", alg: "RSA" })]).start();
+    try {
+      const fake = (await fakeJira()) as FakeJira & { issues: Map<string, { summary: string }>; setTime(iso: string): void };
+      const s = setupAuditRepo({
+        changes: makeChanges(400),
+        fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          return url.startsWith("https://acme.atlassian.net/") ? fake.fetch(input, init) : globalThis.fetch(input, init);
+        }) as typeof fetch,
+        tsa: { ids: ["test-a", "test-b"], server: tsa },
+      });
+      for (const [to, from] of Object.entries(JIRA_FILES)) cpSync(from, join(s.dir, to), { recursive: true });
+      appendFileSync(join(s.dir, ".pr-rla.yml"), `ledger:\n  use: ./jira/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\n`);
+      await lockPlugin(s.dir, "./jira/index.mjs", { kind: "ledger", options: OPTIONS, trust: "full", approve: true });
+      s.git("add", "-A");
+      s.git("commit", "-qm", "jira ledger");
+      const at = (iso: string) => ((s.clock.now = T(iso)), (tsa.nowMs = T(iso)));
+      at("2026-10-20T00:00:00Z");
+      expect(await registerCommand(s.ctx, {})).toBe(0);
+      const { freezeCommand } = await import("../src/commands/freeze.js");
+      const { sampleCommand } = await import("../src/commands/sample.js");
+      const { runVerify } = await import("../src/commands/verify.js");
+      at("2026-10-20T12:00:00Z");
+      expect(await freezeCommand(s.ctx, {})).toBe(0);
+      at("2026-10-21T01:00:00Z");
+      expect(await sampleCommand(s.ctx, {})).toBe(0);
+      const pub = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/ledger-publication.json"), "utf8")) as { publications: { record: { index: { issues: { key: string }[]; options: unknown } } }[] };
+      expect(pub.publications).toHaveLength(1);
+      expect(pub.publications[0]!.record.index.options).toEqual({ pass: "10001", fail: "10002" });
+      expect(pub.publications[0]!.record.index.issues.slice(0, 2).map((i) => i.key)).toEqual(["AUD-1", "AUD-2"]);
+      fake.setTime("2026-10-21T02:00:00Z");
+      const index = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/ledger-index.json"), "utf8")) as { issues: { draw: number; key: string; id: string; url: string }[] };
+      for (const i of index.issues) fake.set(i.key, i === index.issues[1] ? "fail" : "pass");
+      at("2026-10-21T03:00:00Z");
+      const honest = (await runVerify(s.ctx, {})).checks.find((c) => c.n === 7)!;
+      expect(honest.details.filter((d) => /publication|append-only|draw order/.test(d) && d.startsWith("FAIL"))).toEqual([]);
+      // Draw 2 (fail) and the last draw (pass) exchange issues in the index (Jira would also show any summary edit: see above).
+      const a = index.issues[1]!;
+      const b = index.issues.at(-1)!;
+      const keep = { key: a.key, id: a.id, url: a.url };
+      Object.assign(a, { key: b.key, id: b.id, url: b.url });
+      Object.assign(b, keep);
+      writeFileSync(join(s.dir, "audit/2026-q3/ledger-index.json"), JSON.stringify(index, null, 2));
+      const c7 = (await runVerify(s.ctx, {})).checks.find((c) => c.n === 7)!;
+      expect(c7.status).toBe("FAIL");
+      expect(c7.details.join("\n")).toMatch(new RegExp(`FAIL the ledger index is not an append-only extension of what was published: draw #${a.draw}: publication #1 lists issue #${keep.key}`));
+      expect(c7.details.join("\n")).toMatch(/pr-rla opens issues in draw order, so issue numbers rise with the draws/);
+    } finally {
+      await tsa.stop();
+    }
+  }, 180_000);
+});

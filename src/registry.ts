@@ -22,7 +22,8 @@ import { sha256Hex, canonicalJson } from "./core/canonical.js";
 import type { PluginIdentity } from "./core/records.js";
 import { externalPluginInfo } from "./plugins/identity.js";
 import { PluginError } from "./plugins/errors.js";
-import { readLock, type PluginPolicy, type PluginRules } from "./plugins/lock.js";
+import { readLock, refuseIfBuiltinOnly, verifyLocked, type PluginPolicy, type PluginRules } from "./plugins/lock.js";
+import type { BindingIdentity } from "./core/plugin-binding.js";
 import { PR_RLA_VERSION } from "./version.js";
 import github from "./providers/github/index.js";
 import gitlab from "./providers/gitlab/index.js";
@@ -258,4 +259,20 @@ export async function pluginIdentity(spec: PluginSpec, kind: "provider" | "ledge
     populationOptionsSha256: optionsDigest(spec.options, keys),
     trust: builtinName ? "builtin" : "full",
   };
+}
+
+/**
+ * What P1 compares (src/core/plugin-binding.ts), read without running the plugin: a built-in's
+ * definition, or an external plugin's lock entry once its installed files re-hash to it (a changed
+ * file is LOCK_MISMATCH). So a command can refuse a plugin the registration does not name, and verify
+ * can FAIL it, before any of its code runs. `builtin-only` still refuses every external plugin.
+ */
+export async function bindingIdentity(spec: PluginSpec, kind: "provider" | "ledger", baseDir: string, policy: PluginPolicy | PluginRules = "locked"): Promise<BindingIdentity> {
+  if (kind === "provider" ? builtinProviderName(spec.use) : builtinLedgerName(spec.use)) {
+    const { populationOptionsSha256: _p, ...id } = await pluginIdentity(spec, kind, baseDir, policy);
+    return id;
+  }
+  refuseIfBuiltinOnly(policy, kind, spec.use);
+  const { entry } = verifyLocked(spec.use, baseDir);
+  return { name: entry.name, source: entry.source, version: entry.version, integrity: entry.treeSha256, optionsSha256: optionsDigest(spec.options), trust: entry.trust };
 }

@@ -42,6 +42,17 @@ describe("the index must agree with the tracker (finding 3)", () => {
     expect(ledgerIndexSha256({ ...doc, window: "x" })).not.toBe(ledgerIndexSha256(doc));
   });
 
+  it("GitHub names an issue by its numeric id (pass-2 review #7): a change of node id format changes nothing; another numeric id FAILs", async () => {
+    const { open, issue } = await github();
+    for (const d of [1, 2, 3]) issue(d).node_id = `I_kwDOAAAAAMigrated${d}`;
+    const r = await integrity(await open());
+    expect(r.ok, r.findings.join("\n")).toBe(true);
+    issue(2).id += 1;
+    const moved = await integrity(await open());
+    expect(moved.ok).toBe(false);
+    expect(moved.findings.join("\n")).toMatch(/draw #2: .* answered issue 2 \(id \d+\) for the index's 2 \(id \d+\); the index does not describe this issue/);
+  });
+
   it("draw 3 re-pointed at another draw's issue number (the reproduction) is refused: the issue is not the one the index names", async () => {
     const { open, windowDir, issue } = await github();
     const other = issue(1);
@@ -62,7 +73,7 @@ describe("the index must agree with the tracker (finding 3)", () => {
     editIndex(windowDir, (i) => {
       const e = i.issues.find((x) => x.draw === 3)!;
       e.number = one.number;
-      e.id = one.node_id;
+      e.id = String(one.id);
     });
     const l = await open();
     const r = await integrity(l);

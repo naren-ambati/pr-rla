@@ -11,8 +11,10 @@ import type { BrokerFetch } from "../net/contract.js";
 import { pluginPolicy } from "../plugins/lock.js";
 import type { Ledger } from "../sdk/ledger.js";
 import { isCommitId, type ScmProvider } from "../sdk/provider.js";
+import { identityNext, identityRefusal } from "../core/plugin-binding.js";
+import { bindingIdentity } from "../registry.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, readTrustExtra, type TrustBundle, type TrustBundleExtra } from "../timestamp/bundle.js";
-import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditContext, type AuditMode } from "./context.js";
+import { AuditApiError, createAuditContext, openLedger, openProvider, type AuditCaller, type AuditContext, type AuditMode } from "./context.js";
 import { AuditError, type AuditErrorCode } from "./errors.js";
 
 /**
@@ -62,6 +64,11 @@ export interface ApiContext {
    */
   mode?: AuditMode;
   /**
+   * Who reads a read-only context's results (src/api/context.ts `AuditCaller`): `pr-rla/api/read` is an
+   * assistant's (the default in read-only mode); the CLI's verify, status and dry runs are a person's.
+   */
+  caller?: AuditCaller;
+  /**
    * Refuses a file or directory the caller may not open (the MCP server's roots: ROOT_ESCAPE). The
    * API calls it for the config, the audit directory, the protocol and any file the config names.
    */
@@ -85,6 +92,7 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
   if (!a) {
     a = createAuditContext({
       mode: ctx.mode ?? "read-write",
+      ...(ctx.caller ? { caller: ctx.caller } : {}),
       env: ctx.env,
       nowMs: () => ctx.nowMs(),
       sleep: (ms, signal) => (ctx.sleep ? ctx.sleep(ms, signal) : sleepFor(ms, signal)),
@@ -99,12 +107,27 @@ export function auditContextFor(ctx: ApiContext): AuditContext {
 }
 
 /**
+ * The read-only context a read function runs on (P1, master-plugins-review #7). Verify, status, the draws,
+ * the draw context and a dry-run freeze only read, so the CLI never opens them in read-write mode: called
+ * with a read-write context (the CLI's), they run on a read-only copy for the same person (`caller:
+ * person`), whose broker refuses every request that is not a read and whose ledgers have no write
+ * methods. A context that is read-only already (`pr-rla/api/read`) is returned as it is.
+ */
+export function readOnlyContext<T extends ApiContext>(ctx: T): T {
+  if ((ctx.mode ?? "read-write") === "read-only") return ctx;
+  return { ...ctx, mode: "read-only", caller: "person" };
+}
+
+/** Who reads this context's results: a read-write context is a person's; a read-only one an assistant's unless it says otherwise. */
+export const callerOf = (ctx: Pick<ApiContext, "mode" | "caller">): AuditCaller => ((ctx.mode ?? "read-write") === "read-write" ? "person" : (ctx.caller ?? "assistant"));
+
+/**
  * Gives an ApiContext an AuditContext made elsewhere, so several calls share one broker and its
  * per-host budgets (`pr-rla/api/read` does this per caller session and audit directory).
  * The modes must agree.
  */
 export function bindAuditContext(ctx: ApiContext, actx: AuditContext): void {
-  if ((ctx.mode ?? "read-write") !== actx.mode) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode cannot use a ${actx.mode} AuditContext`);
+  if ((ctx.mode ?? "read-write") !== actx.mode || callerOf(ctx) !== actx.caller) throw new Error(`an ApiContext in ${ctx.mode ?? "read-write"} mode (${callerOf(ctx)}) cannot use a ${actx.mode} AuditContext (${actx.caller})`);
   auditContexts.set(ctx, actx);
 }
 
@@ -166,14 +189,50 @@ export function configFor(ctx: ApiContext, window?: string): { config: PrRlaConf
   return { config, paths };
 }
 
-/** The configured provider, its requests through the context's broker. */
-export async function providerFor(ctx: ApiContext, config: PrRlaConfig): Promise<ScmProvider> {
+/**
+ * How a command holds the plugin it opens to the registration (P1): a schema-v2 registration's
+ * `plugins.provider` / `plugins.ledger` is the only one an audit runs (src/core/plugin-binding.ts).
+ */
+export interface BindingOptions {
+  /** The command that opens it, for the refusal (e.g. "status"). */
+  command?: string;
+  /**
+   * `refuse` (default): an AuditError before the plugin is opened. `note`: a note on `err`, then it is
+   * opened (a dry run, which writes nothing). `report`: opened without comparing; the caller compares
+   * (verify, whose checks 5 and 7 FAIL on any difference).
+   */
+  onMismatch?: "refuse" | "note" | "report";
+}
+
+/** Refuses (or notes) a configured plugin that is not the registered one. A v1 registration names no plugins. */
+export async function bindRegisteredPlugin(ctx: ApiContext, config: PrRlaConfig, registration: SignedRecord<AnyRegistration> | null | undefined, kind: "provider" | "ledger", o: BindingOptions = {}): Promise<void> {
+  if (!registration || !isRegistrationV2(registration) || o.onMismatch === "report") return;
+  // Read from the definition or the lock: a plugin the registration does not name never runs (P1).
+  const loaded = await bindingIdentity(config[kind], kind, config.dir, auditContextFor(ctx));
+  const why = identityRefusal(kind, registration.record.plugins[kind], loaded, o.command ?? "the command");
+  if (!why) return;
+  if (o.onMismatch === "note") ctx.err(`note: ${why.replace(/^.*? refused: /, "")}; a real ${o.command ?? "run"} refuses it`);
+  else throw new AuditError(why, 1, "FAILED", identityNext(kind));
+}
+
+/**
+ * The configured provider, its requests through the context's broker. With a v2 `registration` it
+ * must be the registered provider (P1: see `BindingOptions`); without one (register, an unregistered
+ * dry run) nothing is compared.
+ */
+export async function providerFor(ctx: ApiContext, config: PrRlaConfig, o: BindingOptions & { registration?: SignedRecord<AnyRegistration> | null } = {}): Promise<ScmProvider> {
+  await bindRegisteredPlugin(ctx, config, o.registration, "provider", o);
   return openProvider(auditContextFor(ctx), config.provider, config.dir, ctx.signal ? { signal: ctx.signal } : {});
 }
 
-/** The configured ledger, its requests through the context's broker, told the registered reviewers once a registration exists. */
-export async function ledgerFor(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths): Promise<Ledger> {
+/**
+ * The configured ledger, its requests through the context's broker, told the registered reviewers once a
+ * registration exists. Under a v2 registration it must be the registered ledger (P1): any other is refused
+ * before it is opened, unless the caller compares it itself (`onMismatch: "report"`, verify).
+ */
+export async function ledgerFor(ctx: ApiContext, config: PrRlaConfig, paths: WindowPaths, o: BindingOptions = {}): Promise<Ledger> {
   const reg = existsSync(paths.registration) ? readRegistration(paths) : null;
+  await bindRegisteredPlugin(ctx, config, reg, "ledger", o);
   const reviewers = reg && isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
   return openLedger(auditContextFor(ctx), config.ledger, config.dir, paths.windowDir, { reviewers, ...(ctx.signal ? { signal: ctx.signal } : {}) });
 }

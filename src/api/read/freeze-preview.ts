@@ -16,7 +16,7 @@ import type { PrRlaConfig, WindowPaths } from "../../config.js";
 import { pluginIdentity } from "../../registry.js";
 import type { ChangeKind, ChangeRecord, ScmProvider } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
-import { auditContextFor, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, type ApiContext } from "../session.js";
+import { callerOf, readOnlyContext, auditContextFor, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, type ApiContext } from "../session.js";
 import { foreign } from "../../core/said.js";
 import { renderResult } from "./untrusted.js";
 
@@ -175,17 +175,8 @@ async function freezeInputs(ctx: ApiContext, o: { dryRun: boolean; window?: stri
   const repoSet = reg ? registrationRepoSet(reg) : config.repoSet;
   const pooled = repoSet.kind !== "repo";
   const repo = repoSet.kind === "repo" ? repoSet.repo : repoSetLabel(repoSet);
-  if (reg && isRegistrationV2(reg)) {
-    // Options that change the population are part of the stratum (populationOptions, check 5).
-    const id = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
-    const reg0 = reg.record.plugins.provider;
-    if (id.optionsSha256 !== reg0.optionsSha256 && id.populationOptionsSha256 !== reg0.populationOptionsSha256) {
-      const why = `the provider options that change the population (populationOptions) differ from the registration (${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${reg0.populationOptionsSha256.slice(0, 12)}…)`;
-      if (!o.dryRun) throw new AuditError(`${why}: freeze with the registered options, or verify check 5 fails`);
-      ctx.err(`note: ${why}`);
-    }
-  }
-  const provider = await providerFor(ctx, config);
+  // P1: freeze runs the registered provider only (its name, source, files, trust and every option); a dry run notes the difference.
+  const provider = await providerFor(ctx, config, { registration: reg, command: "freeze", onMismatch: o.dryRun ? "note" : "refuse" });
   return { config, paths, reg, selector, window, parameters, protocol, repo, repoSet, pooled, frozenAt, round, tooLate, tsaMs, provider };
 }
 
@@ -295,6 +286,7 @@ export async function planFreeze(ctx: ApiContext, o: { dryRun: boolean; window?:
  * written, and no checkpoint is made.
  */
 export async function freezeEstimate(ctx: ApiContext, opts: { window?: string } = {}): Promise<FreezeEstimateResult> {
+  ctx = readOnlyContext(ctx); // P1: an estimate writes nothing, so it runs read-only
   const i = await freezeInputs(ctx, { dryRun: true, ...(opts.window !== undefined ? { window: opts.window } : {}) });
   const actx = auditContextFor(ctx);
   const before = actx.broker.stats.requests;
@@ -332,10 +324,11 @@ export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions 
 export async function freezePreview(ctx: ApiContext, opts?: FreezePreviewOptions & { estimate?: false }): Promise<FreezePreview>;
 export async function freezePreview(ctx: ApiContext, opts?: FreezePreviewOptions): Promise<FreezePreview | FreezeEstimateResult>;
 export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions = {}): Promise<FreezePreview | FreezeEstimateResult> {
+  ctx = readOnlyContext(ctx); // P1: a dry run writes nothing, so it runs read-only (freeze --dry-run)
   if (opts.estimate) return freezeEstimate(ctx, opts.window !== undefined ? { window: opts.window } : {});
   const plan = await planFreeze(ctx, { dryRun: true, ...(opts.window !== undefined ? { window: opts.window } : {}), ...(opts.listing ? { listing: true } : {}) });
-  if (ctx.mode !== "read-only") return plan.preview;
-  // Read-only (S1): what the provider wrote (its limitations, the labels of its own counts) is its text, in untrusted.errors.
+  if (callerOf(ctx) === "person") return plan.preview;
+  // An assistant's read (S1): what the provider wrote (its limitations, the labels of its own counts) is its text, in untrusted.errors.
   const p = plan.preview;
   const label = (c: { label: string; value: number }) => ({ ...c, label: foreign("the provider's label for the count", c.label) });
   return renderResult<FreezePreview>("read-only", { ...p, limitations: p.limitations.map((l) => foreign("a limitation the provider reports", l)), nativeCounts: p.nativeCounts.map(label), diagnostics: p.diagnostics.map(label) });

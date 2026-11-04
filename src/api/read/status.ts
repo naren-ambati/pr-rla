@@ -2,21 +2,23 @@ import { existsSync } from "node:fs";
 import { buildPopulation } from "../../core/population.js";
 import { perRepoRows, type RepoRow } from "../../core/pooled-report.js";
 import { PRESENCE_LIMIT, auditBinding, countedVerdicts, signaturesCountFor, verdictRuleFailures, type CountedVerdicts } from "../../core/presence/index.js";
-import { certificateWithheld, gitFileLedgerGate } from "../../core/ledger-path.js";
+import type { GateLedger } from "../../core/ledger-gate.js";
 import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AnyRegistration, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../../core/records.js";
 import { describeRepoSet } from "../../core/repo-set.js";
+import { dropPrefix, foreign, foreignError, said, wordsOf } from "../../core/said.js";
 import { unixToIso } from "../../core/seed.js";
 import type { Selector } from "../../core/selector.js";
 import { computeStatus, provenanceOf, type StatusReport } from "../../core/status.js";
 import { certificateFor, failedWithholdings, isCertified, verdictExitCode, withheldVerdict, type Certificate, type Withholding } from "../../core/verdict.js";
 import { windowDays } from "../../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../../config.js";
-import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
+import { ledgerTraits, registeredCeiling, testOnlyLedgerOptions } from "../../ledger-traits.js";
 import { builtinLedgerName } from "../../registry.js";
 import { provenanceRank, type ProvenanceLevel, type VerdictEvent } from "../../sdk/ledger.js";
 import { anchorLines, notTamperProof } from "../../timestamp/verify.js";
-import { latestCheckpointAt } from "./checkpoints.js";
-import { auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
+import { latestCheckpointAt, readCheckpoints } from "./checkpoints.js";
+import { check7Gate } from "./ledger-gate.js";
+import { bindRegisteredPlugin, callerOf, readOnlyContext, auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { accessShortfall } from "../access.js";
 import { assessRecord, logBound } from "../timestamps.js";
 import { fenceStatus, renderResult } from "./untrusted.js";
@@ -88,8 +90,14 @@ export type StatusResult =
       verdictNotes: string[];
       /** A pooled audit's per-repo counts (U8): descriptive; the risk limit applies to the pool. */
       perRepo?: RepoRow[];
-      /** The built-in git-file ledger's integrity walk and path rule, as check 7 runs them (P4); null for other ledgers. */
+      /** The ledger's integrity report and git-file's path rule, as check 7 judges them (P4; every ledger since P1); null for a ledger with no integrity check. */
       ledgerIntegrity: { ok: boolean; findings: string[]; fails: string[]; warnings: string[] } | null;
+      /**
+       * Check 7's gate as status ran it (P1, src/core/ledger-gate.ts): every FAIL and WARN verify's check 7 gives for the same
+       * files and ledger read. `shown`: the lines status prints besides its own (the binding, the publication, the
+       * checkpoints and their coverage). Any FAIL withholds CERTIFIED (`certificateWithheld`).
+       */
+      ledgerGate: { fails: string[]; incompletes: string[]; warns: string[]; shown: string[] };
       /** Why CERTIFIED is withheld although the sequence certifies: what check 7 would FAIL (P4). Empty otherwise. */
       certificateWithheld: string[];
       /**
@@ -105,7 +113,18 @@ export type StatusResult =
       line: string;
     } & TimeStanding &
       StatusReport)
-  | ({ phase: "sampled"; window: string; verdictsRead: false; ledger: string; verdictsSkipped: string; N: number; drawsIssued: number; line: string } & TimeStanding);
+  | ({
+      phase: "sampled";
+      window: string;
+      verdictsRead: false;
+      ledger: string;
+      verdictsSkipped: string;
+      N: number;
+      drawsIssued: number;
+      line: string;
+      /** Check 7's local rules, without the tracker (P1): the index binding, its publication record, the checkpoint file. */
+      ledgerGate: { fails: string[]; incompletes: string[]; warns: string[] };
+    } & TimeStanding);
 
 /**
  * The audit mode and the honest-output note for status. v1: tamper-evident iff its log entries verify
@@ -225,6 +244,7 @@ export async function ledgerStatus(paths: WindowPaths, ledger: { readVerdicts():
 
 /** Where the audit stands: one result per phase (unregistered, registered, frozen, sampled). */
 export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise<StatusResult> {
+  ctx = readOnlyContext(ctx); // P1: status only reads (--checkpoint is a separate write, on the caller's own context)
   const { config, paths } = configFor(ctx, opts.window);
   const window = opts.window ?? config.window.name;
   if (!existsSync(paths.registration)) {
@@ -245,7 +265,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     let soFar = "";
     const set = registrationRepoSet(reg);
     if (!opts.offline && now >= opens && set.kind === "repo") {
-      const provider = await providerFor(ctx, config);
+      const provider = await providerFor(ctx, config, { registration: reg, command: "status" });
       ctx.onProgress?.({ done: 0, message: `listing ${set.repo} on ${provider.name} for N so far` });
       const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx), ...(ctx.signal ? { signal: ctx.signal } : {}) });
       nSoFar = pop.entries.length;
@@ -263,15 +283,22 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     return { phase: "frozen", window, N: manifest.N, line, ...standing, ...seed };
   }
   const draws = readDraws(paths);
+  // P1: status reads only the registered ledger, and refuses any other before anything is read (even offline).
+  await bindRegisteredPlugin(ctx, config, reg, "ledger", { command: "status" });
+  // The ledger as check 7's gate has it: bound above, so its identity is the registered one.
+  const loaded = { identity: isRegistrationV2(reg) ? reg.record.plugins.ledger : null, testOnlyOptions: testOnlyLedgerOptions(config.ledger) };
+  const trust = trustFor(ctx, opts.tsaTrust ?? []);
   if (opts.skipTrackerLedger) {
     const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx));
     if (lt.hosts.length > 0) {
       const verdictsSkipped = `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; read its verdicts with offline: false`;
       const line = `${mode} · frozen N ${fmt(manifest.N)} · ${draws.issued} draw(s) issued · verdicts not read (${verdictsSkipped})${timestampNote}`;
-      return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing };
+      // Check 7's local rules still run (the index, its publication, the checkpoint file): what verify would FAIL without reading the tracker.
+      const g = await check7Gate(paths, reg, { ...loaded, read: null }, trust);
+      return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing, ledgerGate: { fails: g.fails.map(String), incompletes: g.incompletes.map(String), warns: g.warns.map(String) } };
     }
   }
-  const ledger = await ledgerFor(ctx, config, paths);
+  const ledger = await ledgerFor(ctx, config, paths, { command: "status" });
   ctx.onProgress?.({ done: 0, message: `reading the verdicts from ledger ${ledger.name}` });
   // Time round B: a verdict read refused to a ledger running without its credential is not "no verdicts" (src/api/access.ts).
   const actx = auditContextFor(ctx);
@@ -280,7 +307,7 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
     capped = await countedLedgerVerdicts(ctx, config, reg, ledger, { manifestSha256: manifest.sha256, beacon: draws.beacon });
   } catch (e) {
     if (!accessShortfall(actx, `ledger:${ledger.name}`, `ledger ${ledger.name}`)) throw e;
-    capped = { verdicts: [], notes: [`ledger ${ledger.name}: readVerdicts failed: ${(e as Error).message}`], findings: [], warnings: [], ineligible: () => null };
+    capped = { verdicts: [], notes: [said`ledger ${ledger.name}: readVerdicts failed: ${foreignError(e)}`], findings: [], warnings: [], ineligible: () => null };
   }
   const unread = accessShortfall(actx, `ledger:${ledger.name}`, `ledger ${ledger.name}`);
   const report = computeStatus({
@@ -301,10 +328,36 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length).map((v) => v.draw) : [];
   const verdictNotes = [...(minProvenance === "presence" || report.provenance.some((p) => p.level === "presence") ? [PRESENCE_LIMIT] : []), ...capped.notes, ...capped.warnings];
   const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
-  // P4: status runs check 7's git-file integrity walk and path rule (local), and withholds CERTIFIED where check 7 would FAIL.
-  const gate = builtinLedgerName(config.ledger.use) === "git-file" ? await gitFileLedgerGate(ledger, reg) : null;
-  const withheld = report.sequence.state === "CERTIFIED" ? certificateWithheld({ gate, below: belowMinimum.length, unsigned: unsigned.length }) : [];
-  const ledgerIntegrity = gate ? { ok: !gate.fails.length, findings: gate.integrity?.findings ?? [], fails: gate.fails, warnings: gate.warns } : null;
+  // P1 (with the seam review): check 7's gate, the one verify runs (src/core/ledger-gate.ts), over what status read:
+  // nothing verify FAILs there can show as CERTIFIED here. The ledger's integrity report and history come from the
+  // same read as the verdicts (an issue ledger reads its tracker once).
+  let integrity: GateLedger["integrity"] = null;
+  if (ledger.verifyIntegrity) {
+    try {
+      integrity = { report: await ledger.verifyIntegrity(), error: null };
+    } catch (e) {
+      integrity = { report: null, error: foreignError(e) };
+    }
+  }
+  let history: GateLedger["history"] = null;
+  if (ledger.readHistory && readCheckpoints(paths.windowDir).checkpoints.length) {
+    try {
+      history = { events: await ledger.readHistory(), error: null };
+    } catch (e) {
+      history = { events: null, error: foreignError(e) };
+    }
+  }
+  const countedFirst = report.firstVerdicts.filter((v) => counted.has(v.changeId));
+  const gate = await check7Gate(paths, reg, { ...loaded, read: { name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, findingsArePrRlas: builtinLedgerName(config.ledger.use) === "git-file", verdictsRead: capped.verdicts, counted: countedFirst, firstVerdicts: report.firstVerdicts, integrity, history } }, trust);
+  const withheld = report.sequence.state === "CERTIFIED" ? gate.withheld : [];
+  // P4's view of the integrity rule (the integrity report and git-file's path), kept for its callers.
+  const integrityLines = gate.lines.filter((l) => l.rule === "integrity");
+  // Its warnings are the path rule's, as P4 printed them (the report's own warnings are check 7's WARN lines, not repeated here).
+  // What the integrity report says is the ledger's text (S1), so it is carried as foreign unless the ledger is pr-rla's git-file.
+  const ours = builtinLedgerName(config.ledger.use) === "git-file";
+  const ledgerIntegrity = integrity ? { ok: !integrityLines.some((l) => l.level === "fail"), findings: (integrity.report?.findings ?? []).map((f) => (ours ? f : foreign("the ledger's integrity finding", f))), fails: integrityLines.filter((l) => l.level === "fail").map((l) => dropPrefix(l.text, "FAIL ")), warnings: integrityLines.filter((l) => l.level === "warn" && wordsOf(l.text).startsWith("WARN ")).map((l) => dropPrefix(l.text, "WARN ")) } : null;
+  // The rest of the gate, as status prints it: what status does not already say its own way (the verdict rules, the integrity report).
+  const shown = gate.lines.filter((l) => l.level !== "note" && l.rule !== "integrity" && l.rule !== "provenance" && l.rule !== "signatures");
   let checkpointAdvised = false;
   if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
     const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
@@ -314,13 +367,39 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   // The one certificate rule (src/core/verdict.ts): what status can establish offline withholds it. The times give
   // INCOMPLETE withholdings; a status-side gate of check 7 (P4's git-file walk, P1's local gate) adds its FAIL reasons
   // here as failedWithholdings(...), so status never shows CERTIFIED where verify would not.
-  const withholdings = [...timeWithheld, ...failedWithholdings(withheld.map((w) => `verify check 7 would FAIL: ${w}`))];
+  const withholdings = [
+    ...timeWithheld,
+    ...failedWithholdings(withheld.map((w) => `verify check 7 would FAIL: ${w}`)),
+    ...gate.unestablished.map((w): Withholding => ({ verdict: "INCOMPLETE", reason: `verify check 7 would be INCOMPLETE: ${w}` })),
+  ];
   const certificate = certificateFor(report.sequence.state, report.refusal, withholdings, unread ? [unread] : []);
   const line =
     report.refusal ??
     statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }, certificate) + timestampNote;
-  // Rendered once, by the mode (S1): in read-only mode the verdicts' reviewers, notes and other ledger-written fields,
-  // and what the counting notes quote from ledger lines, are pr-rla's words with the text in untrusted.errors.
-  const shown = ctx.mode === "read-only" ? fenceStatus(report) : report;
-  return renderResult<StatusResult>(ctx.mode ?? "read-write", { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...shown, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld, certificate, certified: isCertified(certificate), line });
+  // Rendered once, by the reader (S1): when an assistant reads, the verdicts' reviewers, notes and other ledger-written
+  // fields, and what the counting notes and the gate quote from ledger lines, are pr-rla's words with the text in
+  // untrusted.errors. P1 runs every read on a read-only context, so the caller decides, not the mode.
+  const assistant = callerOf(ctx) !== "person";
+  const fenced = assistant ? fenceStatus(report) : report;
+  return renderResult<StatusResult>(assistant ? "read-only" : "read-write", {
+    phase: "sampled",
+    window,
+    verdictsRead: true,
+    ledger: ledger.name,
+    ...standing,
+    ...fenced,
+    minProvenance,
+    belowMinimum,
+    checkpointAdvised,
+    requireSigned,
+    unsigned,
+    verdictNotes,
+    ...(perRepo ? { perRepo } : {}),
+    ledgerIntegrity,
+    ledgerGate: { fails: gate.fails, incompletes: gate.incompletes, warns: gate.warns, shown: shown.map((l) => l.text) },
+    certificateWithheld: withheld,
+    certificate,
+    certified: isCertified(certificate),
+    line,
+  });
 }

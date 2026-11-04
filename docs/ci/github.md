@@ -41,7 +41,7 @@ jobs:
 | `fail-on` | `escalate,refusal,timestamps,incomplete` | Which of exits 2, 3, 5 and 6 fail the job. Exit 1 and exit 4 always fail |
 | `plugins` | `builtin-only` | `allow` lets the audit's locked plugins load |
 | `approve-origins` | empty | `ENV_VAR=https://host` entries; see Credentials |
-| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the workspace, separated by commas or newlines; passed to `status`, `verify` and `checkpoint` as `--tsa-trust`. Needed only for an authority outside the shipped bundle: without it such an audit's certificate is `WITHHELD` (exit 6) |
+| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the workspace, separated by commas or newlines; passed to `status`, `verify` and `checkpoint` as `--tsa-trust`. Needed only for an authority outside the shipped bundle: without it such an audit's certificate is `WITHHELD` (exit 6; with an issue ledger, exit 1, since check 7 FAILs a draw → issue publication its authorities are not trusted for) |
 | `accept-lock-grants` | `false` | Only for an audit repository you control |
 | `allow-writes` | `false` | Permit `checkpoint` and `sample` |
 | `token` | `github.token` | What pr-rla reads as `GITHUB_TOKEN`, and what the comment is posted with |
