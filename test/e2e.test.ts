@@ -270,8 +270,12 @@ describe("status variants and refusals", () => {
     await sampleCommand(s.ctx, { through: 56 });
     s.out.length = 0;
     await statusCommand(s.ctx, {});
-    expect(s.out[0]).toMatch(/prefix 36\/56 .* NOT CERTIFIED/);
-    expect(s.out[1]).toMatch(/blocking draw: #37 /);
+    // Draws 37.. that repeat a change reviewed among the first 36 reuse its verdict, so the prefix runs to the first new one.
+    const d56 = readJ<DrawsFile>(s, `${W}/draws.json`).draws.slice(0, 56);
+    const reviewed = new Set(d56.slice(0, 36).map((d) => d.changeId));
+    const blocking = d56.slice(36).find((d) => !reviewed.has(d.changeId))!.draw;
+    expect(s.out[0]).toMatch(new RegExp(`prefix ${blocking - 1}/56 .* NOT CERTIFIED`));
+    expect(s.out[1]).toMatch(new RegExp(`blocking draw: #${blocking} `));
     await reviewDraws(s, 56, [once]);
     s.out.length = 0;
     // The SPRT certifies at 56; with no timestamp authority the certificate is withheld (time round B), exit 6.

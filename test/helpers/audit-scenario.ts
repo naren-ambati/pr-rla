@@ -10,6 +10,7 @@ import { recordedBeacon } from "./fixtures.js";
 import type { MockRekor } from "./mock-rekor.js";
 import type { TrustBundleExtra } from "../../src/timestamp/bundle.js";
 import type { MockTsaServer } from "./test-tsa.js";
+import { installTestSigningKey } from "./signing-key.js";
 
 export const REPO = "acme/widgets";
 
@@ -98,6 +99,9 @@ export function setupAuditRepo(opts: { changes: ChangeRecord[]; log?: MockRekor;
     ].join("\n"),
   );
   writeFileSync(join(dir, ".gitignore"), ".pr-rla/\n");
+  // Since time round B a registration names its signing key, so its digest, and with it the draws, follow the key:
+  // one fixed test key keeps every scenario's draws the same from run to run (test/helpers/signing-key.ts).
+  installTestSigningKey(dir);
   git("add", "-A");
   git("commit", "-qm", "audit repo");
   const clock = { now: T("2026-10-20T00:00:00Z") };

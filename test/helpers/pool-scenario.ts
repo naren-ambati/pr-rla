@@ -6,7 +6,6 @@ import { setupAuditRepo, T } from "./audit-scenario.js";
 import { recordedBeacon } from "./fixtures.js";
 import { fakeClock } from "./fake-clock.js";
 import { ORG, type FakeOrg } from "./fake-org.js";
-import { installTestSigningKey } from "./signing-key.js";
 
 /**
  * An audit repo for a pooled GitHub audit over a synthetic org (fake-org.ts). The context runs on a shared fake clock
@@ -17,8 +16,6 @@ export const REPOS_RULE = `{ owner: ${ORG} }`;
 
 export function setupPoolAudit(org: FakeOrg, o: { repos?: string; extra?: string; start?: string; window?: string; provider?: string; timestamping?: string; tsa?: Parameters<typeof setupAuditRepo>[0]["tsa"] } = {}) {
   const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch, ...(o.tsa ? { tsa: o.tsa } : {}) });
-  // One key for every pooled test audit: two registrations of one config at one clock are then the same (NFR6).
-  installTestSigningKey(s.dir);
   const clock = fakeClock(T(o.start ?? "2026-10-20T00:00:00Z"));
   const config = [
     `provider: ${o.provider ?? "github"}`,
