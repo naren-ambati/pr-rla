@@ -22,6 +22,9 @@ Working log for pr-rla v0.1: what is done, what is verified (with the command an
 | Phase 3, bolt 1 (U1): RFC 3161 trusted time, k-of-n by operator, record schema v2, Rekor v2 client (mock-tested only) | done in bolt 1 (below) |
 | Phase 3, bolt 2 (U2a): the fetch broker (every outbound request), published-limit rate defaults, the `src/api` foundation | done in bolt 2 (below) |
 | Phase 3, bolt 3 (U4): `github-issues` and `gitlab-issues` ledgers, the ledger kit, the Jira example, ledger checkpoints and their git transport, `account` provenance | done in bolt 3 (below) |
+| Phase 3, bolt 4 (U2b): `pr-rla.lock.json`, the isolated plugin host (`pr-rla/ipc/v1`), `trust: full`, `--plugins builtin-only`, `plugin add` / `lock` / `check` | done in bolt 4 (below) |
+| Phase 3, bolt 5 (U3): `selector.bots`, the pinned head, `Actor.id`, `reviewGranularity`, `pr-rla/http`, `landedVia` and `direct_push_via_merge` | done in bolt 5 (below) |
+| Wave 1 integration: bolts 3, 4 and 5 on one branch | done (below): traits and provenance over IPC, `hostFromOption` credentials, external ledgers in the plugin host, the 204 fix |
 
 ## Architecture
 
@@ -900,3 +903,442 @@ Part 2 registers, freezes and samples a 200-change json-file audit offline (git-
 - **U3 owns `src/sdk/http.ts`:** please fix finding 4 (pass a `null` body for 204, 205 and 304 in `checkJsonBody`).
 - **For U9:** `register`'s refusal of `min_provenance: account` with `git-file` must give way once `require_signed` produces `account` and `presence` verdicts. Check 7 already compares levels by `provenanceRank`.
 - **For U7:** `command: checkpoint` maps to `pr-rla checkpoint --push`, with exit 1 (preconditions), 4 (stopped) and 5 (too few tokens). The transport needs a checkout with an upstream branch, or `--remote` and `--branch`.
+
+## Bolt 4 (U2b): plugin lock and isolated plugin host (2026-11-03)
+
+*Appended from `docs/build-notes/u2b.md` (kept there too) at the wave-1 integration. Written on its own branch; "Integration: wave 1" below records what changed when it met U3 and U4.*
+
+Goal (delivery-plan.md, bolt 4): `pr-rla.lock.json`, written only by an explicit `pr-rla plugin add`; the npm integrity and tree hash re-checked at every load; external plugins out of process in a host with a scrubbed environment and the Node permission model; credentials only as placeholders the broker swaps on declared hosts (including `prrla-basic:`); `trust: full` as a per-plugin opt-in; `--plugins builtin-only` and `PR_RLA_PLUGINS`; `pr-rla plugin check` as a correctness gate; RK-02 settled or recorded.
+
+Built on branch `bolt/u2b-plugin-host` from the end of bolt 2 (`54e1628`), in parallel with U4 (bolt 3) and U3, so this bolt has neither U4's ledgers and ledger kit nor U3's SDK additions. These notes live here rather than in BUILD-NOTES.md so the branches merge cleanly.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR2.1 the registration records each plugin's name, source, version, content hash and options hash | met | `plugin-lock.test.ts › register records name, source, version, content hash and options hash`: `integrity` is the lock's treeSha256, `trust` the locked trust |
+| FR2.2 the lock pins version, npm integrity and a tree hash; a mismatch at load refuses | met | `› a changed file is refused at load` (freeze and register), `› the tree hash covers … each dependency separately`, `› records the integrity … a changed package-lock entry is refused at load` |
+| FR2.3 only `plugin add` creates a lock entry, printing what it trusts; `register` never extends the lock and refuses an unlocked plugin naming `plugin add` | met | `› exits 1 with the command to run; writes no lock and no registration`, `› prints the source, version, resolved, npm integrity and tree hash it trusts, and asks first`, `› … leaves the lock untouched` |
+| FR2.4 out of process, scrubbed environment, placeholders swapped on declared hosts only; the security model states the Node 22/24 limit; Node 25+ network test run or marked unverified | met, with the limit | `plugin-host.test.ts › the hostile fixture plugin, contained` on Node 22.23.2 and 26.8.2; `docs/security-model.md`; RK-02 below |
+| FR2.5 `trust: full` opt-in, recorded, printed by `verify` | met | `› runs in process with the real environment and prints PLUGIN TRUST: full` (register, freeze, verify) |
+| FR2.6 `--plugins builtin-only` and `PR_RLA_PLUGINS=builtin-only` refuse all external code | met | `› refuse an external plugin before it is resolved or imported` (a module that throws on import never runs); other values refused |
+| FR2.7 `plugin check` runs the kit through the host and says correctness, not safety | met | `› passes the Gitea example through the host and says correctness, not safety`; `node dist/cli.js plugin check ./examples/providers/gitea/index.mjs --offline` (below) |
+| NFR13 `engines.node >= 22.13`; Node 25 network denial verified or recorded | met | `package.json`; RK-02 ran on Node 26.8.2 |
+| The Gitea example passes the conformance kit **through the host** | met | `› on recorded Codeberg responses` and `› on the synthetic Forgejo (every merge strategy, a 45 s rate-limit wait proxied to the parent's clock)`; `plugin check` from `dist/` |
+| The hostile fixture reads a placeholder, not the token | met | the demo below; `› reads a placeholder, not the token; no other variable reaches it` |
+| Node 25 IPC/network-denial test | **ran** on Node 26.8.2 (found on PATH): IPC works under `--permission` without `--allow-net`, and the child's socket is `ERR_ACCESS_DENIED`. Node 25.x itself is not installed here, so the 25.x row rests on 26 | `› RK-02 … IPC works and the child has no network` |
+| test-design.md U2b: tree-hash mismatch, symlink escape, builtin-only before import, register exit 1, install-script warning, 60 s without heartbeat kills the child | met | `plugin-lock.test.ts`, `plugin-host.test.ts › heartbeats, silence and message size` |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| The lock: resolution (package by `node_modules` walk and its `.` export; path inside the audit repo, root = nearest package.json), transitive runtime dependencies, tree hash, read grants, install-script scan, load-time checks, builtin-only policy | `src/plugins/lock.ts`, `src/plugins/errors.ts` |
+| The protocol `pr-rla/ipc/v1` (types and limits) | `src/plugins/protocol.ts` |
+| The child: SDK mapping, IPC fetch and sleep, calls, heartbeats; no runtime import from pr-rla | `src/plugins/child.ts` |
+| The parent: spawn with the permission flags, IPC, watchdog, size limits, secret scrubbing, definition validation, provider and ledger proxies | `src/plugins/host.ts` |
+| Opening external plugins for commands (lock, then isolated or full) | `src/plugins/open.ts`, wired in `src/api/context.ts` (`openProvider`, `openLedger`, `plugins` policy, no-hosts sentinel) |
+| External plugin identity from the lock, never an in-process import of an isolated plugin | `src/plugins/identity.ts`, `src/registry.ts` (`pluginIdentity`, `builtinProviderName`, `builtinLedgerName`) |
+| Lock entries (shared by the CLI and tests) | `src/plugins/entry.ts` |
+| `plugin add`, `plugin lock`, `plugin check`; `--plugins builtin-only`; hosts stopped when a command ends | `src/commands/plugin.ts`, `src/plugins/check.ts`, `src/cli.ts` |
+| `register` prints each plugin's trust and tree hash, and `PLUGIN TRUST: full`; `verify` repeats it and warns in check 5 when the provider it loads is not the registered one | `src/commands/register.ts`, `src/commands/verify.ts` |
+| The Gitea example declares `hosts`, `GITEA_TOKEN` for codeberg.org and its conformance fixture | `examples/providers/gitea/` |
+| The hostile fixture | `test/fixtures/plugins/hostile/` |
+| Tests: 37 new | `test/plugin-host.test.ts` 20 (one is the "unverified" placeholder, skipped when a Node 25+ is found), `test/plugin-lock.test.ts` 17 |
+| Demo | `scripts/demo-plugin-host.mjs` |
+| Docs | `docs/security-model.md` (new: the plugin section), `docs/writing-a-provider.md` §§3, 4, 7, README (step 5, one limitation) |
+
+### RK-02: the Node 25 test
+
+Measured 2026-11-03 on macOS with the Node versions Homebrew already had (nothing was installed for this bolt): a child started as the host starts it (`--permission`, fs-read limited, no `--allow-net`):
+
+| Node | IPC under `--permission` | read outside the scope | write | `net.connect` |
+|---|---|---|---|---|
+| 22.23.2 | works | `ERR_ACCESS_DENIED` | `ERR_ACCESS_DENIED` | **connects** |
+| 24.20.0 | works | `ERR_ACCESS_DENIED` | `ERR_ACCESS_DENIED` | **connects** |
+| 26.8.2 | works | `ERR_ACCESS_DENIED` | `ERR_ACCESS_DENIED` | `ERR_ACCESS_DENIED` |
+| 26.8.2 with `--allow-net` | works | `ERR_ACCESS_DENIED` | `ERR_ACCESS_DENIED` | connects |
+
+So the design's "if it passes" branch applies: the child never gets `--allow-net`, and on Node 25 or later it has no network. The test (`plugin-host.test.ts › RK-02`) looks for a Node at 25 or later as this one, in `PR_RLA_NODE25`, or on PATH, and runs it as the child; with none it reports a skipped `UNVERIFIED` test instead. On this machine PATH has `/opt/homebrew/bin/node` (26.8.2) after Node 22, so plain `npm test` runs it.
+
+### Verified (command → output)
+
+From a clean state in the worktree (`node_modules`, `dist` and `examples/providers/gitea/node_modules` removed; nothing else untracked), at `b6e68c7`, 2026-11-04T00:24Z, Node 22.23.2:
+
+```
+npm ci                                     → added 60 packages … found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 29 passed (29) · Tests 344 passed | 1 skipped (345)
+npm --prefix examples/providers/gitea ci   → added 1 package … found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1 (no new dependency)
+```
+
+- 345 = the 308 of bolt 2, unchanged in what they assert, plus 37 new; the one skipped is the `UNVERIFIED` placeholder, skipped because the RK-02 test ran.
+- The same suite under Node 26.8.2 (`/opt/homebrew/bin/node node_modules/vitest/vitest.mjs run`): 339 passed, 1 skipped (the second hostile block is not added when the test's own Node is already 25+).
+- Each commit of this bolt was checked in a scratch clone: typecheck clean at every one; 308, 308, 308, 308, 344 (+1 skipped), 344 (+1 skipped) tests passing.
+- `npm test` makes no network call. The children run only fixtures and the Gitea plugin, whose every request comes back to the parent's fake transports; the hostile plugin's one socket goes to a loopback server the test starts.
+
+`plugin check` from the build, offline:
+
+```
+$ node dist/cli.js plugin check ./examples/providers/gitea/index.mjs --offline
+plugin check ./examples/providers/gitea/index.mjs: provider gitea@0.1.0 (path)
+  lock            not locked: run "pr-rla plugin add ./examples/providers/gitea/index.mjs" to trust it
+  npm signatures  not applicable: a path plugin is not from the npm registry
+  hosts           codeberg.org (with no options: not named in .pr-rla.yml)
+  credentials     GITEA_TOKEN -> codeberg.org
+  conformance     the provider kit through the plugin host, on 1 recorded fixture(s)
+    ok   codeberg-forgejo-docs-2026-10-01.json › api-version
+    … (normalization, window-and-kinds, classification, merge-strategies, no-double-counting,
+       stable-sorted-ids, review-state-mapping, actors, pagination, kind-filtering: ok;
+       bot-detection: skip, the fixture declares no bots)
+    ok   codeberg-forgejo-docs-2026-10-01.json › transient-faults
+  conformance     PASS
+conformance = correctness, not safety: a malicious plugin can pass it
+exit 0
+```
+
+On a scratch copy of the repo, `pr-rla -C examples/codeberg-forgejo-docs-2026-10 plugin add ../providers/gitea/index.mjs --yes` wrote the lock entry the example's comment describes (`source path`, `resolved file:../providers/gitea`, `hosts codeberg.org`, `GITEA_TOKEN -> codeberg.org`, trust isolated). No `freeze` ran against Codeberg: no live call was needed in this bolt.
+
+### The demo
+
+`node scripts/demo-plugin-host.mjs` (offline, after `npm run build`), Node 22.23.2:
+
+```
+U2b demo: a hostile provider through pr-rla's plugin host (this Node v22.23.2)
+  the parent's environment has GITHUB_TOKEN=ghp_DEMO…, GITHUB_USER and AWS_SECRET_ACCESS_KEY
+  lock entry: ./plugins/hostile/index.mjs · trust isolated · treeSha256 c8ee5d28a6eff068… · hosts api.github.com, uploads.example.com · credentials GITHUB_TOKEN -> api.github.com; GITHUB_USER -> api.github.com
+  [pr-rla] plugin hostile@6.6.6 runs isolated: placeholder credentials, read-only access to its own files; Node 22 cannot block its network access, so it could still send out what it reads (Node 25 or later blocks it)
+  what the plugin got, inside the host:
+    process.env.GITHUB_TOKEN                 prrla-cred:GITHUB_TOKEN
+    process.env.AWS_SECRET_ACCESS_KEY        null
+    its whole environment                    GITHUB_TOKEN, GITHUB_USER, PR_RLA_HOST, __CF_USER_TEXT_ENCODING
+    read ~/.npmrc                            refused: ERR_ACCESS_DENIED
+    read a file outside the plugin           refused: ERR_ACCESS_DENIED
+    read /proc/<parent>/environ              refused: ERR_ACCESS_DENIED
+    write a file (own dir / tmp)             refused: ERR_ACCESS_DENIED / refused: ERR_ACCESS_DENIED
+    start a process                          refused: ERR_ACCESS_DENIED
+    token to its declared host, echoed back  allowed: "200 {\"authorization\":\"token prrla-cred:GITHUB_TOKEN\"}"
+    Basic auth to it, echoed back            allowed: "200 {\"authorization\":\"Basic prrla-basic:GITHUB_USER:GITHUB_TOKEN\"}"
+    the placeholder to another declared host refused: CREDENTIAL_HOST_MISMATCH
+    the placeholder to an undeclared host    refused: HOST_NOT_ALLOWED
+    prrla-basic: to an undeclared host       refused: HOST_NOT_ALLOWED
+    global fetch() to an undeclared host     refused: HOST_NOT_ALLOWED
+    POST (provider requests are read-only)   refused: READ_ONLY_VIOLATION
+    open a socket to 127.0.0.1               allowed: "connected" (the server received "exfiltrated")
+  what the fake api.github.com received (the broker swapped the placeholder there, and only there):
+    GET https://api.github.com/echo  Authorization: token ghp_DEMO0123456789secret
+    GET https://api.github.com/echo  Authorization: Basic YWxpY2U6Z2hwX0RFTU8wMTIzNDU2Nzg5c2VjcmV0
+```
+
+With `/opt/homebrew/opt/node@24/bin/node` the output is the same (Node 24). With `/opt/homebrew/bin/node` (26.8.2) every line is the same except two: `… no network (Node 26)` and `open a socket to 127.0.0.1  refused: ERR_ACCESS_DENIED`.
+
+### Deviations from the design, and why
+
+1. **Additions within `pr-rla/ipc/v1`.** The protocol is new in this release, so these are part of v1, not a new version:
+   - a `describe` call evaluates `hosts(options)` and `writePaths(options)` without creating an instance, so the parent can refuse before `create` runs;
+   - `sleep`/`slept` and `log` messages, so a plugin's waits run on the command's clock (one clock per command, as bolts 1 and 2 require) and its `ctx.log` reaches the command's log;
+   - `error` with `id: null` reports a load failure;
+   - `appendVerdict` and `nativeCounts` are callable: the SDK interfaces have them and the contract's method list left them out;
+   - `ready` also carries the definition's shape, `credentials`, `populationOptions` and the child's Node version.
+2. **The parent validates the definition**, not the child: the child reports the fields and the parent runs the SDK's own `assertProviderDefinition` / `assertLedgerDefinition` on them, so a hostile child cannot skip validation.
+3. **A plugin links against the host's SDK.** `module.registerHooks` in the child maps `pr-rla/provider` and `pr-rla/ledger` to pr-rla's own modules. A plugin's own copy of pr-rla (the Gitea example's `file:` link points at the whole repo) is never loaded, hashed or readable, and an isolated plugin needs no `npm install`. `trust: full` plugins still resolve their own, as before. This needs Node 22.15 or later; on an older Node the child refuses with that message (untested there: only 22.23.2, 24.20.0 and 26.8.2 ran).
+4. **Lock fields.** `name` is the plugin definition's name (what the child reports), so `PluginIdentity.name` stays what it was; `version` comes from the plugin's package.json; `resolved` and `npmIntegrity` from the audit repo's package-lock.json for a package, `file:<path from the audit directory>` and null for a path plugin, and null integrity for an npm local-path (link) install. `plugin add` refuses a package with no package-lock entry (the draft's "required for package plugins").
+5. **"Inside the audit repo"** is the git work tree holding the audit directory (or the directory itself without one), so the Codeberg example's `../providers/gitea` qualifies.
+6. **A placeholder only for a credential that is set.** An unset locked credential stays unset in the child, as it would in process; otherwise every anonymous run would send a placeholder the broker cannot swap and be refused.
+7. **What the lock grants is what the broker enforces.** At load, what the plugin now asks for (hosts and write paths for these options, credential names) must be within its lock entry, or it is refused with `plugin lock`. This catches an options change such as a new `base_url`.
+8. **An isolated plugin that declares no hosts may contact none.** The broker reads an empty host set as "any" (built-ins), so the AuditContext gives such a plugin a set no host matches.
+9. **Message limits.** Outgoing messages are measured before they are sent. Incoming ones are measured after Node's IPC channel has parsed them, so the limit bounds what is accepted, not memory. The heartbeat watchdog counts any message and runs only while the plugin loads or a call is in flight.
+10. **Broker hints across IPC.** An isolated plugin's `acceptJson` predicate cannot cross a process boundary, so it becomes "the body must parse", and its retry counts are capped at the broker's own limit (6 retries).
+11. **`plugin check` fixtures** are data: the recorded-fixture format of `scripts/record-fixture.mjs`, listed in the plugin's package.json as `"pr-rla": { "conformance": [...] }` and/or passed with `--fixture`. The parent replays them; requests to hosts the plugin did not declare are refused as the broker would. With no fixtures, `check` exits 1: a gate with nothing checked does not pass. There is no ledger kit on this branch (it is U4's), so a ledger's check reports that and exits 1. Only the expectations of the kit's shape are read (the recorder writes `expected.pullRequests` as a count).
+12. **`plugin add` and `plugin lock` need the plugin named in `.pr-rla.yml`**, because its options decide its hosts; `plugin check` does not (it then asks with no options).
+13. **Check 5's identity comparison is in the verify command**, not in `src/core/verify.ts`, to leave the core to U3 (which adds the `populationOptions` FAIL there). It compares an external provider's name, source, version, integrity, options hash and trust, and turns a PASS into a WARN with the difference.
+14. **Every command opening an isolated plugin prints what isolation it has** (NFR4): placeholder credentials, read-only access to its own files, and whether this Node blocks its network.
+15. **The child replaces its global `fetch`** with the IPC fetch, so a plugin calling `fetch()` directly still goes through the broker.
+16. **The `now` field** the Gitea tests inject in process is not part of the SDK and is not forwarded; the child uses its own clock. The Gitea plugin uses it only to stop its second list walk, and the recorded and synthetic data give the same results.
+17. **One existing test's setup changed.** `test/api-context.test.ts` opened an unlocked example plugin through `openProvider`; it now copies and locks it in a temp audit directory first (5 lines). Every assertion is unchanged.
+
+### Findings
+
+- On Node 22 and 24, `process.permission.has("net")` is `false` although the network is not controlled at all. The host goes by the Node version (25 or later), not by that call.
+- A directory grant does not leak to a sibling with the same prefix (`plug` vs `plug-evil`), and a bare import resolves when only the dependency's own directory is granted. Node removes `NODE_CHANNEL_FD` from the child's environment; macOS adds `__CF_USER_TEXT_ENCODING` to every process.
+- `module.registerHooks` works under `--permission` without `--allow-worker` (its hooks run in-thread).
+- The tree must be hashed before a child is granted anything: the permission model checks the path it is given, so an escaping symlink inside a granted directory would otherwise be read through (the class of CVE-2025-55130). `readGrants` hashes first.
+- A child starts in about 70 ms; the kit through the host on one fixture takes about 0.5 s (it makes six instances, so six children).
+
+### Unverified
+
+- Node 25.x itself (the row rests on 26.8.2), Linux (`/proc/<ppid>/environ` was refused, but macOS has no `/proc`), Windows.
+- Node 22.13 and 22.14 (no `module.registerHooks`): the child should refuse with the 22.15 message; not run.
+- `npm audit signatures` in `plugin check`: it asks the npm registry, so it never ran in this bolt (`--offline` everywhere).
+- A package plugin installed from the real registry: the tests use synthetic package-lock entries.
+- An external ledger against a real tracker, and the ledger kit through the host (U4).
+- **Credentials whose hosts depend on options.** SDK v1's `credentials` is a static list, so the Gitea example declares `GITEA_TOKEN` for codeberg.org only. An isolated self-hosted Gitea with a token gets `CREDENTIAL_HOST_MISMATCH` (refused unsent) instead of sending it; in process it works as before. Open question: a credential grant `plugin add` takes from the reviewer (`--credential ENV=host`), or `credentials(options)` in a later SDK.
+
+### Shared files this bolt touched (for merge planning)
+
+- `src/api/context.ts`: imports; `AuditContext.plugins` and `AuditContextOptions.plugins`; the no-hosts sentinel in `hostsFor`; one early branch in `openProvider`; `openLedger`'s first five lines moved into `openBuiltinLedger`.
+- `src/registry.ts`: two imports; `builtinProviderName`, `builtinLedgerName`; an external branch at the top of `pluginIdentity` and its new `policy` parameter (U3 edits the built-in branch's `populationOptions` below it).
+- `src/commands/context.ts` (`CommandContext.plugins`, one line in `auditContextFor`), `register.ts`, `freeze.ts` (pass the policy to `pluginIdentity`; register prints plugin lines), `verify.ts` (identity WARN, `PLUGIN TRUST` line), `src/cli.ts` (`--plugins`, the `plugin` command group, `closeAllPluginHosts` in `run`).
+- `examples/providers/gitea/index.mjs` (two definition fields, next to where U3 adds its own) and `package.json` (`files`, `"pr-rla"`); `examples/codeberg-forgejo-docs-2026-10/.pr-rla.yml` (comment).
+- `package.json` and `package-lock.json`: `engines.node` `>=22.13` only. No export, dependency or script changed; `src/testing/index.ts` untouched.
+- `README.md` (step 5 under "Adding a provider", one limitation bullet), `docs/writing-a-provider.md`, `test/api-context.test.ts` (above). New: `docs/security-model.md`, `docs/build-notes/u2b.md`.
+
+### What later units need to know
+
+- **U8 (org-pooled freeze runs external providers through the host).** Open the provider once per freeze with `openProvider`: one child serves every repo. The host takes concurrent calls (each has its own id), so P = 4 parallel `listChanges` on one hosted provider works and shares the broker's per-host budget. `listRepos` is proxied when the plugin has it. Keep each call's result under 64 MiB, which per-repo calls do; do not build the pooled population inside the plugin. Pass `req.signal` to cancel (the host sends `cancel` and aborts that child's in-flight fetches). A long `listChanges` is safe: heartbeats continue while the child waits on the broker. The lock's hosts are computed from the configured options at `plugin add`, so a rule's hosts must not vary per repo. The child dies with the command (`closeAllPluginHosts`); a resumed run starts a new one. `freeze` calls `pluginIdentity` after opening the provider, which starts a second, short-lived child to read `populationOptions`.
+- **U3.** For an isolated plugin, `populationOptions` comes from the child's `ready` message, already wired in `src/plugins/identity.ts`. Never import an isolated plugin in process to read it. When `pr-rla/http` is exported, add it to `SDK_MODULES` in `src/plugins/host.ts`. `head`, `headSha` and `Actor.id` cross IPC as data. Expect a small conflict where both branches add fields to the Gitea definition.
+- **U4.** An external ledger through `openLedger` or a command now needs a lock entry; tests can use `test/helpers/plugin-lock.ts`. Wire `runLedgerConformance` into `src/plugins/check.ts` (ledgers report "not run" and exit 1 today). An isolated ledger has no fs-write: a Jira ledger that only speaks HTTP is fine. `readHistory` is proxied. The Jira example's `prrla-basic:JIRA_EMAIL:JIRA_TOKEN` works through the host when both are locked credentials for its site; see the credential open question above for options-dependent hosts.
+- **U5.** In read-only mode an isolated ledger's writes are refused before they reach the child (tested). `pr-rla-mcp` should honour `PR_RLA_PLUGINS`.
+- **U10.** `docs/security-model.md` holds the plugin section; extend it with the rest of the model. `engines` is already `>=22.13`.
+
+## Bolt 5 (U3): SDK carry-overs (2026-11-04)
+
+*Appended from `docs/build-notes/u3.md` (kept there too) at the wave-1 integration. Written on its own branch; "Integration: wave 1" below records what changed when it met U2b and U4.*
+
+Goal (delivery-plan.md, bolt 5): FR7.1–FR7.7. The registered bot list, the pinned head, `Actor.id`, `reviewGranularity`, `pr-rla/http` and `landedVia` with `direct_push_via_merge`, all optional within provider API version 1, implemented by every built-in where the SCM provides them, with four new kit checks that every built-in and the Gitea plugin pass.
+
+Built on branch `bolt/u3-sdk-carry-overs` from the end of bolt 2 (`54e1628`), in parallel with U4 (master) and U2b. These notes are kept out of `BUILD-NOTES.md` so the branches merge cleanly.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR7.1 `selector.bots`, applied by the core to every actor on every provider; on recorded gitlab-org/cli data `bots: ["gitlab-bot"]` moves exactly 4 MRs into the stratum | met | `gitlab-provider.test.ts › … October 2026`: no-human-review 0 → 4 (!4191, !4247, !4251, !4253), also as `id:1786152`; `e2e-u3.test.ts`: the list is signed into the registration and re-applied by `verify`; the demo below |
+| FR7.2 pinned head: `headSha` in the manifest, `ListChangesRequest.head` in `verify`; a synthetic commit pushed after freeze no longer fails check 5 | met | `e2e-gitlab.test.ts › FR7.2`: a merge pushed on 10-25 brings in a commit dated 09-30; from the branch's head it is a direct push the manifest lacks, `verify` walks the frozen head and check 5 passes (`population 400/400 match`); per provider, `walks from request.head` tests; kit check `pinned-head` |
+| FR7.3 `Actor.id`; `id:<n>` selectors; a renamed user stays the same actor in `verify` | met | `e2e-u3.test.ts › FR7.3`: `claude[bot]` renamed after freeze to `claude-code[bot]` with the same id: check 5 PASS with `1 account(s) renamed since freeze, matched by account id: claude[bot] → claude-code[bot]`; the same rename without ids FAILs check 5 |
+| FR7.4 one review object defined in the SDK; `reviewGranularity` declared per provider and recorded in the manifest; the kit's check passes on every built-in | met | `Review` JSDoc in `src/sdk/provider.ts`; GitHub `submission`, GitLab and both Bitbuckets `first-comment-per-user`, json-file default; the manifest's `provider.reviewGranularity` (`e2e-gitlab.test.ts`); `review-granularity` passes on all five built-ins and the Gitea plugin |
+| FR7.5 `pr-rla/http` with its own version constant | met | `package.json` export `./http`; `HTTP_HELPER_VERSION = 1`; `createJsonClient` (`sdk-u3.test.ts`); in the clean clone `import('pr-rla/http')` → `HTTP_HELPER_VERSION 1 function` |
+| FR7.6 `ChangeRecord.landedVia` and `direct_push_via_merge: include \| exclude` (default `include`), named on the certificate; on recorded bamboo-specs data `exclude` removes the release-branch commits | met | `bitbucket-cloud-provider.test.ts › … 2026-10-06`: 5 direct pushes, 4 with `landedVia` = Tardigrade's merge `a9f178ae03`; `exclude` leaves only the merge; the status/verify certificate line says `direct pushes via a pushed merge included\|excluded` (`selector-u3.test.ts`) |
+| FR7.7 every new SDK field optional, within API version 1; the phase-2 providers pass unchanged | met | `conformance.test.ts › a phase-2 provider (no headSha, no ids) still passes`; the template example and the Gitea plugin's own node:test pass unchanged; `sdk-u3.test.ts` |
+| Every built-in and the Gitea plugin pass the extended kit | met | GitHub, GitLab, Bitbucket Cloud, Data Center: synthetic fixtures plus a late-push fixture, none of the 17 checks skipped; recorded gh-aw, gitlab-org/cli (11-02 and October), freedesktop, bamboo-specs (10-27 and 10-06), Codeberg; json-file with its definition (the checks it cannot exercise skip and say why) |
+| `populationOptions` (functional-design §U3 "Added"): a mismatch FAILs check 5 | met | `e2e-u3.test.ts › populationOptions`: a different `scope` FAILs check 5 and `freeze` refuses it; a different `page_size` does not |
+| Kit check `revoked-approval` | met | every synthetic fixture (erin unapproved, carol reset by a push), and !4290's withdrawn `gitlab-bot` approval on recorded gitlab-org/cli |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| SDK: `Actor.id`, `ChangeRecord.landedVia`, `ListChangesRequest.head`, `ListChangesResult.headSha`, definition `reviewGranularity`, `populationOptions`, `reportsLandedVia`, validators, the "one review object" definition | `src/sdk/provider.ts` |
+| `pr-rla/http`: the phase-2 `HttpClient` moved here; `createJsonClient`, `HTTP_HELPER_VERSION`; `src/providers/http.ts` re-exports it | `src/sdk/http.ts`, `package.json` |
+| Core: `normalizeBotList`, `actorMatches` (`id:<n>`, aliases), `applyBotList`, the `exclude` step, renamed-account aliases from the manifest | `src/core/selector.ts`, `src/core/population.ts` |
+| `freeze`: records `headSha` and the definition's `reviewGranularity`, prints the `landedVia` diagnostic, refuses changed population options; `register`: the landedVia warning; the certificate line names the bot list and the via-merge choice | `src/commands/{freeze,register,status,verify}.ts`, `src/provider-traits.ts` |
+| `verify` check 5: walks the frozen head, aliases renamed accounts by id, FAILs on changed population options, says when the provider does not pin history | `src/core/verify.ts` |
+| `landedVia` for the built-ins (pure) | `src/providers/landed-via.ts` |
+| Built-ins: GitHub (`databaseId`), GitLab (user id from GraphQL and REST), Bitbucket Cloud (`uuid`), Data Center (user id), each with the pinned head, `landedVia` and the three definition fields | `src/providers/*` |
+| Gitea plugin: user ids, the pinned head, `reviewGranularity`, `populationOptions` | `examples/providers/gitea/index.mjs` |
+| Kit: `pinned-head`, `actor-ids`, `review-granularity`, `revoked-approval`; `ConformanceOptions.definition`; fixture `pinnedHead`; expected actors compared on the fields they name | `src/testing/conformance.ts` |
+| Fixtures: gh-aw 11-02, gitlab-org/cli 11-02 and freedesktop re-recorded; gitlab-org/cli October and bamboo-specs 10-06 new | `test/fixtures/` |
+| Demo | `scripts/demo-sdk-carry-overs.mjs` |
+| Tests: 45 new (308 → 353) | `sdk-u3` 7, `selector-u3` 10, `e2e-u3` 8, `conformance` 6, and provider/e2e tests |
+
+### Live calls (all read-only, all 2026-11-04)
+
+| What | Requests | Time (UTC) | Why |
+|---|---|---|---|
+| GitHub gh-aw 2026-11-02, re-recorded twice, token from `gh auth token` | 16 + 16 | 00:05:09, 00:06:30 | the GraphQL queries now ask for `databaseId`. The first recording carried a personal commit e-mail (commits made after the original recording); the recorder now scrubs non-noreply addresses and the second recording replaced it |
+| GitLab gitlab-org/cli 2026-11-02, no token | 24 | 00:11:52 | GraphQL users now carry `id` |
+| GitLab gitlab.freedesktop.org xorg/xserver 2026-10-05..07, no token | 12 | 00:12:01 | same |
+| Bitbucket Cloud atlassian/bamboo-specs 2026-10-06, no token | 38 | 00:14:53–00:15:09 | new: the pushed release merge (FR7.6). No 429 |
+| GitLab gitlab-org/cli October 2026 through `freeze --dry-run` (`record-fixture.mjs --cli`), no token | 462 | 00:15:33–00:18:21 | new: the bots demo (FR7.1) |
+| `curl` of `/approvals` and the MR for !4191, !4247, !4251, !4253 | 8 | 00:19:14 | independent check: each was approved only by GitLabDuo and gitlab-bot, merged into main by jay_mccure |
+
+Each re-recording was replayed through the bolt-2 code (a `git archive` of `54e1628` built in the scratchpad) and the new code: normalized without ids, the records are byte-identical (38, 9 and 2 changes); only `headSha` is new. gh-aw PR #73884's merge commit still has no `associatedPullRequests`, so that regression case survives. Every fixture was grepped for e-mail addresses: only `user-<hash>@example.invalid`, GitHub noreply addresses and Bitbucket's bot address (kept for bot detection, as before).
+
+### Verified (command → output)
+
+From a fresh `git clone` of the branch at `53fe2f2`, 2026-11-04T00:29Z, Node 22.23.2:
+
+```
+npm ci                                     → added 60 packages … found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 30 passed (30) · Tests 353 passed (353)
+npm --prefix examples/providers/gitea ci   → added 1 package … found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+- 353 tests = the 308 of bolt 2 plus 45 new. None skipped. `npm test` makes no network call (the network-deny harness is unchanged; every new test replays recordings or uses fakes).
+- Each of the 15 code commits (everything before this note) was checked in the scratch clone: typecheck clean, and 315, 325, 325, 327, 330, 333, 334, 335, 336, 344, 351, 351, 351, 352 and 353 tests passing.
+
+**The demo** (`node scripts/demo-sdk-carry-overs.mjs`, offline, in the clean clone; trimmed):
+
+```
+1. gitlab-org/cli, October 2026 (recorded 2026-11-04): GitLab reports gitlab-bot as bot: false
+   selector.bots: []
+     no recorded human review................ 0
+     N = 0
+   selector.bots: ["gitlab-bot"]
+     actors re-labelled as bot by selector... 164
+     no recorded human review................ 4 (merged by: 4 human accounts, 0 bot, 0 unknown/direct push)
+     N = 4: #4191, #4247, #4251, #4253
+   selector.bots: ["gitlab-bot"], max_changed_lines: 200 (the example's stratum)
+     no recorded human review................ 4
+     <= 200 changed lines.................... 3
+     N = 3: #4191, #4251, #4253
+
+2. atlassian/bamboo-specs, 2026-10-06 (recorded 2026-11-04): Tardigrade's merge of the 13.0 branch, pushed to master
+   direct_push_via_merge: include (the default)
+     N = 5: @4f1f0c51…, @735553ca…, @78611696…, @9470b730…, @a9f178ae…
+     diagnostic: direct pushes that arrived through merge a9f178ae03b6… (a non-first parent): 4
+   direct_push_via_merge: exclude
+     excluding pushes via a pushed merge..... 1
+     N = 1: @a9f178ae03b65a3190e4eb98f9454c7fcad71c91
+```
+
+### Deviations from the design, and why
+
+1. **`reportsLandedVia`, a definition field the contract does not list.** `register` must warn "provider X does not report landedVia" before any change is listed, so only the definition can say it. It is optional, within API version 1, and owned by U3.
+2. **`landedVia` names the outermost pushed merge, and only a merge that is itself a direct push in the population.** For each direct-push merge M, the commits it brought in are those reachable from its non-first parents and not from its first parent, over the history the provider walked. A commit brought in through nested merges (a release branch merged into another, then pushed) names the one no other of them brought in; on bamboo-specs that is Tardigrade's merge for all four. A PR's merge commit never names anything (its commits belong to the PR). Limitation, added to the provider's limitations whenever it reports `landedVia`: without push history a `git pull` merge pushed to the default branch ("foxtrot") is indistinguishable, so the mainline commits behind its second parent are reported as arriving through it, and `exclude` would drop them. gh-aw has 8 such merges in Q3; its registration uses `include`.
+3. **Re-labelling keeps the login.** The design says `applyBotList` rewrites `kind`; it does not add the `[bot]` suffix, so `authors` entries and the manifest keep matching the provider's login. It runs inside `applySelector` (not before it in `buildPopulation`), so every caller gets it and the funnel step comes with it. The step counts actor entries (author, merger, review), and appears only when the list is non-empty; the `exclude` step only when `exclude` is set. So phase-2 funnels are unchanged.
+4. **Matching.** `id:<v>` entries match `Actor.id` exactly and never a login; logins stay case-insensitive and exact (a bare login does not match its `[bot]` form, as before). `authors` gains `id:<v>` too. Bot-list entries are trimmed, de-duplicated (logins case-insensitively) and sorted.
+5. **Renamed accounts are aliased from the manifest.** `verify` maps each account id in the frozen changes to the login it had then, and a selector login matches an actor whose id maps to it. So the rename case of FR7.3 holds for every change in the manifest. Not covered: an account renamed after freeze whose changes were *excluded* by a login-based rule (say `merged_by: human` with that account in `bots`); `id:<n>` entries cover that.
+6. **Check 5 and the pinned head.** When the manifest has a `headSha` and the provider walks elsewhere (or reports none), check 5 adds the contract's detail and becomes WARN. When the manifest has no head (a provider that never pinned, such as json-file), the detail is added but the status is unchanged, so json-file audits still read 7/7 PASS. A pinned walk adds `history walked from the frozen head …`.
+7. **Population options are compared only when the options differ.** A registration made before U3 hashed no population options, so its `populationOptionsSha256` differs from today's even for identical options. Check 5 FAILs (and `freeze` refuses) only when both the full options hash and the population-options hash differ. The remaining edge: a pre-U3 registration whose verifier also changed a non-population option would FAIL. No such registration exists (the gh-aw one is still to be made).
+8. **Kit.**
+   - The definition reaches the kit as a third argument, `runProviderConformance(provider, fixtures, { definition })`, because a factory returns instances.
+   - `actor-ids` exempts a direct push's author (a git identity the SCM links to an account only sometimes) and `ghost`.
+   - `pinnedHead` is a fixture field. Without it, a provider that reports `headSha` is re-run from that head and must give the same head and records, so recorded fixtures exercise the check too.
+   - The `actors` and `reviewers` expectations now compare login and kind, and the id only when the expectation names one (its own commit, first, so providers adding ids keep passing old fixtures).
+   - The kit's own "none skipped" test now runs a fake that reports ids and a head, and a new test shows a phase-2 provider passing with two skips.
+9. **`createJsonClient`** takes the contract's `{ base, headers, fetch, sleep, log, maxRetries }` plus the built-ins' `name`, `rateLimitHint` and `maxBlindRateLimitRetries`, and returns the same `HttpClient` the built-ins use. Moving it into the self-contained SDK meant detecting broker errors by shape (`code`, `host`, `next`) instead of `instanceof BrokerError`. The Gitea plugin still carries its own client: switching it was not needed, and U2b edits the same file.
+10. **The Gitea plugin reports no `landedVia`** (the helper is internal to the built-ins, and the plugin imports only `pr-rla/provider`). `register` warns if it is paired with `exclude`. Its `bots` option stays: the registered list is applied on top, and `bots` is now one of its population options.
+11. **Per-provider id choices.** GitHub: `databaseId` on `User`, `Bot`, `Mannequin` and `Organization` actors (an `EnterpriseUserAccount` would have none). GitLab: the numeric id, from REST or the end of the GraphQL gid. Bitbucket Cloud: `uuid`, through a new `account()`, so the exported `normalizeUser` and its tests are unchanged; the Gitea plugin does the same. Data Center: the numeric id (from the documented shape).
+12. **Population options per built-in:** GitHub `base_url`, `api_url`, `graphql_url`; GitLab `base_url`, `listing_slack_hours`; Bitbucket Cloud `api_url`, `listing_slack_hours`; Data Center `base_url`; Gitea `base_url`, `bots`; json-file none (its `path` can differ between a freezer and a verifier with the same file).
+13. **Two existing assertions were updated, both to values U3 now fills.** `e2e-gitlab.test.ts` pinned the manifest's provider identity with bolt 1's placeholders (`reviewGranularity: "submission"`, `populationOptionsSha256` over `{}`); it now expects `first-comment-per-user` and the hash over `base_url`, and also checks `headSha`. The GitLab note-pagination test's expected review author now carries its id. No assertion was loosened.
+14. **CLI-mode recordings and the provider's clock.** `record-fixture.mjs --cli` stamps `recordedAt` when the script starts, but GitLab re-scans its listing from its own walk start minus 60 s. Replays derive that clock from the recording (`recordedWalkClock` in `test/helpers/replay-fetch.ts`).
+15. **The October GitLab fixture is 2.0 MB** (462 exchanges, a whole month). It is the data the definition of done names.
+
+### Findings
+
+- **The October population of commits moved, the changes did not.** Phase 2 counted 414 default-branch commits dated in October; on 2026-11-04 there are 415, all linked to merged MRs, with the same 205 MRs. A commit dated in October reached `main` later through an MR. It is attributed to that MR, so it is not a direct push. This is the drift the pinned head guards against when such a commit is *not* claimed.
+- **gitlab-bot is account 1786152 and appears 164 times** as an actor in October (approvals, withdrawn approvals, comments), always `bot: false`.
+- **The 2026-10-06 bamboo-specs merges are empty:** all five direct pushes have 0 changed lines in Bitbucket's diffstat (`release/empty/merge_…` branches). Under `include` the stratum gains 5 changes with nothing to review.
+- The re-recorded GitLab fixtures needed fewer requests (24 and 12) than the originals (28 and 19), with identical records: the current walk claimed every commit from the listing and read no MR commit lists.
+
+### Unverified
+
+- `landedVia` on real GitHub, GitLab and Data Center data: only Bitbucket Cloud has a recorded pushed merge; the others are synthetic.
+- A real account rename on any SCM (the FR7.3 test renames a login in a json-file export).
+- `databaseId` on GitHub Enterprise Server; Data Center's user `id` against a live server (as before).
+- The Gitea plugin through U2b's isolated host (not in this branch).
+
+### Shared files touched (for merging with U4 and U2b)
+
+- `package.json`: one export added (`./http`).
+- `src/testing/index.ts`: one type added to the export list (`ConformanceOptions`).
+- `README.md`: one bullet (`pr-rla/http`), one clause (the kit's U3 checks), one sentence (registering bots).
+- `src/config.ts`: two lines in the `init` template's selector.
+- `examples/providers/gitea/index.mjs`: `account()`, the pinned head, and three lines in the definition (near `description`, where U2b may add `hosts` and `credentials`).
+- `src/sdk/provider.ts`, `src/sdk/http.ts`, `src/providers/http.ts` (now a re-export), `src/testing/conformance.ts`.
+- `src/commands/{freeze,register,status,verify}.ts` and `src/core/{selector,population,verify}.ts`.
+- Test helpers: `fake-github.ts`, `fake-gitlab.ts`, `fake-bitbucket-dc.ts`, `scm-scenario.ts` (the `latePush` variant), `replay-fetch.ts`.
+- Not touched: `src/registry.ts` (the traits live in the new `src/provider-traits.ts`, which reads the definition in process: U2b's isolated host must supply `reviewGranularity`, `populationOptions` and `reportsLandedVia` from the child, as its `ready` message is designed to), `src/api/`, `src/net/`, `src/ledgers/`, `BUILD-NOTES.md`.
+
+### What U5 and U8 need to know
+
+**U5 (audit API, `draw-context`, MCP):**
+- `describeChange` is U5's: nothing in this branch implements it. `ScmProvider` has no `describeChange` member yet; add it as optional, as contracts §1 shows.
+- Every built-in actor now carries `Actor.id` (direct-push git identities and `ghost` excepted). Use it to match reviewers and to show stable identities; logins remain the display value. `manifestAliases(changes)` gives id → frozen login.
+- The manifest's `repos[0].headSha` is the pinned head; report it in `status`/`verify` results. `Population` now has `headSha` and `viaMerge`, and `freeze --dry-run --json` prints both: `freeze_preview` can pass them through.
+- The certificate line comes from `statusLine(…, { selector })` and names the bot list and the via-merge choice; the API's status result should carry the same.
+- `providerTraits(spec, dir)` reads the definition fields; it loads the definition in process.
+
+**U8 (org-pooled freeze):**
+- `ListChangesRequest.head` is per repository: record each repo's `headSha` in `manifest.repos[]` and pass each back in `verify`.
+- `reviewGranularity` is per provider; the design's rule that a pooled `unreviewed: no-review` across providers of different granularity is refused at `register` is not built (single-repo audits have one provider). With one provider per pool (RQ15) it holds trivially.
+- `selector.bots` is applied by the core across the whole pooled population; prefer `id:<n>` entries there, since logins are not unique across hosts.
+- `landedViaMerges` (`src/providers/landed-via.ts`) is pure and costs one reachability walk per direct-push merge; a large org with many pushed merges will feel it.
+
+## Integration: wave 1 (U2b + U3 + U4, 2026-11-04)
+
+Branch `integrate/wave1`, from the end of bolt 2 (`54e1628`). U2b (`bolt/u2b-plugin-host`) and U3 (`bolt/u3-sdk-carry-overs`) were built in parallel from that commit and U4 on `master`; this section is what it took to make them one program. Neither bolt branch was changed.
+
+### Merges and conflicts
+
+| Commit | What | Conflicts, and how they were resolved (both units' behaviour kept) |
+|---|---|---|
+| `c8e33ce` | `merge --no-ff bolt/u2b-plugin-host` | none |
+| `8a7e0ff` | `merge --no-ff bolt/u3-sdk-carry-overs` | `examples/providers/gitea/index.mjs`: U2b's `hosts` and `credentials`, then U3's `reviewGranularity` and `populationOptions`. `src/commands/freeze.ts`: U2b's `pluginIdentity(…, policy)` and U3's `providerTraits`. `docs/writing-a-provider.md`: U3's `pr-rla/http` paragraph, then U2b's broker paragraph. `src/commands/verify.ts` merged textually but imported `pluginIdentity` twice; one kept. `README.md`, `package.json`, `package-lock.json`, `src/config.ts`, `src/cli.ts`, `src/commands/{register,context}.ts` and the test helpers merged cleanly |
+| `facfb8f` | `merge --no-ff master` (U4, at `7d044f8`) | `README.md`: U3's provider-kit sentence and `pr-rla/http`, with U4's ledger-kit bullet. `src/api/context.ts`: U2b's split into `openBuiltinLedger` / `openExternalLedger`, carrying U4's `reviewers`, the ledger's `sleep`, `LEDGER_BUDGET_FAMILY` and (until `c021c4d`) its empty-hosts credential rule; external ledgers get `reviewers` and `sleep` through the host's `create`. `src/commands/register.ts`: U2b's policy and trust lines, U3's landedVia warning, U4's `preflightLedger`, `verdicts` and reviewers line. `src/commands/verify.ts`: the loaded identity computed once, with U4's `checkpoints`, `checkpointProblems` and `ledgerSkipped` |
+
+The merge commits typecheck; `8a7e0ff` and `facfb8f` each left tests failing on the integration gaps below, fixed in the commits that follow them.
+
+### Gaps fixed
+
+1. **Provider traits across the host** (`1f1af6c`). U3's `providerTraits` imported the provider in process to read `reviewGranularity`, `reportsLandedVia` and `populationOptions`; with U2b that ran an isolated plugin in pr-rla's own process, with the real environment.
+   - `describe` (`pr-rla/ipc/v1`) also returns those three fields, additively. The parent validates them with the SDK's own `providerTraitProblems`, and now validates `ready`'s `reviewGranularity` and `populationOptions` at load too.
+   - `externalPluginInfo` reads them through `describe` (`trust: full` reads the imported definition). `pluginIdentity` and `providerTraits` both use it, so the registration, the manifest's `reviewGranularity` and register's landedVia warning come from one place.
+   - `plugin check` hands the kit the traits the child described (so `review-granularity` runs through the host), and reads U3's `actorIds`, `revokedApprovals` and `reviewGranularity` from a recorded fixture.
+   - `pr-rla/http` is mapped to the host's own SDK module in the child, as U2b's notes asked.
+   - Shown by `wave1-integration.test.ts`: the Gitea plugin's traits read isolated (`submission`, `["base_url","bots"]`, no landedVia); a plugin that throws when imported outside the host goes through `register`, `freeze` (manifest `reviewGranularity: first-comment-per-user`) and `verify` (check 5 PASS); a child reporting `reviewGranularity: "per-comment"` is refused `PLUGIN_INVALID`.
+2. **The plugin policy everywhere** (`1f1af6c`, `8f187ec`). U3's calls to `pluginIdentity` in `freeze` and `verify`, and U4's in `checkpoint`, passed no policy. With `--plugins builtin-only` they would have started an isolated plugin's child, or imported a `trust: full` one, before anything refused. Every command now passes `auditContextFor(ctx).plugins`.
+3. **Credentials for self-hosted isolated plugins** (`a4293a3`). SDK v1's static list refused an isolated self-hosted Gitea run with a token. Within provider API version 1, a credential may name the option holding the service's URL: `{ env: "GITEA_TOKEN", hosts: ["codeberg.org"], hostFromOption: "base_url" }`.
+   - pr-rla computes the host from the option, not from the plugin's code (`credentialGrants`, `src/plugins/host.ts`): the URL's host when the option is set and is `https:`; no host for any other value, so a token is refused unsent rather than sent in clear text; the declared `hosts` without the option.
+   - `plugin add` / `plugin lock` record the computed hosts and `hostFromOption` in the lock entry and print `GITEA_TOKEN -> gitea.example.com (the host of option base_url)`. Every load recomputes them and refuses a host the lock does not grant, so a changed `base_url` needs `plugin lock`. The broker still swaps the placeholder only on the locked hosts.
+   - The registration commits to the option through `optionsSha256`, and for Gitea through `populationOptionsSha256` too (`base_url` is a population option), so a verifier with another `base_url` FAILs check 5 before it could send the token anywhere.
+   - Shown: an isolated Gitea at forge.example.com receives `token <secret>` on every request there; without `base_url` the grant stays codeberg.org; a changed `base_url` is refused at load naming the credential; an `http://` `base_url` grants no host and nothing is sent.
+4. **External ledgers through the host** (`c021c4d`). U4 read an external ledger's definition in process in three places: `register`'s preflight (`hosts`, `writePaths`, `create()`, `provenance`), `record` (`provenance`) and `verify` (`hosts`, for the offline skip).
+   - `describe` also returns a ledger's `provenance`; the new `ledgerTraits` (`src/ledger-traits.ts`) gives `record` and `verify` the name, provenance and hosts (an external ledger's locked hosts) without importing it.
+   - `register`'s preflight runs in the ledger's host: lock and files checked, `hosts` and `writePaths` evaluated and compared with the lock, `create()` run in the child with a fetch that refuses. Lock refusals keep their code (`NOT_LOCKED` names `plugin add`); what the ledger throws is reported as U4 reported it.
+   - **The Jira ledger writes `ledger-index.json`, and an isolated child cannot write files.** `LedgerContext.index` (optional, `ledgerApiVersion` 1) is that one JSON document: pr-rla reads and writes `<windowDir>/ledger-index.json` for the ledger, atomically, over two messages added within `pr-rla/ipc/v1` (`index`, `indexResult`); writes are refused in a read-only context. The Jira example uses it when offered and keeps its own file code otherwise, so its package test is unchanged.
+   - Shown: the Jira example passes `runLedgerConformance` with every ledger instance in its own host child (both recorded hibernate fixtures and the synthetic ones; all 13 checks its package test requires ran); isolated, `JIRA_EMAIL`/`JIRA_TOKEN` reach it as placeholders, the broker builds Basic auth (`prrla-basic:`) for the `base_url` host only, pr-rla writes its index, and an undeclared host is refused; a ledger that throws when imported outside the host goes through the preflight, `record` and `verify --offline` (check 7 SKIP naming its host); an options error comes back from the child; an unlocked ledger is refused naming `plugin add`.
+5. **One credential mechanism** (`c021c4d`). U4 let a ledger credential with `hosts: []` follow `hosts(options)`, in process only. The Jira example now declares `hostFromOption: "base_url"` for both credentials, and built-in and `trust: full` ledgers resolve credentials with the same `credentialGrants` as providers. An empty `hosts` without `hostFromOption` means no host again, as the broker always enforced it.
+6. **HTTP 204 through a JSON check** (`73fa7fb`, U4 finding 4). `checkJsonBody` rebuilt every checked response with a string body, and `new Response("", { status: 204 })` throws. A 101, 103, 204, 205 or 304 now passes through with no body and no check, in the broker and the kit's harness. Test: `broker.test.ts › a 204, 205 or 304 to a request with a JSON check passes through`.
+7. **Reviewers by `id:`, as U3 matches actors** (`259d2bb`). U4's `verdictIneligibility` already matched `id:<account id>` against the event's `provenance.actorId`, which is the tracker event's `Actor.id` (GitHub's numeric id, GitLab's user id, Jira's accountId), the same ids U3's providers report. It also let a bare entry match an id; U3's rule (`actorMatches`) is that a bare entry is a login, never an id. They now agree, case by case (`wave1-integration.test.ts`, 6 cases, each checked against `actorMatches` too). No U4 test relied on the bare-id match: Jira's reviewers are its accountIds, which are also its logins.
+
+### Registration identity and check 5: U3 and U2b agree
+
+- An external plugin's `PluginIdentity` takes `name`, `source`, `version`, `integrity` (treeSha256) and `trust` from its re-verified lock entry (U2b), and `optionsSha256` and `populationOptionsSha256` from the same `optionsDigest` U3 uses for built-ins, over the keys the definition lists, now read through `describe`. A U2b-era registration hashed the keys from `ready`, which are the same, so U3's pre-U3 compatibility rule (deviation 7) is unaffected.
+- The manifest's provider is that identity plus `apiVersion` and the `reviewGranularity` from the same traits read.
+- Check 5 evaluates one loaded identity: U3's FAIL (both option hashes differ) and U2b's WARN (an external provider whose name, source, version, integrity, options hash or trust differs). A FAIL stays FAIL; the WARN only lifts a PASS. This is draft 02 Q3: other options are a WARN, population options a FAIL.
+- **One U3 assertion changed for it.** `e2e-u3.test.ts` expected PASS when a non-population option (`page_size`) of a path plugin changes. With U2b that plugin is external and must be locked, and the design makes the change a WARN, so the test now expects WARN, no FAIL detail, and the WARN line naming `optionsSha256`. Its FAIL and freeze-refusal cases are unchanged.
+
+### Decisions
+
+- **`describe`, not `ready`, carries the traits**, as the brief asked: one call per open that already answers "what does this definition ask for with these options". `ready` keeps U2b's fields, and they are now validated.
+- **`hostFromOption` over the alternatives** U2b listed (a `--credential ENV=host` grant at `plugin add`, or `credentials(options)` evaluated by the plugin) and U4's `hosts: []` rule: the host comes from configuration the user wrote, is computed by pr-rla, is a single `https:` host, and is recorded in the lock and bound by the registration's options hash. Plugin code never decides where a credential goes.
+- **A parent-kept index rather than fs-write for ledgers.** Granting an isolated ledger write access to `audit/<window>/` would break the security model's "cannot write files". One parent-written JSON document keeps it true.
+- **`plugin check` still does not run the ledger kit.** Its fixtures are built by code (fake trackers, published issues), and `plugin check` replays recorded data only; the message now says so, and the command still exits 1 for a ledger.
+
+### Tests
+
+468 = 308 (bolt 2) + 37 (U2b) + 45 (U3) + 59 (U4) + 19 (this integration: 18 in `test/wave1-integration.test.ts`, 1 in `broker.test.ts`). 467 pass; 1 is skipped: U2b's `UNVERIFIED` RK-02 placeholder, skipped because the RK-02 test ran on Node 26.8.2 found on PATH.
+
+Existing tests changed, none weakened:
+- `e2e-u3.test.ts › populationOptions` (3): the path plugin is locked (`trust: full`, since it reads the audit directory), and the WARN above.
+- `plugin-host.test.ts › the Gitea example … through the host` (2): the recorded run's skip list adds `revoked-approval` (U3's check, with nothing to check: the recording's one stale Codeberg approval still counts) and asserts `review-granularity` ran; the synthetic run adds U3's expectations, the traits from `describe` and a pinned-head fixture, and still asserts no skips.
+- `jira-example.test.ts` (2): they opened the example unlocked from the repo root; they now lock a copy in a temp audit directory with `trust: full`, as their titles say. Every assertion is unchanged.
+
+### Verified (command → output)
+
+From a fresh `git clone` of `integrate/wave1` at `8f187ec` (the last code commit; only this file changes after it), 2026-11-04T01:11Z, Node 22.23.2:
+
+```
+npm ci                                     → added 60 packages … found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 42 passed (42) · Tests 467 passed | 1 skipped (468)
+npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+node scripts/demo-plugin-host.mjs          → exit 0, output as in bolt 4's demo (the token reaches only the fake api.github.com)
+node scripts/demo-sdk-carry-overs.mjs      → exit 0; N = 0 → 4 (#4191, #4247, #4251, #4253) with bots: [gitlab-bot]; 5 → 1 with direct_push_via_merge: exclude
+node scripts/demo-ledgers.mjs              → exit 0; the relabel VERIFIED with check 7 WARN, the deleted issue FAILED check 7
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+- `node dist/cli.js plugin check ./examples/providers/gitea/index.mjs --offline` → `conformance PASS`, now with `pinned-head`, `actor-ids` and `review-granularity` ok through the host (`bot-detection` and `revoked-approval` skip, saying why), exit 0. In the scratch clone, `plugin add ../providers/gitea/index.mjs --yes` on the Codeberg example printed `credentials   GITEA_TOKEN -> codeberg.org (the host of option base_url)` and locked `{ env: GITEA_TOKEN, hosts: [codeberg.org], hostFromOption: base_url }`.
+- `npm test` makes no network call: the new tests use fake trackers, fake Gitea and recordings under the network-deny harness.
+- **One unexplained failure.** The very first `npm test` in the fresh clone reported 1 failed test; its output was not kept. It did not recur in 18 further full runs (sequential, with vitest's cache cleared, and in a second fresh clone). Two suites run concurrently once failed `timestamps-e2e.test.ts` with `ENOENT … .git/objects` in `cloneScenario` (bolt 1's helper copying a temp git repo), which looks like interference between the two runs. The plugin-host tests with short heartbeat limits (`heartbeatTimeoutMs: 500`) are the other candidates under load: the Jira-through-the-host test starts 67 short-lived children in about 7 s.
+
+### For the next units
+
+- **U5 (audit API, MCP).** A read-only context refuses `LedgerContext.index` writes, as it refuses the ledger's own. `pr-rla-mcp` should pass `PR_RLA_PLUGINS`. `ledgerTraits` and `providerTraits` read external plugins without importing isolated ones; use them, not `loadLedgerDefinition` / `loadProviderDefinition`, for anything configured.
+- **Still in process:** `scripts/record-fixture.mjs` and `examples/ledgers/jira/scripts/record.mjs` import the plugin they record, as before; they are developer tools, run on code you trust.
+- **`selector.bots` does not touch verdict eligibility.** A bot on a user account (U4 finding 3) is stopped only by `verdicts.reviewers`; with `Actor.id`, `id:<n>` entries are the robust form, since they survive a rename.
+- **IPC additions within `pr-rla/ipc/v1`** in this integration: `describe` returns `reviewGranularity`, `populationOptions`, `reportsLandedVia` and `provenance`; `create` passes a ledger's `reviewers`; `index` / `indexResult` carry `LedgerContext.index`.
