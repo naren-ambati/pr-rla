@@ -65,6 +65,23 @@ describe("the hand-off: a long call returns { jobId } and keeps running (FR3.5)"
     assert.deepEqual(s.writes(), []);
   });
 
+  it("freeze_preview and online verify hand off too; each job ends, done or failed, on reads only", async () => {
+    const slow = await mockGitHub({ delayMs: 300 });
+    const dir = onlineAudit(slow.url);
+    const s = await startServer({ roots: [dir], args: ["--handoff-ms", "150"] });
+    servers.push(s, { close: slow.close });
+    for (const [tool, args] of [["freeze_preview", {}], ["verify", { offline: false }]]) {
+      const h = body(await s.call(tool, args));
+      assert.match(h.jobId, new RegExp(`^${tool}:[0-9a-f]{24}$`));
+      const end = await waitForJob(s, h.jobId);
+      // The mock serves describeChange only, so the listing fails: the job reports it as an error, not a crash.
+      assert.ok(end.state === "failed" ? end.error.code === "PROVIDER_ERROR" : end.state === "done", JSON.stringify(end).slice(0, 300));
+    }
+    assert.deepEqual(slow.requests.filter((q) => !q.read), []);
+    assert.ok(slow.requests.some((q) => q.method === "POST" && q.url === "/api/graphql"), "GraphQL queries are reads");
+    assert.deepEqual(s.writes(), []);
+  });
+
   it("a call that finishes before the hand-off returns its result directly", async () => {
     const dir = copyAudit();
     const s = await startServer({ roots: [dir], args: ["--handoff-ms", "25000"] });
