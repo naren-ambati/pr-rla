@@ -1405,7 +1405,7 @@ Both paths are software (D7). Neither proves anything about hardware, which is t
 
 ### Verified (command → output)
 
-From a fresh `git clone` of the branch at `5dde207`, 2026-11-04T02:28:49Z, Node 22.23.2 (the commit after it changes one test file; the suite was re-run with it, with the examples installed: 577 passed, 2 skipped):
+From a fresh `git clone` of the branch at `3dbc93f` (the last code commit; only this file changes after it), 2026-11-04T02:49:07Z, Node 22.23.2:
 
 ```
 npm ci                                     → added 60 packages … found 0 vulnerabilities
@@ -1416,6 +1416,7 @@ npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
 npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
 npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
 npm --prefix examples/ledgers/jira test    → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+npm test, again with both examples installed → Test Files 48 passed (48) · Tests 577 passed | 2 skipped (579)
 node scripts/demo-presence.mjs             → exit 0 (below)
 node scripts/demo-{broker,ledgers,plugin-host,sdk-carry-overs}.mjs → exit 0
 npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
@@ -1423,7 +1424,7 @@ npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, d
 
 - 579 = 468 before (467 passed, 1 skipped) + 111 new. The second skipped test is the oracle's `UNVERIFIED` placeholder, skipped because ssh-keygen is installed.
 - The U9 test files also pass on Node 26.8.2 and 24.20.0 (116 passed, 1 skipped each).
-- Every commit of the bolt was checked in a scratch clone: typecheck clean and the suite passing at each (501, 552, 572, 576, then 577 passed).
+- Every code commit of the bolt was checked in a scratch clone: typecheck clean and the suite passing at each (501, 552, 572, 576, then 577 passed).
 - No LICENSE file; `"private": true, "license": "UNLICENSED"`. No dependency added.
 
 **The demo** (`node scripts/demo-presence.mjs`, offline, on the sk-dummy fixture; abridged):
