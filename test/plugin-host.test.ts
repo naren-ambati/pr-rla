@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../src/api/context.js";
+import { buildProgram } from "../src/cli.js";
 import { hostedProviderConformance, readRecordedFixture } from "../src/plugins/check.js";
 import { closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
 import { placeholderEnv, readGrants, resolvePlugin, verifyLocked } from "../src/plugins/lock.js";
@@ -161,6 +162,74 @@ describe("the hostile fixture plugin, contained (functional-design.md §U2b; tes
       });
     });
   }
+});
+
+describe("the hostile fixture's dependency names cannot widen its read grant (finding 3)", () => {
+  /** The hostile fixture in a temp audit repo, with `pkg` merged into its package.json and the repo's secrets beside it. */
+  function hostileWith(pkg: Record<string, unknown>, at?: string): string {
+    const dir = at ?? auditDirWith({});
+    cpSync(HOSTILE, join(dir, "plugins", "hostile"), { recursive: true });
+    const file = join(dir, "plugins", "hostile", "package.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), ...pkg }));
+    mkdirSync(join(dir, ".pr-rla"), { recursive: true });
+    writeFileSync(join(dir, ".pr-rla", "signing-key.pem"), "-----BEGIN PRIVATE KEY----- secret");
+    writeFileSync(join(dir, ".env"), "AWS_SECRET_ACCESS_KEY=aws-real-secret-do-not-leak");
+    return realpathSync(dir);
+  }
+  const refusal = async (dir: string) => {
+    try {
+      // Before the fix, this granted the child every file of the audit repo (the review's exp/drive-dep.mjs).
+      return { grants: readGrants(resolvePlugin(USE, dir)) };
+    } catch (e) {
+      return { code: (e as { code?: string }).code, message: (e as Error).message };
+    }
+  };
+
+  it("a name that is not an npm package name (\"../../..\") is refused before anything is granted", async () => {
+    const dir = hostileWith({ optionalDependencies: { "../../..": "*" } });
+    // As in the review's exp/audit: the audit repo has a package.json, so "../../.." resolved to the repo root.
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "audit", private: true }));
+    expect(await refusal(dir)).toEqual({ code: "PLUGIN_INVALID", message: `plugin ${USE}: its package.json names the dependency "../../..", which is not an npm package name; refusing it before anything is granted or run` });
+    for (const bad of ["a/../../..", "@scope/../x", ".hidden", "_private", "a/b"]) expect((await refusal(hostileWith({ dependencies: { [bad]: "*" } }))).code, bad).toBe("PLUGIN_INVALID");
+  });
+
+  it("a dependency installed as a symlink out of node_modules (here: to the audit repo) is refused", async () => {
+    const dir = hostileWith({ dependencies: { "evil-dep": "1.0.0" } });
+    mkdirSync(join(dir, "plugins", "hostile", "node_modules"));
+    symlinkSync("../../..", join(dir, "plugins", "hostile", "node_modules", "evil-dep"));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "audit", version: "1.0.0" }));
+    expect(await refusal(dir)).toEqual({ code: "TREE_ESCAPE", message: `plugin ${USE}: its dependency evil-dep resolves to ${dir}, which is not in a node_modules directory; refusing it before anything is granted or run` });
+  });
+
+  it("a dependency in a node_modules directory that holds the audit repo is refused", async () => {
+    const outer = realpathSync(mkdtempSync(join(tmpdir(), "prrla-outer-")));
+    const dep = join(outer, "node_modules", "evil-dep");
+    mkdirSync(join(dep, "audit"), { recursive: true });
+    writeFileSync(join(dep, "package.json"), JSON.stringify({ name: "evil-dep", version: "1.0.0" }));
+    const dir = hostileWith({ dependencies: { "evil-dep": "1.0.0" } }, join(dep, "audit"));
+    expect(await refusal(dir)).toEqual({ code: "TREE_ESCAPE", message: `plugin ${USE}: its dependency evil-dep resolves to ${dep}, which contains the audit directory ${dir}; refusing it before anything is granted or run` });
+  });
+
+  it("plugin check refuses it too, before it starts the plugin", async () => {
+    const dir = hostileWith({ optionalDependencies: { "../../..": "*" } });
+    const out: string[] = [];
+    let code = -1;
+    await buildProgram(() => ({ cwd: dir, env: {}, nowMs: () => 0, fetch: globalThis.fetch, out: (l) => out.push(l), err: (l) => out.push(`ERR ${l}`) }), (c) => (code = c)).parseAsync(["node", "pr-rla", "plugin", "check", USE, "--offline"]);
+    expect(code).toBe(1);
+    expect(out).toEqual([`ERR pr-rla: plugin ${USE}: its package.json names the dependency "../../..", which is not an npm package name; refusing it before anything is granted or run`, "ERR   next: a dependency must be name or @scope/name, installed in node_modules"]);
+  });
+
+  it("scoped and pnpm-style (symlinked inside node_modules) dependencies still resolve", async () => {
+    const dir = hostileWith({ dependencies: { "@acme/util": "1.0.0", "left-pad": "1.3.0" } });
+    const nm = join(dir, "plugins", "hostile", "node_modules");
+    mkdirSync(join(nm, "@acme", "util"), { recursive: true });
+    writeFileSync(join(nm, "@acme", "util", "package.json"), JSON.stringify({ name: "@acme/util", version: "1.0.0" }));
+    const store = join(nm, ".pnpm", "left-pad@1.3.0", "node_modules", "left-pad");
+    mkdirSync(store, { recursive: true });
+    writeFileSync(join(store, "package.json"), JSON.stringify({ name: "left-pad", version: "1.3.0" }));
+    symlinkSync(join(".pnpm", "left-pad@1.3.0", "node_modules", "left-pad"), join(nm, "left-pad"));
+    expect(resolvePlugin(USE, dir).deps.map((d) => `${d.name}@${d.version}`).sort()).toEqual(["@acme/util@1.0.0", "left-pad@1.3.0"]);
+  });
 });
 
 describe("the Gitea example passes the conformance kit through the host", () => {

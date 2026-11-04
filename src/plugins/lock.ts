@@ -205,7 +205,28 @@ export function auditRepoRoot(auditDir: string): string {
   }
 }
 
-/** Node's bare-specifier lookup: <dir>/node_modules/<name>, walking up. */
+/**
+ * An npm package name: `name` or `@scope/name`, URL-safe characters, not starting with `.` or `_`,
+ * at most 214 characters (uppercase allowed, as older packages have it). So no `..`, no `/` beyond
+ * the scope's, and nothing a path join could climb out of `node_modules` with.
+ */
+const NPM_NAME = /^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*\/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*$/;
+export const isNpmPackageName = (name: string): boolean => name.length > 0 && name.length <= 214 && NPM_NAME.test(name);
+
+/**
+ * Refuses a resolved package directory that is not an installed package: it must sit in a
+ * `node_modules` directory (as `node_modules/<name>` or `node_modules/@scope/<name>`, after symlinks),
+ * and must not contain the audit directory. Checked before anything is hashed, granted or run.
+ */
+function checkPackageDir(use: string, what: string, name: string, dir: string, auditDir: string): void {
+  const parent = dirname(dir);
+  const holder = name.startsWith("@") ? dirname(parent) : parent;
+  if (basename(holder) !== "node_modules" || (name.startsWith("@") && !basename(parent).startsWith("@")))
+    throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which is not in a node_modules directory; refusing it before anything is granted or run`, "TREE_ESCAPE", "install it with npm (npm ci --ignore-scripts); a linked or vendored copy outside node_modules is not a dependency pr-rla can pin");
+  if (isInside(auditDir, dir)) throw new PluginError(`plugin ${use}: ${what} ${name} resolves to ${dir}, which contains the audit directory ${auditDir}; refusing it before anything is granted or run`, "TREE_ESCAPE", "remove that dependency from the plugin");
+}
+
+/** Node's bare-specifier lookup: <dir>/node_modules/<name>, walking up. `name` must be an npm package name. */
 function findPackage(name: string, fromDir: string): { dir: string; installedAt: string } | null {
   for (let d = fromDir; ; d = dirname(d)) {
     const candidate = join(d, "node_modules", name);
@@ -274,19 +295,22 @@ function dependencyNames(pkg: PackageJson): { name: string; required: boolean }[
   return [...names].filter((n) => n !== "pr-rla").sort().map((name) => ({ name, required: keys(pkg.dependencies).includes(name) && !keys(pkg.optionalDependencies).includes(name) }));
 }
 
-function resolveDependencies(use: string, root: string, pkg: PackageJson | null): ResolvedDependency[] {
+function resolveDependencies(use: string, root: string, pkg: PackageJson | null, auditDir: string): ResolvedDependency[] {
   if (!pkg) return [];
   const out = new Map<string, ResolvedDependency>();
   const queue: { from: string; pkg: PackageJson; who: string }[] = [{ from: root, pkg, who: use }];
   while (queue.length) {
     const { from, pkg: p, who } = queue.shift()!;
+    const whose = who === use ? "its package.json" : `the package.json of its dependency ${who}`;
     for (const { name, required } of dependencyNames(p)) {
+      if (!isNpmPackageName(name)) throw new PluginError(`plugin ${use}: ${whose} names the dependency ${JSON.stringify(name)}, which is not an npm package name; refusing it before anything is granted or run`, "PLUGIN_INVALID", "a dependency must be name or @scope/name, installed in node_modules");
       const found = findPackage(name, from);
       if (!found) {
         if (required) throw new PluginError(`plugin ${use}: dependency ${name} of ${who} is not installed`, "PLUGIN_UNRESOLVED", "install the plugin's dependencies (npm ci --ignore-scripts)");
         continue;
       }
       if (out.has(found.dir) || found.dir === root) continue;
+      checkPackageDir(use, who === use ? "its dependency" : `the dependency (of ${who})`, name, found.dir, auditDir);
       const dp = readPackageJson(found.dir) ?? {};
       out.set(found.dir, { name, version: str(dp.version), dir: found.dir, pkg: dp });
       queue.push({ from: found.dir, pkg: dp, who: name });
@@ -305,8 +329,10 @@ function resolveDependencies(use: string, root: string, pkg: PackageJson | null)
 export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
   const dir = realpathSync(auditDir);
   if (!isPathSpec(use)) {
+    if (!isNpmPackageName(use)) throw new PluginError(`plugin ${JSON.stringify(use)} is neither a path (./…, ../…, /…, file:) nor an npm package name`, "PLUGIN_INVALID", "use the package's name, or a path relative to the audit directory");
     const found = findPackage(use, dir);
     if (!found) throw new PluginError(`cannot find package ${use} from ${dir}`, "PLUGIN_UNRESOLVED", `install it in the audit repo (npm install --save-exact ${use} --ignore-scripts), or use it by path`);
+    checkPackageDir(use, "package", use, found.dir, dir);
     const pkg = readPackageJson(found.dir) ?? {};
     const npm = npmLockEntry(use, found.installedAt);
     return {
@@ -316,7 +342,7 @@ export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
       root: found.dir,
       rootIsFile: false,
       pkg,
-      deps: resolveDependencies(use, found.dir, pkg),
+      deps: resolveDependencies(use, found.dir, pkg, dir),
       version: str(pkg.version),
       resolved: npm?.resolved ?? null,
       npm,
@@ -337,7 +363,7 @@ export function resolvePlugin(use: string, auditDir: string): ResolvedPlugin {
   }
   const rootIsFile = root === entry;
   const pkg = rootIsFile ? null : readPackageJson(root);
-  return { use, source: "path", entry, root, rootIsFile, pkg, deps: resolveDependencies(use, root, pkg), version: str(pkg?.version), resolved: `file:${toPosix(relative(dir, root)) || "."}`, npm: null };
+  return { use, source: "path", entry, root, rootIsFile, pkg, deps: resolveDependencies(use, root, pkg, dir), version: str(pkg?.version), resolved: `file:${toPosix(relative(dir, root)) || "."}`, npm: null };
 }
 
 // ---------------------------------------------------------------------------
