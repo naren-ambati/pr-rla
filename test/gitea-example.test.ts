@@ -96,6 +96,19 @@ describe("external Gitea/Forgejo plugin, loaded from .pr-rla.yml through the reg
     expect(r.changes.map((c) => c.id)).not.toContain(`gitea:${sc.repo}@${OID("P9a")}`);
   });
 
+  it("walks from request.head (FR7.2); Gitea user ids are Actor.id (FR7.3)", async () => {
+    const late = scmScenario({ latePush: true });
+    const p = await fromConfig(fakeGitea(late, { limit: 3 }).fetch);
+    const now = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["direct_push"] });
+    expect(now.headSha).toBe(OID("LM"));
+    expect(now.changes.map((c) => c.id)).toContain(x.late.id);
+    const frozen = await p.listChanges({ repo: late.repo, window: late.window, kinds: ["pull_request", "direct_push"], head: late.frozenHead });
+    expect(frozen.headSha).toBe(late.frozenHead);
+    expect(frozen.changes.map((c) => c.id).sort()).toEqual([...x.all].sort());
+    const rebase = frozen.changes.find((c) => c.id === x.ids.rebase)!;
+    expect([rebase.author, rebase.mergedBy, ...rebase.reviews.map((r) => r.author)].every((a) => a && /^-?\d+$/.test(a.id ?? ""))).toBe(true);
+  });
+
   it("also loads by package name (pr-rla-provider-gitea) from the audit repo's node_modules", async () => {
     const audit = mkdtempSync(join(tmpdir(), "prrla-gitea-pkg-"));
     mkdirSync(join(audit, "node_modules"));
