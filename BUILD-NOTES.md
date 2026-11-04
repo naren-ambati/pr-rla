@@ -2825,3 +2825,22 @@ A trial merge of this branch (`1a32174`) into `integrate/wave2` at `6b0ec01` (P3
   - `api-cli-contract` flow 2: P4 expects `verify --offline` to exit 1 (an uncommitted git-file ledger FAILs check 7); FAIL still wins over INCOMPLETE, so keep P4's 1 and re-check the other steps' codes.
 - **Files this round touched that P1, P3 or P4 also own:** `src/core/verify.ts` (check 5: one line passing `reviewHorizonFor`; check 7: only `checkTimestamps(..., "WARN")` for checkpoints, so their coverage keeps WARNing), `src/api/read/verify.ts` (`noteAccess` runs after P1's and P3's checks and only lowers a check to INCOMPLETE), `src/api/pool-list.ts` and `src/api/read/freeze-preview.ts` (the review horizon), `src/api/write/register.ts` (`publicKeyPem` in the record; the label note), `src/net/broker.ts` (`stats.denied`, `stats.answered`), `src/plugins/open.ts` and `src/api/context.ts` (credential standing).
 - **Every registration's digest changes** (it names its key), so anything a test or fixture pinned to a registration's sha256, or to draws, moves; P4's verdict payload v2 names the manifest and the beacon, which this round does not change.
+
+### Verified (command → output)
+
+From fresh `git clone`s of `fix/p2-time-b` at `e450463` (the last code and test commit; only this section comes after it), 2026-11-04T10:04Z to 10:14Z, Node 22.23.2, OpenSSL 3.6.4, three runs in a row, each the whole command, every step exit 0:
+
+```
+npm ci                                       → found 0 vulnerabilities
+npm run build                                → exit 0
+npm run typecheck                            → exit 0 (both tsconfigs)
+npm test                                     → Test Files 85 passed (85) · Tests 1269 passed (1269)
+npm --prefix packages/pr-rla-mcp ci && test  → # pass 59 · # fail 0
+npm --prefix examples/providers/gitea ci && test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci && test    → # pass 1 · # fail 0
+node scripts/demo-{broker,ledgers,plugin-host,presence,sdk-carry-overs}.mjs, packages/pr-rla-mcp/scripts/demo-draw-context.mjs → exit 0
+```
+
+- An earlier set of three runs, at `3110a10`, had run 2 fail on `e2e › one failure …` (the random-key draws above); `e450463` fixed it, and the three runs above followed it.
+- The ledgers demo now ends `INCOMPLETE … (exit 6)` for the relabel fixture (its audit has no timestamp authority) and still `FAILED: check 7 (labels)` for the deleted issue, read anonymously from a recorded public tracker.
+- `npm test` makes no network call. The only network use of the round is the 309 read-only GitHub GETs listed under "Fixtures".
