@@ -1,6 +1,7 @@
 // Records real, read-only GitHub API responses for the provider tests.
 // Usage: GITHUB_TOKEN=$(gh auth token) node scripts/record-github-fixture.mjs <owner/repo> <YYYY-MM-DD> <out.json>
-// REST pull objects are trimmed to the fields pr-rla reads; GraphQL responses are stored as returned.
+// REST pull objects are trimmed to the fields pr-rla reads; GraphQL responses are stored as returned,
+// except commit-author e-mail addresses: any but GitHub's noreply ones become user-<hash>@example.invalid.
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createBroker } from "../dist/net/broker.js";
@@ -10,6 +11,12 @@ const [repo, day, out] = process.argv.slice(2);
 if (!repo || !day || !out) throw new Error("usage: record-github-fixture.mjs <owner/repo> <YYYY-MM-DD> <out.json>");
 const exchanges = [];
 const sha = (b) => (typeof b === "string" ? createHash("sha256").update(b).digest("hex") : null);
+const NOREPLY = /noreply\.github\.com$/;
+const scrubEmail = (e) => (!e || NOREPLY.test(e) ? e : `user-${createHash("sha256").update(e.toLowerCase()).digest("hex").slice(0, 8)}@example.invalid`);
+const scrubHistory = (b) => {
+  for (const n of b?.data?.repository?.object?.history?.nodes ?? []) if (n.author) n.author.email = scrubEmail(n.author.email);
+  return b;
+};
 const trimPull = (p) => ({ number: p.number, merged_at: p.merged_at, updated_at: p.updated_at, base: { ref: p.base.ref }, user: { login: p.user?.login, type: p.user?.type }, merge_commit_sha: p.merge_commit_sha, html_url: p.html_url });
 const recordingFetch = async (input, init) => {
   const res = await fetch(input, init);
@@ -17,6 +24,7 @@ const recordingFetch = async (input, init) => {
   let body = await res.json();
   if (/\/pulls\?/.test(url) && Array.isArray(body)) body = body.map(trimPull);
   if (/\/search\/issues/.test(url)) body = { total_count: body.total_count };
+  if (/\/graphql$/.test(url)) body = scrubHistory(body);
   const headers = {};
   if (res.headers.get("link")) headers.link = res.headers.get("link");
   let variables;

@@ -7,6 +7,7 @@ import {
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { classifyHistory, type HistoryNode } from "./history.js";
 import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
@@ -86,6 +87,8 @@ export class GitHubProvider implements ScmProvider {
     const head = await this.http.graphql<{ repository: { defaultBranchRef: { name: string; target: { oid: string } } | null } }>(HEAD_QUERY, { owner, name });
     const ref = head.repository.defaultBranchRef;
     if (!ref) throw new Error(`${req.repo} has no default branch`);
+    // The pinned head (U3): verify walks the history freeze walked, from the manifest's headSha.
+    const headSha = (req.head ?? ref.target.oid).toLowerCase();
     const changes: ChangeRecord[] = [];
     const diagnostics: { label: string; value: number }[] = [];
     // The PR listing is needed for direct pushes too: a PR's merge commit is never a direct push.
@@ -95,14 +98,16 @@ export class GitHubProvider implements ScmProvider {
       const prs = await this.fetchPullRequests(owner, name, listed.intoDefault);
       for (const pr of prs) changes.push(pr);
     }
+    let viaMerge = false;
     if (req.kinds.includes("direct_push")) {
-      const { directPushes, linkedPrs, inWindow, merges } = await this.walkHistory(owner, name, req, ref.name, ref.target.oid, listed.mergeCommits);
-      changes.push(...directPushes.map((c) => normalizeDirectPush(req.repo, c)));
+      const { directPushes, linkedPrs, inWindow, merges, landedVia } = await this.walkHistory(owner, name, req, ref.name, headSha, listed.mergeCommits);
+      changes.push(...directPushes.map((c) => normalizeDirectPush(req.repo, c, landedVia.get(c.oid)?.toLowerCase())));
+      viaMerge = landedVia.size > 0;
       diagnostics.push({ label: "default-branch commits in window", value: inWindow });
       diagnostics.push({ label: "commits linked to a merged PR", value: linkedPrs });
       diagnostics.push({ label: "direct pushes that are merge commits", value: merges });
     }
-    return { changes, defaultBranch: ref.name, limitations: GITHUB_LIMITATIONS, diagnostics };
+    return { changes, defaultBranch: ref.name, limitations: viaMerge ? [...GITHUB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITHUB_LIMITATIONS, diagnostics, headSha };
   }
 
   /** REST pulls (state=closed, sort=updated desc), filtered by merged_at, plus a re-scan for PRs updated during the walk. */
@@ -200,7 +205,9 @@ export class GitHubProvider implements ScmProvider {
       associatedPullRequests: c.associatedPullRequests.nodes,
     });
     const result = classifyHistory([...nodes.values()].map(toNode), req.window, defaultBranch, mergeCommits);
+    const parents = new Map([...nodes.values()].map((c) => [c.oid, c.parents.nodes.map((p) => p.oid)]));
     return {
+      landedVia: landedViaMerges(parents, result.directPushes),
       directPushes: result.directPushes.map((oid) => nodes.get(oid)!),
       linkedPrs: [...result.prCommits.values()].reduce((a, v) => a + v.length, 0),
       inWindow: result.inWindow,
@@ -237,5 +244,8 @@ export default defineProvider<GitHubProviderOptions>({
     const urls = githubEndpoints(options ?? {});
     return [...new Set([new URL(urls.apiUrl).host, new URL(urls.graphqlUrl).host])];
   },
+  reviewGranularity: "submission",
+  populationOptions: ["base_url", "api_url", "graphql_url"],
+  reportsLandedVia: true,
   create: (options, ctx) => new GitHubProvider(options ?? {}, ctx),
 });

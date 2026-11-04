@@ -36,6 +36,9 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
   const prefix = new URL(restBase).pathname.replace(/\/+$/, "");
   let served = 0;
   const byOid = new Map(commits.map((c) => [c.oid, c]));
+  // Stable account ids (GraphQL databaseId), one per login, as GitHub keeps them across renames.
+  const idOf = (login: string) => 1000 + [...login].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1_000_000, 7);
+  const withId = <A extends { login: string } | null>(a: A) => (a ? { ...a, databaseId: idOf(a.login) } : a);
   const commitNode = (c: FakeCommit) => ({
     oid: c.oid,
     url: `https://github.com/${repo}/commit/${c.oid}`,
@@ -43,21 +46,23 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
     additions: c.lines ?? 10,
     deletions: 0,
     parents: { nodes: c.parents.map((oid) => ({ oid })) },
-    author: c.author ? { name: c.author.name, email: c.author.email, user: c.author.login ? { login: c.author.login } : null } : { name: "Dev", email: "dev@example.com", user: { login: "dev" } },
+    author: c.author ? { name: c.author.name, email: c.author.email, user: c.author.login ? withId({ login: c.author.login }) : null } : { name: "Dev", email: "dev@example.com", user: withId({ login: "dev" }) },
     associatedPullRequests: { nodes: c.prs ?? [] },
   });
-  // git log order from head: reverse chronological over all reachable commits.
-  const reachable: FakeCommit[] = [];
-  const seen = new Set<string>();
-  const stack = [head];
-  while (stack.length) {
-    const o = stack.pop()!;
-    if (seen.has(o) || !byOid.has(o)) continue;
-    seen.add(o);
-    reachable.push(byOid.get(o)!);
-    stack.push(...byOid.get(o)!.parents);
-  }
-  reachable.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  // git log order from a commit: reverse chronological over all reachable commits.
+  const reachableFrom = (from: string) => {
+    const out: FakeCommit[] = [];
+    const seen = new Set<string>();
+    const stack = [from];
+    while (stack.length) {
+      const o = stack.pop()!;
+      if (seen.has(o) || !byOid.has(o)) continue;
+      seen.add(o);
+      out.push(byOid.get(o)!);
+      stack.push(...byOid.get(o)!.parents);
+    }
+    return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  };
   const prNode = (p: FakePr, first = 100) => ({
     number: p.number,
     url: `https://github.com/${repo}/pull/${p.number}`,
@@ -66,11 +71,11 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
     baseRefName: p.base,
     additions: p.additions,
     deletions: p.deletions,
-    author: p.author,
-    mergedBy: p.mergedBy,
+    author: withId(p.author),
+    mergedBy: withId(p.mergedBy),
     mergeCommit: p.mergeCommit ? { oid: p.mergeCommit } : null,
     labels: { nodes: (p.labels ?? []).map((name) => ({ name })) },
-    reviews: { totalCount: p.reviews.length, pageInfo: { hasNextPage: p.reviews.length > first, endCursor: p.reviews.length > first ? String(first) : null }, nodes: p.reviews.slice(0, first) },
+    reviews: { totalCount: p.reviews.length, pageInfo: { hasNextPage: p.reviews.length > first, endCursor: p.reviews.length > first ? String(first) : null }, nodes: p.reviews.slice(0, first).map((r) => ({ ...r, author: withId(r.author) })) },
   });
   const pageSize = opts.pageSize ?? 2;
   const restSorted = [...prs].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
@@ -93,7 +98,7 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
         const size = Number(/history\(first: (\d+)/.exec(query)![1]);
         if (opts.failHistoryAbove !== undefined && size > opts.failHistoryAbove) return new Response("bad gateway", { status: 502 });
         const since = Date.parse(String(variables.since));
-        const all = reachable.filter((c) => Date.parse(c.date) >= since);
+        const all = reachableFrom(String(variables.head)).filter((c) => Date.parse(c.date) >= since);
         const start = variables.after ? Number(variables.after) : 0;
         const nodes = all.slice(start, start + size).map(commitNode);
         return json({ data: { repository: { object: { history: { pageInfo: { hasNextPage: start + size < all.length, endCursor: String(start + size) }, nodes } } } } });
@@ -105,7 +110,7 @@ export function fakeGitHub(repo: string, head: string, commits: FakeCommit[], pr
       if (query.includes("reviews(first: 100, after: $after)")) {
         const p = prs.find((x) => x.number === variables.number)!;
         const start = Number(variables.after);
-        const nodes = p.reviews.slice(start, start + 100);
+        const nodes = p.reviews.slice(start, start + 100).map((r) => ({ ...r, author: withId(r.author) }));
         return json({ data: { repository: { pullRequest: { reviews: { pageInfo: { hasNextPage: start + 100 < p.reviews.length, endCursor: String(start + 100) }, nodes } } } } });
       }
       const repoData: Record<string, unknown> = {};
@@ -125,8 +130,12 @@ const U = (login: string) => ({ __typename: "User", login });
 const B = (login: string) => ({ __typename: "Bot", login });
 const rev = (state: string, at: string | null, author: { __typename: string; login: string } | null) => ({ state, submittedAt: at, author });
 
-/** The canonical classification scenario used by tests and docs. Window: 2026-08-01 (UTC). */
-export function classificationScenario() {
+/**
+ * The canonical classification scenario used by tests and docs. Window: 2026-08-01 (UTC).
+ * `latePush`: after freeze, a merge LM (dated 08-04) is pushed whose second parent LC is local work
+ * dated in the window: unpinned, LC shows up as a direct push; from the frozen head H10 it does not.
+ */
+export function classificationScenario(opts: { latePush?: boolean } = {}) {
   const c = (tag: string, date: string, parents: string[], extra: Partial<FakeCommit> = {}): FakeCommit => ({ oid: OID(tag), date, parents: parents.map(OID), ...extra });
   const pr = (number: number, base = "main") => ({ number, merged: true, baseRefName: base });
   const commits: FakeCommit[] = [
@@ -145,6 +154,7 @@ export function classificationScenario() {
   ];
   // Put S5 on the first-parent chain: M3's first parent is S5, S5's is R2c.
   commits.find((x) => x.oid === OID("M3"))!.parents = [OID("S5"), OID("F3b")];
+  if (opts.latePush) commits.push(c("LC", "2026-08-01T22:30:00Z", ["D2"], { author: { name: "Alice", email: "alice@example.com", login: "alice" }, lines: 2 }), c("LM", "2026-08-04T09:00:00Z", ["H10", "LC"]));
   const many = Array.from({ length: 150 }, (_, i) => rev("COMMENTED", `2026-08-01T11:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`, B("copilot-pull-request-reviewer")));
   const prs: FakePr[] = [
     { number: 10, base: "main", mergedAt: "2026-08-02T10:00:01Z", updatedAt: "2026-08-02T10:00:05Z", mergeCommit: OID("H10"), author: B("copilot-swe-agent"), mergedBy: U("maint"), reviews: [], additions: 1, deletions: 1 },
@@ -156,5 +166,5 @@ export function classificationScenario() {
     { number: 7, base: "main", mergedAt: null, updatedAt: "2026-08-01T07:00:00Z", mergeCommit: null, author: U("bob"), mergedBy: null, reviews: [], additions: 1, deletions: 0 },
     { number: 0, base: "main", mergedAt: "2026-07-31T23:00:01Z", updatedAt: "2026-07-31T23:00:02Z", mergeCommit: OID("B0"), author: U("bob"), mergedBy: U("maint"), reviews: [], additions: 1, deletions: 0 },
   ];
-  return { repo: "acme/widgets", head: OID("H10"), commits, prs, window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" } };
+  return { repo: "acme/widgets", head: OID(opts.latePush ? "LM" : "H10"), frozenHead: OID("H10"), commits, prs, window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" } };
 }
