@@ -31,6 +31,8 @@ export interface VerifyOptions {
   logKey?: string;
   beaconFile?: string;
   json?: boolean;
+  /** Also print the per-item lines a summary line stands for (VerifyCheck.verbose); --json always has them. */
+  verbose?: boolean;
   /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
   tsaTrust?: string[];
 }
@@ -118,6 +120,7 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
   for (const c of report.checks) {
     ctx.out(`${String(c.n)}. ${c.status.padEnd(4)} ${c.name}: ${c.summary}`);
     for (const d of c.details) ctx.out(`        ${d}`);
+    if (opts.verbose) for (const d of c.verbose ?? []) ctx.out(`          ${d}`);
   }
   ctx.out(report.checks.map((c) => (c.n === 1 ? c.summary : `${c.summary} ${mark(c.status)}`)).join(" · "));
   const registered = readRegistration(configFor(ctx).paths);

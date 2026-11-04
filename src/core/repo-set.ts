@@ -1,6 +1,6 @@
 import { REPO_VISIBILITIES, type RepoRef, type RepoSetRule, type RepoVisibility, type ScmProvider } from "../sdk/provider.js";
 import { probeRepo } from "./failures.js";
-import type { GoneRepo, ListedRepo, RegisteredRepo, RepoListing, RepoSet } from "./records.js";
+import type { GoneRepo, HeadEvidence, ListedRepo, RegisteredRepo, RegisteredVisibility, RepoListing, RepoSet } from "./records.js";
 
 /**
  * Repo sets (U8, FR5.1/FR5.6/FR5.7): what an audit covers, how a rule resolves, and the population
@@ -297,12 +297,13 @@ export function listedRepo(rule: RepoSetRule, r: RepoRef): ListedRepo {
   return { repo: r.repo, repoId: r.id, defaultBranch: r.defaultBranch, archived: r.archived, fork: r.fork, visibility: r.visibility, createdAt: typeof r.createdAt === "string" ? r.createdAt : null, excludedBy: ruleExclusions(rule, r) };
 }
 
-/** The unfiltered listing of a rule's owner, as a manifest records it (sorted by repo), with what the token could see. */
-export async function ownerListing(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility">, set: RepoSetRule, refs?: readonly RepoRef[]): Promise<RepoListing> {
-  const all = refs ?? (await listOwner(provider, set));
-  const repos = all.map((r) => listedRepo(set, r)).sort((a, b) => cmp(a.repo, b.repo));
-  // What the token can prove it sees. A failure to say is recorded, not fatal: the listing itself stands, and verify
-  // establishes its own token's visibility anyway.
+/**
+ * What a token can prove a listing of `set.owner` shows, per visibility (U8; P3 for `expected`): the provider's own
+ * proof, downgraded where the SCM's count of the owner's repositories (`ListingVisibility.expected`, GitHub's
+ * `total_private_repos`) is larger than what the listing holds. A provider that cannot say gives `complete: null`; a
+ * failure to say is recorded as not proven, never fatal.
+ */
+export async function listingProof(provider: Pick<ScmProvider, "name" | "listingVisibility">, set: RepoSetRule, listed: readonly Pick<RepoRef, "visibility">[]): Promise<RegisteredVisibility> {
   let seen: Awaited<ReturnType<NonNullable<ScmProvider["listingVisibility"]>>> | null = null;
   let failed: string | null = null;
   if (typeof provider.listingVisibility === "function") {
@@ -315,12 +316,47 @@ export async function ownerListing(provider: Pick<ScmProvider, "name" | "listRep
   const visibility = Object.fromEntries(
     REPO_VISIBILITIES.map((v) => {
       const proof = seen?.visibilities?.[v];
-      const listed = repos.filter((r) => r.visibility === v).length;
-      if (proof) return [v, { listed, complete: proof.complete === true, reason: String(proof.reason) }];
-      return [v, { listed, complete: failed ? false : null, reason: failed ?? `provider ${provider.name} cannot say what its token sees (it has no listingVisibility)` }];
+      const count = listed.filter((r) => r.visibility === v).length;
+      if (proof) return [v, { listed: count, complete: proof.complete === true, reason: String(proof.reason) }];
+      return [v, { listed: count, complete: failed ? false : null, reason: failed ?? `provider ${provider.name} cannot say what its token sees (it has no listingVisibility)` }];
     }),
   ) as RepoListing["visibility"];
-  return { owner: set.owner, identity: seen?.identity ?? null, visibility, repos };
+  for (const x of Array.isArray(seen?.expected) ? seen!.expected : []) {
+    const vs = (Array.isArray(x?.visibilities) ? x.visibilities : []).filter((v): v is RepoVisibility => REPO_VISIBILITIES.includes(v));
+    if (!vs.length || typeof x.count !== "number" || !Number.isFinite(x.count)) continue;
+    const have = listed.filter((r) => vs.includes(r.visibility)).length;
+    if (have >= x.count) continue;
+    for (const v of vs) visibility[v] = { listed: visibility[v].listed, complete: false, reason: `the listing shows ${have} ${vs.join(" or ")} repositories, but ${String(x.source)} counts ${x.count}, so it is missing some (${visibility[v].reason})` };
+  }
+  return { identity: seen?.identity ?? null, visibility };
+}
+
+/** The unfiltered listing of a rule's owner, as a manifest records it (sorted by repo), with what the token could see. */
+export async function ownerListing(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility">, set: RepoSetRule, refs?: readonly RepoRef[]): Promise<RepoListing> {
+  const all = refs ?? (await listOwner(provider, set));
+  const repos = all.map((r) => listedRepo(set, r)).sort((a, b) => cmp(a.repo, b.repo));
+  // What the token can prove it sees. A failure to say is recorded, not fatal: the listing itself stands, and verify
+  // establishes its own token's visibility anyway.
+  const proof = await listingProof(provider, set, repos);
+  return { owner: set.owner, identity: proof.identity, visibility: proof.visibility, repos };
+}
+
+/**
+ * What `register` signs for a rule (P3): the repos the rule matches now, by id, and what the token could prove it saw.
+ * `warnings` are the lines register prints loudly: each visibility the rule admits other than public that the token
+ * cannot be shown to see in full (its repos of that visibility may be missing from the registered set).
+ */
+export async function registerRuleRepos(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility">, set: RepoSetRule): Promise<{ registered: RegisteredRepo[]; visibility: RegisteredVisibility; warnings: string[] }> {
+  validateRepoSet(set, provider);
+  const refs = await listOwner(provider, set);
+  const registered = applyRule(set, refs)
+    .map((r) => ({ repo: r.repo, repoId: r.id }))
+    .sort((a, b) => cmp(a.repo, b.repo));
+  const visibility = await listingProof(provider, set, refs);
+  const warnings = set.visibility
+    .filter((v) => v !== "public" && visibility.visibility[v].complete !== true)
+    .map((v) => `this token cannot be shown to see every ${v} repository under ${set.owner} (${visibility.visibility[v].reason}): a ${v} repository it does not see is left out of the registered set, and verify will be INCOMPLETE for ${v} repositories. Register with a token that can prove it sees them all (GitHub: an org owner's classic token with the repo scope, or a GitHub App installation on all repositories), or limit the rule's visibility`);
+  return { registered, visibility, warnings };
 }
 
 /** What a pooled freeze lists: the pool, a rule's owner listing, and the registered repos that are gone. */
@@ -381,8 +417,13 @@ export interface PoolRecord {
   changeRepos?: Iterable<string>;
   listing?: RepoListing | null;
   gone?: readonly GoneRepo[];
-  /** The registration's `registeredRepos` (empty when it has none). */
-  registered?: readonly RegisteredRepo[];
+  /**
+   * The registration's `registeredRepos`. null: the registration does not record them, which a rule registration
+   * must (P3; check 2 FAILs it). Absent: not checked (a names-only check).
+   */
+  registered?: readonly RegisteredRepo[] | null;
+  /** The manifest's `headEvidence` (P3): one entry per repo it names, which must be a manifest repo with that head. */
+  headEvidence?: readonly HeadEvidence[];
 }
 
 /**
@@ -398,6 +439,9 @@ export function poolRecordProblems(set: RepoSet, rec: PoolRecord): string[] {
   const lowerRepos = manifestRepos.map(lower);
   const gone = rec.gone ?? [];
   const registered = rec.registered ?? [];
+  // P3: a rule registration must record what its rule matched, or nothing holds the pool to it (finding 2 of pass 2).
+  if (set.kind === "rule" && rec.registered !== undefined && (rec.registered === null || rec.registered.length === 0))
+    p.push(`the registration records no registeredRepos for its repo rule: every rule registration must (register writes the repos the rule matched, by id), or an archive, rename or visibility change after registration could take a repo out of the pool unseen`);
   const eg = (xs: readonly string[]) => `(e.g. ${xs.slice(0, 3).join(", ")})`;
   if (manifestRepos.length === 0) p.push("manifest lists no repos");
   if (new Set(lowerRepos).size !== lowerRepos.length) p.push("manifest lists a repo twice");
@@ -446,6 +490,15 @@ export function poolRecordProblems(set: RepoSet, rec: PoolRecord): string[] {
   const listed = new Set(lowerRepos);
   const stray = [...new Set(rec.changeRepos ?? [])].filter((r) => !listed.has(lower(r))).sort();
   if (stray.length) p.push(`manifest has changes from ${stray.length} repo(s) it does not list ${eg(stray)}`);
+  // P3: the push-log record names manifest repos, each once, sorted, with the head the manifest records for it.
+  const ev = rec.headEvidence ?? [];
+  if (ev.length) {
+    const heads = new Map(rec.repos.map((r) => [r.repo, (r as { headSha?: string | null }).headSha ?? null]));
+    const bad = ev.filter((e) => !e || typeof e.repo !== "string" || !heads.has(e.repo) || heads.get(e.repo) !== e.headSha || (e.status !== "tip" && e.status !== "unproven")).map((e) => String(e?.repo));
+    if (bad.length) p.push(`manifest headEvidence names ${bad.length} repo(s) that are not manifest repos with that head ${eg(bad)}`);
+    const names = ev.map((e) => String(e?.repo));
+    if (new Set(names).size !== names.length || names.some((r, i) => i > 0 && cmp(names[i - 1]!, r) >= 0)) p.push("manifest headEvidence is not sorted by repo, or names a repo twice");
+  }
   return p;
 }
 

@@ -20,7 +20,9 @@ import {
   isRegistrationV2,
   manifestRepos,
   manifestSha256,
+  recordedRegisteredRepos,
   registeredRepos,
+  registeredVisibility,
   registrationRepoSet,
   registrationTime,
   type AnyCommitment,
@@ -56,6 +58,8 @@ export interface VerifyCheck {
   /** One-line summary, e.g. "population 1,590/1,590 match". */
   summary: string;
   details: string[];
+  /** Optional (P3): the per-item lines a summary line in `details` stands for; `verify` prints them with --verbose, and --json has them. */
+  verbose?: string[];
 }
 
 export interface VerifyArtifacts {
@@ -267,7 +271,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     // The repos the manifest covers are the registered ones: the repo, the list (or recorded gone), or inside the rule,
     // every registered repo included, and a listing that agrees with itself (U8, FR5.1/FR5.2; the review's finding 1).
     const mv2 = isManifestV2(m) ? m : null;
-    c2.details.push(...poolRecordProblems(registrationRepoSet(reg), { repos: manifestRepos(m), changeRepos: m.changes.map((x) => x.repo), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], registered: registeredRepos(reg) }));
+    c2.details.push(...poolRecordProblems(registrationRepoSet(reg), { repos: manifestRepos(m), changeRepos: m.changes.map((x) => x.repo), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], registered: isRegistrationV2(reg) ? recordedRegisteredRepos(reg) : [], ...(mv2?.headEvidence ? { headEvidence: mv2.headEvidence } : {}) }));
     const csig = verifySignedRecord(cm);
     if (!csig.ok) c2.details.push(`commitment signature: ${csig.reason}`);
     if (cm.publicKeyPem.trim() !== reg.publicKeyPem.trim()) c2.details.push("commitment is signed by a different key than the registration");
@@ -348,7 +352,22 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
     // Every repo rebuilt from its frozen head and compared with the window as its current head shows it; the pool held to
     // the rule and the registered repos (src/core/rebuild.ts).
-    const pool = await checkPool(provider, { set, registered: registeredRepos(reg), mode, repos: mrepos.map((r) => ({ ...r, headSha: mv2 ? r.headSha : null })), listing: mv2?.repoListing ?? null, gone: mv2?.goneRepos ?? [], window, selector });
+    // P3: each frozen head is held to the push log over the freeze span (the manifest's as-of time until R publishes),
+    // and a rule's registered set to what the registering token could see.
+    const pool = await checkPool(provider, {
+      set,
+      registered: registeredRepos(reg),
+      mode,
+      repos: mrepos.map((r) => ({ ...r, headSha: mv2 ? r.headSha : null })),
+      listing: mv2?.repoListing ?? null,
+      gone: mv2?.goneRepos ?? [],
+      window,
+      selector,
+      registeredAt: registrationTime(reg).iso,
+      ...(set.kind === "rule" ? { registeredVisibility: registeredVisibility(reg) } : {}),
+      freezeSpan: { from: m.frozenAt, until: unixToIso(derived.publishesAt) },
+    });
+    if (pool.verbose.length) c5.verbose = pool.verbose;
     const count = (repo: string) => m.changes.filter((x) => x.repo === repo).length;
     let unverified = 0;
     const unrebuilt = new Set<string>();

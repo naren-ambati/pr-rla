@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { describeRepoSet, RepoSetError, resolveRepoSet } from "../core/repo-set.js";
-import { beaconParams, derivedRoundFor, type AuditMode, type RegisteredRepo, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
+import { describeRepoSet, registerRuleRepos, RepoSetError, resolveRepoSet } from "../core/repo-set.js";
+import { beaconParams, derivedRoundFor, type AuditMode, type RegisteredRepo, type RegisteredVisibility, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
 import { ephemeralKey, loadOrCreateKey, signRecord } from "../core/signing.js";
 import { unixToIso } from "../core/seed.js";
 import { stoppingTable, effectiveCap } from "../core/sprt.js";
@@ -86,12 +86,14 @@ export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, 
  * only). Returns the repos it resolves to, or null for a single repo. A rule's are signed into the registration
  * (`registeredRepos`, by id), so a repo archived, renamed or made private after registration stays in the pool.
  */
-async function preflightRepoSet(ctx: CommandContext, config: PrRlaConfig): Promise<{ count: number; registered: RegisteredRepo[] | null } | null> {
+async function preflightRepoSet(ctx: CommandContext, config: PrRlaConfig): Promise<{ count: number; registered: RegisteredRepo[] | null; visibility: RegisteredVisibility | null; warnings: string[] } | null> {
   if (config.repoSet.kind === "repo") return null;
   try {
-    const resolved = await resolveRepoSet(await providerFor(ctx, config), config.repoSet);
-    if (resolved.length === 0) throw new CommandError(`${describeRepoSet(config.repoSet)} matches no repository the token can see; widen the rule, or check the token's access`);
-    return { count: resolved.length, registered: config.repoSet.kind === "rule" ? resolved.map((r) => ({ repo: r.repo, repoId: r.repoId! })) : null };
+    // A rule (P3): the repos it matches, by id, and what the token can prove it saw (src/core/repo-set.ts).
+    const rule = config.repoSet.kind === "rule" ? await registerRuleRepos(await providerFor(ctx, config), config.repoSet) : null;
+    const count = rule ? rule.registered.length : (await resolveRepoSet(await providerFor(ctx, config), config.repoSet)).length;
+    if (count === 0) throw new CommandError(`${describeRepoSet(config.repoSet)} matches no repository the token can see; widen the rule, or check the token's access`);
+    return { count, registered: rule?.registered ?? null, visibility: rule?.visibility ?? null, warnings: rule?.warnings ?? [] };
   } catch (e) {
     if (e instanceof RepoSetError) throw new CommandError(e.message);
     throw e;
@@ -109,6 +111,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     schema: "pr-rla/registration/v2",
     repos: config.repoSet,
     ...(pool?.registered ? { registeredRepos: pool.registered } : {}),
+    ...(pool?.visibility ? { registeredVisibility: pool.visibility } : {}),
     window: config.window,
     selector: config.selector,
     protocolSha256: protocolSha256(config),
@@ -132,6 +135,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   const table = stoppingTable(config.parameters).map((x) => x.draws).join(" / ");
   ctx.out(`${opts.dryRun ? "[dry run] " : ""}registration ${signed.sha256.slice(0, 12)}… · ${config.repo} · window ${config.window.name} (${config.window.start}..${config.window.end})`);
   if (pool !== null) ctx.out(`  repos: ${describeRepoSet(config.repoSet)} · resolves to ${pool.count} now${pool.registered ? " (signed by repo id: they stay in the pool whatever their name, archive state or visibility at freeze)" : ""}; resolved again at freeze, one certificate for the pool`);
+  for (const w of pool?.warnings ?? []) ctx.out(`  WARNING: ${w}`);
   ctx.out(`  claim D: detected-defect rate <= ${pct(config.parameters.p0)} (p1 ${pct(config.parameters.p1)}, risk ${pct(config.parameters.alpha)}) · certify after ${table} draws with 0/1/2 fails · cap ${effectiveCap(config.parameters)}`);
   ctx.out(`  selector ${JSON.stringify(config.selector)}`);
   if (config.selector.direct_push_via_merge === "exclude" && config.selector.kinds.includes("direct_push")) {

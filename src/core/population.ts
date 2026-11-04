@@ -75,6 +75,12 @@ export function checkListed(providerName: string, listed: ListChangesResult, arg
     if (!args.selector.kinds.includes(c.kind)) throw new Error(`provider ${providerName} returned ${c.id} of kind ${c.kind}, which was not requested`);
     if (c.repo !== args.repo) throw new Error(`provider ${providerName} returned ${c.id} from repo ${c.repo}, not ${args.repo}`);
   }
+  // P3: `unreachable` names pull requests of this listing.
+  if (listed.unreachable !== undefined) {
+    if (!Array.isArray(listed.unreachable)) throw new Error(`provider ${providerName}: unreachable must be a list of change ids`);
+    const prs = new Set(listed.changes.filter((c) => c.kind === "pull_request").map((c) => c.id));
+    for (const id of listed.unreachable) if (!prs.has(id)) throw new Error(`provider ${providerName} says ${JSON.stringify(id)} is unreachable from the head, but it is not a pull request of the listing`);
+  }
 }
 
 const schemeOf = (id: string) => id.slice(0, id.indexOf(":"));

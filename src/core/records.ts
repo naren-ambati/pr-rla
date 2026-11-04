@@ -169,10 +169,33 @@ export interface RegistrationRecordV2 {
   /**
    * A `rule` registration only (U8): the repositories the rule matched when it was registered, by stable id, sorted by
    * repo. Freeze includes every one of them that still exists, whatever its archive state, visibility or name by then,
-   * so nothing the auditee changes after registration takes a repository out of the pool. Absent in registrations
-   * written before this field existed; verify then holds the pool to the rule alone.
+   * so nothing the auditee changes after registration takes a repository out of the pool. Required for a rule (P3):
+   * check 2 FAILs a rule registration without it.
    */
   registeredRepos?: RegisteredRepo[];
+  /**
+   * A `rule` registration only (P3): what the registering token could prove it saw, per visibility, when the rule was
+   * resolved into `registeredRepos` (the same proof a pooled manifest's `repoListing` records). A visibility the rule
+   * admits whose proof is not complete leaves check 5 INCOMPLETE: a repo of it the token missed is not registered.
+   */
+  registeredVisibility?: RegisteredVisibility;
+}
+
+/** What a registering token could prove it saw under the rule's owner (RegistrationRecordV2.registeredVisibility). */
+export type RegisteredVisibility = Pick<RepoListing, "identity" | "visibility">;
+
+/**
+ * What the SCM's push log showed at freeze about one repo's frozen head (P3; ManifestV2.headEvidence). `tip`: the log
+ * showed `headSha` as the default branch's tip during the freeze, since `since` (the update `event`). `unproven`: it did
+ * not, and `detail` says why. Informational: verify reads the log again and decides from what it reads.
+ */
+export interface HeadEvidence {
+  repo: string;
+  headSha: string;
+  status: "tip" | "unproven";
+  since?: string;
+  event?: string;
+  detail: string;
 }
 
 /** A repository a rule matched at `register` (RegistrationRecordV2.registeredRepos). */
@@ -248,6 +271,8 @@ export interface ManifestV2 {
   repoListing?: RepoListing;
   /** A pool only (U8): registered repos found gone at freeze. Their changes are not in the manifest; verify reports them. */
   goneRepos?: GoneRepo[];
+  /** P3: per repo with a pinned head, sorted by repo, what the push log showed about it; present when the provider has a push log. */
+  headEvidence?: HeadEvidence[];
   /** SHA-256 over canonicalJson of every other field. */
   sha256: string;
 }
@@ -298,6 +323,16 @@ export function manifestRepo(m: AnyManifest): string {
 /** The registered repos of a rule registration (empty for a repo or list set, and for registrations made before the field existed). */
 export function registeredRepos(reg: SignedRecord<AnyRegistration>): RegisteredRepo[] {
   return reg.record.schema === "pr-rla/registration/v2" ? (reg.record.registeredRepos ?? []) : [];
+}
+
+/** A rule registration's registeredRepos as recorded: null when the field is absent (check 2 FAILs such a rule registration, P3). */
+export function recordedRegisteredRepos(reg: SignedRecord<AnyRegistration>): RegisteredRepo[] | null {
+  return reg.record.schema === "pr-rla/registration/v2" ? (reg.record.registeredRepos ?? null) : null;
+}
+
+/** What the registering token could prove it saw (a rule registration, P3); null when the registration does not record it. */
+export function registeredVisibility(reg: SignedRecord<AnyRegistration>): RegisteredVisibility | null {
+  return reg.record.schema === "pr-rla/registration/v2" ? (reg.record.registeredVisibility ?? null) : null;
 }
 
 /** The repositories a manifest covers, in manifest order (a v1 manifest has one, without id or head). */
