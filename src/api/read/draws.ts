@@ -6,6 +6,7 @@ import { AuditError } from "../errors.js";
 import { auditContextFor, configFor, ledgerFor, readManifest, readRegistration, type ApiContext } from "../session.js";
 import { issuedDraws } from "./draw-context.js";
 import { countedLedgerVerdicts } from "./status.js";
+import { fenceStatus, renderResult } from "./untrusted.js";
 
 /** At most this many draws in one view (contracts.md §4). */
 export const MAX_DRAWS_LIMIT = 200;
@@ -46,6 +47,8 @@ export interface DrawsView {
   blockingDraw: { draw: number; changeId: string; url: string } | null;
   verdictsRead: boolean;
   verdictsSkipped?: string;
+  /** Read-only mode (S1): the reviewers the ledger names (and a time it gives that does not parse), which `reviewer` points to as `untrusted.errors[i]`. */
+  untrusted?: { errors: string[] };
 }
 
 /** `draws`: the issued draws with state, and the blocking draw. No network: a tracker ledger's verdicts are not read. */
@@ -82,8 +85,10 @@ export async function draws(ctx: ApiContext, opts: DrawsOptions = {}): Promise<D
     reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
     ineligible: counted.ineligible,
   });
-  const first = new Map(report.firstVerdicts.map((v) => [v.changeId, v]));
-  return {
+  // In read-only mode the reviewer and the time are the ledger's (S1), rendered with the rest of the view.
+  const shown = ctx.mode === "read-only" ? fenceStatus(report) : report;
+  const first = new Map(shown.firstVerdicts.map((v, k) => [report.firstVerdicts[k]!.changeId, v]));
+  return renderResult<DrawsView>(ctx.mode ?? "read-write", {
     ...base,
     draws: page.map((d) => {
       const v = first.get(d.changeId);
@@ -91,5 +96,5 @@ export async function draws(ctx: ApiContext, opts: DrawsOptions = {}): Promise<D
     }),
     blockingDraw: report.blockingDraw ? { draw: report.blockingDraw.draw, changeId: report.blockingDraw.changeId, url: report.blockingDraw.url } : null,
     verdictsRead: true,
-  };
+  });
 }

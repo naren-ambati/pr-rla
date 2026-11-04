@@ -1,20 +1,12 @@
 import { BrokerError } from "../../net/contract.js";
-import { escapeControls } from "../../core/text.js";
+import { BROKER_REFUSALS, MAX_UNTRUSTED_BYTES, PLUGIN_REFUSALS, errorLabel, untrustedText } from "../../core/said.js";
 import { PluginError } from "../../plugins/errors.js";
 import { AuditError, type AuditErrorCode } from "../errors.js";
 
 /** At most this much of a foreign error's text is kept in `untrusted`. */
-export const MAX_UNTRUSTED_ERROR_BYTES = 2048;
+export const MAX_UNTRUSTED_ERROR_BYTES = MAX_UNTRUSTED_BYTES;
 
-/** Plugin refusals pr-rla makes itself (its own text); the rest of PluginError's codes carry a plugin's output. */
-const PLUGIN_REFUSALS = new Set(["NOT_LOCKED", "LOCK_MISMATCH", "BUILTIN_ONLY", "TREE_ESCAPE", "PLUGIN_UNRESOLVED", "FULL_TRUST_REFUSED", "NODE_TOO_OLD"]);
-/** Broker refusals of a request pr-rla would not send (its own text). */
-const BROKER_REFUSALS = new Set(["HOST_NOT_ALLOWED", "WRITE_PATH_NOT_ALLOWED", "CREDENTIAL_HOST_MISMATCH", "TOO_MANY_REDIRECTS", "RETRY_HINT_INVALID"]);
-
-const cut = (s: string) => {
-  const b = Buffer.from(escapeControls(s), "utf8");
-  return b.length <= MAX_UNTRUSTED_ERROR_BYTES ? b.toString("utf8") : `${b.subarray(0, MAX_UNTRUSTED_ERROR_BYTES).toString("utf8").replace(/\uFFFD$/, "")}…`;
-};
+const cut = untrustedText;
 
 /**
  * What a read call throws, always an AuditError whose `message` and `next` are pr-rla's (U5 fix
@@ -45,8 +37,7 @@ export function readError(e: unknown): unknown {
     a.untrusted = cut(e.message);
     return a;
   }
-  const status = typeof err?.status === "number" && err.status > 0 ? `, HTTP ${err.status}` : "";
-  const a = new AuditError(`the provider, the ledger or a plugin failed (${typeof err?.name === "string" ? err.name : "Error"}${status}); what it said is in untrusted`, 1, "PROVIDER_ERROR" as AuditErrorCode);
+  const a = new AuditError(`the provider, the ledger or a plugin failed (${errorLabel(e)}); what it said is in untrusted`, 1, "PROVIDER_ERROR" as AuditErrorCode);
   a.untrusted = cut(typeof err?.message === "string" ? err.message : String(e));
   return a;
 }

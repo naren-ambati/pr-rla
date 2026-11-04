@@ -6,6 +6,7 @@ import { describeRepoSet, resolvePool, RepoSetError, type PoolResolution, type R
 import type { Selector } from "../core/selector.js";
 import { isRepoEmpty, type AuditWindow, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { canonicalJson } from "../core/canonical.js";
+import { quoted } from "../core/said.js";
 
 /** Whether a listing failure is the kind that waiting out fixes (src/core/failures.ts; re-exported for callers of the API). */
 export { isTransientFailure };
@@ -261,7 +262,7 @@ export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
             o.log(`freeze: [${++finished}/${n}] ${repo}: gone (from the checkpoint, and probed again: HTTP ${p.status})`);
             continue;
           }
-          if (p.kind !== "exists") throw new Error(`${repo}: its checkpoint says it is gone, and probing it again says ${p.kind === "unsupported" ? `nothing (provider ${o.provider.name} has no describeRepo)` : p.detail}; nothing is skipped`);
+          if (p.kind !== "exists") throw new Error(`${repo}: its checkpoint says it is gone, and probing it again says ${p.kind === "unsupported" ? `nothing (provider ${o.provider.name} has no describeRepo)` : quoted(p.detail)}; nothing is skipped`);
           o.log(`freeze: the checkpoint says ${repo} is gone, but it exists; listing it`);
           cached = null;
         }
@@ -281,8 +282,9 @@ export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
           if (listed === null) {
             // A repo of a registered list, found gone by a repo-level probe.
             const p = await probeRepo(o.provider, { repo });
-            if (p.kind !== "gone") throw new Error(`${repo} answers 404 or 403, and its repo-level probe says ${p.kind === "exists" ? "it exists (so a part of it is missing)" : p.kind === "unsupported" ? `nothing (provider ${o.provider.name} has no describeRepo)` : p.detail}`);
-            const g: GoneRepo = { repo, repoId: null, status: p.status, detail: p.detail, probedAt: now() };
+            if (p.kind !== "gone") throw new Error(`${repo} answers 404 or 403, and its repo-level probe says ${p.kind === "exists" ? "it exists (so a part of it is missing)" : p.kind === "unsupported" ? `nothing (provider ${o.provider.name} has no describeRepo)` : quoted(p.detail)}`);
+            // The manifest records what the probe said as the CLI prints it (a record is data; S1, src/core/said.ts).
+            const g: GoneRepo = { repo, repoId: null, status: p.status, detail: quoted(p.detail), probedAt: now() };
             store?.writeGone(repo, g);
             listGone.push(g);
             results[i] = null;

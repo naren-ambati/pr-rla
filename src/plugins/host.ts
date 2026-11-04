@@ -8,6 +8,7 @@ import { assertLedgerDefinition, LedgerApiVersionError, PROVENANCE_LEVELS, SUPPO
 import {
   assertProviderDefinition,
   DEFAULT_REVIEW_GRANULARITY,
+  isPluginName,
   ProviderApiVersionError,
   providerTraitProblems,
   SUPPORTED_PROVIDER_API_VERSIONS,
@@ -731,6 +732,8 @@ export function declaredCredentials(host: PluginHost, options: unknown): LockedC
 async function createInstance(host: PluginHost, options: unknown, base: { cwd: string; windowDir?: string; reviewers?: readonly string[] | null }): Promise<CreateResult> {
   const c = (await host.call("create", [options, base])) as CreateResult;
   if (!c || typeof c.name !== "string" || !Array.isArray(c.methods)) throw new PluginError(`plugin ${host.label}: create() returned no instance`, "PLUGIN_INVALID");
+  // The instance's name is printed in pr-rla's own lines ("provider <name> …"): it must be a plugin name, as the definition's is (S1).
+  if (!isPluginName(c.name)) throw new PluginError(`plugin ${host.label}: create() returned an instance whose name is not a plugin name (lowercase letters, digits and hyphens)`, "PLUGIN_INVALID");
   return c;
 }
 

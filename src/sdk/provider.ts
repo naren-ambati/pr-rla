@@ -627,6 +627,9 @@ export class ProviderApiVersionError extends Error {
 }
 
 /** Throws if `value` is not a loadable provider definition. */
+/** A plugin's name as a definition must give it (lowercase letters, digits and hyphens): the instance and the lock entry too (S1). */
+export const isPluginName = (value: unknown): value is string => typeof value === "string" && /^[a-z0-9][a-z0-9-]*$/.test(value) && value.length <= 214;
+
 export function assertProviderDefinition(value: unknown, source: string): asserts value is ProviderDefinition {
   if (!value || typeof value !== "object") {
     throw new Error(`${source}: does not export a provider definition (use defineProvider() as the default export)`);
@@ -674,6 +677,8 @@ export function pluginGrantProblems(def: { hosts?: unknown; credentials?: unknow
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const ID = /^[a-z0-9][a-z0-9-]*:[^\s#@]+(?:#[1-9][0-9]*|@(?:[0-9a-f]{40}|[0-9a-f]{64}))$/;
+/** Whether a value is a change id as a ChangeRecord's `id` must be: `<scheme>:<repo>#<n>` or `<scheme>:<repo>@<sha>`. */
+export const isChangeId = (value: unknown): value is string => typeof value === "string" && ID.test(value);
 
 /** A git commit id as the manifest records and providers send it: 40 (SHA-1) to 64 (SHA-256) lowercase hex characters. */
 export const COMMIT_ID = /^[0-9a-f]{40,64}$/;

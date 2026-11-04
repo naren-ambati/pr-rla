@@ -1,3 +1,4 @@
+import { BROKER_REFUSALS, PrRlaError } from "../core/said.js";
 import { bounded } from "../core/text.js";
 import { RETRIES_EXHAUSTED, TIMED_OUT, type RetryHints } from "../sdk/http.js";
 
@@ -38,7 +39,7 @@ export const DESTINATION_TIMEOUT_MS: Readonly<Record<Destination, number>> = {
 export const TSA_RETRY_DEADLINE_MS = 5 * 60_000;
 
 /** Typed broker errors carry a code, the host and a next step (contracts.md §2, §7). */
-export class BrokerError extends Error {
+export class BrokerError extends PrRlaError {
   readonly host: string;
   constructor(
     message: string,
@@ -49,6 +50,10 @@ export class BrokerError extends Error {
     super(message);
     this.name = "BrokerError";
     this.host = bounded(host);
+  }
+  /** A refusal or a timeout is pr-rla's words; giving up quotes the service's last answer (S1, src/core/said.ts). */
+  override said(): { own: string } | { words: string; foreign: string } {
+    return BROKER_REFUSALS.has(this.code) ? { own: this.message } : { words: `${this.host}: the service did not answer usefully (${this.code})`, foreign: this.message };
   }
 }
 

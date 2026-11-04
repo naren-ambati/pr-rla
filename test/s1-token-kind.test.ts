@@ -25,9 +25,14 @@ async function frozen(org: FakeOrg): Promise<PoolScenario> {
 }
 
 type Check5 = { status: string; details: string[] };
-const c5 = (r: { checks: { n: number; status: string; details: unknown[] }[] }): Check5 => {
+/**
+ * Check 5's lines; read-only lines quote the provider's reasons through `untrusted.errors` (S1, finding 2), so they are
+ * resolved here to compare them with the CLI's, which quotes them in place.
+ */
+const c5 = (r: { checks: { n: number; status: string; details: unknown[] }[]; untrusted?: { errors: string[] } }): Check5 => {
   const c = r.checks.find((x) => x.n === 5)!;
-  return { status: c.status, details: c.details.map(String) };
+  const errors = r.untrusted?.errors ?? [];
+  return { status: c.status, details: c.details.map((d) => String(d).replace(/(?:the provider's reason|the account the freeze's token was); what it said is in untrusted\.errors\[(\d+)\]/g, (_m, i: string) => errors[Number(i)]!)) };
 };
 /** Check 5's lines about what the token can see (one per non-public visibility). */
 const visibility = (c: Check5) => c.details.filter((d) => /repositor(y|ies) under acme-org/.test(d) && /private|internal/.test(d));
@@ -37,6 +42,9 @@ async function both(s: PoolScenario, org: FakeOrg, token: string): Promise<{ cli
   const env = { GITHUB_TOKEN: token };
   const cli = await s.clock.run(runVerify({ ...s.ctx, env }, { offline: false }));
   const ro = await s.clock.run(read.verify({ dir: s.dir, offline: false }, { nowMs: () => s.clock.now(), sleep: (ms) => s.clock.sleep(ms), fetch: org.fetch, env }));
+  // Read-only says pr-rla's words: the reason itself is only in untrusted.errors.
+  const raw = ro.checks.find((x) => x.n === 5)!.details.filter((d) => /under acme-org/.test(d) && /private|internal/.test(d));
+  for (const l of raw) expect(l).not.toMatch(/OAuth App|X-OAuth-Scopes|classic token|auditor/);
   return { cli: c5(cli), ro: c5(ro), verdicts: [cli.verdict, ro.verdict] };
 }
 

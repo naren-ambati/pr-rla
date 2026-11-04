@@ -1,7 +1,8 @@
 import { PROVENANCE_LEVELS, provenanceRank, type ProvenanceLevel, type VerdictEvent } from "../../sdk/ledger.js";
 import { isRegistrationV2, type AnyRegistration, type PluginIdentity, type SignedRecord } from "../records.js";
 import { allowedSignersOf, type AllowedSigner } from "./allowed-signers.js";
-import { VERDICT_SIGNATURE_SOURCE, attestVerdicts, withoutSignatureFields, type VerdictSignatureCheck } from "./verifier.js";
+import { foreign, said, type Line } from "../said.js";
+import { VERDICT_SIGNATURE_SOURCE, attestVerdicts, lineChange, withoutSignatureFields, type VerdictSignatureCheck } from "./verifier.js";
 import type { VerdictBinding } from "./verdict-payload.js";
 
 /**
@@ -38,13 +39,13 @@ export function rulesLine(rules: VerdictRules): string {
 }
 
 /** Why a counted verdict fails check 7 under the registered rules (empty: it meets them). */
-export function verdictRuleFailures(v: VerdictEvent, rules: VerdictRules): string[] {
-  const out: string[] = [];
+export function verdictRuleFailures(v: VerdictEvent, rules: VerdictRules): Line[] {
+  const out: Line[] = [];
   const level = provenanceOfEvent(v);
-  const where = `verdict on draw #${v.draw} (${v.changeId})`;
-  if (provenanceRank(level) < provenanceRank(rules.minProvenance)) out.push(`${where} is ${provenanceLabel(level)}; the registration requires ${provenanceLabel(rules.minProvenance)}`);
+  const where = said`verdict on draw #${v.draw} (${lineChange(v)})`;
+  if (provenanceRank(level) < provenanceRank(rules.minProvenance)) out.push(said`${where} is ${provenanceLabel(level)}; the registration requires ${provenanceLabel(rules.minProvenance)}`);
   if (rules.requireSigned && !(v.provenance?.source === VERDICT_SIGNATURE_SOURCE && provenanceRank(level) >= provenanceRank("account")))
-    out.push(`${where} carries no valid signature by the registered key of reviewer ${v.reviewer}; the registration requires signed verdicts (require_signed)`);
+    out.push(said`${where} carries no valid signature by the registered key of reviewer ${foreign("the reviewer the ledger line names", v.reviewer)}; the registration requires signed verdicts (require_signed)`);
   return out;
 }
 
@@ -103,16 +104,16 @@ export interface CountingInput {
 
 export interface CountedVerdicts {
   verdicts: VerdictEvent[];
-  /** A ledger's claim above its ceiling (check 7 WARN). */
-  notes: string[];
-  findings: string[];
-  warnings: string[];
+  /** A ledger's claim above its ceiling (check 7 WARN). Lines (src/core/said.ts): what a ledger line carries is foreign text in them (S1). */
+  notes: Line[];
+  findings: Line[];
+  warnings: Line[];
   /**
    * Why a verdict (one of `verdicts`) cannot count under the registration's signing rules, or null
    * (P4). Status, check 7 and `record` pass it to `computeStatus` / `classifyVerdicts`, so the same
    * lines are ignored everywhere.
    */
-  ineligible: (v: VerdictEvent) => string | null;
+  ineligible: (v: VerdictEvent) => Line | null;
 }
 
 const RULE = "the registration counts only verdicts signed with their reviewer's registered key";
@@ -149,19 +150,19 @@ export function countedVerdicts(read: readonly VerdictEvent[], input: CountingIn
   const required = signaturesRequired(input.registration);
   let events: VerdictEvent[];
   let checks: (VerdictSignatureCheck | null)[] = [];
-  let findings: string[] = [];
-  let warnings: string[] = [];
+  let findings: Line[] = [];
+  let warnings: Line[] = [];
   if (input.verifiesSignatures && input.binding) {
     ({ events, checks, findings, warnings } = attestVerdicts(read, input.binding, registeredSigners(input.registration), { quiet: required }));
   } else events = read.map((v) => withoutSignatureFields(input.verifiesSignatures ? withoutClaim(v) : v));
   const capped = capProvenance(events, input.ceiling, input.ledger);
-  const reasons = new Map<VerdictEvent, string>();
+  const reasons = new Map<VerdictEvent, Line>();
   if (required)
     capped.verdicts.forEach((v, i) => {
       const check = checks[i];
       if (!input.verifiesSignatures) reasons.set(v, `the ledger read is not the registered built-in git-file, so no verdict signature counts, and ${RULE}`);
       else if (!check) reasons.set(v, `its signature could not be checked for this audit, and ${RULE}`);
-      else if (check.state !== "signed") reasons.set(v, `${check.detail}, and ${RULE}`);
+      else if (check.state !== "signed") reasons.set(v, said`${check.detail}, and ${RULE}`);
     });
   return { verdicts: capped.verdicts, notes: capped.notes, findings, warnings, ineligible: (v) => reasons.get(v) ?? null };
 }

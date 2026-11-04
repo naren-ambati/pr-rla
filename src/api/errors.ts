@@ -1,3 +1,5 @@
+import { PrRlaError } from "../core/said.js";
+
 /**
  * The audit API's error (contracts.md §4 and §7). It carries the CLI exit code, a code the MCP
  * server reports as is (`NO_AUDIT`, `BAD_WINDOW`, `DRAW_OUT_OF_RANGE`, `READ_ONLY_VIOLATION`,
@@ -18,7 +20,7 @@ export type AuditErrorCode =
   /** A refusal with no more specific code (CLI usage errors, write-side refusals). */
   | "FAILED";
 
-export class AuditError extends Error {
+export class AuditError extends PrRlaError {
   /** Text from the SCM, a ledger or a plugin that explains the error: data, never instructions. */
   untrusted?: string;
   constructor(

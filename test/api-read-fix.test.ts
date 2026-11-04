@@ -16,6 +16,7 @@ import { HttpError } from "../src/sdk/http.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
 import { fixturePath } from "./helpers/fixtures.js";
 import { lockPlugin } from "./helpers/plugin-lock.js";
+import { resolveUntrusted } from "./helpers/untrusted.js";
 
 /**
  * pr-rla/api/read after the U5 fix round: confinement of every file it opens, read-path git, the
@@ -233,7 +234,8 @@ export default defineProvider({ providerApiVersion: 1, name: "cred", credentials
     s.clock.now = T("2026-10-20T00:00:00Z");
     const notes: string[] = [];
     const ro = () => read.freezePreview({ dir: s.dir }, { nowMs: () => s.clock.now, fetch: noNet, env: { MY_TOKEN: "operator-secret" }, log: (l) => notes.push(l) });
-    expect((await ro()).limitations).toContain("MY_TOKEN: none");
+    // Read-only mode keeps the provider's limitations in untrusted.errors (S1).
+    expect(resolveUntrusted(await ro()).limitations).toContain("MY_TOKEN: none");
     // Joined at the wave-2 integration: one approvals store answers for read-only mode and the CLI.
     expect(notes.join("\n")).toMatch(/plugin \.\/plugins\/cred\/index\.mjs: not approved on this machine, so its credentials are withheld \(MY_TOKEN -> https:\/\/api\.example\.com\) and it runs without them; to grant them: pr-rla plugin approve \.\/plugins\/cred\/index\.mjs/);
     const { freezePreview } = await import("../src/api/read/freeze-preview.js");
@@ -241,7 +243,7 @@ export default defineProvider({ providerApiVersion: 1, name: "cred", credentials
     expect((await rw()).limitations).toContain("MY_TOKEN: none");
     // Approved (as plugin add, lock and approve record it), both modes pass the placeholder; neither ever passes the secret.
     await lockPlugin(s.dir, "./plugins/cred/index.mjs", { approve: true });
-    expect((await ro()).limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
+    expect(resolveUntrusted(await ro()).limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
     expect((await rw()).limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
   }, 60_000);
 });

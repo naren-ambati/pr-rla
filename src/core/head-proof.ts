@@ -2,6 +2,7 @@ import { isCommitId, isIsoUtc, NO_COMMIT, type AuditWindow, type PushLog, type P
 import { isTransientFailure } from "./failures.js";
 import { mapPool } from "./population.js";
 import type { HeadEvidence } from "./records.js";
+import { foreign, foreignError, quoted, said, type Line } from "./said.js";
 
 /**
  * Push-time evidence for a frozen head (P3). A manifest's frozen head, and the commit dates and graph shape behind it,
@@ -46,11 +47,15 @@ export type HeadProof =
       forcedInWindow: PushLogEvent[];
       limitations: string[];
     }
-  | { kind: "disproven"; reason: string; limitations: string[] }
-  | { kind: "none"; reason: string; limitations: string[] };
+  /** `reason` may quote what the provider sent (S1: carried as foreign text, src/core/said.ts). */
+  | { kind: "disproven"; reason: Line; limitations: string[] }
+  | { kind: "none"; reason: Line; limitations: string[] };
 
 const short = (sha: string) => (sha === NO_COMMIT || sha === "" ? "(none)" : `${sha.slice(0, 12)}…`);
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const message = (e: unknown) => foreignError(e);
+/** An update's id is the SCM's: only an identifier (letters, digits and `._:-`, at most 128) is shown or compared (S1). */
+const UPDATE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const shown = (v: unknown) => foreign("what the provider sent", JSON.stringify(v) ?? String(v));
 const iso = (ms: number) => new Date(ms).toISOString().replace(".000Z", "Z");
 const KINDS: ReadonlySet<string> = new Set(["fast-forward", "forced", "created", "deleted", "unknown"]);
 
@@ -58,16 +63,17 @@ interface Ev extends PushLogEvent {
   t: number;
 }
 
-/** Problems with one event as the SDK defines it; empty means usable. */
-function eventProblem(e: unknown): string | null {
+/** Problems with one event as the SDK defines it; null means usable. What the provider sent is quoted as foreign text. */
+function eventProblem(e: unknown): Line | null {
   if (!e || typeof e !== "object") return "an update is not an object";
   const x = e as Partial<PushLogEvent>;
   if (typeof x.id !== "string" || x.id === "") return "an update has no id";
-  if (!isIsoUtc(x.at)) return `update ${x.id} has no ISO 8601 UTC time (${JSON.stringify(x.at)})`;
-  if (!KINDS.has(x.kind as string)) return `update ${x.id} has kind ${JSON.stringify(x.kind)}`;
+  if (!UPDATE_ID.test(x.id)) return said`an update has an id that is not an identifier (${shown(x.id)})`;
+  if (!isIsoUtc(x.at)) return said`update ${x.id} has no ISO 8601 UTC time (${shown(x.at)})`;
+  if (!KINDS.has(x.kind as string)) return said`update ${x.id} has kind ${shown(x.kind)}`;
   for (const side of ["before", "after"] as const) {
     const v = x[side];
-    if (v !== "" && v !== NO_COMMIT && !isCommitId(v)) return `update ${x.id} has ${side} ${JSON.stringify(v)}, not a commit id`;
+    if (v !== "" && v !== NO_COMMIT && !isCommitId(v)) return said`update ${x.id} has ${side} ${shown(v)}, not a commit id`;
   }
   return null;
 }
@@ -78,11 +84,11 @@ function eventProblem(e: unknown): string | null {
  */
 export function analysePushLog(log: PushLog, a: HeadProofArgs): HeadProof {
   const limitations = Array.isArray(log?.limitations) ? log.limitations.filter((l): l is string => typeof l === "string") : [];
-  const none = (reason: string): HeadProof => ({ kind: "none", reason, limitations });
+  const none = (reason: Line): HeadProof => ({ kind: "none", reason, limitations });
   if (!log || !Array.isArray(log.events)) return none("the provider's push log has no list of updates");
   for (const e of log.events) {
     const p = eventProblem(e);
-    if (p) return none(`the provider's push log is malformed: ${p}`);
+    if (p) return none(said`the provider's push log is malformed: ${p}`);
   }
   const head = a.head.toLowerCase();
   // An update listed twice (offset pages shift while new updates arrive) is one update.
@@ -163,7 +169,7 @@ export async function readHeadProof(provider: Pick<ScmProvider, "name" | "pushLo
     log = await provider.pushLog({ repo: a.repo, branch: a.branch, since: a.window.closesAt, ...(a.signal ? { signal: a.signal } : {}) });
   } catch (e) {
     if (a.rethrowTransient && isTransientFailure(e)) throw e;
-    return { kind: "none", reason: isTransientFailure(e) ? `reading its push log hit a rate limit or an outage (${message(e)}); run verify again` : `its push log could not be read (${message(e)})`, limitations: [] };
+    return { kind: "none", reason: isTransientFailure(e) ? said`reading its push log hit a rate limit or an outage (${message(e)}); run verify again` : said`its push log could not be read (${message(e)})`, limitations: [] };
   }
   return analysePushLog(log, a);
 }
@@ -205,7 +211,8 @@ export async function freezeHeadEvidence(
       evidence.push({ repo: r.repo, headSha: r.headSha, status: "tip", since: p.since, event: p.event.id, detail: `${provenLine(p)}${forced}` });
       if (p.rewrites.length) rewritten.push(r.repo);
     } else {
-      evidence.push({ repo: r.repo, headSha: r.headSha, status: "unproven", detail: p.kind === "disproven" ? `the push log does not show it as the branch's tip during the freeze: ${p.reason}` : p.reason });
+      // The manifest records the text as the CLI prints it (quoted in place, its controls escaped): a record is data.
+      evidence.push({ repo: r.repo, headSha: r.headSha, status: "unproven", detail: quoted(p.kind === "disproven" ? said`the push log does not show it as the branch's tip during the freeze: ${p.reason}` : p.reason) });
       unproven.push(`${r.repo}: ${evidence.at(-1)!.detail}`);
     }
   });

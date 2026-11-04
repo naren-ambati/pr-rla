@@ -1,6 +1,7 @@
 import { canonicalHistory, historyDiff, historyEventProblems, type CanonicalHistoryEvent, type LedgerHistoryEvent, type VerdictEvent } from "../sdk/ledger.js";
 import { canonicalJson, sha256Hex } from "./canonical.js";
 import type { PluginIdentity, TimestampEvidence } from "./records.js";
+import { ident, isoOrForeign, joinLines, said, type Line } from "./said.js";
 
 /**
  * Ledger checkpoints (FR4.4; contracts.md §5 `pr-rla/ledger-checkpoint/v1`): the defence against
@@ -180,19 +181,21 @@ export function parseHistoryFile(text: string): LedgerHistoryEvent[] {
  * a missing or altered event list, an event that vanished or changed, and a draw whose first
  * verdict is no longer the one the checkpoint recorded.
  */
-export function compareWithCheckpoint(cp: CheckpointArtifact, current: readonly LedgerHistoryEvent[], firstVerdicts: readonly VerdictEvent[]): string[] {
+export function compareWithCheckpoint(cp: CheckpointArtifact, current: readonly LedgerHistoryEvent[], firstVerdicts: readonly VerdictEvent[]): Line[] {
   const at = cp.line.takenAt;
   if (!cp.events) return [`checkpoint ${at}: its event list ${cp.file} is missing or unreadable`];
   if (eventsSha256(cp.events) !== cp.line.eventsSha256) return [`checkpoint ${at}: its event list ${cp.file} does not match the line's eventsSha256`];
-  const problems: string[] = [];
+  const problems: Line[] = [];
   const d = historyDiff(cp.events, current);
+  // Event ids, verdicts and times come from the ledger's history now: shown as identifiers, else as foreign text (S1).
+  const ids = (xs: readonly string[]) => joinLines(xs.slice(0, 5).map((x) => ident("an event id the ledger gives", x)), ", ");
   if (d.missing.length || d.changed.length)
-    problems.push(`history rewritten after checkpoint ${at}: ${d.missing.length} event(s) missing${d.missing.length ? ` (${d.missing.slice(0, 5).join(", ")})` : ""}, ${d.changed.length} changed${d.changed.length ? ` (${d.changed.slice(0, 5).join(", ")})` : ""}`);
+    problems.push(said`history rewritten after checkpoint ${at}: ${d.missing.length} event(s) missing${d.missing.length ? said` (${ids(d.missing)})` : ""}, ${d.changed.length} changed${d.changed.length ? said` (${ids(d.changed)})` : ""}`);
   const now = new Map(firstVerdicts.map((v) => [v.changeId, v]));
   for (const f of cp.line.perDrawFirstVerdict) {
     const v = now.get(f.changeId);
     const same = v && v.verdict === f.verdict && (f.eventId === null || v.provenance?.eventId === f.eventId) && v.recordedAt === f.recordedAt;
-    if (!same) problems.push(`checkpoint ${at}: draw #${f.draw} had first verdict ${f.verdict} (${f.recordedAt}); now ${v ? `${v.verdict} (${v.recordedAt})` : "none"}`);
+    if (!same) problems.push(said`checkpoint ${at}: draw #${f.draw} had first verdict ${f.verdict} (${f.recordedAt}); now ${v ? said`${ident("the verdict the ledger gives", v.verdict)} (${isoOrForeign("the time the ledger line gives", v.recordedAt)})` : "none"}`);
   }
   return problems;
 }

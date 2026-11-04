@@ -6,6 +6,10 @@ import type { GoneRepo, ManifestRepo, RegisteredRepo, RegisteredVisibility, Repo
 import { describeExclusions, isMutableExclusion, listOwner, matchRepo, ruleExclusions } from "./repo-set.js";
 import type { Selector } from "./selector.js";
 import type { AuditWindow } from "../sdk/provider.js";
+import { Said, foreign, foreignError, said, type Foreign, type Line } from "./said.js";
+
+/** The parts of a line, for a line built from several (src/core/said.ts). */
+const partsOf = (l: Line): (string | Foreign)[] => (typeof l === "string" ? [l] : [...l.parts]);
 
 /**
  * Check 5's rebuild, repo by repo and for the pool as a whole (U8, and the P3 round). Pure apart from the provider
@@ -27,7 +31,13 @@ import type { AuditWindow } from "../sdk/provider.js";
 const short = (sha: string) => `${sha.slice(0, 12)}…`;
 const n = (x: number) => x.toLocaleString("en-US");
 const eg = (xs: readonly string[]) => `e.g. ${xs.slice(0, 3).join(", ")}`;
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** What a provider threw, as a piece of a line: foreign unless it is pr-rla's own refusal (S1, src/core/said.ts). */
+const message = (e: unknown) => foreignError(e);
+/** A time the provider sent, as pr-rla prints it when it parses (pr-rla's words then), else as foreign text. */
+const when = (t: string | null | undefined): string | Foreign => {
+  const ms = typeof t === "string" ? Date.parse(t) : Number.NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString().replace(".000Z", "Z") : foreign("a time the provider sent", t);
+};
 const lower = (s: unknown) => (typeof s === "string" ? s.toLowerCase() : null);
 
 export interface RebuildArgs {
@@ -64,9 +74,10 @@ export interface RepoRebuild {
   history: "pinned" | "unpinned" | "no-head" | "empty";
   /** The head the rebuild walked (unpinned: the one the provider reported). */
   walked: string | null;
-  fail: string[];
-  incomplete: string[];
-  notes: string[];
+  /** Lines (src/core/said.ts): what a provider said is carried in them as foreign text (S1). */
+  fail: Line[];
+  incomplete: Line[];
+  notes: Line[];
   /** P3: what the push log showed about the frozen head (null: not read). */
   proof: HeadProof | null;
 }
@@ -85,37 +96,37 @@ function underName(l: ListChangesResult, from: string, to: string): ListChangesR
 }
 
 /** What a listing failure means for one repo: an empty repo, a rate limit, a gone repo (by probe), the verifier's own access, or a FAIL. */
-async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs & { current: string }, where: "current" | "frozen"): Promise<{ kind: "empty" } | { kind: "renamed"; to: string } | { kind: "fail" | "incomplete"; reason: string }> {
+async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs & { current: string }, where: "current" | "frozen"): Promise<{ kind: "empty" } | { kind: "renamed"; to: string } | { kind: "fail" | "incomplete"; reason: Line }> {
   if (isRepoEmpty(e)) {
     if (a.frozenEmpty) return { kind: "empty" };
-    return { kind: "fail", reason: `frozen head ${a.frozenHead ? short(a.frozenHead) : "(none recorded)"} not found: the repository has no default branch now (${message(e)})` };
+    return { kind: "fail", reason: said`frozen head ${a.frozenHead ? short(a.frozenHead) : "(none recorded)"} not found: the repository has no default branch now (${message(e)})` };
   }
-  if (isTransientFailure(e)) return { kind: "incomplete", reason: `could not be listed (${message(e)}): a rate limit or an outage, not a missing repository; run verify again` };
+  if (isTransientFailure(e)) return { kind: "incomplete", reason: said`could not be listed (${message(e)}): a rate limit or an outage, not a missing repository; run verify again` };
   const status = (e as { status?: unknown } | null)?.status;
   // P3 (#6): a token the SCM refuses is the verifier's problem, never evidence against the audit.
-  if (status === 401) return { kind: "incomplete", reason: `the verifier's token was refused (HTTP 401: ${message(e)}): its access, not the audit, is at fault; verify again with a working token` };
+  if (status === 401) return { kind: "incomplete", reason: said`the verifier's token was refused (HTTP 401: ${message(e)}): its access, not the audit, is at fault; verify again with a working token` };
   if (looksUnavailable(e)) {
     const p = await probeRepo(provider, { repo: a.current });
     switch (p.kind) {
       case "exists":
         // The probe found it under another path (a rename, found by the SCM's redirect): list it there.
         if (p.ref.repo.toLowerCase() !== a.current.toLowerCase()) return { kind: "renamed", to: p.ref.repo };
-        return { kind: "fail", reason: where === "frozen" && a.frozenHead ? `frozen head ${short(a.frozenHead)} not found (HTTP ${status}: ${message(e)}); the repository itself exists` : `HTTP ${status} on part of the repository although it exists (${message(e)})` };
+        return { kind: "fail", reason: where === "frozen" && a.frozenHead ? said`frozen head ${short(a.frozenHead)} not found (HTTP ${status}: ${message(e)}); the repository itself exists` : said`HTTP ${status} on part of the repository although it exists (${message(e)})` };
       case "gone":
         return { kind: "incomplete", reason: `gone: its repo-level metadata answers HTTP ${p.status}${p.status === 404 ? " (deleted, or hidden from this token)" : " (hidden from this token)"}` };
       case "no-access":
-        return { kind: "incomplete", reason: `no access: its repo-level metadata answers HTTP ${p.status} (${p.detail}), a permission problem, not a missing repository` };
+        return { kind: "incomplete", reason: said`no access: its repo-level metadata answers HTTP ${p.status} (${p.detail}), a permission problem, not a missing repository` };
       case "transient":
-        return { kind: "incomplete", reason: `could not be listed (HTTP ${status}), and probing it hit a rate limit or an outage (${p.detail}); run verify again` };
+        return { kind: "incomplete", reason: said`could not be listed (HTTP ${status}), and probing it hit a rate limit or an outage (${p.detail}); run verify again` };
       case "unsupported":
-        return { kind: "incomplete", reason: `HTTP ${status} (${message(e)}), and provider ${provider.name} cannot probe a repository (it has no describeRepo), so whether it is gone is unknown` };
+        return { kind: "incomplete", reason: said`HTTP ${status} (${message(e)}), and provider ${provider.name} cannot probe a repository (it has no describeRepo), so whether it is gone is unknown` };
       default:
-        return { kind: "incomplete", reason: `HTTP ${status} (${message(e)}), and probing it failed too (${p.detail})` };
+        return { kind: "incomplete", reason: said`HTTP ${status} (${message(e)}), and probing it failed too (${p.detail})` };
     }
   }
   const what = where === "frozen" ? "rebuilding from the frozen head" : "listing it";
-  if (a.verifierFailing) return { kind: "incomplete", reason: `${what} failed (${message(e)}) while the verifier's own access is failing too (the owner listing, or what its token is): not counted against the audit; verify again with working access` };
-  return { kind: "fail", reason: `${what} failed: ${message(e)}` };
+  if (a.verifierFailing) return { kind: "incomplete", reason: said`${what} failed (${message(e)}) while the verifier's own access is failing too (the owner listing, or what its token is): not counted against the audit; verify again with working access` };
+  return { kind: "fail", reason: said`${what} failed: ${message(e)}` };
 }
 
 /**
@@ -124,7 +135,7 @@ async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs
  * frozen head's first-parent history), else the window listed from the close's tip, every change of which must be in the
  * frozen head's rebuild.
  */
-async function closeTipReached(provider: ScmProvider, a: RebuildArgs & { current: string }, list: (head?: string) => Promise<ListChangesResult>, frozen: string, tip: string, rewrites: string[], pinned: ListChangesResult): Promise<{ ok: string } | { fail: string } | { incomplete: string }> {
+async function closeTipReached(provider: ScmProvider, a: RebuildArgs & { current: string }, list: (head?: string) => Promise<ListChangesResult>, frozen: string, tip: string, rewrites: string[], pinned: ListChangesResult): Promise<{ ok: string } | { fail: string } | { incomplete: Line }> {
   if (typeof provider.firstParentPath === "function") {
     try {
       if ((await provider.firstParentPath({ repo: a.current, base: tip, head: frozen, ...(a.signal ? { signal: a.signal } : {}) })) !== null) return { ok: `the branch's tip when the window closed (${short(tip)}) is on the frozen head's first-parent history` };
@@ -136,7 +147,7 @@ async function closeTipReached(provider: ScmProvider, a: RebuildArgs & { current
   try {
     atClose = await list(tip);
   } catch (e) {
-    return { incomplete: `the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}), and listing the window from its tip when the window closed (${short(tip)}) failed (${message(e)}): whether the frozen head reaches everything on the branch then is unverified` };
+    return { incomplete: said`the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}), and listing the window from its tip when the window closed (${short(tip)}) failed (${message(e)}): whether the frozen head reaches everything on the branch then is unverified` };
   }
   if (lower(atClose.headSha) !== tip) return { incomplete: `the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}), and the provider does not pin history to its tip when the window closed (${short(tip)}): whether the frozen head reaches everything on the branch then is unverified` };
   const have = new Set(pinned.changes.map((c) => c.id));
@@ -217,7 +228,7 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
   if (a.freezeSpan) {
     const proof = await readHeadProof(provider, { repo: a.current, branch: a.branch || pinned.defaultBranch, head: frozen, window: a.window, from: a.freezeSpan.from, until: a.freezeSpan.until, ...(a.signal ? { signal: a.signal } : {}) });
     out.proof = proof;
-    if (proof.kind === "disproven") out.fail.push(`the frozen head ${short(frozen)} was not the default branch's tip at freeze: ${proof.reason}`);
+    if (proof.kind === "disproven") out.fail.push(said`the frozen head ${short(frozen)} was not the default branch's tip at freeze: ${proof.reason}`);
     else if (proof.kind === "proven") {
       const rewrites = proof.rewrites.map((e) => `${e.kind} update ${e.id} at ${e.at}`);
       if (proof.rewrites.length && proof.tipAtClose !== null && proof.tipAtClose !== frozen) {
@@ -251,13 +262,13 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
     else if (proof?.kind === "proven") {
       // The head is proven but not shown to reach the close's tip: the FAIL or INCOMPLETE above says why.
     } else if (proof?.kind !== "disproven")
-      out.incomplete.push(`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and there is no push-time evidence to place them (${proof ? proof.reason : "no push log was read"}): whether they arrived after freeze (FR7.2) or the frozen head hides them is unverified`);
+      out.incomplete.push(said`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and there is no push-time evidence to place them (${proof ? proof.reason : "no push log was read"}): whether they arrived after freeze (FR7.2) or the frozen head hides them is unverified`);
   }
   if (extra.length) {
     if (proof?.kind === "proven") {
       const forced = proof.after.filter((e) => e.kind !== "fast-forward").map((e) => `${e.kind} update ${e.id} at ${e.at}`);
       out.notes.push(`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): the branch was rewritten after freeze${forced.length ? ` (${eg(forced)})` : ""}; the push log shows the frozen head was its tip at freeze, so the frozen population stands`);
-    } else if (proof?.kind !== "disproven") out.incomplete.push(`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): it was rewritten since freeze, or the frozen head is not the branch's, and there is no push-time evidence to tell which (${proof ? proof.reason : "no push log was read"})`);
+    } else if (proof?.kind !== "disproven") out.incomplete.push(said`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): it was rewritten since freeze, or the frozen head is not the branch's, and there is no push-time evidence to tell which (${proof ? proof.reason : "no push log was read"})`);
   }
   return out;
 }
@@ -290,16 +301,16 @@ export interface PoolCheckInput {
 }
 
 export interface PoolCheck {
-  /** Decisive lines (FAIL / INCOMPLETE / WARN prefixes) and notes, in order. */
-  lines: string[];
+  /** Decisive lines (FAIL / INCOMPLETE / WARN prefixes) and notes, in order (src/core/said.ts lines). */
+  lines: Line[];
   /** One per manifest repo, in manifest order. */
   rebuilt: RepoRebuild[];
   /** P3 (#10): the lines a summary line in `lines` stands for (one per repo); printed with --verbose, always in --json. */
-  verbose: string[];
+  verbose: Line[];
 }
 
 /** The window changes a repo lists now (from its current head), for a repo outside the manifest; or why it could not be counted. */
-async function countNow(provider: ScmProvider, repo: string, i: PoolCheckInput): Promise<{ count: number } | { error: string }> {
+async function countNow(provider: ScmProvider, repo: string, i: PoolCheckInput): Promise<{ count: number } | { error: string | Foreign }> {
   try {
     const l = await listRepoChanges(provider, { repo, window: i.window, selector: i.selector, ...(i.signal ? { signal: i.signal } : {}) });
     checkListed(provider.name, l, { repo, window: i.window, selector: i.selector });
@@ -313,7 +324,7 @@ async function countNow(provider: ScmProvider, repo: string, i: PoolCheckInput):
 const nonPublic = (vs: readonly RepoVisibility[]) => vs.filter((v) => v !== "public");
 
 /** One repo outside the pool, as check 5 judges it (see `checkPool`): a decisive line, a collapsible WARN, quiet, or nothing. */
-type Verdict = { line: string } | { warn: string; count: number } | { quiet: true } | null;
+type Verdict = { line: Line } | { warn: Line; count: number } | { quiet: true } | null;
 
 /**
  * Check 5 over a pool: re-list the owner unfiltered (a rule), establish what the token (and, P3, the registering token)
@@ -333,8 +344,8 @@ type Verdict = { line: string } | { warn: string; count: number } | { quiet: tru
  * A rename since freeze is no failure: the repo is matched by its id.
  */
 export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promise<PoolCheck> {
-  const lines: string[] = [];
-  const verbose: string[] = [];
+  const lines: Line[] = [];
+  const verbose: Line[] = [];
   const concurrency = i.concurrency ?? 4;
   const rule: RepoSetRule | null = i.set.kind === "rule" ? i.set : null;
   // P3 (#6): the verifier's own access failing (the owner listing, what its token is) turns unexplained listing errors INCOMPLETE.
@@ -347,30 +358,31 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
     } catch (e) {
       now = null;
       verifierFailing = true;
-      lines.push(`INCOMPLETE cannot re-list the repositories under ${rule.owner} (${message(e)}): repos added, renamed or excluded since freeze would not be seen`);
+      lines.push(said`INCOMPLETE cannot re-list the repositories under ${rule.owner} (${message(e)}): repos added, renamed or excluded since freeze would not be seen`);
     }
     // What this token can see: public listings are complete for anyone; private and internal need the provider's proof.
     const want = nonPublic(rule.visibility);
     if (want.length) {
-      const freezer = (v: RepoVisibility) => (i.listing ? ` (the freeze listed ${n(i.listing.visibility[v]?.listed ?? 0)}${i.listing.identity ? `, as ${i.listing.identity}` : ""})` : "");
-      if (typeof provider.listingVisibility !== "function") for (const v of want) lines.push(`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: provider ${provider.name} cannot say what its token sees (it has no listingVisibility)${freezer(v)}`);
+      // The identity, the reasons and the count's source are the provider's words (at freeze, at registration, now).
+      const freezer = (v: RepoVisibility): Line => (i.listing ? said` (the freeze listed ${n(i.listing.visibility[v]?.listed ?? 0)}${i.listing.identity ? said`, as ${foreign("the account the freeze's token was", i.listing.identity)}` : ""})` : "");
+      if (typeof provider.listingVisibility !== "function") for (const v of want) lines.push(said`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: provider ${provider.name} cannot say what its token sees (it has no listingVisibility)${freezer(v)}`);
       else {
         try {
           const seen = await provider.listingVisibility(rule);
           for (const v of want) {
-            let proof = seen.visibilities?.[v];
+            let proof: { complete: boolean; reason: Line | Foreign } | undefined = seen.visibilities?.[v] ? { complete: seen.visibilities[v].complete === true, reason: foreign("the provider's reason", seen.visibilities[v].reason) } : undefined;
             // P3: held to the SCM's own count of the owner's repositories, where it gives one.
             for (const x of Array.isArray(seen.expected) ? seen.expected : []) {
               if (!now || !Array.isArray(x?.visibilities) || !x.visibilities.includes(v) || typeof x.count !== "number") continue;
               const have = now.filter((r) => x.visibilities.includes(r.visibility)).length;
-              if (have < x.count) proof = { complete: false, reason: `the listing shows ${have} ${x.visibilities.join(" or ")} repositories, but ${String(x.source)} counts ${x.count}, so it is missing some` };
+              if (have < x.count) proof = { complete: false, reason: said`the listing shows ${have} ${x.visibilities.join(" or ")} repositories, but ${foreign("the provider's source for the count", String(x.source))} counts ${x.count}, so it is missing some` };
             }
-            if (proof?.complete === true) lines.push(`${v} repositories under ${rule.owner}: listed completely (${proof.reason})`);
-            else lines.push(`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${proof?.reason ?? "the provider gave no answer for it"}${freezer(v)}`);
+            if (proof?.complete === true) lines.push(said`${v} repositories under ${rule.owner}: listed completely (${proof.reason})`);
+            else lines.push(said`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${proof?.reason ?? "the provider gave no answer for it"}${freezer(v)}`);
           }
         } catch (e) {
           verifierFailing = true;
-          for (const v of want) lines.push(`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${message(e)}${freezer(v)}`);
+          for (const v of want) lines.push(said`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${message(e)}${freezer(v)}`);
         }
       }
       // P3: what the registering token could see. A repo of a visibility it could not be shown to see in full may be
@@ -379,23 +391,23 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
         for (const v of want) {
           const reg = i.registeredVisibility?.visibility?.[v];
           if (i.registeredVisibility === null) lines.push(`INCOMPLETE the registration does not record what its token could see (registeredVisibility), so the registered repo set cannot be shown to hold every ${v} repository under ${rule.owner}`);
-          else if (reg?.complete !== true) lines.push(`INCOMPLETE the registered repo set cannot be shown to hold every ${v} repository under ${rule.owner}: at registration, ${reg?.reason ?? "the token's listing gave no proof"}${i.registeredVisibility.identity ? ` (as ${i.registeredVisibility.identity})` : ""}`);
+          else if (reg?.complete !== true) lines.push(said`INCOMPLETE the registered repo set cannot be shown to hold every ${v} repository under ${rule.owner}: at registration, ${reg?.reason !== undefined ? foreign("the provider's reason", reg.reason) : "the token's listing gave no proof"}${i.registeredVisibility.identity ? said` (as ${foreign("the account the registering token was", i.registeredVisibility.identity)})` : ""}`);
         }
     }
   }
   const nowAsResolved = (now ?? []).map((r) => ({ repo: r.repo, repoId: r.id, ref: r }));
 
   // Every manifest repo, under its path now.
-  const located = await mapPool(i.repos, concurrency, async (m): Promise<{ current: string } | { reason: string }> => {
+  const located = await mapPool(i.repos, concurrency, async (m): Promise<{ current: string } | { reason: Line }> => {
     if (!now) return { current: m.repo };
     const hit = matchRepo(nowAsResolved, m);
     if (hit) return { current: hit.repo };
     const p = await probeRepo(provider, { repo: m.repo, id: m.repoId });
     if (p.kind === "exists") return { current: p.ref.repo };
     if (p.kind === "gone") return { reason: `gone: not in ${rule!.owner}'s listing, and its repo-level metadata answers HTTP ${p.status}${p.status === 404 ? " (deleted, or hidden from this token)" : " (hidden from this token)"}` };
-    if (p.kind === "no-access") return { reason: `no access: not in ${rule!.owner}'s listing, and its repo-level metadata answers HTTP ${p.status} (${p.detail})` };
+    if (p.kind === "no-access") return { reason: said`no access: not in ${rule!.owner}'s listing, and its repo-level metadata answers HTTP ${p.status} (${p.detail})` };
     if (p.kind === "unsupported") return { reason: `not in ${rule!.owner}'s listing, and provider ${provider.name} cannot probe a repository (it has no describeRepo)` };
-    return { reason: `not in ${rule!.owner}'s listing, and probing it failed (${p.detail})` };
+    return { reason: said`not in ${rule!.owner}'s listing, and probing it failed (${p.detail})` };
   });
   const rebuilt = await mapPool(i.repos, concurrency, async (m, k): Promise<RepoRebuild> => {
     const where = located[k]!;
@@ -418,7 +430,7 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
   const without = rebuilt.filter((b) => b.proof?.kind === "none");
   if (i.repos.length === 1 && proven.length === 1) lines.push(`push log: the frozen head ${short(i.repos[0]!.headSha!)} was the default branch's tip at freeze: ${provenLine(proven[0]!.proof as Extract<HeadProof, { kind: "proven" }>)}`);
   else if (proven.length) lines.push(`push log: ${n(proven.length)} of ${n(rebuilt.length)} frozen head(s) were their default branch's tip at freeze`);
-  if (without.length) lines.push(`push log: no push-time evidence for ${n(without.length)} repo(s) (${without.slice(0, 2).map((b) => `${b.repo}: ${(b.proof as { reason: string }).reason}`).join("; ")}): a window commit pushed there after freeze cannot be placed, and makes that repo INCOMPLETE`);
+  if (without.length) lines.push(said`push log: no push-time evidence for ${n(without.length)} repo(s) (${new Said(without.slice(0, 2).flatMap((b, k) => [k ? "; " : "", `${b.repo}: `, ...partsOf((b.proof as { reason: Line }).reason)]))}): a window commit pushed there after freeze cannot be placed, and makes that repo INCOMPLETE`);
 
   // The registered repos recorded gone at freeze.
   for (const g of i.gone) {
@@ -428,11 +440,11 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
       const p = await probeRepo(provider, { repo: g.repo, id: g.repoId });
       if (p.kind === "exists") current = p.ref.repo;
       else if (p.kind === "gone") lines.push(`INCOMPLETE registered repo ${g.repo} was gone at freeze (HTTP ${g.status} at ${g.probedAt}) and still is (HTTP ${p.status}): its changes in the window are unknown`);
-      else lines.push(`INCOMPLETE registered repo ${g.repo} was gone at freeze (HTTP ${g.status} at ${g.probedAt}); probing it now: ${p.kind === "unsupported" ? `provider ${provider.name} has no describeRepo` : p.detail}`);
+      else lines.push(said`INCOMPLETE registered repo ${g.repo} was gone at freeze (HTTP ${g.status} at ${g.probedAt}); probing it now: ${p.kind === "unsupported" ? `provider ${provider.name} has no describeRepo` : p.detail}`);
     }
     if (current) {
       const c = await countNow(provider, current, i);
-      if ("error" in c) lines.push(`INCOMPLETE registered repo ${g.repo} was recorded gone at freeze (HTTP ${g.status} at ${g.probedAt}) but exists as ${current}, and its window changes could not be counted (${c.error})`);
+      if ("error" in c) lines.push(said`INCOMPLETE registered repo ${g.repo} was recorded gone at freeze (HTTP ${g.status} at ${g.probedAt}) but exists as ${current}, and its window changes could not be counted (${c.error})`);
       else if (c.count > 0) lines.push(`FAIL registered repo ${g.repo} was recorded gone at freeze (HTTP ${g.status} at ${g.probedAt}) but exists${current !== g.repo ? ` as ${current}` : ""}, with ${n(c.count)} changes in the window that are not in the manifest`);
       else lines.push(`registered repo ${g.repo} was recorded gone at freeze but exists${current !== g.repo ? ` as ${current}` : ""}; it lists no change in the window, so it cannot change the population`);
     }
@@ -458,7 +470,7 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
       const exclNow = ruleExclusions(rule, r);
       if (registered) {
         const c = await countNow(provider, r.repo, i);
-        if ("error" in c) return { line: `INCOMPLETE registered repo ${r.repo} is not in the manifest, and its window changes could not be counted (${c.error})` };
+        if ("error" in c) return { line: said`INCOMPLETE registered repo ${r.repo} is not in the manifest, and its window changes could not be counted (${c.error})` };
         return { line: c.count > 0 ? `FAIL registered repo ${r.repo} is not in the manifest (${n(c.count)} changes landed in the window)` : `registered repo ${r.repo} is not in the manifest; it lists no change in the window, so it cannot change the population` };
       }
       // What kept it out of the pool at freeze: what the freeze's listing recorded, else what excludes it now.
@@ -469,14 +481,14 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
         // The freeze's listing says it was a fork (or not the owner's) then, and it is not now: what a repo is does not
         // change that way, so the record is wrong or the SCM changed it; its window changes are then unaccounted for.
         const c = await countNow(provider, r.repo, i);
-        if ("error" in c) return { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)}, which it is not now; its window changes could not be counted (${c.error})` };
+        if ("error" in c) return { line: said`INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)}, which it is not now; its window changes could not be counted (${c.error})` };
         return c.count === 0 ? null : { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)} (the manifest's listing records it so), which it is not now, and ${n(c.count)} of its changes landed in the window: the record is wrong, or the SCM changed what the repo is` };
       }
       const created = r.createdAt ? Date.parse(r.createdAt) : NaN;
-      if (Number.isFinite(created) && created >= closes) return exclNow.length === 0 ? { line: `repo ${r.repo} matches the registered rule but is not in the manifest; it was created ${r.createdAt}, after the window closed, so it cannot hold a window landing` } : null;
+      if (Number.isFinite(created) && created >= closes) return exclNow.length === 0 ? { line: said`repo ${r.repo} matches the registered rule but is not in the manifest; it was created ${when(r.createdAt)}, after the window closed, so it cannot hold a window landing` } : null;
       const seen = atFreeze ? (excl.length ? `was excluded at freeze (${describeExclusions(excl)})` : "matched the rule in the freeze's own listing") : "was not in the freeze's listing";
       const c = await countNow(provider, r.repo, i);
-      if ("error" in c) return { line: `INCOMPLETE repo ${r.repo} ${seen}${exclNow.length ? `, is excluded by ${describeExclusions(exclNow)} now` : " and the rule matches it now"}; its window changes could not be counted (${c.error})` };
+      if ("error" in c) return { line: said`INCOMPLETE repo ${r.repo} ${seen}${exclNow.length ? `, is excluded by ${describeExclusions(exclNow)} now` : " and the rule matches it now"}; its window changes could not be counted (${c.error})` };
       if (c.count === 0) return excl.length ? { quiet: true } : { line: `repo ${r.repo} matches the registered rule but is not in the manifest; it lists no change in the window, so it cannot change the population` };
       const changes = `${n(c.count)} of its changes landed in the window`;
       if (excl.length === 0) {
@@ -486,14 +498,14 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
       // Excluded only by attributes its owners can change.
       const afterReg = Number.isFinite(created) && Number.isFinite(regAt) ? created > regAt : null;
       if (atFreeze && excl.length === 1 && excl[0] === "archived" && (prospective || afterReg === true))
-        return { line: `FAIL repo ${r.repo} was archived at freeze (the manifest's listing records it so), yet ${changes}${afterReg ? `, after it was created on ${r.createdAt}, after the registration` : ", all after the registration"}: an archived repository is read-only, so it was archived after them, and archiving it took them out of the pool` };
+        return { line: said`FAIL repo ${r.repo} was archived at freeze (the manifest's listing records it so), yet ${changes}${afterReg ? said`, after it was created on ${when(r.createdAt)}, after the registration` : ", all after the registration"}: an archived repository is read-only, so it was archived after them, and archiving it took them out of the pool` };
       if (afterReg !== false)
-        return { line: `INCOMPLETE repo ${r.repo} ${seen}${atFreeze ? "" : `, is excluded by ${describeExclusions(exclNow)} now`}, and ${changes}, but ${afterReg === null ? `provider ${provider.name} gives no creation time, so whether it existed at registration is unknown` : `it was created on ${r.createdAt}, after the registration, so it could not be registered`}: whether it was excluded when its changes landed is unverified` };
+        return { line: said`INCOMPLETE repo ${r.repo} ${seen}${atFreeze ? "" : `, is excluded by ${describeExclusions(exclNow)} now`}, and ${changes}, but ${afterReg === null ? `provider ${provider.name} gives no creation time, so whether it existed at registration is unknown` : said`it was created on ${when(r.createdAt)}, after the registration, so it could not be registered`}: whether it was excluded when its changes landed is unverified` };
       const then = atFreeze ? (JSON.stringify(atFreeze.excludedBy) === JSON.stringify(exclNow) ? "" : atFreeze.excludedBy.length ? `, by ${describeExclusions(atFreeze.excludedBy)} at freeze` : ", and the rule matched it at freeze") : ", and the freeze's listing did not show it";
       const what = exclNow.length ? `is excluded by ${describeExclusions(exclNow)} now${then}` : `was excluded by ${describeExclusions(excl)} at freeze and the rule matches it now`;
       return { warn: `WARN repo ${r.repo} ${what}, an attribute its owners can change, and has ${n(c.count)} changes in the window that are not in the population (${retro(true)})`, count: c.count };
     });
-    const warns: { warn: string; count: number }[] = [];
+    const warns: { warn: Line; count: number }[] = [];
     let quiet = 0;
     for (const v of verdicts) {
       if (!v) continue;
@@ -503,7 +515,7 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
     }
     // P3 (#10): one line for the attribute-excluded repos with window changes; each repo's line is in `verbose`.
     if (warns.length) {
-      const names = warns.map((w) => /^WARN repo (\S+)/.exec(w.warn)?.[1] ?? "?");
+      const names = warns.map((w) => /^WARN repo (\S+)/.exec(String(w.warn))?.[1] ?? "?");
       lines.push(`WARN ${n(warns.length)} repo(s) excluded only by attributes their owners can change (name, archive state, visibility) have ${n(warns.reduce((k, w) => k + w.count, 0))} changes in the window that are not in the population (${eg(names)}): ${retro(warns.length === 1)}; each is listed with --verbose and in --json`);
       verbose.push(...warns.map((w) => w.warn));
     }

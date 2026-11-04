@@ -8,7 +8,7 @@ import { writeFileAtomic } from "../io/atomic.js";
 import { INDEX_FILE } from "../ledgers/issue-index.js";
 import type { PluginSpec } from "../registry.js";
 import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerDefinition, type LedgerIndexStore, type ProvenanceLevel } from "../sdk/ledger.js";
-import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
+import { assertProviderDefinition, isPluginName, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
 import { approveCommand, grantsOf, grantText, refuseFullTrustUnapproved, type ConsentSource } from "./approvals.js";
 import { PluginError } from "./errors.js";
 import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
@@ -119,6 +119,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
     const p = await def.create(spec.options, { cwd, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep });
     if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(p.apiVersion)) throw new ProviderApiVersionError(def.name, p.apiVersion);
     if (typeof p.listChanges !== "function") throw new PluginError(`provider "${def.name}" returned an object without listChanges()`, "PLUGIN_INVALID");
+    if (!isPluginName(p.name)) throw new PluginError(`provider "${def.name}" returned an instance whose name is not a plugin name (lowercase letters, digits and hyphens)`, "PLUGIN_INVALID");
     return p;
   }
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: brokerCredentials(spec.use, entry, consent !== null) });
@@ -174,6 +175,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
     const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, index, ...reviewers });
     if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");
+    if (!isPluginName(l.name)) throw new PluginError(`ledger "${def.name}" returned an instance whose name is not a plugin name (lowercase letters, digits and hyphens)`, "PLUGIN_INVALID");
     return l;
   }
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: brokerCredentials(spec.use, entry, consent !== null) });

@@ -17,6 +17,8 @@ import { pluginIdentity } from "../../registry.js";
 import type { ChangeKind, ChangeRecord, ScmProvider } from "../../sdk/provider.js";
 import { AuditError } from "../errors.js";
 import { auditContextFor, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, type ApiContext } from "../session.js";
+import { foreign } from "../../core/said.js";
+import { renderResult } from "./untrusted.js";
 
 /**
  * `freeze_preview` and `freeze --dry-run` (functional-design.md §U5): the population a freeze would
@@ -66,6 +68,8 @@ export interface FreezePreview {
   repos?: ManifestRepo[];
   /** A pooled preview: how many repos, how many with a pinned head, how many with changes in the window. */
   pool?: { repos: number; pinned: number; withChanges: number };
+  /** Read-only mode (S1): the provider's limitations and count labels, which those fields point to as `untrusted.errors[i]`. */
+  untrusted?: { errors: string[] };
 }
 
 /** `freeze --dry-run --estimate` and freeze_preview's `estimate` (U8): what a pooled freeze would cost. */
@@ -329,7 +333,11 @@ export async function freezePreview(ctx: ApiContext, opts?: FreezePreviewOptions
 export async function freezePreview(ctx: ApiContext, opts: FreezePreviewOptions = {}): Promise<FreezePreview | FreezeEstimateResult> {
   if (opts.estimate) return freezeEstimate(ctx, opts.window !== undefined ? { window: opts.window } : {});
   const plan = await planFreeze(ctx, { dryRun: true, ...(opts.window !== undefined ? { window: opts.window } : {}), ...(opts.listing ? { listing: true } : {}) });
-  return plan.preview;
+  if (ctx.mode !== "read-only") return plan.preview;
+  // Read-only (S1): what the provider wrote (its limitations, the labels of its own counts) is its text, in untrusted.errors.
+  const p = plan.preview;
+  const label = (c: { label: string; value: number }) => ({ ...c, label: foreign("the provider's label for the count", c.label) });
+  return renderResult<FreezePreview>("read-only", { ...p, limitations: p.limitations.map((l) => foreign("a limitation the provider reports", l)), nativeCounts: p.nativeCounts.map(label), diagnostics: p.diagnostics.map(label) });
 }
 
 /**

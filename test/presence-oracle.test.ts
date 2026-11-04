@@ -9,6 +9,7 @@ import { checkVerdictSignature, parseAllowedSigner, parseAllowedSigners, verdict
 import type { VerdictEvent } from "../src/sdk/ledger.js";
 import { armor, makeTestKey, tamperArmor, unarmor, type SignOptions, type TestKey } from "./helpers/sshsig-signer.js";
 import { NAMESPACE, signedLine, verdictBytes, type LineFields } from "./helpers/verdict-lines.js";
+import { quoted } from "../src/core/said.js";
 
 /**
  * The oracle for FR9.2 (test-design.md §2, U9; as changed after review): pr-rla's verdict on each
@@ -175,8 +176,8 @@ describe.skipIf(SKIP || !hasSshKeygen)("oracle: ssh-keygen -Y verify and check-n
     const c = c0.tamper ? { ...c0, sig: tamperArmor(c0.sig, c0.tamper), line: JSON.stringify({ ...JSON.parse(c0.line), sshsig: unarmor(tamperArmor(c0.sig, c0.tamper)) }) } : c0;
     const mine = prRla(c.line, c.allowed);
     const theirs = oracle(c.sig, c.bytes, c.allowed, c.principal);
-    expect(mine.valid, mine.detail).toBe(c.expect.valid);
-    expect(mine.accepted, mine.detail).toBe(c.expect.accepted);
+    expect(mine.valid, quoted(mine.detail)).toBe(c.expect.valid);
+    expect(mine.accepted, quoted(mine.detail)).toBe(c.expect.accepted);
     if (c.stricter) {
       // ssh-keygen accepts it; pr-rla refuses on purpose.
       expect(theirs.verify, `${c.stricter}: ${theirs.verifyOut}`).toBe(0);

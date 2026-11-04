@@ -1,6 +1,7 @@
 import { REPO_VISIBILITIES, type RepoRef, type RepoSetRule, type RepoVisibility, type ScmProvider } from "../sdk/provider.js";
-import { probeRepo } from "./failures.js";
+import { REPO_PATH, probeRepo } from "./failures.js";
 import type { GoneRepo, HeadEvidence, ListedRepo, RegisteredRepo, RegisteredVisibility, RepoListing, RepoSet } from "./records.js";
+import { quoted } from "./said.js";
 
 /**
  * Repo sets (U8, FR5.1/FR5.6/FR5.7): what an audit covers, how a rule resolves, and the population
@@ -25,7 +26,6 @@ export interface ResolvedRepo {
 }
 
 export const DEFAULT_INCLUDE: readonly string[] = ["*"];
-const REPO_PATH = /^[^\s/:]+(?:\/[^\s/]+)+$/;
 const SCHEME = /^([a-z0-9][a-z0-9-]*):(.+)$/;
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const lower = (s: string) => s.toLowerCase();
@@ -397,14 +397,14 @@ export async function resolvePool(provider: Pick<ScmProvider, "name" | "listRepo
         pool.set(probed.ref.id, { repo: probed.ref.repo, repoId: probed.ref.id });
         break;
       case "gone":
-        gone.push({ repo: reg.repo, repoId: reg.repoId, status: probed.status, detail: probed.detail, probedAt: o.now() });
+        gone.push({ repo: reg.repo, repoId: reg.repoId, status: probed.status, detail: quoted(probed.detail), probedAt: o.now() });
         break;
       case "transient":
         throw probed.error; // a rate limit or an outage: the freeze stops (exit 4) and the same command finishes it
       case "unsupported":
         throw new RepoSetError(`registered repo ${reg.repo} (id ${reg.repoId}) is not in ${set.owner}'s listing, and provider ${provider.name} cannot probe a repository (it has no describeRepo) to tell whether it is gone; nothing is skipped`);
       default:
-        throw new RepoSetError(`registered repo ${reg.repo} (id ${reg.repoId}) is not in ${set.owner}'s listing, and probing it failed (${probed.kind === "no-access" ? `no access: ${probed.detail}` : probed.detail}); nothing is skipped`);
+        throw new RepoSetError(`registered repo ${reg.repo} (id ${reg.repoId}) is not in ${set.owner}'s listing, and probing it failed (${probed.kind === "no-access" ? `no access: ${quoted(probed.detail)}` : quoted(probed.detail)}); nothing is skipped`);
     }
   }
   return { pool: [...pool.values()].sort((a, b) => cmp(a.repo, b.repo)), listing, gone: gone.sort((a, b) => cmp(a.repo, b.repo)) };

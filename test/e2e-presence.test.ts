@@ -22,6 +22,7 @@ import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
 import { NAMESPACE, bindingOf, signedLine } from "./helpers/verdict-lines.js";
 import { claimsIn, claimsInText, jsonSentences, markdownSentences, uncoveredSentences, unlabelledPresence, vettedSet, type VettedList } from "./helpers/wording.js";
 import { MockTsaServer, makeTestAuthority } from "./helpers/test-tsa.js";
+import { render } from "../src/core/said.js";
 
 /**
  * U9 end to end (FR3.8, FR9.1–FR9.6), as changed after review: a git-file audit whose registration
@@ -40,7 +41,8 @@ let keysDir: string;
 const keys: Record<string, TestKey> = {};
 const keyPath = (name: string) => join(keysDir, name);
 const readJ = <X>(s: Scenario, p: string) => JSON.parse(readFileSync(join(s.dir, p), "utf8")) as X;
-const check = (r: Pick<Awaited<ReturnType<typeof runVerify>>, "checks">, n: number) => r.checks.find((c) => c.n === n)!;
+/** A check of verify's result, or of the core's report rendered as the CLI shows it (S1: src/core/said.ts). */
+const check = <C extends { n: number }>(r: { checks: readonly C[] }, n: number) => r.checks.find((c) => c.n === n)!;
 const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   tsa.nowMs = T(iso);
@@ -366,9 +368,12 @@ describe("FR3.8: the default provenance with git-file, and the ceilings", () => 
       const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
       const claims = draws.draws.slice(0, 36).filter((d) => d.firstOccurrence).map((d) => ({ draw: d.draw, changeId: d.changeId, verdict: "pass" as const, protocolSha256: reg.record.protocolSha256, reviewer: "bob", recordedAt: "2026-10-21T03:00:00Z", provenance: { level: "presence" as const, source: "scm-label-event" } }));
       const tracker = { apiVersion: 1, name: "tracker", readVerdicts: async () => claims, appendVerdict: async () => {}, verifyIntegrity: async () => ({ ok: true, tamperTrail: true, findings: [] }) };
-      const r = await verifyAudit(
-        { registration: reg, manifest: readJ(s, `${W}.manifest.json`), commitment: readJ(s, `${W}/manifest-commitment.json`), draws, currentProtocolSha256: reg.record.protocolSha256 },
-        { provider: null, ledger: tracker, beacon: async (round) => recordedBeacon(round), logKey: async () => null, trustBundle: mergeTrust(SHIPPED_TRUST_BUNDLE, s.tsaTrust), provenanceCeiling: "account" },
+      const r = render(
+        await verifyAudit(
+          { registration: reg, manifest: readJ(s, `${W}.manifest.json`), commitment: readJ(s, `${W}/manifest-commitment.json`), draws, currentProtocolSha256: reg.record.protocolSha256 },
+          { provider: null, ledger: tracker, beacon: async (round) => recordedBeacon(round), logKey: async () => null, trustBundle: mergeTrust(SHIPPED_TRUST_BUNDLE, s.tsaTrust), provenanceCeiling: "account" },
+        ),
+        null,
       );
       return { r, claims };
     };

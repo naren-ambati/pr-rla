@@ -17,6 +17,7 @@ import { anchorLines, notTamperProof } from "../../timestamp/verify.js";
 import { latestCheckpointAt } from "./checkpoints.js";
 import { auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { assessRecord, logBound } from "../timestamps.js";
+import { fenceStatus, renderResult } from "./untrusted.js";
 
 /**
  * `status` (functional-design.md §U5): where an audit stands, as one result object per phase.
@@ -78,6 +79,8 @@ export type StatusResult =
       ledgerIntegrity: { ok: boolean; findings: string[]; fails: string[]; warnings: string[] } | null;
       /** Why CERTIFIED is withheld although the sequence certifies: what check 7 would FAIL (P4). Empty otherwise. */
       certificateWithheld: string[];
+      /** Read-only mode (S1): what ledger lines said (a reviewer, a note, an app's name), which the fields above point to as `untrusted.errors[i]`. */
+      untrusted?: { errors: string[] };
       /** The certificate line (or the refusal), as the CLI prints it first. */
       line: string;
     } & TimeStanding &
@@ -253,5 +256,8 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   const line =
     report.refusal ??
     statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector, withheld }) + timestampNote;
-  return { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...report, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld, line };
+  // Rendered once, by the mode (S1): in read-only mode the verdicts' reviewers, notes and other ledger-written fields,
+  // and what the counting notes quote from ledger lines, are pr-rla's words with the text in untrusted.errors.
+  const shown = ctx.mode === "read-only" ? fenceStatus(report) : report;
+  return renderResult<StatusResult>(ctx.mode ?? "read-write", { phase: "sampled", window, verdictsRead: true, ledger: ledger.name, ...standing, ...shown, minProvenance, belowMinimum, checkpointAdvised, requireSigned, unsigned, verdictNotes, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld, line });
 }

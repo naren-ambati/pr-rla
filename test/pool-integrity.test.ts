@@ -6,6 +6,7 @@ import type { ListedRepo, RepoListing } from "../src/core/records.js";
 import { normalizeSelector } from "../src/core/selector.js";
 import { BrokerRetriesExhausted, BrokerTimeout } from "../src/net/contract.js";
 import { NO_COMMIT, RepoEmptyError, RepoUnavailableError, type ChangeRecord, type FirstParentCommit, type ListChangesRequest, type ListChangesResult, type PushLogEvent, type RepoRef, type RepoSetRule, type ScmProvider } from "../src/sdk/provider.js";
+import { quoted } from "../src/core/said.js";
 
 /**
  * The U8 fix round's core, on in-memory providers (fixture kind: synthetic): rule exclusions and repo matching, the
@@ -165,19 +166,19 @@ describe("rebuildRepo: the frozen head against the current head (finding 3)", ()
     const proven = await rebuildRepo(twoHeads({ frozen, now: later, log: log(H0) }), args(SPAN));
     expect(proven.fail).toEqual([]);
     expect(proven.incomplete).toEqual([]);
-    expect(proven.notes.join("\n")).toMatch(/1 commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*: the push log shows [0-9a-f]{12}… was the branch's tip at freeze \(it became the default branch's tip at 2026-09-30T10:00:00Z \(update 2, fast-forward\)\) .*\(FR7\.2\)/);
+    expect(proven.notes.map(quoted).join("\n")).toMatch(/1 commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*: the push log shows [0-9a-f]{12}… was the branch's tip at freeze \(it became the default branch's tip at 2026-09-30T10:00:00Z \(update 2, fast-forward\)\) .*\(FR7\.2\)/);
     expect(proven.listed!.changes).toEqual(frozen); // the rebuild is the frozen head's
     // A first-parent path dated after the window, which U8 took as proof, changes nothing when the log disagrees.
     const disproven = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("merge"), committedAt: "2026-10-25T09:00:00Z" }], log: log(sha("real-tip")) }), args(SPAN));
-    expect(disproven.fail.join("\n")).toMatch(/^the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze: the push log shows that at 2026-10-20T12:00:00Z the tip was [0-9a-f]{12}… \(since 2026-09-30T10:00:00Z, update 2\)/);
+    expect(disproven.fail.map(quoted).join("\n")).toMatch(/^the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze: the push log shows that at 2026-10-20T12:00:00Z the tip was [0-9a-f]{12}… \(since 2026-09-30T10:00:00Z, update 2\)/);
     const none = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("merge"), committedAt: "2026-10-25T09:00:00Z" }] }), args(SPAN));
     expect(none.fail).toEqual([]);
-    expect(none.incomplete.join("\n")).toMatch(/1 direct push\(es\) dated in the window are on the default branch now but not reachable from the frozen head .*there is no push-time evidence to place them \(provider two keeps no push log pr-rla can read \(it has no pushLog\)\): whether they arrived after freeze \(FR7\.2\) or the frozen head hides them is unverified/);
+    expect(none.incomplete.map(quoted).join("\n")).toMatch(/1 direct push\(es\) dated in the window are on the default branch now but not reachable from the frozen head .*there is no push-time evidence to place them \(provider two keeps no push log pr-rla can read \(it has no pushLog\)\): whether they arrived after freeze \(FR7\.2\) or the frozen head hides them is unverified/);
   });
 
   it("a pull request reachable now but not from the frozen head always FAILs (a provider that lists pull requests through history)", async () => {
     const r = await rebuildRepo(twoHeads({ frozen, now: [...frozen, pr("acme/a", 2)] }), args());
-    expect(r.fail.join("\n")).toMatch(/1 pull request\(s\) merged in the window are on the default branch now but not in the history from the frozen head/);
+    expect(r.fail.map(quoted).join("\n")).toMatch(/1 pull request\(s\) merged in the window are on the default branch now but not in the history from the frozen head/);
   });
 
   it("a provider that ignores the head: the rebuild walked the current head, as it always has (WARN in check 5)", async () => {
@@ -188,18 +189,18 @@ describe("rebuildRepo: the frozen head against the current head (finding 3)", ()
   it("a frozen head the server does not know (404) while the repo exists: FAIL; the repo gone by its probe: INCOMPLETE; no probe: INCOMPLETE", async () => {
     const e404 = Object.assign(new Error("Commit not found"), { status: 404 });
     const exists = async () => ref("acme/a");
-    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404, describe: exists }), args())).fail.join()).toMatch(/frozen head [0-9a-f]{12}… not found \(HTTP 404: Commit not found\); the repository itself exists/);
+    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404, describe: exists }), args())).fail.map(quoted).join()).toMatch(/frozen head [0-9a-f]{12}… not found \(HTTP 404: Commit not found\); the repository itself exists/);
     const gone = async () => Promise.reject(new RepoUnavailableError("acme/a", 404));
-    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404, describe: gone }), args())).incomplete.join()).toMatch(/^gone: its repo-level metadata answers HTTP 404/);
-    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404 }), args())).incomplete.join()).toMatch(/cannot probe a repository \(it has no describeRepo\), so whether it is gone is unknown/);
+    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404, describe: gone }), args())).incomplete.map(quoted).join()).toMatch(/^gone: its repo-level metadata answers HTTP 404/);
+    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: e404 }), args())).incomplete.map(quoted).join()).toMatch(/cannot probe a repository \(it has no describeRepo\), so whether it is gone is unknown/);
     const limited = new BrokerRetriesExhausted("h", 7, 1000, "HTTP 403", 403, true);
-    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: limited }), args())).incomplete.join()).toMatch(/a rate limit or an outage, not a missing repository; run verify again/);
+    expect((await rebuildRepo(twoHeads({ frozen, now: later, failFrozen: limited }), args())).incomplete.map(quoted).join()).toMatch(/a rate limit or an outage, not a missing repository; run verify again/);
   });
 
   it("an empty repo: consistent when the manifest recorded it empty; a FAIL when it recorded history", async () => {
     const empty: ScmProvider = { apiVersion: 1, name: "e", listChanges: async (req) => Promise.reject(new RepoEmptyError(req.repo)) };
     expect(await rebuildRepo(empty, args({ frozenHead: null, frozenEmpty: true }))).toMatchObject({ listed: { changes: [] }, fail: [], incomplete: [] });
-    expect((await rebuildRepo(empty, args())).fail.join()).toMatch(/not found: the repository has no default branch now/);
+    expect((await rebuildRepo(empty, args())).fail.map(quoted).join()).toMatch(/not found: the repository has no default branch now/);
   });
 
   it("a repo of a list renamed after freeze (no id to match): the probe's redirect finds it, and it is rebuilt there", async () => {
@@ -227,16 +228,16 @@ describe("checkPool: what this token can see (finding 2)", () => {
   const input = (set: RepoSetRule) => ({ set, registered: [], mode: "PROSPECTIVE" as const, repos: [{ repo: "acme/a", repoId: "id-acme/a", defaultBranch: "main", headSha: H0 }], listing: null, gone: [], window: WINDOW, selector: SEL });
 
   it("a provider that cannot say what its token sees: INCOMPLETE for each private or internal visibility the rule admits; nothing for public", async () => {
-    expect((await checkPool(stubPool(), input(rule()))).lines).toEqual([
+    expect((await checkPool(stubPool(), input(rule()))).lines.map(quoted)).toEqual([
       "INCOMPLETE cannot establish that this token sees every internal repository under acme: provider plain cannot say what its token sees (it has no listingVisibility)",
       "INCOMPLETE cannot establish that this token sees every private repository under acme: provider plain cannot say what its token sees (it has no listingVisibility)",
     ]);
-    expect((await checkPool(stubPool(), input(rule({ visibility: ["public"] })))).lines).toEqual([]);
+    expect((await checkPool(stubPool(), input(rule({ visibility: ["public"] })))).lines.map(quoted)).toEqual([]);
   });
 
   it("a provider that proves it: one line per visibility, and nothing INCOMPLETE", async () => {
     const proof = { complete: true, reason: "owner" };
     const p = stubPool({ listingVisibility: async () => ({ identity: "me", visibilities: { public: proof, private: proof, internal: proof } }) });
-    expect((await checkPool(p, input(rule()))).lines).toEqual(["internal repositories under acme: listed completely (owner)", "private repositories under acme: listed completely (owner)"]);
+    expect((await checkPool(p, input(rule()))).lines.map(quoted)).toEqual(["internal repositories under acme: listed completely (owner)", "private repositories under acme: listed completely (owner)"]);
   });
 });

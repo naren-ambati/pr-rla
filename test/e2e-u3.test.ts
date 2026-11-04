@@ -5,6 +5,7 @@ import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { runVerify } from "../src/commands/verify.js";
 import type { ManifestV2 } from "../src/core/records.js";
+import { quoted } from "../src/core/said.js";
 import type { ChangeRecord } from "../src/sdk/provider.js";
 import { optionsDigest } from "../src/registry.js";
 import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
@@ -164,7 +165,7 @@ export default {
     const provider = await unsafeCreateProvider({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, { cwd: s.dir, env: {}, log: () => {}, fetch });
     const manifest = readJ<ManifestV2>(s, `${W}.manifest.json`);
     const report = await verifyAudit({ registration: old, manifest, commitment: null, draws: null, currentProtocolSha256: null }, { provider, ledger: null, beacon: async () => null, logKey: async () => null, trustBundle: { version: "x", authorities: {} } as never, providerIdentity: id });
-    expect(report.checks.find((c) => c.n === 5)!.details.some((d) => /provider options that change the population/.test(d))).toBe(false);
+    expect(report.checks.find((c) => c.n === 5)!.details.some((d) => /provider options that change the population/.test(quoted(d)))).toBe(false);
   });
 
   it("freeze refuses population options that differ from the registered ones", async () => {

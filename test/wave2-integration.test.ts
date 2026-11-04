@@ -13,6 +13,7 @@ import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
 import { checkpointRecord, type LedgerCheckpointLine } from "../src/core/checkpoint.js";
 import { buildPooledPopulation } from "../src/core/population.js";
 import { rebuildRepo } from "../src/core/rebuild.js";
+import { Said, quoted } from "../src/core/said.js";
 import { hostedProvider, startPluginHost } from "../src/plugins/host.js";
 import { readGrants, resolvePlugin } from "../src/plugins/lock.js";
 import { approveBuiltin } from "../src/plugins/approvals.js";
@@ -30,6 +31,7 @@ import { classificationScenario, fakeGitHub } from "./helpers/fake-github.js";
 import { commitAll } from "./helpers/signed-commits.js";
 import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
 import { NAMESPACE } from "./helpers/verdict-lines.js";
+import { resolveUntrusted } from "./helpers/untrusted.js";
 import { PRESENCE_LIMIT } from "../src/core/presence/index.js";
 
 /**
@@ -287,7 +289,11 @@ export default defineProvider({
       await expect(provider.listChanges({ repo: "acme/a", window, kinds: ["pull_request"] })).rejects.toMatchObject({ status: 403, rateLimited: true });
       const r = await rebuildRepo(provider, { repo: "acme/a", frozenHead: "a".repeat(40), frozenEmpty: false, window, selector: normalizeSelector({ kinds: ["pull_request"], unreviewed: "no-human-review" }) });
       expect(r.fail).toEqual([]);
-      expect(r.incomplete).toEqual([expect.stringMatching(/^could not be listed \(.*API rate limit exceeded.*\): a rate limit or an outage, not a missing repository; run verify again$/)]);
+      // The provider's text is carried apart from pr-rla's words (S1, finding 2): it is never part of the reason's words,
+      // only a foreign piece of it, which the CLI quotes in place and read-only mode puts in untrusted.errors.
+      expect(r.incomplete.map(String)).toEqual(["could not be listed (the provider, the ledger or a plugin failed (Error, HTTP 403)): a rate limit or an outage, not a missing repository; run verify again"]);
+      expect(r.incomplete.flatMap((l) => (l instanceof Said ? l.pieces.map((p) => p.foreign) : []))).toEqual(["API rate limit exceeded"]);
+      expect(r.incomplete.map(quoted)).toEqual(["could not be listed (API rate limit exceeded): a rate limit or an outage, not a missing repository; run verify again"]);
     } finally {
       host.close();
     }
@@ -342,7 +348,12 @@ describe("per-verdict signatures through pr-rla/api/read: status and the draw co
     // ineligible (fix/p4-ledger-path): ignored with its reason, not counted below the minimum.
     expect(Object.fromEntries(r.provenance.map((p) => [p.level, p.count]))).toEqual({ presence: 1, account: 1 });
     expect(r.belowMinimum).toEqual([]);
-    expect(r.ignored.filter((i) => i.event.reviewer === "carol")).toEqual([{ event: expect.objectContaining({ reviewer: "carol", verdict: "pass" }), reason: "carries no signature, and the registration counts only verdicts signed with their reviewer's registered key" }]);
+    // Read-only (S1): the reviewers the ledger names are in untrusted.errors, and the fields point there.
+    const resolved = resolveUntrusted(r);
+    expect(resolved.ignored.filter((i) => i.event.reviewer === "carol")).toEqual([{ event: expect.objectContaining({ reviewer: "carol", verdict: "pass" }), reason: "carries no signature, and the registration counts only verdicts signed with their reviewer's registered key" }]);
+    expect(r.untrusted?.errors).toEqual(expect.arrayContaining(["carol", "bob", "alice"]));
+    // (The provenance's signer is the registration's principal, which pr-rla verified the signature against: its words.)
+    expect(JSON.stringify({ ...r, untrusted: null })).not.toMatch(/"reviewer":"(carol|bob|alice)"/);
     expect(r.verdictNotes).toContain(PRESENCE_LIMIT); // the T16 limit, wherever presence is counted
     expect(JSON.stringify(r)).not.toMatch(/sshsig|registrationSha256":"[0-9a-f]{64}","reviewer/);
   });
