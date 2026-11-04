@@ -3547,7 +3547,7 @@ Merged on top of `1943f7f` on the coordinator's instruction. P2 was cut from `0f
 
 ## Bolt 11 (U10): docs and release engineering, with nothing published (2026-11-04)
 
-Branch `bolt/u10-docs-release`, from the integration tip `0d3545b` (every unit and fix round merged except P1, audit binding, and S1, integration seams, which were still running). Goal (delivery-plan.md, bolt 11): FR8.1–FR8.3, NFR18 and NFR19; the doc set, a doc check, release engineering without a publish, and the release checklist. The docs describe the code on this branch; where it differs from the design, the code and this file win, and the docs say so. Where P1 and S1 add behaviour, the docs carry bounded hooks (`<!-- pending P1: … -->`, `<!-- pending S1: … -->`, 14 of them; `npm run docs:check` lists them) for the final accuracy pass after both merge.
+Branch `bolt/u10-docs-release`, from the integration tip `0d3545b` (every unit and fix round merged except P1, audit binding, and S1, integration seams, which were still running). Goal (delivery-plan.md, bolt 11): FR8.1–FR8.3, NFR18 and NFR19; the doc set, a doc check, release engineering without a publish, and the release checklist. The docs describe the code on this branch; where it differs from the design, the code and this file win, and the docs say so. Where P1 and S1 add behaviour, the docs carry bounded hooks (`<!-- pending P1: … -->` and `<!-- pending S1: … -->`, 12 in all; `npm run docs:check` lists them) for the final accuracy pass after both merge.
 
 ### Definition of done, and the test that covers each item
 
@@ -3596,6 +3596,10 @@ Branch `bolt/u10-docs-release`, from the integration tip `0d3545b` (every unit a
 - The design's NFR16 counts exit 4 among phase 1–2's codes; the phase-2 code had 0–3 (no exit 4 in `3a464f5`), and 4 and 5 arrived with `src/cli/exit-codes.ts` in bolt 1 (`6fa807a`). The compatibility table and the changelog follow the code.
 - An independent read-only review of the first draft against the code found 54 more points in the new docs (k is configurable; `record` needs `--reviewer` for git-file; simulate re-implements `evaluateSequence`'s rule; describeChange ran live for all 36 draws; the trust-bundle script cannot mark a trust-on-first-use plan independent; and so on). Each was checked against the source and fixed in `da21162`; the commit message lists them.
 
+### Found and fixed while verifying
+
+- The first counted fresh-clone run reported 16 pending hooks where there are 12: `pendingHooks` also counted the hook syntax quoted in inline code (this section, and the checklist's step 10). It now reads only comments in the text, outside code, and `test/docs.test.ts` has a control for it ("a hook is an HTML comment in the text").
+
 ### Settled or recorded, with dates
 
 - **The npm names**: `npm view pr-rla`, `pr-rla-mcp`, `pr-rla-provider-gitea` and `pr-rla-ledger-jira` each answered E404 (`GET https://registry.npmjs.org/<name>`), 2026-11-04T11:39:54Z: all four unclaimed. Read-only.
@@ -3628,7 +3632,7 @@ Branch `bolt/u10-docs-release`, from the integration tip `0d3545b` (every unit a
 
 ### For the integration step, and the final accuracy pass after P1 and S1
 
-- **Re-run after both merge:** `npm run build && npm run docs:outputs` (the `status`, `verify` and `register --dry-run` outputs will change if P1's read-only contexts or check-7 gate change what they print), `node scripts/pack-action-tarball.mjs`, and `npm run docs:check`, which lists the 14 hooks to complete: P1 in `CHANGELOG.md`, `docs/concepts.md` (the ledger publication record), `docs/writing-a-ledger.md`, `docs/compatibility.md` (its schema), `docs/gh-aw-prospective.md` (commit `ledger-publication.json` after `sample`) and `docs/security-model.md` (T4, T5, T9, read-only contexts); S1 in both changelogs, `docs/security-model.md` (T6, T8), `docs/writing-a-ledger.md` §7, `docs/writing-a-provider.md` (estimates and retry hints) and `packages/pr-rla-mcp/README.md`.
+- **Re-run after both merge:** `npm run build && npm run docs:outputs` (the `status`, `verify` and `register --dry-run` outputs will change if P1's read-only contexts or check-7 gate change what they print), `node scripts/pack-action-tarball.mjs`, and `npm run docs:check`, which lists the 12 hooks to complete: P1 in `CHANGELOG.md`, `docs/concepts.md` (the ledger publication record), `docs/writing-a-ledger.md`, `docs/compatibility.md` (its schema), `docs/gh-aw-prospective.md` (commit `ledger-publication.json` after `sample`) and `docs/security-model.md` (T4, T5, T9, read-only contexts); S1 in both changelogs, `docs/security-model.md` (T6, T8), `docs/writing-a-ledger.md` §7, `docs/writing-a-provider.md` (estimates and retry hints) and `packages/pr-rla-mcp/README.md`.
 - **The doc check applies to every new or changed doc**: a fenced block without a language, or output that is not dated, fails `test/docs.test.ts`. A new `pr-rla` option named in a doc must exist in `src/cli.ts`; a new exit code must reach `src/cli/exit-codes.ts`, `contracts.md` §7 and `docs/compatibility.md` together.
 - **Files P1 and S1 may also change:** `README.md`, `docs/security-model.md` (the threat table is near the top; the sections below are unchanged except the tier-2 reviewers sentence), `docs/writing-a-provider.md`, `docs/ci/*.md`, `packages/pr-rla-mcp/README.md`, `src/cli.ts` (two help strings: `status`'s `addHelpText` and `record --force`), `package.json` (`files`, `build`, `prepack` and three scripts), `packages/pr-rla-mcp/package.json` (`files`, `build`, `prepack`), `integrations/github-action/package-lock.json` and `vendor/` (re-take rather than merge), and this file (this section is at the end).
 - **The pending-hook test** requires every hook to name P1 or S1; at release there must be none (checklist step 10).

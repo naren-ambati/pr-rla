@@ -346,12 +346,23 @@ export async function exitCodeProblems(files, root = ROOT) {
   return problems;
 }
 
-/** The hooks a later round completes: `<!-- pending P1: … -->` and `<!-- pending S1: … -->`. */
+/**
+ * The hooks a later round completes: `<!-- pending P1: … -->` and `<!-- pending S1: … -->` comments. The same
+ * text quoted in inline code or in a fenced block (a page describing the convention) is not a hook.
+ */
 export function pendingHooks(files, root = ROOT) {
   const out = [];
   for (const f of files) {
+    let fence = null;
     readFileSync(join(root, f), "utf8").split("\n").forEach((l, i) => {
-      for (const m of l.matchAll(/<!-- pending ([A-Za-z0-9]+): (.*?) -->/g)) out.push({ at: `${f}:${i + 1}`, round: m[1], what: m[2] });
+      const fm = /^\s*(`{3,}|~{3,})/.exec(l);
+      if (fm) {
+        if (!fence) fence = fm[1];
+        else if (l.trim().startsWith(fence)) fence = null;
+        return;
+      }
+      if (fence) return;
+      for (const m of l.replace(/`[^`]*`/g, "").matchAll(/<!-- pending ([A-Za-z0-9]+): (.*?) -->/g)) out.push({ at: `${f}:${i + 1}`, round: m[1], what: m[2] });
     });
   }
   return out;

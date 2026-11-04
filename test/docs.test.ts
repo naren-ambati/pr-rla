@@ -304,6 +304,16 @@ describe("hooks left for the rounds still running", () => {
     expect(hooks.filter((h) => h.round !== "P1" && h.round !== "S1")).toEqual([]);
     expect(all.pending).toEqual(hooks);
   });
+
+  it("a hook is an HTML comment in the text: the same words quoted in inline code or a fenced block are not one", () => {
+    const root = mkdtempSync(join(tmpdir(), "pr-rla-hooks-"));
+    try {
+      writeFileSync(join(root, "a.md"), ["Real: <!-- pending P1: describe the record -->", "Quoted: `<!-- pending S1: … -->`", "```text", "<!-- pending S1: inside a fence -->", "```", ""].join("\n"));
+      expect((pendingHooks(["a.md"], root) as { at: string; round: string }[]).map((h) => [h.at, h.round])).toEqual([["a.md:1", "P1"]]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("npm run docs:check", () => {
