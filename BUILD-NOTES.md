@@ -1614,7 +1614,24 @@ First, at `4907ae6`:
 - run 1 (2026-11-04T04:54Z): every step exit 0; `npm test` twice `Test Files 50 passed (50) · Tests 630 passed | 1 skipped (631)`; gitea and jira examples `# pass 1 · # fail 0`; `found 0 vulnerabilities`; dependencies asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1.
 - run 2 (04:57Z): the same, except the second `npm test`: `1 failed | 629 passed`, the Jira plugin-host test timing out at 60 s (fixed in `063f34a`); and `demo-ledgers.mjs` printed check 7's identity FAIL for its ledger swap (fixed in `aa0ed5c`).
 
-The final runs are recorded in the next commit.
+Then three runs in a row at `ed24591` (the last commit before this one, which changes only this section):
+
+```
+run 3 (2026-11-04T05:04Z)       run 4 (05:07Z)                  run 5 (05:10Z), under parallel load
+npm ci              → exit 0    npm ci              → exit 0    npm ci              → exit 0
+npm run build       → exit 0    npm run build       → exit 0    npm run build       → exit 0
+npm run typecheck   → exit 0    npm run typecheck   → exit 0    npm run typecheck   → exit 0
+npm test            → 630 passed | 1 skipped (631), all three
+gitea ci, test      → # pass 1 · # fail 0, all three
+jira ci, test       → # pass 1 · # fail 0, all three
+npm test (again)    → 630 passed | 1 skipped (631), all three
+node scripts/demo-{presence,broker,ledgers,plugin-host,sdk-carry-overs}.mjs → exit 0, all three
+npm ls --prod --depth=0 → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+Run 5 ran beside an extra full `npm test` in run 3's clone, on top of the other agents' suites. That extra run (not one of the three) failed one test: `e2e.test.ts › status: 36 passes certify claim D`, where `cloneScenario`'s `cpSync` reported its own freshly made temp directory's `.git/objects` missing (`ENOENT … prrla-tamper-…/.git/objects`). The helper and that test are unchanged; every process on this machine shares the same temp directory and the `prrla-` prefixes, and it did not recur. Unexplained, recorded here.
+
+The demo `demo-presence.mjs` prints, for the sk-dummy fixture: `draw #2 … an ed25519-sk key, UP set → presence (user-presence flag verified; key hardware not attested) · ssh-keygen -Y verify -I bob: Good → check 7 …: PASS`; `draw #4 … no-touch-required: UP clear → account · … Good → FAIL: … is account; the registration requires presence (…)`; `draw #13 … for another audit's registration → self-asserted · ssh-keygen … Good`; `draw #14 … in namespace git … → self-asserted · … refused`; `VERDICT PROVENANCE: self-asserted (5) · account (7) · presence (user-presence flag verified; key hardware not attested) (2)`; then `integrity, full clone: PASS` and `integrity, depth-1 clone: FAIL … the repository is a shallow clone …`.
 
 ### Unverified
 
