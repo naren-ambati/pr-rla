@@ -97,6 +97,13 @@ async function cases(): Promise<{ fixtures: LedgerFixture[]; factory: (f: Ledger
   f = await probe(recreated);
   defs.push({ fixture: { name: "synthetic label renamed and its name re-used", case: "label-rename", expect: { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: at(f, ids.rc!) } }, integrity: "FAIL", messages: [/is not the label the draws were published with \(id \d+, now \d+\)/] } }, setup: recreated });
 
+  const deleted: Setup = (g, i) => {
+    ids.dl = g.label(i(1), PASS, alice);
+    g.deleteLabel(PASS);
+  };
+  f = await probe(deleted);
+  defs.push({ fixture: { name: "synthetic label deleted", case: "label-rename", expect: { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: at(f, ids.dl!) } }, integrity: "FAIL", messages: [/verdict label "pr-rla:pass" no longer exists in acme\/audit/] } }, setup: deleted });
+
   const unlisted: Setup = (g, i) => {
     g.label(i(1), PASS, { login: "intruder", id: 66, type: "User" });
     ids.ul = g.label(i(1), FAIL, alice);

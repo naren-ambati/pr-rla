@@ -161,6 +161,17 @@ describe("tampering with an issue-ledger history", () => {
     expect(check(r, 7).details.join("\n")).toMatch(/label history incomplete/);
   });
 
+  it("the tracker cannot be read: check 7 FAILs with the error, never passes silently", async () => {
+    const s = clone(honest);
+    s.ctx.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return url.startsWith("https://api.github.com/") ? new Response("down", { status: 502 }) : globalThis.fetch(input, init);
+    }) as typeof fetch;
+    const r = await runVerify(s.ctx, {});
+    expect(check(r, 7).status).toBe("FAIL");
+    expect(check(r, 7).details.join("\n")).toMatch(/ledger github-issues: readVerdicts failed: github-issues GET https:\/\/api\.github\.com\/repos\/acme\/audit\/labels\/pr-rla%3Apass: gave up after 7 attempts \(HTTP 502\)/);
+  });
+
   it("the verdict label is removed after it counted: FAIL", async () => {
     const s = tampered((f) => f.unlabel(f.issueByDraw(readJ<DrawsFile>(honest, `${W}/draws.json`).draws[0]!.draw).number, "pr-rla:pass", { login: "mallory", id: 66, type: "User" }));
     const r = await runVerify(s.ctx, {});

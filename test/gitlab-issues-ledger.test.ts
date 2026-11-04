@@ -148,6 +148,7 @@ describe("gitlab-issues details", () => {
     const l = await openLedger(actx, cfg.ledger, dir, dir);
     await l.publishDraws!(DRAWS, PUB);
     expect(fake.writes().map((r) => r.method + " " + r.url.replace(fake.projectUrl, ""))).toEqual(["POST /labels", "POST /labels", "POST /labels", "POST /issues", "POST /issues", "POST /issues"]);
+    expect(fake.writes().filter((r) => r.url.endsWith("/issues")).map((r) => (r.body as { title: string }).title)).toEqual(DRAWS.map((d) => `pr-rla draw #${d.draw}: ${d.changeId}`));
     expect(actx.broker.policy.budgets.get("gitlab.example.com")?.rules.map((r) => r.id)).toEqual(["api", "api_anonymous", "issue_create", "note_create"]);
     await l.appendVerdict({ draw: 2, changeId: DRAWS[1]!.changeId, verdict: "pass", protocolSha256: PUB.protocolSha256, reviewer: "x", recordedAt: "2026-10-21T03:00:00Z" });
     expect(fake.writes().at(-1)).toMatchObject({ method: "PUT", body: { add_labels: PASS } });
