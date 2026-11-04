@@ -155,3 +155,12 @@ describe("checkPool: an exclusion by what a repo is that no longer holds", () =>
     expect((await checkPool(provider(true) as never, input)).lines.join("\n")).not.toMatch(/acme\/x/);
   });
 });
+
+describe("the push log, read twice over shifting pages", () => {
+  it("an update listed twice is one update, not a gap", () => {
+    const h = (t: string) => sha1(t);
+    const e = (id: string, at: string, before: string, after: string): PushLogEvent => ({ id, at, before, after, kind: "unknown" });
+    const log = [e("3", "2026-10-25T00:00:00Z", h("b"), h("c")), e("2", "2026-08-01T00:00:00Z", h("a"), h("b")), e("2", "2026-08-01T00:00:00Z", h("a"), h("b")), e("1", "2026-06-01T00:00:00Z", NO_COMMIT, h("a"))];
+    expect(analysePushLog({ events: log }, { head: h("b"), window: { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" }, from: "2026-10-20T12:00:00Z", until: "2026-10-21T00:00:00Z" })).toMatchObject({ kind: "proven", tipAtClose: h("b") });
+  });
+});

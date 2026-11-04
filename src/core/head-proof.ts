@@ -85,8 +85,11 @@ export function analysePushLog(log: PushLog, a: HeadProofArgs): HeadProof {
     if (p) return none(`the provider's push log is malformed: ${p}`);
   }
   const head = a.head.toLowerCase();
+  // An update listed twice (offset pages shift while new updates arrive) is one update.
+  const seen = new Set<string>();
+  const unique = log.events.filter((e) => !seen.has(e.id) && !!seen.add(e.id));
   // Oldest first; equal times in the log's own (newest-first) order, reversed.
-  const evs: Ev[] = log.events.map((e, i) => ({ ...e, before: e.before.toLowerCase(), after: e.after.toLowerCase(), t: Date.parse(e.at), i })).sort((x, y) => x.t - y.t || y.i - x.i).map(({ i: _i, ...e }) => e);
+  const evs: Ev[] = unique.map((e, i) => ({ ...e, before: e.before.toLowerCase(), after: e.after.toLowerCase(), t: Date.parse(e.at), i })).sort((x, y) => x.t - y.t || y.i - x.i).map(({ i: _i, ...e }) => e);
   const closes = Date.parse(a.window.closesAt);
   const opens = Date.parse(a.window.opensAt);
   const from = Date.parse(a.from);
