@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import gitlab, { GitLabProvider } from "../src/providers/gitlab/index.js";
 import { buildReviews, normalizeCommitAuthor, normalizeUser } from "../src/providers/gitlab/normalize.js";
 import { loadProviderDefinition } from "../src/registry.js";
-import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
 import { fakeGitLab, GL_BASE, glUserId } from "./helpers/fake-gitlab.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
@@ -17,18 +17,16 @@ const human = (login: string) => ({ login, kind: "human" as const });
 
 describe("GitLab provider on a synthetic self-managed instance: every merge strategy", () => {
   const sc = scmScenario();
+  const late = scmScenario({ latePush: true });
   const x = scenarioExpectations("gitlab");
-  const make = (h?: ConformanceHarness) => {
-    const fake = fakeGitLab(sc, { pageSize: 3 });
+  const make = (h?: ConformanceHarness, s = sc) => {
+    const fake = fakeGitLab(s, { pageSize: 3 });
     const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
     return { fake, provider: new GitLabProvider({ base_url: GL_BASE, page_size: 3, batch_size: 4 }, { ...(h ? h.context(base) : base), now: () => Date.parse("2026-08-03T00:00:00Z") }) };
   };
   it("passes the conformance kit: squash, squash + merge commit, merge commit, rebase, fast-forward, direct pushes", async () => {
     let last = make();
-    const report = await runProviderConformance(
-      (_f, h) => (last = make(h)).provider,
-      [
-        {
+    const base: ConformanceFixture = {
           name: "synthetic gitlab acme/widgets 2026-08-01",
           request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -57,13 +55,16 @@ describe("GitLab provider on a synthetic self-managed instance: every merge stra
             bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "project_42_bot_0a1b2c[bot]"],
             humans: ["maint", "bob", "dave", "erin", "carol"],
             minPages: 20,
+            actorIds: { carol: String(glUserId("carol")), "review-bot[bot]": String(glUserId("review-bot")) },
+            reviewGranularity: "first-comment-per-user",
+            revokedApprovals: x.revokedApprovals,
           },
           pagesServed: () => last.fake.served(),
           http: true,
           rateLimitFault: GITLAB_RATE_LIMIT,
-        },
-      ],
-    );
+        };
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic gitlab, a merge pushed after freeze", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
+    const report = await runProviderConformance((f, h) => (last = make(h, f.pinnedHead ? late : sc)).provider, [base, pushedLater], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
@@ -200,12 +201,16 @@ describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, 2026
           // GitLab reports these service accounts as bot: false, so pr-rla counts them as human (documented limitation).
           humans: ["gitlab-bot", "gitlab-dependency-update-bot", "viktomas"],
           minPages: 20,
+          // U3: user ids from GraphQL and REST; gitlab-bot's approval on !4290 was withdrawn ("unapproved") 73 min later.
+          actorIds: { "gitlab-bot": "1786152", viktomas: "3457201", "GitLabDuo[bot]": "21826781" },
+          reviewGranularity: "first-comment-per-user",
+          revokedApprovals: { [id(4290)]: ["gitlab-bot"] },
         },
         pagesServed: r.served,
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ]);
+    ], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -242,12 +247,13 @@ describe("GitLab provider on recorded self-managed responses: gitlab.freedesktop
           actors: { [id(2341)]: { author: human("whot"), mergedBy: human("marge-bot") } },
           humans: ["marge-bot", "whot"],
           minPages: 10,
+          reviewGranularity: "first-comment-per-user",
         },
         pagesServed: r.served,
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ]);
+    ], { definition: gitlab });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -269,6 +275,20 @@ describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, Octo
   const id = (n: number) => `gitlab:gitlab-org/cli#${n}`;
   // The example's stratum (examples/gitlab-cli-2026-10/.pr-rla.yml), with and without the registered bot list.
   const selector = (bots: string[], max_changed_lines: number | null = 200) => normalizeSelector({ kinds: ["pull_request", "direct_push"], authors: "any", unreviewed: "no-human-review", merged_by: "any", max_changed_lines, bots });
+
+  it("passes the extended conformance kit on a month of real data", async () => {
+    const report = await runProviderConformance((_f, h) => r.make(h), [
+      {
+        name: "gitlab-org/cli 2026-10",
+        request: r.request,
+        expect: { ids: r.rec.expected.ids, directPushes: [], bots: ["GitLabDuo[bot]"], humans: ["gitlab-bot", "jay_mccure"], actorIds: { "gitlab-bot": "1786152" }, reviewGranularity: "first-comment-per-user", minPages: 400 },
+        pagesServed: r.served,
+        http: true,
+        rateLimitFault: GITLAB_RATE_LIMIT,
+      },
+    ], { definition: gitlab });
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
+  });
 
   it("bots: [gitlab-bot] moves exactly 4 MRs into the no-human-review stratum (0 -> 4); the provider still reports gitlab-bot as human", async () => {
     const out = await r.make().listChanges(r.request);

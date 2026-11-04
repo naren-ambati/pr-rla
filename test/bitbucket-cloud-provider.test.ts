@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BitbucketCloudProvider, rebasedCopies } from "../src/providers/bitbucket-cloud/index.js";
+import bitbucketCloud, { BitbucketCloudProvider, rebasedCopies } from "../src/providers/bitbucket-cloud/index.js";
 import { buildReviews, normalizeCommitAuthor, normalizeUser } from "../src/providers/bitbucket-cloud/normalize.js";
 import { loadProviderDefinition } from "../src/registry.js";
-import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { fakeBitbucketCloud } from "./helpers/fake-bitbucket-cloud.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
 import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
@@ -15,19 +15,17 @@ const human = (login: string) => ({ login, kind: "human" as const });
 
 describe("Bitbucket Cloud provider on a synthetic repository: every merge strategy", () => {
   const sc = scmScenario();
+  const late = scmScenario({ latePush: true });
   const x = scenarioExpectations("bitbucket-cloud");
-  const make = (h?: ConformanceHarness) => {
-    const fake = fakeBitbucketCloud(sc, { pageLen: 3 });
+  const make = (h?: ConformanceHarness, s = sc) => {
+    const fake = fakeBitbucketCloud(s, { pageLen: 3 });
     const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
     return { fake, provider: new BitbucketCloudProvider({}, { ...(h ? h.context(base) : base), now: () => Date.parse("2026-08-03T00:00:00Z") }) };
   };
 
   it("passes the conformance kit: squash, merge commit, rebase (original commits listed), fast-forward, direct pushes", async () => {
     let last = make();
-    const report = await runProviderConformance(
-      (_f, h) => (last = make(h)).provider,
-      [
-        {
+    const base: ConformanceFixture = {
           name: "synthetic bitbucket-cloud acme/widgets 2026-08-01",
           request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -56,12 +54,16 @@ describe("Bitbucket Cloud provider on a synthetic repository: every merge strate
             bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "deploy-bot[bot]"],
             humans: ["maint", "bob", "dave", "carol", "alice"],
             minPages: 25,
+            actorIds: { bob: "{bob}", "review-bot[bot]": "{review-bot}" },
+            reviewGranularity: "first-comment-per-user",
+            // Bitbucket drops a withdrawn approval from the activity: it must not come back as APPROVED either.
+            revokedApprovals: x.revokedApprovals,
           },
           pagesServed: () => last.fake.served(),
           http: true,
-        },
-      ],
-    );
+        };
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic bitbucket-cloud, a merge pushed after freeze", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
+    const report = await runProviderConformance((f, h) => (last = make(h, f.pinnedHead ? late : sc)).provider, [base, pushedLater], { definition: bitbucketCloud });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
@@ -198,11 +200,12 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
           changedLines: Object.fromEntries(pushes.map((s) => [push(s), 24])),
           bots: ["atlassian-renovate-bot[bot]"],
           minPages: 15,
+          reviewGranularity: "first-comment-per-user",
         },
         pagesServed: () => last.served(),
         http: true,
       },
-    ]);
+    ], { definition: bitbucketCloud });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -226,6 +229,16 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
     const base = { cwd: ".", env: {}, log: () => {}, fetch: replayFetch(rec) as typeof fetch };
     return new BitbucketCloudProvider(rec.options, { ...(h ? h.context(base) : base), now: () => Date.parse(rec.recordedAt) });
   };
+
+  it("passes the extended conformance kit on the recorded release merge", async () => {
+    let last = replayFetch(rec);
+    const report = await runProviderConformance(
+      (_f, h) => new BitbucketCloudProvider(rec.options, { ...h.context({ fetch: (last = replayFetch(rec)) as typeof fetch }), now: () => Date.parse(rec.recordedAt) }),
+      [{ name: "atlassian/bamboo-specs 2026-10-06", request: { repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] }, expect: { ids: [merge, ...release].map(push), directPushes: [merge, ...release].map(push), reviewGranularity: "first-comment-per-user", minPages: 30 }, pagesServed: () => last.served(), http: true }],
+      { definition: bitbucketCloud },
+    );
+    expect(report.ok, formatConformanceReport(report)).toBe(true);
+  });
 
   it("5 direct pushes: the pushed merge, and 4 release-branch commits whose landedVia is that merge", async () => {
     const r = await make().listChanges({ repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] });

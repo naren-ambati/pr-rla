@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseConfig } from "../src/config.js";
-import { createProvider } from "../src/registry.js";
+import { createProvider, loadProviderDefinition } from "../src/registry.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
-import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { fakeGitea, GITEA_BASE } from "./helpers/fake-gitea.js";
 import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
 import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
@@ -41,10 +41,8 @@ describe("external Gitea/Forgejo plugin, loaded from .pr-rla.yml through the reg
 
   it("passes the conformance kit on a synthetic Forgejo: squash, merge commit, rebase (new SHAs), fast-forward, direct pushes", async () => {
     let fake = fakeGitea(sc, { limit: 3 });
-    const report = await runProviderConformance(
-      async (_f, h) => fromConfig((fake = fakeGitea(sc, { limit: 3 })).fetch, h),
-      [
-        {
+    const late = scmScenario({ latePush: true });
+    const base: ConformanceFixture = {
           name: "synthetic gitea acme/widgets 2026-08-01",
           request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -73,13 +71,16 @@ describe("external Gitea/Forgejo plugin, loaded from .pr-rla.yml through the reg
             bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "forgejo-actions[bot]"],
             humans: ["maint", "bob", "dave", "erin", "carol", "alice"],
             minPages: 40,
+            reviewGranularity: "submission",
+            revokedApprovals: x.revokedApprovals,
           },
           pagesServed: () => fake.served(),
           http: true,
           rateLimitFault: { status: 429, headers: () => ({ ratelimit: '"baseline";r=0;t=45', "ratelimit-policy": '"baseline";q=2000;w=600' }), minWaitMs: 45_000 },
-        },
-      ],
-    );
+        };
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic gitea, a merge pushed after freeze", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
+    const definition = await loadProviderDefinition("./examples/providers/gitea/index.mjs", ROOT);
+    const report = await runProviderConformance(async (f, h) => fromConfig((fake = fakeGitea(f.pinnedHead ? late : sc, { limit: 3 })).fetch, h), [base, pushedLater], { definition });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
@@ -166,11 +167,14 @@ describe("external Gitea plugin on recorded Codeberg responses: forgejo/docs, 20
           bots: ["viceice-bot[bot]", "forgejo-actions[bot]"],
           humans: ["mahlzahn", "Gusted", "aahlenst"],
           minPages: 20,
+          // U3: Codeberg user ids (forgejo-actions is the built-in Actions user, -2).
+          actorIds: { mahlzahn: "55597", Gusted: "26734", "viceice-bot[bot]": "141082", "forgejo-actions[bot]": "-2" },
+          reviewGranularity: "submission",
         },
         pagesServed: () => last.served(),
         http: true,
       },
-    ]);
+    ], { definition: await loadProviderDefinition("./examples/providers/gitea/index.mjs", ROOT) });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 

@@ -8,6 +8,7 @@ export {
   type ConformanceCheck,
   type ConformanceFixture,
   type ConformanceHarness,
+  type ConformanceOptions,
   type ConformanceReport,
   type ConformanceResult,
   type ProviderUnderTest,

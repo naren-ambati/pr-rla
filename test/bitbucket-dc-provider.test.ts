@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BitbucketDataCenterProvider } from "../src/providers/bitbucket-data-center/index.js";
+import bitbucketDc, { BitbucketDataCenterProvider } from "../src/providers/bitbucket-data-center/index.js";
 import { buildReviews, countDiff, normalizeCommitAuthor, normalizeUser } from "../src/providers/bitbucket-data-center/normalize.js";
 import { loadProviderDefinition } from "../src/registry.js";
-import { formatConformanceReport, runProviderConformance, type ConformanceHarness } from "../src/testing/index.js";
+import { formatConformanceReport, runProviderConformance, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 import { DC_BASE, fakeBitbucketDc } from "./helpers/fake-bitbucket-dc.js";
 import { OID, scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
 
@@ -11,20 +11,18 @@ const human = (login: string) => ({ login, kind: "human" as const });
 
 describe("Bitbucket Data Center provider on a fake server built from the documented shapes (unverified against a live server)", () => {
   const sc = scmScenario();
+  const late = scmScenario({ latePush: true });
   const repo = "ACME/widgets";
   const x = scenarioExpectations("bitbucket-data-center", repo);
-  const make = (h?: ConformanceHarness) => {
-    const fake = fakeBitbucketDc(sc, { limit: 3 });
+  const make = (h?: ConformanceHarness, s = sc) => {
+    const fake = fakeBitbucketDc(s, { limit: 3 });
     const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
     return { fake, provider: new BitbucketDataCenterProvider({ base_url: DC_BASE, page_size: 3 }, h ? h.context(base) : base) };
   };
 
   it("passes the conformance kit: squash, merge commit, rebase (original commits listed), fast-forward, direct pushes", async () => {
     let last = make();
-    const report = await runProviderConformance(
-      (_f, h) => (last = make(h)).provider,
-      [
-        {
+    const base: ConformanceFixture = {
           name: "synthetic bitbucket-data-center ACME/widgets 2026-08-01",
           request: { repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -53,13 +51,15 @@ describe("Bitbucket Data Center provider on a fake server built from the documen
             bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "deploy-bot[bot]"],
             humans: ["maint", "bob", "dave", "erin", "carol", "alice"],
             minPages: 25,
+            reviewGranularity: "first-comment-per-user",
+            revokedApprovals: x.revokedApprovals,
           },
           pagesServed: () => last.fake.served(),
           http: true,
           rateLimitFault: { status: 429, headers: () => ({ "retry-after": "30" }), minWaitMs: 30_000 },
-        },
-      ],
-    );
+        };
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic bitbucket-data-center, a merge pushed after freeze", expect: { ...base.expect, ids: [...x.all, x.late.id], directPushes: [...x.directPushes, x.late.id] }, pinnedHead: { head: sc.frozenHead, late: [x.late.sha] } };
+    const report = await runProviderConformance((f, h) => (last = make(h, f.pinnedHead ? late : sc)).provider, [base, pushedLater], { definition: bitbucketDc });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });

@@ -39,12 +39,16 @@ describe("GitHub provider on recorded gh-aw responses (2026-11-02, real data)", 
         humans: ["SivaKesava1", "pelikhan"],
         prCommits: { "github:github/gh-aw#73884": ["a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf"] },
         mergeShas: { "github:github/gh-aw#73884": "a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf" },
+        // U3: databaseId as Actor.id (read back from the recorded GraphQL responses); GitHub reviews are submissions.
+        actorIds: { SivaKesava1: "11771739", "copilot-swe-agent[bot]": "198982749", "github-actions[bot]": "41898282" },
+        reviewGranularity: "submission",
+        revokedApprovals: { "github:github/gh-aw#74201": ["github-actions[bot]"] },
       },
       pagesServed: () => last.served(),
       http: true,
       rateLimitFault: GITHUB_RATE_LIMIT,
     };
-    const report = await runProviderConformance((_f, h) => recordedProvider((last = replayFetch(rec)), h), [fixture]);
+    const report = await runProviderConformance((_f, h) => recordedProvider((last = replayFetch(rec)), h), [fixture], { definition: github });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
@@ -80,8 +84,9 @@ describe("GitHub provider on recorded gh-aw responses (2026-11-02, real data)", 
 
 describe("GitHub provider on a synthetic graph: squash, merge commit, rebase merge, direct pushes", () => {
   const sc = classificationScenario();
-  const make = (h?: ConformanceHarness) => {
-    const fake = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { pageSize: 2 });
+  const late = classificationScenario({ latePush: true });
+  const make = (h?: ConformanceHarness, s = sc) => {
+    const fake = fakeGitHub(s.repo, s.head, s.commits, s.prs, { pageSize: 2 });
     const base = { cwd: ".", env: {}, log: () => {}, fetch: fake.fetch };
     return { fake, provider: new GitHubProvider({ page_size: 2, batch_size: 3, history_page_size: 2 }, { ...(h ? h.context(base) : base), now: () => Date.parse("2026-08-03T00:00:00Z") }) };
   };
@@ -96,10 +101,7 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
 
   it("classifies every case and passes the conformance kit", async () => {
     let last = make();
-    const report = await runProviderConformance(
-      (_f, h) => (last = make(h)).provider,
-      [
-        {
+    const base: ConformanceFixture = {
           name: "synthetic acme/widgets 2026-08-01",
           request: { repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] },
           expect: {
@@ -119,13 +121,17 @@ describe("GitHub provider on a synthetic graph: squash, merge commit, rebase mer
             mergeShas: { [ids.rebase]: OID("R2c"), [ids.merge]: OID("M3"), [ids.squash]: OID("S1"), [ids.alice]: OID("D2") },
             bots: ["copilot-swe-agent[bot]", "github-merge-queue[bot]", "github-actions[bot]", "copilot-pull-request-reviewer[bot]"],
             humans: ["alice", "maint", "dave", "carol"],
+            reviewGranularity: "submission",
+            revokedApprovals: { [ids.rebase]: ["erin"] },
           },
           pagesServed: () => last.fake.served(),
           http: true,
           rateLimitFault: GITHUB_RATE_LIMIT,
-        },
-      ],
-    );
+        };
+    // The same graph after freeze: a merge pushed later brings in LC, dated in the window.
+    const lc = `github:${sc.repo}@${OID("LC")}`;
+    const pushedLater: ConformanceFixture = { ...base, name: "synthetic acme/widgets, a merge pushed after freeze", expect: { ...base.expect, ids: [...Object.values(ids), lc], directPushes: [ids.alice, ids.bot, lc] }, pinnedHead: { head: sc.frozenHead, late: [OID("LC")] } };
+    const report = await runProviderConformance((f, h) => (last = make(h, f.pinnedHead ? late : sc)).provider, [base, pushedLater], { definition: github });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
     expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
