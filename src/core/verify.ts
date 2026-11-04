@@ -53,12 +53,16 @@ export interface VerifyArtifacts {
   currentProtocolSha256: string | null;
   /** Ledger checkpoints committed in the audit repo (de-duplicated), with their stored event lists. */
   checkpoints?: CheckpointArtifact[];
+  /** Lines of ledger-checkpoints.jsonl that are not checkpoints (check 7 FAILs: the file is append-only). */
+  checkpointProblems?: string[];
 }
 
 export interface VerifyDeps {
   /** null = offline: check 5 is skipped. */
   provider: ScmProvider | null;
   ledger: Ledger | null;
+  /** Why the ledger was not read (an offline verify of a ledger that lives in a tracker); check 7 then SKIPs saying so. */
+  ledgerSkipped?: string;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /** Trusted public key (PEM) for a log URL, or null if none is available. */
@@ -326,7 +330,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   let status: StatusReport | null = null;
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
-    c7.summary = "no verified draws to check labels against";
+    c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
     const ledger = deps.ledger;
@@ -384,6 +388,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       if (c7.status === "PASS") c7.status = "WARN";
     }
     const checkpoints = a.checkpoints ?? [];
+    for (const p of a.checkpointProblems ?? []) {
+      c7.status = "FAIL";
+      c7.details.push(`FAIL checkpoint file: ${p}`);
+    }
     if (checkpoints.length && !ledger.readHistory) {
       c7.details.push(`${checkpoints.length} ledger checkpoint(s) in the audit repo, but ledger ${ledger.name} has no readHistory: they cannot be compared`);
       if (c7.status === "PASS") c7.status = "WARN";

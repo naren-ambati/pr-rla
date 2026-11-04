@@ -91,6 +91,13 @@ export class FakeGitHubIssues extends FakeClock {
   }
 
   // --- test controls -------------------------------------------------------------
+  /** An independent copy of the tracker (for tamper scenarios on a cloned audit). */
+  clone(): FakeGitHubIssues {
+    const c = Object.assign(new FakeGitHubIssues(this.api, this.repo), structuredClone({ ...this, requests: [] }));
+    (c as { labels: Map<string, { id: number; name: string }> }).labels = new Map(structuredClone([...this.labels]));
+    (c as { issues: Map<number, GhIssueState> }).issues = new Map(structuredClone([...this.issues]));
+    return c;
+  }
   addLabel(name: string): number {
     const id = this.nextLabelId++;
     this.labels.set(name.toLowerCase(), { id, name });

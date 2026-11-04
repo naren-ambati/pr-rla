@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
+import { checkpointCommand } from "./commands/checkpoint.js";
 import { CommandError, nodeContext, type CommandContext } from "./commands/context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
@@ -106,8 +107,20 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .description("longest fully labelled prefix, LLR vs target, and CERTIFIED / n more needed / ESCALATE")
     .option("--json", "machine-readable output")
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
+    .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")
     .action(function (this: Command) {
       return run((ctx) => statusCommand(ctx, this.opts()))();
+    });
+
+  program
+    .command("checkpoint")
+    .description("hash the ledger's verdict-event history, time-stamp it, and append it to audit/<window>/ledger-checkpoints.jsonl")
+    .option("--push", "commit the checkpoint and push it (fetch, rebase, push; at most 3 attempts; never forced)")
+    .option("--remote <name>", "with --push: the remote, when the branch has no upstream")
+    .option("--branch <name>", "with --push: the remote branch, when the branch has no upstream")
+    .option("--tsa-trust <file>", "extra timestamp-authority anchors (repeatable)", collect)
+    .action(function (this: Command) {
+      return run((ctx) => checkpointCommand(ctx, this.opts()))();
     });
 
   program

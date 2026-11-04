@@ -17,6 +17,8 @@ import {
 } from "./context.js";
 import { logPublicKey } from "./translog.js";
 import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
+import { readCheckpoints } from "../api/checkpoint.js";
+import { loadLedgerDefinition } from "../registry.js";
 import { PR_RLA_VERSION } from "../version.js";
 
 export interface VerifyOptions {
@@ -40,11 +42,17 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   } catch {
     currentProtocol = null;
   }
+  // A ledger that lives in a tracker (it declares hosts) is not read offline: check 7 then SKIPs and says why.
+  const def = await loadLedgerDefinition(config.ledger.use, config.dir);
+  const remoteLedger = (def.hosts?.(config.ledger.options as never) ?? []).length > 0;
+  const skipLedger = !!opts.offline && remoteLedger;
+  const { checkpoints, problems } = readCheckpoints(paths.windowDir);
   return verifyAudit(
-    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol },
+    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems },
     {
       provider: opts.offline ? null : await providerFor(ctx, config),
-      ledger: await ledgerFor(ctx, config, paths),
+      ledger: skipLedger ? null : await ledgerFor(ctx, config, paths),
+      ...(skipLedger ? { ledgerSkipped: `offline: ledger ${def.name} lives in ${def.hosts!(config.ledger.options as never).join(", ")}; run verify without --offline to check the verdicts` } : {}),
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
