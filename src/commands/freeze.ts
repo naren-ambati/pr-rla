@@ -96,9 +96,9 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   if (reg && isRegistrationV2(reg)) {
     // Options that change the population are part of the stratum (populationOptions, check 5).
     const now = await pluginIdentity(config.provider, "provider", config.dir);
-    const registered = reg.record.plugins.provider.populationOptionsSha256;
-    if (now.populationOptionsSha256 !== registered) {
-      const why = `the provider options that change the population (populationOptions) differ from the registration (${now.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.slice(0, 12)}…)`;
+    const reg0 = reg.record.plugins.provider;
+    if (now.optionsSha256 !== reg0.optionsSha256 && now.populationOptionsSha256 !== reg0.populationOptionsSha256) {
+      const why = `the provider options that change the population (populationOptions) differ from the registration (${now.populationOptionsSha256.slice(0, 12)}… ≠ registered ${reg0.populationOptionsSha256.slice(0, 12)}…)`;
       if (!opts.dryRun) throw new CommandError(`${why}: freeze with the registered options, or verify check 5 fails`);
       ctx.err(`note: ${why}`);
     }

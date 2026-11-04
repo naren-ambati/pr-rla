@@ -6,6 +6,7 @@ import { registerCommand } from "../src/commands/register.js";
 import { runVerify } from "../src/commands/verify.js";
 import type { ManifestV2 } from "../src/core/records.js";
 import type { ChangeRecord } from "../src/sdk/provider.js";
+import { optionsDigest } from "../src/registry.js";
 import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 
 /**
@@ -135,6 +136,24 @@ export default {
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("FAIL");
     expect(c5.summary).toMatch(/^population: provider options that change the population differ from the registration \(populationOptionsSha256 [0-9a-f]{12}… ≠ registered [0-9a-f]{12}…\); rebuild with the registered options$/);
+  });
+
+  it("a registration made before U3 (population options not hashed) still verifies with the same options", async () => {
+    const s = setup();
+    await registerAndFreeze(s);
+    // What a bolt-1/2 registration recorded: a hash over no option keys at all.
+    const regPath = join(s.dir, W, "registration.json");
+    const reg = JSON.parse(readFileSync(regPath, "utf8"));
+    expect(reg.record.plugins.provider.populationOptionsSha256).not.toBe(optionsDigest({}));
+    const { verifyAudit } = await import("../src/core/verify.js");
+    const { pluginIdentity } = await import("../src/registry.js");
+    const id = await pluginIdentity({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, "provider", s.dir);
+    const old = { ...reg, record: { ...reg.record, plugins: { ...reg.record.plugins, provider: { ...reg.record.plugins.provider, populationOptionsSha256: optionsDigest({}) } } } };
+    const { createProvider } = await import("../src/registry.js");
+    const provider = await createProvider({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, { cwd: s.dir, env: {}, log: () => {}, fetch });
+    const manifest = readJ<ManifestV2>(s, `${W}.manifest.json`);
+    const report = await verifyAudit({ registration: old, manifest, commitment: null, draws: null, currentProtocolSha256: null }, { provider, ledger: null, beacon: async () => null, logKey: async () => null, trustBundle: { version: "x", authorities: {} } as never, providerIdentity: id });
+    expect(report.checks.find((c) => c.n === 5)!.details.some((d) => /provider options that change the population/.test(d))).toBe(false);
   });
 
   it("freeze refuses population options that differ from the registered ones", async () => {

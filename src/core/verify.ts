@@ -286,9 +286,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const pinned = isManifestV2(m) ? (m.repos[0]?.headSha ?? null) : null;
     const aliases = manifestAliases(m.changes);
     const pop = await buildPopulation(deps.provider, { repo: registrationRepo(reg), window: reg.record.window, selector: reg.record.selector, cutoffIso: m.frozenAt, ...(pinned ? { head: pinned } : {}), aliases });
-    const registeredOptions = v2 ? (reg.record as RegistrationRecordV2).plugins.provider.populationOptionsSha256 : null;
-    if (registeredOptions !== null && deps.providerIdentity && deps.providerIdentity.populationOptionsSha256 !== registeredOptions)
-      c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${deps.providerIdentity.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registeredOptions.slice(0, 12)}…); rebuild with the registered options`);
+    // Identical options cannot differ in the ones that change the population (a registration made before
+    // U3 hashed no population options, so the population hash alone would differ for nothing).
+    const registered = v2 ? (reg.record as RegistrationRecordV2).plugins.provider : null;
+    const id = deps.providerIdentity;
+    if (registered && id && id.optionsSha256 !== registered.optionsSha256 && id.populationOptionsSha256 !== registered.populationOptionsSha256)
+      c5.details.push(`FAIL population: provider options that change the population differ from the registration (populationOptionsSha256 ${id.populationOptionsSha256.slice(0, 12)}… ≠ registered ${registered.populationOptionsSha256.slice(0, 12)}…); rebuild with the registered options`);
     const mine = new Map(m.changes.map((x) => [x.id, x]));
     const rebuilt = new Map(pop.entries.map((x) => [x.id, x]));
     const missing = [...rebuilt.keys()].filter((id) => !mine.has(id));
