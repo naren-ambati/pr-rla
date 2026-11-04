@@ -27,6 +27,7 @@ interface Definition {
   credentials?: unknown;
   populationOptions?: unknown;
   reportsLandedVia?: unknown;
+  labelHistory?: unknown;
   provenance?: unknown;
   hosts?: unknown;
   writePaths?: unknown;
@@ -216,7 +217,7 @@ async function describe(options: unknown): Promise<DescribeResult> {
     hosts: typeof def.hosts === "function" ? await (def.hosts as Fn)(options) : [],
     writePaths: typeof def.writePaths === "function" ? await (def.writePaths as Fn)(options) : [],
   };
-  for (const k of ["reviewGranularity", "populationOptions", "reportsLandedVia", "provenance"] as const) if (def[k] !== undefined) out[k] = def[k];
+  for (const k of ["reviewGranularity", "populationOptions", "reportsLandedVia", "labelHistory", "provenance"] as const) if (def[k] !== undefined) out[k] = def[k];
   return out;
 }
 

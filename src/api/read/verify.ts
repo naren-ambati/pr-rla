@@ -7,6 +7,7 @@ import { verifyAudit, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
 import { pluginIdentity } from "../../registry.js";
+import { providerTraits } from "../../provider-traits.js";
 import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
@@ -94,6 +95,8 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   }
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
+  // P5: a labels stratum needs a provider that reads label history (check 2, offline too).
+  const labelHistory = registration.record.selector.labels?.length ? (await providerTraits(config.provider, config.dir, auditContextFor(ctx))).labelHistory : undefined;
   // U9: the ledger's, compared in check 7; its ceiling is the registered ledger's.
   const ledgerIdentity = ledger ? await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx)) : null;
   const report = await verifyAudit(
@@ -123,6 +126,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
       logKey: async (url) => logKeys.lookup(url),
       trustBundle: trustFor(ctx, opts.tsaTrust),
       ...(loaded ? { providerIdentity: loaded } : {}),
+      ...(labelHistory !== undefined ? { labelHistory } : {}),
     },
   );
   if (loaded && isRegistrationV2(registration)) noteProviderIdentity(report, registration.record.plugins.provider, loaded);

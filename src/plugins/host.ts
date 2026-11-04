@@ -626,16 +626,19 @@ export interface DefinitionTraits {
   reportsLandedVia: boolean;
   /** Option keys whose values `populationOptionsSha256` hashes. */
   populationOptions: string[];
+  /** P5: whether the provider reads label history (answers `labelsAt: "landing"`). */
+  labelHistory: boolean;
 }
 
 /** The U3 traits of a definition (or of what a child reported), validated with the SDK's own check, defaults applied. */
-export function definitionTraits(raw: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown }, label: string): DefinitionTraits {
+export function definitionTraits(raw: { reviewGranularity?: unknown; populationOptions?: unknown; reportsLandedVia?: unknown; labelHistory?: unknown }, label: string): DefinitionTraits {
   const problem = providerTraitProblems(raw);
   if (problem) throw new PluginError(`plugin ${label}: ${problem}`, "PLUGIN_INVALID");
   return {
     reviewGranularity: (raw.reviewGranularity as ReviewGranularity | undefined) ?? DEFAULT_REVIEW_GRANULARITY,
     reportsLandedVia: raw.reportsLandedVia === true,
     populationOptions: [...((raw.populationOptions as string[] | undefined) ?? [])],
+    labelHistory: raw.labelHistory === true,
   };
 }
 

@@ -247,6 +247,12 @@ export async function planFreeze(ctx: ApiContext, o: { dryRun: boolean; window?:
   const checkpoint = o.checkpoint ? await o.checkpoint(i) : undefined;
   const run = await runPool(ctx, i, { ...(checkpoint ? { checkpoint } : {}), dryRun: o.dryRun, ...(o.force ? { force: true } : {}) });
   const pop = run.population;
+  // P5: a labels stratum needs every change's labels as they were at landing; read as they are now, whoever relabels chooses N.
+  if (selector.labels.length && pop.listed.labelsAt !== "landing" && pop.listed.changes.length > 0) {
+    const why = `the stratum selects by labels (${selector.labels.join(", ")}), and provider ${provider.name} did not give the labels each change had when it landed (it reads no label history): read as they are now, they would let whoever relabels after landing choose N`;
+    if (!o.dryRun) throw new AuditError(`${why}. Nothing was written`);
+    ctx.err(`note: ${why}; freeze refuses it`);
+  }
   const N = pop.entries.length;
   const mergedBy = pop.selection.mergedByBreakdown;
   const defaultBranch = pooled ? "each repo's default branch" : pop.listed.defaultBranch;

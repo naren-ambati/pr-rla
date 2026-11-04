@@ -74,10 +74,11 @@ export interface ReadyMessage {
 export interface DescribeResult {
   hosts: unknown;
   writePaths: unknown;
-  /** The definition's `reviewGranularity`, `populationOptions` and `reportsLandedVia`, when it declares them. */
+  /** The definition's `reviewGranularity`, `populationOptions` and `reportsLandedVia` (and P5's `labelHistory`), when it declares them. */
   reviewGranularity?: unknown;
   populationOptions?: unknown;
   reportsLandedVia?: unknown;
+  labelHistory?: unknown;
   /** A ledger definition's `provenance` (U4), when it declares one. */
   provenance?: unknown;
 }

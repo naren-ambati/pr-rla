@@ -55,8 +55,20 @@ export type PoolArgs = Omit<PopulationArgs, "repo" | "head">;
 /** Lists one repo's changes in the window. The listing is checked by `checkListed` before it is used. */
 export async function listRepoChanges(provider: ScmProvider, args: Pick<PopulationArgs, "repo" | "window" | "selector" | "signal" | "head">): Promise<ListChangesResult> {
   if (args.head !== undefined && !isCommitId(args.head)) throw new Error(`the pinned default-branch head ${JSON.stringify(args.head)} is not a commit id (40 to 64 lowercase hex characters); the manifest was edited or is not from this pr-rla`);
-  const req = { repo: args.repo, window: { opensAt: args.window.opensAt, closesAt: args.window.closesAt }, kinds: args.selector.kinds, ...(args.signal ? { signal: args.signal } : {}), ...(args.head !== undefined ? { head: args.head } : {}) };
+  // P5: a labels stratum asks for each change's labels as they were at landing (`labelsNotAtLanding` holds the answer to it).
+  const req = { repo: args.repo, window: { opensAt: args.window.opensAt, closesAt: args.window.closesAt }, kinds: args.selector.kinds, ...(args.selector.labels.length ? { labelsAt: "landing" as const } : {}), ...(args.signal ? { signal: args.signal } : {}), ...(args.head !== undefined ? { head: args.head } : {}) };
   return provider.listChanges(req);
+}
+
+/**
+ * P5: for a stratum that selects by labels, the repos whose listing does not say its labels are as at landing
+ * (`ListChangesResult.labelsAt`): a provider that reads no label history, or ignored the request. Labels read as they
+ * are now would let whoever relabels after landing choose N. Empty for a stratum without labels.
+ */
+export function labelsNotAtLanding(selector: Pick<Selector, "labels">, listings: readonly { repo: string; listed: ListChangesResult }[]): string[] {
+  if (!selector.labels.length) return [];
+  // A repo with nothing in the window has no labels to read (an empty repository's listing carries no flag).
+  return listings.filter((l) => l.listed.labelsAt !== "landing" && l.listed.changes.length > 0).map((l) => l.repo);
 }
 
 /**
@@ -133,6 +145,7 @@ function mergeListings(parts: readonly ListChangesResult[], changes: ChangeRecor
     defaultBranch: branches.size === 1 ? [...branches][0]! : "(varies by repo)",
     limitations: [...new Set(parts.flatMap((p) => p.limitations))],
     ...(diag.size ? { diagnostics: [...diag].map(([label, value]) => ({ label, value })) } : {}),
+    ...(parts.length && parts.every((p) => p.labelsAt === "landing" || p.changes.length === 0) ? { labelsAt: "landing" as const } : {}),
   };
 }
 

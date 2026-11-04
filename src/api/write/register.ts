@@ -241,10 +241,14 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     prRlaVersion: PR_RLA_VERSION,
     ...(accounts?.bound ? { accounts: accounts.bound } : {}),
   };
-  // Time round B: the population must be fixed by the registration and the SCM's record at landing. Labels are not:
-  // freeze reads them as they are then, so whoever can relabel before the freeze can change N, and so the draws.
-  if (config.selector.labels.length)
-    ctx.err(`note: the stratum selects by labels (${config.selector.labels.join(", ")}), which can change after a change lands; freeze reads them as they are then, so whoever can relabel before the freeze can change N and the draws. A stratum without labels cannot be moved that way`);
+  // P5 (finding 4): the population must be fixed by the registration and the SCM's record at landing. A labels stratum
+  // needs each change's labels as they were when it landed, from label history; a provider without it is refused.
+  if (config.selector.labels.length) {
+    const traits = await providerTraits(config.provider, config.dir, auditContextFor(ctx));
+    if (!traits.labelHistory)
+      throw new AuditError(`the stratum selects by labels (${config.selector.labels.join(", ")}), and provider ${traits.name} reads no label history: labels can be changed after a change lands, so read as they are at freeze they would let whoever relabels choose N, and so the draws. Nothing was written: register a stratum without labels, or use a provider that reads each change's labels at landing (github)`);
+    ctx.err(`note: the stratum selects by labels (${config.selector.labels.join(", ")}); provider ${traits.name} reads each change's labels as they were when it landed, from its label history (on GitHub, one request per pull request), so nothing done after landing moves a change in or out`);
+  }
   if (!opts.dryRun && existsSync(paths.registration) && !opts.force)
     throw new AuditError(`${paths.registration} exists. A new registration replaces the selector; use --force only if the old one was never shown to anyone.`);
   const url = opts.submit && !opts.dryRun ? submitUrl(config, opts.rekorUrl) : null;

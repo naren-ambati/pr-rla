@@ -10,7 +10,7 @@ import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
 import { createPublicKey } from "node:crypto";
 import { canonicalJson, sha256Hex } from "./canonical.js";
-import { assemblePopulation, type Population } from "./population.js";
+import { assemblePopulation, labelsNotAtLanding, type Population } from "./population.js";
 import { drawOrder, storedInCanonicalOrder } from "./draw-key.js";
 import { checkPool } from "./rebuild.js";
 import { ruleRepoNameFindings } from "./repo-names.js";
@@ -115,6 +115,11 @@ export interface VerifyDeps {
   logKey: (logUrl: string) => Promise<TrustedLogKey | null>;
   /** RFC 3161 anchors: the shipped bundle plus any the verifier added with --tsa-trust. Never the audit repo's own. */
   trustBundle: TrustBundle;
+  /**
+   * P5: whether the verifier's provider reads label history (its definition's `labelHistory`), when known. false makes a
+   * labels stratum INCOMPLETE in check 2, offline too (status runs it); check 5 also holds each listing to `labelsAt`.
+   */
+  labelHistory?: boolean;
   /**
    * What the verifier's provider is (its options hashed as at registration). When given for a v2
    * registration, provider options that change the population must match the registered ones (check 5).
@@ -373,9 +378,11 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       c2.details.push(`WARN ${x}`);
       c2.status = raiseStatus(c2.status, "WARN");
     }
-    if (labelled.length) {
-      c2.details.push(`WARN the registered stratum selects by labels (${labelled.join(", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
-      c2.status = raiseStatus(c2.status, "WARN");
+    // P5 (finding 4): a labels stratum is read as at landing, from label history (check 5 rebuilds it so). A provider that
+    // reads none cannot establish it: register refuses such a stratum now; one registered before is INCOMPLETE.
+    if (labelled.length && deps.labelHistory === false) {
+      c2.details.push(`INCOMPLETE the registered stratum selects by labels (${labelled.join(", ")}), and the provider reads no label history: labels can change after a change lands, and read as they are at freeze they would let whoever relabels choose N, and so the draws`);
+      c2.status = raiseStatus(c2.status, "INCOMPLETE");
     }
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
     if (v2 && isRegistrationV2(reg)) {
@@ -502,6 +509,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     }
     c5.details.push(...pool.lines);
     const listings = pool.rebuilt.filter((b) => b.listed).map((b) => ({ repo: b.repo, listed: b.listed! }));
+    // P5 (finding 4): a labels stratum needs the labels each change had at landing (ListChangesResult.labelsAt).
+    const notAtLanding = labelsNotAtLanding(selector, listings);
+    if (notAtLanding.length) c5.details.push(`INCOMPLETE the stratum selects by labels (${selector.labels.join(", ")}), and provider ${provider.name} did not give the labels the changes of ${n(notAtLanding.length)} repo(s) had when they landed (${notAtLanding.slice(0, 3).join(", ")}): it reads no label history, so the stratum read from labels as they are now is not established`);
     let pop: Population;
     try {
       pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, accounts, horizon: reviewHorizonFor(reg) });
