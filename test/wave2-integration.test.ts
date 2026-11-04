@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -57,6 +57,41 @@ import { PRESENCE_LIMIT } from "../src/core/presence/index.js";
  * MCP package's own wave-2 test drives the tools themselves): U9's per-verdict signatures in status and
  * the draw context, and read-only mode under this machine's approvals (the plugins round).
  */
+/**
+ * Every request handed to a fetch broker of this file, at the broker's entry (S1, item 8): what pr-rla asked to send,
+ * before the broker's read-only guard refuses a write, so a write attempt is seen even when nothing was sent. The
+ * transport behind the broker sees only what the broker let through.
+ */
+const brokerEntries = vi.hoisted(() => [] as { pluginId: string; method: string; url: string; body: string | null }[]);
+vi.mock("../src/net/broker.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/net/broker.js")>();
+  const note = (pluginId: string, input: unknown, init?: RequestInit) =>
+    brokerEntries.push({ pluginId, method: (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase(), url: input instanceof Request ? input.url : String(input), body: typeof init?.body === "string" ? init.body : null });
+  return {
+    ...real,
+    createBroker: (...args: Parameters<typeof real.createBroker>) => {
+      const b = real.createBroker(...args);
+      return Object.assign(Object.create(b) as typeof b, {
+        fetch: ((input, init) => (note(init.pluginId, input, init), b.fetch(input, init))) as typeof b.fetch,
+        bind: (pluginId: string, destination?: Parameters<typeof b.bind>[1]) => {
+          const f = b.bind(pluginId, destination);
+          return ((input: string | URL | Request, init?: RequestInit) => (note(pluginId, input, init), f(input, init))) as typeof fetch;
+        },
+      });
+    },
+  };
+});
+/** A request that is not a read under contracts.md §2: anything but GET or HEAD, except a POST to /graphql whose document is a query. */
+const isWrite = (e: { method: string; url: string; body: string | null }) => {
+  if (e.method === "GET" || e.method === "HEAD") return false;
+  if (e.method !== "POST" || new URL(e.url).pathname !== "/graphql") return true;
+  try {
+    return /^\s*(mutation|subscription)\b/.test(String((JSON.parse(e.body ?? "") as { query?: unknown }).query).replace(/#[^\n]*/g, ""));
+  } catch {
+    return true;
+  }
+};
+
 const W = "audit/2026-q3";
 let tsa: MockTsaServer;
 let unregistered: TestAuthority;
@@ -393,7 +428,9 @@ describe("read-only mode honours this machine's approvals (bolt/u5-audit-api-mcp
     expect(approved.N).toBe(anonymous.N);
     expect([...new Set(seen.map((x) => x.auth))]).toEqual(["Bearer ghe_OPERATOR_SECRET"]);
     expect([...new Set(seen.map((x) => new URL(x.url).host))]).toEqual(["ghe.example.com"]);
-    expect(JSON.stringify(approved)).not.toContain("ghe_OPERATOR_SECRET");
+    // (S1, item 8: a preview result carries no headers, so its JSON could never contain the token. That the token is
+    // absent from everything a read-only session sends, even from a server that echoes it, is
+    // packages/pr-rla-mcp/test/mcp-s1.test.mjs.)
   });
 });
 
@@ -445,6 +482,19 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
   }, 120_000);
 });
 
+describe("the broker-entry spy sees a write attempt that the broker refuses and the transport never sees (S1, item 8)", () => {
+  it("control: a read-only context's ledger asks for a POST; the spy records it as a write, the transport gets nothing", async () => {
+    const { createAuditContext } = await import("../src/api/context.js");
+    let sent = 0;
+    const ctx = createAuditContext({ mode: "read-only", fetch: (async () => (sent++, new Response("{}"))) as typeof fetch });
+    brokerEntries.length = 0;
+    await expect(ctx.broker.bind("ledger:github-issues")("https://api.github.com/repos/acme/audit/issues", { method: "POST", body: "{}" })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(ctx.broker.bind("provider:github")("https://api.github.com/graphql", { method: "POST", body: JSON.stringify({ query: "mutation { addLabelsToLabelable(input: {}) { clientMutationId } }" }) })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    expect(sent).toBe(0);
+    expect(brokerEntries.filter(isWrite).map((e) => `${e.method} ${new URL(e.url).pathname}`)).toEqual(["POST /repos/acme/audit/issues", "POST /graphql"]);
+  });
+});
+
 describe("P3's push-log proof and verify's per-repo lines through pr-rla/api/read (bolt/u5-audit-api-mcp × fix/p3-pool-head)", () => {
   it("a public-only rule over a 30-repo GitHub org: the write API records every head's push-log evidence; read.verify, in read-only mode, proves each head from the log and carries check 5's per-repo lines in `verbose` (the MCP verify tool's object)", async () => {
     const org = fakeOrg(orgSpec({ eligible: 30, archived: 2, forks: 1, scale: 2 }));
@@ -461,16 +511,18 @@ describe("P3's push-log proof and verify's per-repo lines through pr-rla/api/rea
       seen.push({ method: init?.method ?? "GET", path: url.pathname, auth: new Headers(init?.headers).get("authorization") });
       return org.fetch(input, init);
     }) as typeof globalThis.fetch;
+    brokerEntries.length = 0;
     const r = await s.clock.run(read.verify({ dir: s.dir, offline: false }, { nowMs: () => s.clock.now(), sleep: (ms) => s.clock.sleep(ms), fetch, env: s.ctx.env }));
     const c5 = r.checks.find((c) => c.n === 5)!;
     expect(c5.details).toContain(`push log: ${m.repos.length} of ${m.repos.length} frozen head(s) were their default branch's tip at freeze`);
     const hidden = org.spec.repos.filter((x) => (x.visibility ?? "public") !== "public" && !x.archived && !x.fork).map((x) => `${ORG}/${x.name}`);
     expect(c5.details.filter((d) => d.startsWith("WARN "))).toHaveLength(1);
     expect(c5.verbose!.map((l) => /^WARN repo (\S+)/.exec(l)![1]).sort()).toEqual(hidden.sort());
-    // Read-only: every request was a read, each push log among them, with the default token swapped in on its origin.
-    expect(seen.filter((x) => x.method !== "GET" && !(x.method === "POST" && x.path === "/graphql"))).toEqual([]);
+    // Read-only: every request pr-rla asked the broker to send was a read (seen at the broker's entry, so a refused write
+    // would show here, S1 item 8), each push log among them, with the default token swapped in on its origin.
+    expect(brokerEntries.length).toBeGreaterThan(m.repos.length);
+    expect(brokerEntries.filter(isWrite)).toEqual([]);
     expect(seen.filter((x) => /\/activity$/.test(x.path)).length).toBeGreaterThanOrEqual(m.repos.length);
     expect(new Set(seen.map((x) => x.auth))).toEqual(new Set(["Bearer synthetic-token-not-real"]));
-    expect(JSON.stringify(r)).not.toContain("synthetic-token-not-real");
   }, 180_000);
 });

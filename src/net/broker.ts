@@ -21,7 +21,7 @@ import {
   type Destination,
 } from "./contract.js";
 import { isGraphqlPath, isQueryOnly } from "./graphql.js";
-import { scrubPairs, scrubText, type SecretValue } from "./scrub.js";
+import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "./scrub.js";
 import { RateGovernor, type GovernedRequest } from "./governor.js";
 import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
 
@@ -335,12 +335,24 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     }
   }
 
+  /** The secret values the caller holds (its granted, approved credentials). */
+  const callerSecrets = (call: Call): SecretValue[] => [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
+
+  /** A response with every form of `secrets` replaced by its placeholder: body, header values, status text. */
+  async function scrubResponse(res: Response, secrets: readonly SecretValue[]): Promise<Response> {
+    if (!secrets.some((x) => x.secret !== false && x.value)) return res;
+    const pairs = scrubPairs(secrets);
+    const body = NULL_BODY.has(res.status) ? null : scrubBytes(pairs, Buffer.from(await res.arrayBuffer()));
+    const headers = new Headers();
+    for (const [k, v] of res.headers) headers.append(k, scrubText(pairs, v));
+    return new Response(body, { status: res.status, statusText: scrubText(pairs, res.statusText), headers });
+  }
+
   // Step 7. Every secret value the caller holds is scrubbed wherever it appears, in every form (finding 5).
   async function record(call: Call, url: URL, method: string, headers: Headers, body: Body | null, res: Response): Promise<void> {
     if (!p.recorder) return;
     const bytes = bodyBytes(body);
-    const secrets: SecretValue[] = [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
-    const pairs = scrubPairs(secrets);
+    const pairs = scrubPairs(callerSecrets(call));
     p.recorder({
       pluginId: call.pluginId,
       destination: call.destination,
@@ -402,6 +414,10 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         release();
       }
       governor.observe(g, res);
+      // Read-only mode (S1, item 8): a response reaches a built-in as an isolated plugin's reaches its child (src/plugins/host.ts):
+      // every secret the caller holds, in every form a server may echo it in, is its placeholder, so no error body,
+      // header, status text or redirect can carry the operator's token into a read result.
+      if (p.mode === "read-only") res = await scrubResponse(res, callerSecrets(call));
       await record(call, url, method, headers, body, res);
       const location = res.headers.get("location");
       if (REDIRECTS.has(res.status) && location) {

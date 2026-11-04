@@ -227,3 +227,24 @@ export default {
     expect(sends).toBe(3);
   });
 });
+
+describe("item 8: in read-only mode a response reaches a built-in with the caller's secrets scrubbed", () => {
+  it("an echoing server's body, headers and status text carry the token's placeholder, not the token, in every form; read-write is as before", async () => {
+    const SECRET = "ghp_OPERATOR+SECRET/0123456789=";
+    const transport = (async (_u: string | URL, init?: RequestInit) => {
+      const t = (new Headers(init?.headers).get("authorization") ?? "").replace(/^Bearer /, "");
+      return new Response(JSON.stringify({ message: `you sent ${t}`, forms: [encodeURIComponent(t), Buffer.from(t).toString("base64")] }), { status: 404, statusText: `Not ${t}`, headers: { "content-type": "application/json", "x-echo": t } });
+    }) as typeof fetch;
+    const credentials = () => new Map([["GITHUB_TOKEN", { value: SECRET, hosts: new Set(["api.github.com"]) }]]);
+    for (const mode of ["read-only", "read-write"] as const) {
+      const broker = createBroker({ mode, credentialsFor: credentials }, { fetch: transport, sleep: async () => {}, log: () => {} });
+      const res = await broker.bind("provider:github")("https://api.github.com/x", { headers: { authorization: "Bearer prrla-cred:GITHUB_TOKEN" } });
+      const seen = `${res.statusText}\n${res.headers.get("x-echo")}\n${await res.text()}`;
+      const forms = [SECRET, encodeURIComponent(SECRET), Buffer.from(SECRET).toString("base64")];
+      if (mode === "read-only") {
+        for (const f of forms) expect(seen).not.toContain(f);
+        expect(seen).toContain("prrla-cred:GITHUB_TOKEN");
+      } else expect(seen).toContain(SECRET);
+    }
+  });
+});
