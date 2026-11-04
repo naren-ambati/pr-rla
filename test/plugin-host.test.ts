@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -147,13 +147,15 @@ describe("the hostile fixture plugin, contained (functional-design.md §U2b; tes
         expect(s.server.requests.every((r) => r.method === "GET")).toBe(true);
       });
 
-      it(major >= 25 ? "cannot open a socket (Node 25 or later, no --allow-net)" : "CAN open a socket: Node 22 and 24 have no network control (the stated limit)", () => {
+      it(major >= 25 ? "cannot open a socket (Node 25 or later, no --allow-net)" : "CAN open a socket: Node 22 and 24 have no network control (the stated limit)", async () => {
         if (major >= 25) {
           expect(seen.socket).toMatchObject({ ok: false, code: "ERR_ACCESS_DENIED" });
           expect(socket.received()).toBe("");
         } else {
           expect(seen.socket).toEqual({ ok: true, value: "connected" });
-          expect(socket.received()).toBe("exfiltrated");
+          // The child's end() callback fires once its bytes reach the OS, not once this server's
+          // "data" handler has run, so under load the bytes can still be in flight here.
+          await vi.waitFor(() => expect(socket.received()).toBe("exfiltrated"), { timeout: 5000, interval: 10 });
         }
       });
     });
