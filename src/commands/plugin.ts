@@ -4,7 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { CONFIG_FILE, loadConfig, type PrRlaConfig } from "../config.js";
 import { builtinLedgerName, builtinProviderName } from "../registry.js";
 import { formatConformanceReport } from "../testing/conformance.js";
-import { CORRECTNESS_NOT_SAFETY, fixtureName, hostedProviderConformance, readRecordedFixture } from "../plugins/check.js";
+import { CORRECTNESS_NOT_SAFETY, fixtureName, hostedLedgerConformance, hostedProviderConformance, readRecordedFixture, readRecordedLedgerFixture } from "../plugins/check.js";
+import { formatLedgerConformanceReport } from "../testing/ledger-conformance.js";
 import { inspectPlugin as inspect, lockEntryFor as entryFor } from "../plugins/entry.js";
 import { NETWORK_DENIED_FROM_NODE } from "../plugins/host.js";
 import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, verifyLocked, writeLock, type LockedCredential, type LockEntry, type PluginTrust, type ResolvedPlugin } from "../plugins/lock.js";
@@ -224,27 +225,30 @@ export async function pluginCheckCommand(ctx: CommandContext, use: string, opts:
     const code = (e as { code?: string }).code;
     lockLine = code === "NOT_LOCKED" ? `not locked: run "pr-rla plugin add ${use}" to trust it` : code === "LOCK_MISMATCH" ? `CHANGED since it was locked: ${(e as Error).message}` : `cannot check: ${(e as Error).message}`;
   }
-  const x = await inspect(kind, use, plugin, c?.options ?? {});
+  const declared = plugin.pkg?.["pr-rla"] && typeof plugin.pkg["pr-rla"] === "object" ? (plugin.pkg["pr-rla"] as { conformance?: unknown }).conformance : undefined;
+  const files = [...(Array.isArray(declared) ? declared.filter((f): f is string => typeof f === "string").map((f) => resolve(plugin.rootIsFile ? dirname(plugin.root) : plugin.root, f)) : []), ...(opts.fixture ?? []).map((f) => resolve(ctx.cwd, f))];
+  // A ledger not named in .pr-rla.yml is asked with its first recorded fixture's options (a ledger usually needs its tracker's URL).
+  const ledgerRecs = kind === "ledger" ? files.map((f) => ({ name: fixtureName(f), rec: readRecordedLedgerFixture(f) })) : [];
+  const asked = c?.options ?? ledgerRecs[0]?.rec.options ?? {};
+  const x = await inspect(kind, use, plugin, asked);
   ctx.out(`plugin check ${use}: ${kind} ${x.name}${plugin.version ? `@${plugin.version}` : ""} (${plugin.source})`);
   ctx.out(`  lock            ${lockLine}`);
   ctx.out(`  npm signatures  ${npmSignatures(plugin, opts.offline)}`);
-  ctx.out(`  hosts           ${x.hosts.join(", ") || "none"}${c ? "" : " (with no options: not named in .pr-rla.yml)"}`);
+  ctx.out(`  hosts           ${x.hosts.join(", ") || "none"}${c ? "" : ledgerRecs[0]?.rec.options ? ` (with the options of ${ledgerRecs[0].name}: not named in .pr-rla.yml)` : " (with no options: not named in .pr-rla.yml)"}`);
   ctx.out(`  credentials     ${x.credentials.length ? x.credentials.map(credentialText).join("; ") : "none"}`);
   warnInstallScripts(ctx, plugin);
   let ok = false;
-  // The ledger kit's fixtures are built by code (fake trackers, published issues), not recorded data a check can replay.
-  if (kind === "ledger") ctx.out("  conformance     not run: plugin check replays recorded provider fixtures only; run your ledger's own runLedgerConformance test");
+  if (!files.length) ctx.out(`  conformance     not run: no fixtures (list recorded ${kind} fixtures in the plugin's package.json as "pr-rla": { "conformance": [...] }, or pass --fixture <file>)`);
   else {
-    const declared = plugin.pkg?.["pr-rla"] && typeof plugin.pkg["pr-rla"] === "object" ? (plugin.pkg["pr-rla"] as { conformance?: unknown }).conformance : undefined;
-    const files = [...(Array.isArray(declared) ? declared.filter((f): f is string => typeof f === "string").map((f) => resolve(plugin.rootIsFile ? dirname(plugin.root) : plugin.root, f)) : []), ...(opts.fixture ?? []).map((f) => resolve(ctx.cwd, f))];
-    if (!files.length) ctx.out('  conformance     not run: no fixtures (list recorded fixtures in the plugin\'s package.json as "pr-rla": { "conformance": [...] }, or pass --fixture <file>)');
-    else {
-      ctx.out(`  conformance     the provider kit through the plugin host, on ${files.length} recorded fixture(s)`);
-      const report = await hostedProviderConformance(plugin, use, files.map((f) => ({ name: fixtureName(f), rec: readRecordedFixture(f) })));
-      for (const l of formatConformanceReport(report).split("\n")) ctx.out(`    ${l}`);
-      ok = report.ok;
-      ctx.out(`  conformance     ${ok ? "PASS" : "FAIL"}`);
-    }
+    // A ledger's recorded fixtures run the ledger kit (finding 15), a provider's the provider kit; both through the host.
+    ctx.out(`  conformance     the ${kind} kit through the plugin host, on ${files.length} recorded fixture(s)`);
+    const report =
+      kind === "ledger"
+        ? await hostedLedgerConformance(plugin, use, ledgerRecs)
+        : await hostedProviderConformance(plugin, use, files.map((f) => ({ name: fixtureName(f), rec: readRecordedFixture(f) })));
+    for (const l of (kind === "ledger" ? formatLedgerConformanceReport(report) : formatConformanceReport(report)).split("\n")) ctx.out(`    ${l}`);
+    ok = report.ok;
+    ctx.out(`  conformance     ${ok ? "PASS" : "FAIL"}`);
   }
   ctx.out(CORRECTNESS_NOT_SAFETY);
   return ok ? 0 : 1;

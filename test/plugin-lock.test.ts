@@ -262,8 +262,16 @@ describe("--plugins builtin-only and PR_RLA_PLUGINS=builtin-only (FR2.6)", () =>
     expect((await cli(builtin, ["--plugins", "builtin-only", "freeze", "--dry-run"])).code).toBe(0);
   });
 
-  it("any other value is refused, so a typo never lets external code in", () => {
+  it("any other value is refused, so a typo never lets external code in", async () => {
     expect(() => pluginPolicy("all", {})).toThrow(/--plugins "all": the only value is builtin-only/);
+    // An empty --plugins is a mistake, not "unset" (finding 15); an empty variable is unset, as shells set them.
+    expect(() => pluginPolicy("", {})).toThrow(/--plugins "": the only value is builtin-only/);
+    expect(pluginPolicy(undefined, { PR_RLA_PLUGINS: "" })).toBe("locked");
+    const s = withPlugin({ source: 'throw new Error("IMPORTED: external code ran");\n' });
+    const r = await cli(s, ["--plugins", "", "freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/--plugins "": the only value is builtin-only/);
+    expect(text(r)).not.toMatch(/IMPORTED/);
     expect(() => pluginPolicy(undefined, { PR_RLA_PLUGINS: "builtin_only" })).toThrow(/PR_RLA_PLUGINS "builtin_only"/);
     expect(pluginPolicy(undefined, {})).toBe("locked");
     expect(pluginPolicy(undefined, { PR_RLA_PLUGINS: "builtin-only" })).toBe("builtin-only");
@@ -369,6 +377,42 @@ describe("plugin check: a correctness gate, never a safety gate (FR2.7)", () => 
     expect(none.code).toBe(1);
     expect(text(none)).toMatch(/conformance {5}not run: no fixtures/);
     expect(none.out[none.out.length - 1]).toBe(CORRECTNESS_NOT_SAFETY);
+  });
+});
+
+describe("plugin check runs the ledger kit for a ledger (finding 15)", () => {
+  const JIRA = "./examples/ledgers/jira/index.mjs";
+  const ctxAtRoot: Partial<CommandContext> = { cwd: ROOT };
+
+  it("on the Jira example's recorded hibernate.atlassian.net changelogs, through the host; it used to exit 1 without running", async () => {
+    const s = setupAuditRepo({ changes: [] });
+    const r = await cli(s, ["plugin", "check", JIRA, "--kind", "ledger", "--offline"], ctxAtRoot);
+    expect(r.code, text(r)).toBe(0);
+    expect(r.out).toContain("  conformance     the ledger kit through the plugin host, on 2 recorded fixture(s)");
+    for (const c of ["api-version", "normalization", "first-label", "integrity", "transient-faults"]) expect(r.out).toContain(`    ok   hibernate-first-verdicts.json › ${c}`);
+    expect(r.out).toContain("    ok   hibernate-removal-HHH-14722.json › removal");
+    expect(r.out).toContain("  conformance     PASS");
+    expect(r.out[r.out.length - 1]).toBe(CORRECTNESS_NOT_SAFETY);
+  });
+
+  it("fails on a recording whose expectation the ledger does not meet, and runs nothing without fixtures", async () => {
+    const s = setupAuditRepo({ changes: [] });
+    const rec = JSON.parse(readFileSync(join(ROOT, "examples", "ledgers", "jira", "fixtures", "hibernate-removal-HHH-14722.json"), "utf8"));
+    rec.expected.counted["1"] = null;
+    const bad = join(s.dir, "wrong-counted.json");
+    writeFileSync(bad, JSON.stringify(rec));
+    const plugin = join(s.dir, "ledger");
+    cpSync(join(ROOT, "examples", "ledgers", "jira", "index.mjs"), join(plugin, "index.mjs"));
+    writeFileSync(join(plugin, "package.json"), JSON.stringify({ name: "jira-copy", version: "0.0.1", type: "module" }));
+    const r = await cli(s, ["plugin", "check", "./ledger/index.mjs", "--kind", "ledger", "--offline", "--fixture", "wrong-counted.json"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/FAIL wrong-counted\.json › first-label: draw #1: counted .*expected none/);
+    expect(r.out).toContain("  conformance     FAIL");
+    // Named in .pr-rla.yml, so it is asked with the audit's options, and it lists no fixtures.
+    appendFileSync(join(s.dir, ".pr-rla.yml"), "ledger:\n  use: ./ledger/index.mjs\n  options: { base_url: https://acme.atlassian.net, project: AUD, field: customfield_10050 }\n");
+    const none = await cli(s, ["plugin", "check", "./ledger/index.mjs", "--offline"]);
+    expect(none.code).toBe(1);
+    expect(text(none)).toMatch(/conformance {5}not run: no fixtures \(list recorded ledger fixtures/);
   });
 });
 

@@ -34,7 +34,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.15"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

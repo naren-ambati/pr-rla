@@ -474,10 +474,13 @@ export interface PluginRules {
 
 export const policyOf = (r: PluginPolicy | PluginRules): PluginPolicy => (typeof r === "string" ? r : r.plugins);
 
-/** `--plugins builtin-only` or `PR_RLA_PLUGINS=builtin-only` (FR2.6). Any other value is refused, so a typo never allows external code. */
+/**
+ * `--plugins builtin-only` or `PR_RLA_PLUGINS=builtin-only` (FR2.6). Any other value is refused, so a
+ * typo never allows external code; `--plugins ""` too (finding 15), while an empty PR_RLA_PLUGINS is unset.
+ */
 export function pluginPolicy(flag: string | undefined, env: Readonly<Record<string, string | undefined>>): PluginPolicy {
   for (const [what, v] of [["--plugins", flag], ["PR_RLA_PLUGINS", env.PR_RLA_PLUGINS]] as const) {
-    if (v === undefined || v === "") continue;
+    if (v === undefined || (v === "" && what === "PR_RLA_PLUGINS")) continue;
     if (v !== "builtin-only") throw new PluginError(`${what} ${JSON.stringify(v)}: the only value is builtin-only`, "PLUGIN_INVALID", `use ${what === "--plugins" ? "--plugins builtin-only" : "PR_RLA_PLUGINS=builtin-only"}, or leave it unset`);
     return "builtin-only";
   }

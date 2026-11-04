@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { INDEX_FILE } from "../ledgers/issue-index.js";
 import { HostNotAllowed } from "../net/contract.js";
+import type { DrawForLedger } from "../sdk/ledger.js";
 import { runProviderConformance, type ConformanceFixture, type ConformanceReport } from "../testing/conformance.js";
-import { describePlugin, hostedProvider, startPluginHost, type HostOptions, type PluginHost } from "./host.js";
+import { LEDGER_CASES, runLedgerConformance, type CountedVerdict, type LedgerCase, type LedgerFixture } from "../testing/ledger-conformance.js";
+import { describePlugin, hostedLedger, hostedProvider, startPluginHost, type HostOptions, type PluginHost } from "./host.js";
 import { readGrants, type ResolvedPlugin } from "./lock.js";
+import { ledgerIndexStore } from "./open.js";
 
 /**
  * The conformance kit run through the plugin host (FR2.7): each instance the kit makes is a
@@ -39,7 +44,7 @@ function expectations(expected: Record<string, unknown>): ConformanceFixture["ex
 }
 
 /** Serves recorded exchanges by method, URL and body hash, in recorded order; an unrecorded request throws, so a check stays offline. */
-export function replayFetch(rec: RecordedFixture): typeof fetch & { served: () => number } {
+export function replayFetch(rec: Pick<RecordedFixture, "exchanges">): typeof fetch & { served: () => number } {
   const queue = rec.exchanges.map((e) => ({ e, used: false }));
   let served = 0;
   const f = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -103,3 +108,86 @@ export async function hostedProviderConformance(plugin: ResolvedPlugin, label: s
 }
 
 export const fixtureName = (path: string) => basename(path);
+
+/**
+ * A recorded ledger fixture (FR4.7), data only, for `plugin check` on a ledger (finding 15): a
+ * public tracker's responses as the ledger fetched them, the ledger's local index at the start
+ * (LedgerContext.index, when it keeps one), and what the kit must find. Fixtures that need a
+ * tracker to change between reads (an erasure, a publish) need code, so they stay in the ledger's
+ * own test; `plugin check` runs the kit's cases a recording can show.
+ */
+export interface RecordedLedgerFixture {
+  source: "recorded";
+  case: LedgerCase;
+  options?: Record<string, unknown>;
+  index?: unknown;
+  reviewers?: string[] | null;
+  exchanges: RecordedFixture["exchanges"];
+  expected: {
+    draws: DrawForLedger[];
+    counted: Record<string, CountedVerdict | null>;
+    integrity: "PASS" | "WARN" | "FAIL";
+    /** Each must be part of one of the integrity findings or warnings. */
+    messages?: string[];
+    minHistory?: number;
+    seedPublishedAt?: string;
+  };
+}
+
+const REPLAYABLE: readonly LedgerCase[] = LEDGER_CASES.filter((c) => c !== "idempotent-publish" && c !== "checkpoint-round-trip");
+
+export function readRecordedLedgerFixture(path: string): RecordedLedgerFixture {
+  const rec = JSON.parse(readFileSync(path, "utf8")) as Partial<RecordedLedgerFixture>;
+  const e = rec.expected;
+  if (rec.source !== "recorded" || !REPLAYABLE.includes(rec.case as LedgerCase) || !Array.isArray(rec.exchanges) || !e || !Array.isArray(e.draws) || !e.counted || typeof e.counted !== "object" || !["PASS", "WARN", "FAIL"].includes(e.integrity as string))
+    throw new Error(`${path}: not a recorded ledger fixture (needs source "recorded", a case of ${REPLAYABLE.join(", ")}, exchanges and expected { draws, counted, integrity })`);
+  return rec as RecordedLedgerFixture;
+}
+
+/**
+ * Runs the ledger kit through the host on recorded ledger fixtures, as hostedProviderConformance
+ * does for providers: every instance the kit makes is a fresh child, fed the recording by the
+ * parent; requests to hosts the ledger did not declare are refused; its index is kept here.
+ */
+export async function hostedLedgerConformance(plugin: ResolvedPlugin, label: string, fixtures: { name: string; rec: RecordedLedgerFixture }[], host: Partial<HostOptions> = {}): Promise<ConformanceReport> {
+  const started: PluginHost[] = [];
+  const dirs: string[] = [];
+  try {
+    const recs = new Map(fixtures.map((f) => [f.name, f.rec]));
+    const kit: LedgerFixture[] = fixtures.map(({ name, rec }) => ({
+      name,
+      case: rec.case,
+      source: "recorded",
+      http: true,
+      draws: rec.expected.draws,
+      ...(rec.reviewers !== undefined ? { reviewers: rec.reviewers } : {}),
+      expect: {
+        counted: Object.fromEntries(Object.entries(rec.expected.counted).map(([k, v]) => [Number(k), v])),
+        integrity: rec.expected.integrity,
+        ...(rec.expected.messages ? { messages: rec.expected.messages } : {}),
+        ...(rec.expected.minHistory !== undefined ? { minHistory: rec.expected.minHistory } : {}),
+        ...(rec.expected.seedPublishedAt !== undefined ? { seedPublishedAt: rec.expected.seedPublishedAt } : {}),
+      },
+    }));
+    return await runLedgerConformance(async (f, harness) => {
+      const rec = recs.get(f.name)!;
+      const h = await startPluginHost({ kind: "ledger", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label, ...host });
+      started.push(h);
+      const declared = (await describePlugin(h, rec.options ?? {})).hosts;
+      const windowDir = mkdtempSync(join(tmpdir(), "prrla-check-ledger-"));
+      dirs.push(windowDir);
+      if (rec.index !== undefined) writeFileSync(join(windowDir, INDEX_FILE), JSON.stringify(rec.index));
+      const replay = replayFetch(rec);
+      const guarded = (async (input: string | URL | Request, init?: RequestInit) => {
+        const u = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        if (!declared.includes(u.host) && !declared.includes(u.hostname)) throw new HostNotAllowed(u.host, `ledger:${String(h.ready.name)}`, declared);
+        return replay(input, init);
+      }) as typeof fetch;
+      const lctx = harness.context({ fetch: guarded, windowDir });
+      return hostedLedger(h, rec.options ?? {}, { cwd: windowDir, windowDir, fetch: lctx.fetch, log: lctx.log, ...(lctx.sleep ? { sleep: lctx.sleep } : {}), ...(f.reviewers !== undefined ? { reviewers: f.reviewers } : {}), index: ledgerIndexStore({ mode: "read-write" }, windowDir) });
+    }, kit);
+  } finally {
+    for (const h of started) h.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  }
+}
