@@ -86,6 +86,38 @@ describe("built-in providers: the repo's config cannot send your token elsewhere
     expect(auths(both.seen)).toEqual(["Bearer ghp_MINE"]);
   });
 
+  it("a token_env or username_env that is not a string is refused, and a built-in sees only the variables granted to it (review of this round)", async () => {
+    // JavaScript reads env[["AWS_SECRET_ACCESS_KEY"]] as env.AWS_SECRET_ACCESS_KEY: the table must not let a list through.
+    for (const [use, options] of [
+      ["github", { token_env: ["AWS_SECRET_ACCESS_KEY"], base_url: "https://attacker.example" }],
+      ["bitbucket-cloud", { username_env: ["AWS_SECRET_ACCESS_KEY"], api_url: "https://bb.attacker.example/2.0" }],
+      ["gitlab", { token_env: { toString: () => "AWS_SECRET_ACCESS_KEY" } }],
+      // A list URL: read as the default by the table, stringified to the attacker's URL by the provider.
+      ["github", { graphql_url: ["https://attacker.example/graphql"] }],
+      ["gitlab", { base_url: ["https://gitlab.attacker.example"] }],
+    ] as [string, Record<string, unknown>][]) {
+      const seen: Seen[] = [];
+      const fetch = (async (input: string | URL, init?: RequestInit) => (seen.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") }), new Response("{}"))) as typeof globalThis.fetch;
+      const { ctx } = context({ AWS_SECRET_ACCESS_KEY: "AKIA_VERIFIER_SECRET", GITHUB_TOKEN: "ghp_MINE", BITBUCKET_TOKEN: "bbtok" }, fetch);
+      const opened = await openProvider(ctx, { use, options }, ".").then((p) => p.listChanges(REQ)).catch((e: Error) => e);
+      expect(seen.filter((x) => x.authorization?.includes("AKIA") || (x.authorization?.startsWith("Basic ") && Buffer.from(x.authorization.slice(6), "base64").toString().includes("AKIA"))), use).toEqual([]);
+      expect(seen.filter((x) => x.authorization !== null && !x.url.startsWith("https://api.github.com/") && !x.url.startsWith("https://gitlab.com/")), use).toEqual([]);
+      expect(opened, use).toMatchObject({ message: expect.stringMatching(/(token_env|username_env) must be the name of an environment variable|(graphql_url|base_url) must be a URL/) });
+    }
+    // What a built-in reads is only what is granted: an unrelated secret is not even in its environment.
+    const { BUILTIN_PROVIDERS } = await import("../src/registry.js");
+    const read: Record<string, string | undefined>[] = [];
+    const real = BUILTIN_PROVIDERS.github!.create;
+    (BUILTIN_PROVIDERS.github as { create: unknown }).create = (o: never, c: { env: Record<string, string | undefined> }) => (read.push({ ...c.env }), real(o, c as never));
+    try {
+      const { ctx } = context({ AWS_SECRET_ACCESS_KEY: "AKIA_VERIFIER_SECRET", GITHUB_TOKEN: "ghp_MINE", PATH: "/usr/bin" }, github().fetch);
+      await openProvider(ctx, { use: "github", options: {} }, ".");
+    } finally {
+      (BUILTIN_PROVIDERS.github as { create: unknown }).create = real;
+    }
+    expect(read).toEqual([{ GITHUB_TOKEN: "ghp_MINE" }]);
+  });
+
   it("a graphql_url elsewhere withholds the token from both endpoints (one grant covers every origin it goes to)", async () => {
     const gh = github();
     const { ctx, logs } = context({ GITHUB_TOKEN: "ghp_MINE" }, gh.fetch);

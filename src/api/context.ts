@@ -205,13 +205,14 @@ export function requireReadWrite(ctx: AuditContext, operation: string): void {
 }
 
 /**
- * A built-in's environment for these options (finding 1, for built-ins): each variable it would
- * send stays only when every origin it goes to is a built-in default, approved on this machine, or
- * accepted for this run (`--accept-lock-grants`), and is https. Any other set variable is withheld,
- * so the built-in runs anonymously, and one line names the command that approves it.
+ * A built-in's environment for these options (finding 1, for built-ins): the variables it would
+ * send whose every origin is a built-in default, approved on this machine, or accepted for this
+ * run (`--accept-lock-grants`), and is https, and nothing else: a built-in reads no other variable
+ * (test/builtin-consent.test.ts checks every one). Any other set variable is withheld, so the
+ * built-in runs anonymously, and one line names the command that approves it.
  */
 export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "log">, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; granted: BuiltinCredentialUse[] } {
-  const env: Record<string, string | undefined> = { ...ctx.env };
+  const env: Record<string, string | undefined> = {};
   const granted: BuiltinCredentialUse[] = [];
   const withheld: string[] = [];
   const accepted: string[] = [];
@@ -222,11 +223,9 @@ export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "
     const sources = u.origins.map((o) => ctx.consent.builtin(u.env, o));
     if (https && sources.every((x) => x !== null)) {
       granted.push(u);
+      env[u.env] = ctx.env[u.env];
       if (sources.includes("accepted")) accepted.push(line);
-    } else {
-      withheld.push(`${line}${https ? "" : " (not https)"}`);
-      delete env[u.env];
-    }
+    } else withheld.push(`${line}${https ? "" : " (not https)"}`);
   }
   if (withheld.length) ctx.log(`${kind} ${use}: ${withheld.join("; ")} ${withheld.length > 1 ? "are" : "is"} not approved on this machine, so withheld (the ${kind} runs without ${withheld.length > 1 ? "them" : "it"}); to approve: pr-rla plugin approve ${use}`);
   if (accepted.length) ctx.log(`${kind} ${use}: accepting ${accepted.join("; ")} from .pr-rla.yml for this run, not approved on this machine; --accept-lock-grants is only for a repo you control`);
