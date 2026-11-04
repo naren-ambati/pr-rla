@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The SDK modules (and the host's child, with its protocol types) are what an isolated plugin's
+    // child loads type-stripped from src/: only syntax Node can erase is allowed in them.
+    "erasableSyntaxOnly": true,
+    "noEmit": true
+  },
+  "include": ["src/sdk/**/*.ts", "src/plugins/child.ts", "src/plugins/protocol.ts"]
+}

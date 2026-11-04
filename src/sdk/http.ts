@@ -225,14 +225,15 @@ export interface HttpClientOptions {
   maxBlindRateLimitRetries?: number;
 }
 
+// No parameter properties in this module: an isolated plugin loads it type-stripped from src/ (finding 15; tsconfig.sdk.json).
 export class HttpError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly url: string,
-  ) {
+  readonly status: number;
+  readonly url: string;
+  constructor(message: string, status: number, url: string) {
     super(message);
     this.name = "HttpError";
+    this.status = status;
+    this.url = url;
   }
 }
 
@@ -253,10 +254,12 @@ export interface RequestOptions {
 export class HttpClient {
   requestCount = 0;
   private notBefore = 0;
+  private readonly o: HttpClientOptions;
   private readonly sleep: (ms: number) => Promise<void>;
   readonly baseUrl: string;
 
-  constructor(private readonly o: HttpClientOptions) {
+  constructor(o: HttpClientOptions) {
+    this.o = o;
     this.baseUrl = o.baseUrl.replace(/\/+$/, "");
     this.sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   }

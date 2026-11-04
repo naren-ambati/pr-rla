@@ -504,6 +504,40 @@ export default defineProvider({
   });
 });
 
+describe("pr-rla/http through the host (finding 15)", () => {
+  /** The retrying JSON client, behind the broker as the SDK says (maxRetries: 0), with a rule for a transient GraphQL error. */
+  const SOURCE = `import { defineProvider } from "pr-rla/provider";
+import { createJsonClient, HttpError, HTTP_HELPER_VERSION } from "pr-rla/http";
+export default defineProvider({
+  providerApiVersion: 1, name: "http-user", hosts: () => ["scm.example.com"],
+  create(options, ctx) {
+    const c = createJsonClient({ base: "https://scm.example.com/api", fetch: ctx.fetch, maxRetries: 0, name: "http-user" });
+    return { apiVersion: 1, name: "http-user", async listChanges() {
+      const { data } = await c.request("/graphql-ish", { accept: (b) => (b && b.errors ? "transient GraphQL error" : null) });
+      let missing = "none";
+      try { await c.get("/missing"); } catch (e) { missing = e instanceof HttpError ? "HttpError " + e.status : String(e); }
+      return { changes: [], defaultBranch: "main", limitations: [JSON.stringify({ data, missing, version: HTTP_HELPER_VERSION })] };
+    } };
+  },
+});
+`;
+  it("an isolated plugin imports it from the host's own SDK (type-stripped from src/ here), and its accept rule is kept", async () => {
+    const dir = auditDirWith({});
+    writeFileSync(join(dir, "http-user.mjs"), SOURCE);
+    await lockPlugin(dir, "./http-user.mjs");
+    let calls = 0;
+    const transport = (async (input: string | URL) => {
+      if (String(input).endsWith("/missing")) return new Response("not here", { status: 404 });
+      return new Response(JSON.stringify(++calls === 1 ? { errors: ["timeout"] } : { data: { n: calls } }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const p = await openProvider(createAuditContext({ mode: "read-only", fetch: transport, sleep: async () => {} }), { use: "./http-user.mjs", options: {} }, dir);
+    // Before the fix the child could not load it: ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX (parameter properties in src/sdk/http.ts).
+    const r = await p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
+    expect(JSON.parse(r.limitations[0]!)).toEqual({ data: { data: { n: 2 } }, missing: "HttpError 404", version: 1 });
+    expect(calls).toBe(2);
+  });
+});
+
 describe("an external ledger runs in the host too", () => {
   it("appends and reads verdicts over IPC; in read-only mode its writes refuse before reaching the child", async () => {
     const dir = auditDirWith({});
