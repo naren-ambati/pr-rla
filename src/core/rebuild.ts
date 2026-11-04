@@ -1,27 +1,34 @@
-import { isRepoEmpty, type ChangeRecord, type FirstParentCommit, type ListChangesResult, type RepoRef, type RepoSetRule, type RepoVisibility, type ScmProvider } from "../sdk/provider.js";
+import { isRepoEmpty, type ChangeRecord, type ListChangesResult, type RepoRef, type RepoSetRule, type RepoVisibility, type ScmProvider } from "../sdk/provider.js";
 import { isTransientFailure, looksUnavailable, probeRepo } from "./failures.js";
+import { provenLine, readHeadProof, type HeadProof } from "./head-proof.js";
 import { checkListed, listRepoChanges, mapPool } from "./population.js";
-import type { GoneRepo, ManifestRepo, RegisteredRepo, RepoListing, RepoSet } from "./records.js";
+import type { GoneRepo, ManifestRepo, RegisteredRepo, RegisteredVisibility, RepoListing, RepoSet } from "./records.js";
 import { describeExclusions, isMutableExclusion, listOwner, matchRepo, ruleExclusions } from "./repo-set.js";
 import type { Selector } from "./selector.js";
 import type { AuditWindow } from "../sdk/provider.js";
 
 /**
- * Check 5's rebuild, repo by repo and for the pool as a whole (U8 and the review's findings 1–8). Pure apart from the
- * provider calls; the caller (src/core/verify.ts) diffs the rebuilt populations with the manifest.
+ * Check 5's rebuild, repo by repo and for the pool as a whole (U8, and the P3 round). Pure apart from the provider
+ * calls; the caller (src/core/verify.ts) diffs the rebuilt populations with the manifest.
  *
  * Its lines start with `FAIL `, `INCOMPLETE ` or `WARN ` when they decide the check, and are notes otherwise:
- * - FAIL: the manifest is provably wrong (a window landing it lacks, a frozen head the repository does not have);
+ * - FAIL: the manifest is provably wrong (a window landing it lacks, a frozen head the repository does not have, a
+ *   frozen head the push log shows was not the branch's tip at freeze);
  * - INCOMPLETE: part of the population could not be rebuilt, or its completeness could not be established (a gone or
- *   unreadable repo, a token that cannot be shown to see every private repository, a rate limit);
+ *   unreadable repo, a token that cannot be shown to see every private repository, a window commit the frozen head
+ *   does not reach with no push-time evidence to place it, a rate limit, the verifier's own access failing);
  * - WARN: something a reader must know that this audit cannot decide (an attribute change a retrospective audit
- *   cannot date).
+ *   cannot date). Attribute WARNs are collapsed into one summary line; each repo's line is in `verbose`.
+ *
+ * P3: the frozen head is held to push-time evidence the SCM records itself (src/core/head-proof.ts), never to commit
+ * dates or the shape of the history, which the pusher sets.
  */
 
 const short = (sha: string) => `${sha.slice(0, 12)}…`;
 const n = (x: number) => x.toLocaleString("en-US");
 const eg = (xs: readonly string[]) => `e.g. ${xs.slice(0, 3).join(", ")}`;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const lower = (s: unknown) => (typeof s === "string" ? s.toLowerCase() : null);
 
 export interface RebuildArgs {
   /** The repo's path in the manifest (its change ids carry it). */
@@ -37,6 +44,15 @@ export interface RebuildArgs {
   signal?: AbortSignal;
   /** Set when this rebuild already follows a rename its probe found (it follows one, never a chain). */
   followedRename?: boolean;
+  /** P3: the default branch the head was frozen on, whose push log is read (default: the branch the listing reports). */
+  branch?: string;
+  /**
+   * P3: the freeze span, from the manifest's as-of time to seed round R's publication: the frozen head must have been
+   * the branch's tip at some instant of it. Absent: no push log is read, and push-time evidence is "none".
+   */
+  freezeSpan?: { from: string; until: string };
+  /** P3 (pass 2, #6): the verifier's own access is failing elsewhere (the owner listing, /user): an unexplained listing error is INCOMPLETE. */
+  verifierFailing?: boolean;
 }
 
 export interface RepoRebuild {
@@ -51,6 +67,8 @@ export interface RepoRebuild {
   fail: string[];
   incomplete: string[];
   notes: string[];
+  /** P3: what the push log showed about the frozen head (null: not read). */
+  proof: HeadProof | null;
 }
 
 /** Rewrites change ids and repos listed under the repo's current path back to the manifest's path (a rename since freeze). */
@@ -62,18 +80,21 @@ function underName(l: ListChangesResult, from: string, to: string): ListChangesR
     const id = rest.startsWith(`${from}#`) || rest.startsWith(`${from}@`) ? `${c.id.slice(0, i + 1)}${to}${rest.slice(from.length)}` : c.id;
     return { ...c, id, repo: to };
   };
-  return { ...l, changes: l.changes.map(fix) };
+  const ids = new Map(l.changes.map((c) => [c.id, fix(c).id]));
+  return { ...l, changes: l.changes.map(fix), ...(l.unreachable ? { unreachable: l.unreachable.map((id) => ids.get(id) ?? id) } : {}) };
 }
 
-/** What a listing failure means for one repo: an empty repo, a rate limit, a gone repo (by probe), or a FAIL. */
+/** What a listing failure means for one repo: an empty repo, a rate limit, a gone repo (by probe), the verifier's own access, or a FAIL. */
 async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs & { current: string }, where: "current" | "frozen"): Promise<{ kind: "empty" } | { kind: "renamed"; to: string } | { kind: "fail" | "incomplete"; reason: string }> {
   if (isRepoEmpty(e)) {
     if (a.frozenEmpty) return { kind: "empty" };
     return { kind: "fail", reason: `frozen head ${a.frozenHead ? short(a.frozenHead) : "(none recorded)"} not found: the repository has no default branch now (${message(e)})` };
   }
   if (isTransientFailure(e)) return { kind: "incomplete", reason: `could not be listed (${message(e)}): a rate limit or an outage, not a missing repository; run verify again` };
+  const status = (e as { status?: unknown } | null)?.status;
+  // P3 (#6): a token the SCM refuses is the verifier's problem, never evidence against the audit.
+  if (status === 401) return { kind: "incomplete", reason: `the verifier's token was refused (HTTP 401: ${message(e)}): its access, not the audit, is at fault; verify again with a working token` };
   if (looksUnavailable(e)) {
-    const status = (e as { status?: unknown }).status;
     const p = await probeRepo(provider, { repo: a.current });
     switch (p.kind) {
       case "exists":
@@ -92,19 +113,51 @@ async function classifyFailure(provider: ScmProvider, e: unknown, a: RebuildArgs
         return { kind: "incomplete", reason: `HTTP ${status} (${message(e)}), and probing it failed too (${p.detail})` };
     }
   }
-  return { kind: "fail", reason: `${where === "frozen" ? "rebuilding from the frozen head" : "listing it"} failed: ${message(e)}` };
+  const what = where === "frozen" ? "rebuilding from the frozen head" : "listing it";
+  if (a.verifierFailing) return { kind: "incomplete", reason: `${what} failed (${message(e)}) while the verifier's own access is failing too (the owner listing, or what its token is): not counted against the audit; verify again with working access` };
+  return { kind: "fail", reason: `${what} failed: ${message(e)}` };
 }
 
 /**
- * Rebuilds one repo for check 5 (FR7.2, and the review's finding 3). The rebuild walks the frozen head, so it
- * reproduces the freeze. It also lists the window from the default branch's current head, with the provider's own
- * landing-time definition: a window change reachable now but not from the frozen head FAILs (a pull request always; a
- * direct push unless the first-parent commits after the frozen head are all dated after the window, which is a merge
- * after freeze of work dated in the window, FR7.2), and it is INCOMPLETE where the provider cannot tell the two apart.
+ * Whether everything on the branch when the window closed is reachable from the frozen head, when the push log shows an
+ * update after the close that the SCM does not call a fast-forward (P3): first the cheap proof (the close's tip on the
+ * frozen head's first-parent history), else the window listed from the close's tip, every change of which must be in the
+ * frozen head's rebuild.
+ */
+async function closeTipReached(provider: ScmProvider, a: RebuildArgs & { current: string }, list: (head?: string) => Promise<ListChangesResult>, frozen: string, tip: string, rewrites: string[], pinned: ListChangesResult): Promise<{ ok: string } | { fail: string } | { incomplete: string }> {
+  if (typeof provider.firstParentPath === "function") {
+    try {
+      if ((await provider.firstParentPath({ repo: a.current, base: tip, head: frozen, ...(a.signal ? { signal: a.signal } : {}) })) !== null) return { ok: `the branch's tip when the window closed (${short(tip)}) is on the frozen head's first-parent history` };
+    } catch {
+      // The listing below decides.
+    }
+  }
+  let atClose: ListChangesResult;
+  try {
+    atClose = await list(tip);
+  } catch (e) {
+    return { incomplete: `the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}), and listing the window from its tip when the window closed (${short(tip)}) failed (${message(e)}): whether the frozen head reaches everything on the branch then is unverified` };
+  }
+  if (lower(atClose.headSha) !== tip) return { incomplete: `the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}), and the provider does not pin history to its tip when the window closed (${short(tip)}): whether the frozen head reaches everything on the branch then is unverified` };
+  const have = new Set(pinned.changes.map((c) => c.id));
+  const lost = atClose.changes.filter((c) => !have.has(c.id));
+  if (lost.length) return { fail: `${n(lost.length)} change(s) on the default branch when the window closed (its tip was ${short(tip)}) are not reachable from the frozen head ${short(frozen)} (${eg(lost.map((c) => c.id))}): the branch was rewritten after the window closed (${eg(rewrites)}), and the frozen head leaves them out` };
+  return { ok: `every change on the branch when the window closed (tip ${short(tip)}) is in the frozen head's rebuild` };
+}
+
+/**
+ * Rebuilds one repo for check 5 (FR7.2; the U8 review's finding 3; P3). The rebuild walks the frozen head, so it
+ * reproduces the freeze. It also lists the window from the default branch's current head, and reads the branch's push
+ * log (src/core/head-proof.ts):
+ * - a pull request merged in the window that the frozen head does not reach FAILs (the listing's `unreachable`, the
+ *   stopgap; and any merged in the window that is on the branch now but missing from the frozen rebuild);
+ * - a frozen head the push log shows was not the branch's tip during the freeze FAILs;
+ * - a window commit on the branch now but not reachable from the frozen head arrived after the window closed (FR7.2,
+ *   a note) when the log proves the head; with no usable log it is INCOMPLETE, never PASS and never FAIL.
  */
 export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Promise<RepoRebuild> {
   const a = { ...args, current: args.current ?? args.repo };
-  const out: RepoRebuild = { repo: a.repo, current: a.current, listed: null, history: a.frozenHead ? "pinned" : a.frozenEmpty ? "empty" : "no-head", walked: null, fail: [], incomplete: [], notes: [] };
+  const out: RepoRebuild = { repo: a.repo, current: a.current, listed: null, history: a.frozenHead ? "pinned" : a.frozenEmpty ? "empty" : "no-head", walked: null, fail: [], incomplete: [], notes: [], proof: null };
   if (a.current !== a.repo) out.notes.push(`${a.repo} is named ${a.current} now (matched by repo id): rebuilt under its new name`);
   const list = async (head?: string) => {
     const l = await listRepoChanges(provider, { repo: a.current, window: a.window, selector: a.selector, ...(a.signal ? { signal: a.signal } : {}), ...(head ? { head } : {}) });
@@ -126,66 +179,86 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
   } catch (e) {
     return settle(e, "current");
   }
-  const head = typeof now.headSha === "string" ? now.headSha.toLowerCase() : null;
-  const frozen = a.frozenHead?.toLowerCase() ?? null;
-  if (frozen === null || head === frozen) {
+  const head = lower(now.headSha);
+  const frozen = lower(a.frozenHead);
+  if (frozen === null) {
     out.listed = underName(now, a.current, a.repo);
     out.walked = head;
-    if (frozen === null && a.frozenEmpty && now.changes.length) out.history = "no-head";
+    if (a.frozenEmpty && now.changes.length) out.history = "no-head";
     return out;
   }
   // The branch moved since freeze (or the provider reports no head now): rebuild from the frozen head.
-  let pinned: ListChangesResult;
-  try {
-    pinned = await list(frozen);
-  } catch (e) {
-    return settle(e, "frozen");
+  let pinned = now;
+  if (head !== frozen) {
+    try {
+      pinned = await list(frozen);
+    } catch (e) {
+      return settle(e, "frozen");
+    }
+    const walked = lower(pinned.headSha);
+    out.listed = underName(pinned, a.current, a.repo);
+    out.walked = walked;
+    if (walked !== frozen) {
+      out.history = "unpinned";
+      return out;
+    }
+  } else {
+    out.listed = underName(now, a.current, a.repo);
+    out.walked = head;
   }
-  const walked = typeof pinned.headSha === "string" ? pinned.headSha.toLowerCase() : null;
-  out.listed = underName(pinned, a.current, a.repo);
-  out.walked = walked;
-  if (walked !== frozen) {
-    out.history = "unpinned";
-    return out;
+
+  // 1. The stopgap: a pull request merged in the window whose merge commit the frozen head does not reach.
+  const unreachable = pinned.unreachable ?? [];
+  if (unreachable.length) out.fail.push(`${n(unreachable.length)} pull request(s) merged in the window have a merge commit that is not reachable from the frozen head ${short(frozen)} (${eg(unreachable)}): the frozen head is older than the window's merges, or the branch was rewritten after them`);
+
+  // 2. Push-time evidence for the frozen head. `reachesClose`: everything on the branch when the window closed is
+  // reachable from it (true unless an update after the close is not a fast-forward and that could not be shown).
+  let reachesClose = true;
+  if (a.freezeSpan) {
+    const proof = await readHeadProof(provider, { repo: a.current, branch: a.branch || pinned.defaultBranch, head: frozen, window: a.window, from: a.freezeSpan.from, until: a.freezeSpan.until, ...(a.signal ? { signal: a.signal } : {}) });
+    out.proof = proof;
+    if (proof.kind === "disproven") out.fail.push(`the frozen head ${short(frozen)} was not the default branch's tip at freeze: ${proof.reason}`);
+    else if (proof.kind === "proven") {
+      const rewrites = proof.rewrites.map((e) => `${e.kind} update ${e.id} at ${e.at}`);
+      if (proof.rewrites.length && proof.tipAtClose !== null && proof.tipAtClose !== frozen) {
+        const r = await closeTipReached(provider, a, list, frozen, proof.tipAtClose, rewrites, pinned);
+        reachesClose = "ok" in r;
+        if ("fail" in r) out.fail.push(r.fail);
+        else if ("incomplete" in r) out.incomplete.push(r.incomplete);
+        else out.notes.push(`push log: the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}); ${r.ok}`);
+      }
+      if (proof.forcedInWindow.length) out.notes.push(`push log: the default branch was force-pushed or deleted ${n(proof.forcedInWindow.length)} time(s) inside the window (${eg(proof.forcedInWindow.map((e) => `${e.at}, update ${e.id}`))}): commits those updates took off the branch are not on it, so not in the population`);
+    }
   }
+  if (head === frozen) return out;
   if (head === null) {
     out.incomplete.push(`provider ${provider.name} reports no head for its listing from the default branch's current head, so window landings after the frozen head ${short(frozen)} cannot be checked`);
     return out;
   }
+
+  // 3. The window as the branch shows it now, against the frozen rebuild.
   const frozenIds = new Set(pinned.changes.map((c) => c.id));
   const nowIds = new Set(now.changes.map((c) => c.id));
   const missing = now.changes.filter((c) => !frozenIds.has(c.id));
   const extra = pinned.changes.filter((c) => !nowIds.has(c.id));
-  if (!missing.length && !extra.length) return out;
   const prs = missing.filter((c) => c.kind === "pull_request");
   const pushes = missing.filter((c) => c.kind === "direct_push");
   if (prs.length) out.fail.push(`${n(prs.length)} pull request(s) merged in the window are on the default branch now but not in the history from the frozen head ${short(frozen)} (${eg(prs.map((c) => c.id))}): the frozen head hides window landings`);
-  if (!pushes.length && !extra.length) return out;
-  let path: FirstParentCommit[] | null | undefined;
-  if (typeof provider.firstParentPath !== "function") path = undefined;
-  else {
-    try {
-      path = await provider.firstParentPath({ repo: a.current, base: frozen, head, ...(a.signal ? { signal: a.signal } : {}) });
-    } catch (e) {
-      out.incomplete.push(`comparing the frozen head ${short(frozen)} with the current head ${short(head)} failed (${message(e)}), so ${n(pushes.length + extra.length)} differing change(s) are unverified`);
-      return out;
-    }
+  const proof = out.proof;
+  if (pushes.length) {
+    if (proof?.kind === "proven" && reachesClose)
+      out.notes.push(`${n(pushes.length)} commit(s) dated in the window reached the default branch after the window closed, not through the frozen head (${eg(pushes.map((c) => c.id))}): the push log shows ${short(frozen)} was the branch's tip at freeze (${provenLine(proof)}) and that it reaches everything on the branch when the window closed, so they are not in the population (FR7.2)`);
+    else if (proof?.kind === "proven") {
+      // The head is proven but not shown to reach the close's tip: the FAIL or INCOMPLETE above says why.
+    } else if (proof?.kind !== "disproven")
+      out.incomplete.push(`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and there is no push-time evidence to place them (${proof ? proof.reason : "no push log was read"}): whether they arrived after freeze (FR7.2) or the frozen head hides them is unverified`);
   }
-  if (path === undefined) {
-    if (pushes.length) out.incomplete.push(`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and provider ${provider.name} cannot report first-parent history (no firstParentPath): whether they arrived after freeze (FR7.2) or the frozen head hides them is unverified`);
-    if (extra.length) out.incomplete.push(`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): it was rewritten since freeze, or the frozen head is not the branch's`);
-    return out;
+  if (extra.length) {
+    if (proof?.kind === "proven") {
+      const forced = proof.after.filter((e) => e.kind !== "fast-forward").map((e) => `${e.kind} update ${e.id} at ${e.at}`);
+      out.notes.push(`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): the branch was rewritten after freeze${forced.length ? ` (${eg(forced)})` : ""}; the push log shows the frozen head was its tip at freeze, so the frozen population stands`);
+    } else if (proof?.kind !== "disproven") out.incomplete.push(`${n(extra.length)} change(s) of the frozen history are not on the default branch now (${eg(extra.map((c) => c.id))}): it was rewritten since freeze, or the frozen head is not the branch's, and there is no push-time evidence to tell which (${proof ? proof.reason : "no push log was read"})`);
   }
-  if (path === null) {
-    if (pushes.length) out.fail.push(`the frozen head ${short(frozen)} is not on the default branch's first-parent history (its head is ${short(head)} now), and ${n(pushes.length)} direct push(es) dated in the window are reachable now but not from it (${eg(pushes.map((c) => c.id))})`);
-    if (extra.length) out.incomplete.push(`the frozen head ${short(frozen)} is not on the default branch's first-parent history (its head is ${short(head)} now), and ${n(extra.length)} change(s) of the frozen history are not on the branch now (${eg(extra.map((c) => c.id))})`);
-    return out;
-  }
-  const closes = Date.parse(a.window.closesAt);
-  const early = path.filter((c) => !(Date.parse(c.committedAt) >= closes));
-  if (pushes.length && early.length) out.fail.push(`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and ${n(early.length)} first-parent commit(s) after the frozen head are dated before the window closed (${short(early[0]!.sha)} at ${early[0]!.committedAt}): the frozen head is older than the window's landings`);
-  else if (pushes.length) out.notes.push(`${n(pushes.length)} commit(s) dated in the window arrived on the default branch after it closed, through ${n(path.length)} first-parent commit(s) after the frozen head, all dated after the window (newest ${short(path[0]!.sha)} at ${path[0]!.committedAt}): not in the population (FR7.2)`);
-  if (extra.length) out.incomplete.push(`${n(extra.length)} change(s) of the frozen history are not reachable from the current head (${eg(extra.map((c) => c.id))})`);
   return out;
 }
 
@@ -205,6 +278,15 @@ export interface PoolCheckInput {
   selector: Selector;
   concurrency?: number;
   signal?: AbortSignal;
+  /** P3: when the registration was made (its signed time): a repo created after it cannot have been registered. */
+  registeredAt?: string;
+  /**
+   * P3: what the registering token could prove it saw (a rule registration). null: the registration does not record it,
+   * so the registered set is not shown complete for private or internal repos (INCOMPLETE). Absent: not checked.
+   */
+  registeredVisibility?: RegisteredVisibility | null;
+  /** P3: the freeze span every frozen head is held to (see RebuildArgs.freezeSpan). */
+  freezeSpan?: { from: string; until: string };
 }
 
 export interface PoolCheck {
@@ -212,6 +294,8 @@ export interface PoolCheck {
   lines: string[];
   /** One per manifest repo, in manifest order. */
   rebuilt: RepoRebuild[];
+  /** P3 (#10): the lines a summary line in `lines` stands for (one per repo); printed with --verbose, always in --json. */
+  verbose: string[];
 }
 
 /** The window changes a repo lists now (from its current head), for a repo outside the manifest; or why it could not be counted. */
@@ -228,21 +312,33 @@ async function countNow(provider: ScmProvider, repo: string, i: PoolCheckInput):
 
 const nonPublic = (vs: readonly RepoVisibility[]) => vs.filter((v) => v !== "public");
 
+/** One repo outside the pool, as check 5 judges it (see `checkPool`): a decisive line, a collapsible WARN, quiet, or nothing. */
+type Verdict = { line: string } | { warn: string; count: number } | { quiet: true } | null;
+
 /**
- * Check 5 over a pool: re-list the owner unfiltered (a rule), establish what the token can see, rebuild every manifest
- * repo under its path now (matched by repo id, then by path; a repo the listing no longer holds is probed once),
- * re-examine the repos recorded gone, and hold the pool to the rule and the registered repos:
- * - a registered repo outside the manifest, or recorded gone but there, with changes in the window: FAIL;
- * - a repo the rule matches now, unseen by the freeze, with changes in the window: FAIL, unless the SCM says it was
- *   created after the window closed;
- * - a repo excluded at freeze or now only by an attribute its owners can change (name, archive state, visibility), with
- *   changes in the window, and not registered: WARN with the count (a retrospective audit cannot date the change);
- * - a rename since freeze is no failure: the repo is matched by its id.
+ * Check 5 over a pool: re-list the owner unfiltered (a rule), establish what the token (and, P3, the registering token)
+ * can see, rebuild every manifest repo under its path now (matched by repo id, then by path; a repo the listing no
+ * longer holds is probed once), re-examine the repos recorded gone, and hold the pool to the rule and the registered
+ * repos. For a repo under the owner now that is not in the pool, with changes in the window:
+ * - registered (by id), or recorded by the freeze's own listing as matching the rule: FAIL;
+ * - matching the rule now but not in the freeze's listing: INCOMPLETE (P3, #5): it may have been transferred in after
+ *   freeze, and no built-in provider gives transfer events to tell that from a listing that left it out;
+ * - excluded at freeze only by its archive state, in a prospective audit or when it was created after the registration
+ *   (P3, #4): FAIL, because an archived repository is read-only, so it was archived after its window changes;
+ * - excluded at freeze by its name or visibility (mutable), created after the registration or with no creation time
+ *   from the SCM (P3, #4): INCOMPLETE;
+ * - otherwise excluded by a mutable attribute: WARN with the count, collapsed into one summary line (P3, #10);
+ * - created after the window closed: no window landing, a note;
+ * - excluded by what it is (a fork, another owner): nothing.
+ * A rename since freeze is no failure: the repo is matched by its id.
  */
 export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promise<PoolCheck> {
   const lines: string[] = [];
+  const verbose: string[] = [];
   const concurrency = i.concurrency ?? 4;
   const rule: RepoSetRule | null = i.set.kind === "rule" ? i.set : null;
+  // P3 (#6): the verifier's own access failing (the owner listing, what its token is) turns unexplained listing errors INCOMPLETE.
+  let verifierFailing = false;
   // The owner's repositories now, unfiltered.
   let now: RepoRef[] | null = null;
   if (rule) {
@@ -250,6 +346,7 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
       now = await listOwner(provider, rule);
     } catch (e) {
       now = null;
+      verifierFailing = true;
       lines.push(`INCOMPLETE cannot re-list the repositories under ${rule.owner} (${message(e)}): repos added, renamed or excluded since freeze would not be seen`);
     }
     // What this token can see: public listings are complete for anyone; private and internal need the provider's proof.
@@ -261,14 +358,29 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
         try {
           const seen = await provider.listingVisibility(rule);
           for (const v of want) {
-            const proof = seen.visibilities?.[v];
+            let proof = seen.visibilities?.[v];
+            // P3: held to the SCM's own count of the owner's repositories, where it gives one.
+            for (const x of Array.isArray(seen.expected) ? seen.expected : []) {
+              if (!now || !Array.isArray(x?.visibilities) || !x.visibilities.includes(v) || typeof x.count !== "number") continue;
+              const have = now.filter((r) => x.visibilities.includes(r.visibility)).length;
+              if (have < x.count) proof = { complete: false, reason: `the listing shows ${have} ${x.visibilities.join(" or ")} repositories, but ${String(x.source)} counts ${x.count}, so it is missing some` };
+            }
             if (proof?.complete === true) lines.push(`${v} repositories under ${rule.owner}: listed completely (${proof.reason})`);
             else lines.push(`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${proof?.reason ?? "the provider gave no answer for it"}${freezer(v)}`);
           }
         } catch (e) {
+          verifierFailing = true;
           for (const v of want) lines.push(`INCOMPLETE cannot establish that this token sees every ${v} repository under ${rule.owner}: ${message(e)}${freezer(v)}`);
         }
       }
+      // P3: what the registering token could see. A repo of a visibility it could not be shown to see in full may be
+      // missing from registeredRepos, and nothing else would show it.
+      if (i.registeredVisibility !== undefined)
+        for (const v of want) {
+          const reg = i.registeredVisibility?.visibility?.[v];
+          if (i.registeredVisibility === null) lines.push(`INCOMPLETE the registration does not record what its token could see (registeredVisibility), so the registered repo set cannot be shown to hold every ${v} repository under ${rule.owner}`);
+          else if (reg?.complete !== true) lines.push(`INCOMPLETE the registered repo set cannot be shown to hold every ${v} repository under ${rule.owner}: at registration, ${reg?.reason ?? "the token's listing gave no proof"}${i.registeredVisibility.identity ? ` (as ${i.registeredVisibility.identity})` : ""}`);
+        }
     }
   }
   const nowAsResolved = (now ?? []).map((r) => ({ repo: r.repo, repoId: r.id, ref: r }));
@@ -287,9 +399,26 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
   });
   const rebuilt = await mapPool(i.repos, concurrency, async (m, k): Promise<RepoRebuild> => {
     const where = located[k]!;
-    if ("reason" in where) return { repo: m.repo, current: m.repo, listed: null, history: "no-head", walked: null, fail: [], incomplete: [where.reason], notes: [] };
-    return rebuildRepo(provider, { repo: m.repo, current: where.current, frozenHead: m.headSha, frozenEmpty: m.defaultBranch === "" && m.headSha === null, window: i.window, selector: i.selector, ...(i.signal ? { signal: i.signal } : {}) });
+    if ("reason" in where) return { repo: m.repo, current: m.repo, listed: null, history: "no-head", walked: null, fail: [], incomplete: [where.reason], notes: [], proof: null };
+    return rebuildRepo(provider, {
+      repo: m.repo,
+      current: where.current,
+      frozenHead: m.headSha,
+      frozenEmpty: m.defaultBranch === "" && m.headSha === null,
+      window: i.window,
+      selector: i.selector,
+      ...(m.defaultBranch ? { branch: m.defaultBranch } : {}),
+      ...(i.freezeSpan ? { freezeSpan: i.freezeSpan } : {}),
+      ...(verifierFailing ? { verifierFailing } : {}),
+      ...(i.signal ? { signal: i.signal } : {}),
+    });
   });
+  // What the push log showed, in one or two lines (P3).
+  const proven = rebuilt.filter((b) => b.proof?.kind === "proven");
+  const without = rebuilt.filter((b) => b.proof?.kind === "none");
+  if (i.repos.length === 1 && proven.length === 1) lines.push(`push log: the frozen head ${short(i.repos[0]!.headSha!)} was the default branch's tip at freeze: ${provenLine(proven[0]!.proof as Extract<HeadProof, { kind: "proven" }>)}`);
+  else if (proven.length) lines.push(`push log: ${n(proven.length)} of ${n(rebuilt.length)} frozen head(s) were their default branch's tip at freeze`);
+  if (without.length) lines.push(`push log: no push-time evidence for ${n(without.length)} repo(s) (${without.slice(0, 2).map((b) => `${b.repo}: ${(b.proof as { reason: string }).reason}`).join("; ")}): a window commit pushed there after freeze cannot be placed, and makes that repo INCOMPLETE`);
 
   // The registered repos recorded gone at freeze.
   for (const g of i.gone) {
@@ -314,48 +443,71 @@ export async function checkPool(provider: ScmProvider, i: PoolCheckInput): Promi
     const inPool = (r: RepoRef) => i.repos.some((m) => (m.repoId ? m.repoId === r.id : m.repo.toLowerCase() === r.repo.toLowerCase())) || rebuilt.some((b) => b.current.toLowerCase() === r.repo.toLowerCase());
     const isGone = (r: RepoRef) => !!matchRepo(i.gone, { repo: r.repo, repoId: r.id });
     const closes = Date.parse(i.window.closesAt);
-    const retro =
+    const regAt = i.registeredAt ? Date.parse(i.registeredAt) : NaN;
+    const prospective = i.mode === "PROSPECTIVE";
+    const retro = (one: boolean) =>
       i.mode === "RETROSPECTIVE"
         ? "the registration came after the window opened, so a change made before it cannot be detected"
         : i.registered.length
-          ? "it was not among the repos the rule matched at registration"
+          ? `${one ? "it was" : "they were"} not among the repos the rule matched at registration, so ${one ? "it was" : "they were"} excluded then too`
           : "the registration does not record the repos it matched, so a change after registration cannot be told from one before";
-    const quietMutable: string[] = [];
-    const examine = (now ?? []).filter((r) => !inPool(r) && !isGone(r));
-    const verdicts = await mapPool(examine, concurrency, async (r): Promise<string | null> => {
+    const examine = now.filter((r) => !inPool(r) && !isGone(r));
+    const verdicts = await mapPool(examine, concurrency, async (r): Promise<Verdict> => {
       const atFreeze = i.listing ? matchRepo(i.listing.repos, { repo: r.repo, repoId: r.id }) : undefined;
       const registered = matchRepo(i.registered, { repo: r.repo, repoId: r.id });
       const exclNow = ruleExclusions(rule, r);
       if (registered) {
         const c = await countNow(provider, r.repo, i);
-        if ("error" in c) return `INCOMPLETE registered repo ${r.repo} is not in the manifest, and its window changes could not be counted (${c.error})`;
-        return c.count > 0 ? `FAIL registered repo ${r.repo} is not in the manifest (${n(c.count)} changes landed in the window)` : `registered repo ${r.repo} is not in the manifest; it lists no change in the window, so it cannot change the population`;
+        if ("error" in c) return { line: `INCOMPLETE registered repo ${r.repo} is not in the manifest, and its window changes could not be counted (${c.error})` };
+        return { line: c.count > 0 ? `FAIL registered repo ${r.repo} is not in the manifest (${n(c.count)} changes landed in the window)` : `registered repo ${r.repo} is not in the manifest; it lists no change in the window, so it cannot change the population` };
       }
-      if (exclNow.length === 0) {
-        if (atFreeze && atFreeze.excludedBy.length) {
-          const c = await countNow(provider, r.repo, i);
-          if ("error" in c) return `INCOMPLETE repo ${r.repo} was excluded at freeze (${describeExclusions(atFreeze.excludedBy)}) and the rule matches it now; its window changes could not be counted (${c.error})`;
-          return c.count > 0 ? `WARN repo ${r.repo} was excluded at freeze (${describeExclusions(atFreeze.excludedBy)}) and the rule matches it now: its ${n(c.count)} changes in the window are not in the population (${retro})` : null;
-        }
-        if (r.createdAt && Date.parse(r.createdAt) >= closes) return `repo ${r.repo} matches the registered rule but is not in the manifest; it was created ${r.createdAt}, after the window closed, so it cannot hold a window landing`;
+      // What kept it out of the pool at freeze: what the freeze's listing recorded, else what excludes it now.
+      const excl = atFreeze ? atFreeze.excludedBy : exclNow;
+      const fixed = excl.filter((c) => !isMutableExclusion(c));
+      if (fixed.length && fixed.every((c) => exclNow.includes(c))) return null; // excluded by what it is (a fork, another owner)
+      if (fixed.length) {
+        // The freeze's listing says it was a fork (or not the owner's) then, and it is not now: what a repo is does not
+        // change that way, so the record is wrong or the SCM changed it; its window changes are then unaccounted for.
         const c = await countNow(provider, r.repo, i);
-        if ("error" in c) return `INCOMPLETE repo ${r.repo} matches the registered rule but is not in the manifest, and its window changes could not be counted (${c.error})`;
-        return c.count > 0 ? `FAIL repo ${r.repo} matches the registered rule but is not in the manifest (${n(c.count)} changes landed in the window)` : `repo ${r.repo} matches the registered rule but is not in the manifest; it lists no change in the window, so it cannot change the population`;
+        if ("error" in c) return { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)}, which it is not now; its window changes could not be counted (${c.error})` };
+        return c.count === 0 ? null : { line: `INCOMPLETE repo ${r.repo} was excluded at freeze as ${describeExclusions(fixed)} (the manifest's listing records it so), which it is not now, and ${n(c.count)} of its changes landed in the window: the record is wrong, or the SCM changed what the repo is` };
       }
-      const mutableNow = exclNow.every(isMutableExclusion);
-      const mutableThen = !!atFreeze && atFreeze.excludedBy.length > 0 && atFreeze.excludedBy.every(isMutableExclusion);
-      if (!mutableNow && !mutableThen) return null; // excluded by what it is (a fork, another owner) both times
+      const created = r.createdAt ? Date.parse(r.createdAt) : NaN;
+      if (Number.isFinite(created) && created >= closes) return exclNow.length === 0 ? { line: `repo ${r.repo} matches the registered rule but is not in the manifest; it was created ${r.createdAt}, after the window closed, so it cannot hold a window landing` } : null;
+      const seen = atFreeze ? (excl.length ? `was excluded at freeze (${describeExclusions(excl)})` : "matched the rule in the freeze's own listing") : "was not in the freeze's listing";
       const c = await countNow(provider, r.repo, i);
-      const then = atFreeze ? (JSON.stringify(atFreeze.excludedBy) === JSON.stringify(exclNow) ? "" : atFreeze.excludedBy.length ? `, by ${describeExclusions(atFreeze.excludedBy)} at freeze` : ", and the rule matched it at freeze") : i.listing ? ", and the freeze's listing did not show it" : "";
-      if ("error" in c) return `INCOMPLETE repo ${r.repo} is excluded by ${describeExclusions(exclNow)} now${then}; its window changes could not be counted (${c.error})`;
-      if (c.count === 0) {
-        quietMutable.push(r.repo);
-        return null;
+      if ("error" in c) return { line: `INCOMPLETE repo ${r.repo} ${seen}${exclNow.length ? `, is excluded by ${describeExclusions(exclNow)} now` : " and the rule matches it now"}; its window changes could not be counted (${c.error})` };
+      if (c.count === 0) return excl.length ? { quiet: true } : { line: `repo ${r.repo} matches the registered rule but is not in the manifest; it lists no change in the window, so it cannot change the population` };
+      const changes = `${n(c.count)} of its changes landed in the window`;
+      if (excl.length === 0) {
+        if (atFreeze) return { line: `FAIL repo ${r.repo} matched the registered rule in the freeze's own listing, but it is not in the manifest (${n(c.count)} changes landed in the window)` };
+        return { line: `INCOMPLETE repo ${r.repo} matches the registered rule but ${seen}, and ${changes}: it may have been transferred in after freeze, and provider ${provider.name} gives no transfer events to tell that from a freeze listing that left it out` };
       }
-      return `WARN repo ${r.repo} is excluded by ${describeExclusions(exclNow)} now${then}, an attribute its owners can change, and has ${n(c.count)} changes in the window that are not in the population (${retro})`;
+      // Excluded only by attributes its owners can change.
+      const afterReg = Number.isFinite(created) && Number.isFinite(regAt) ? created > regAt : null;
+      if (atFreeze && excl.length === 1 && excl[0] === "archived" && (prospective || afterReg === true))
+        return { line: `FAIL repo ${r.repo} was archived at freeze (the manifest's listing records it so), yet ${changes}${afterReg ? `, after it was created on ${r.createdAt}, after the registration` : ", all after the registration"}: an archived repository is read-only, so it was archived after them, and archiving it took them out of the pool` };
+      if (afterReg !== false)
+        return { line: `INCOMPLETE repo ${r.repo} ${seen}${atFreeze ? "" : `, is excluded by ${describeExclusions(exclNow)} now`}, and ${changes}, but ${afterReg === null ? `provider ${provider.name} gives no creation time, so whether it existed at registration is unknown` : `it was created on ${r.createdAt}, after the registration, so it could not be registered`}: whether it was excluded when its changes landed is unverified` };
+      const then = atFreeze ? (JSON.stringify(atFreeze.excludedBy) === JSON.stringify(exclNow) ? "" : atFreeze.excludedBy.length ? `, by ${describeExclusions(atFreeze.excludedBy)} at freeze` : ", and the rule matched it at freeze") : ", and the freeze's listing did not show it";
+      const what = exclNow.length ? `is excluded by ${describeExclusions(exclNow)} now${then}` : `was excluded by ${describeExclusions(excl)} at freeze and the rule matches it now`;
+      return { warn: `WARN repo ${r.repo} ${what}, an attribute its owners can change, and has ${n(c.count)} changes in the window that are not in the population (${retro(true)})`, count: c.count };
     });
-    for (const v of verdicts) if (v) lines.push(v);
-    if (quietMutable.length) lines.push(`${n(quietMutable.length)} repo(s) excluded only by attributes their owners can change (name, archive state, visibility) list no change in the window`);
+    const warns: { warn: string; count: number }[] = [];
+    let quiet = 0;
+    for (const v of verdicts) {
+      if (!v) continue;
+      if ("line" in v) lines.push(v.line);
+      else if ("warn" in v) warns.push(v);
+      else quiet++;
+    }
+    // P3 (#10): one line for the attribute-excluded repos with window changes; each repo's line is in `verbose`.
+    if (warns.length) {
+      const names = warns.map((w) => /^WARN repo (\S+)/.exec(w.warn)?.[1] ?? "?");
+      lines.push(`WARN ${n(warns.length)} repo(s) excluded only by attributes their owners can change (name, archive state, visibility) have ${n(warns.reduce((k, w) => k + w.count, 0))} changes in the window that are not in the population (${eg(names)}): ${retro(warns.length === 1)}; each is listed with --verbose and in --json`);
+      verbose.push(...warns.map((w) => w.warn));
+    }
+    if (quiet) lines.push(`${n(quiet)} repo(s) excluded only by attributes their owners can change (name, archive state, visibility) list no change in the window`);
   }
-  return { lines, rebuilt };
+  return { lines, rebuilt, verbose };
 }

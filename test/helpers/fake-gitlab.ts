@@ -27,6 +27,13 @@ export interface FakeGitLabOptions {
   tooLarge?: number[];
   /** The reset note names nobody (the @references are missing). */
   anonymousReset?: boolean;
+  /**
+   * P3: the default branch's push events. Default: the branch is created at the first commit of the head's
+   * first-parent chain, and each later one is pushed when it is dated. `updates` replaces that with explicit updates
+   * (newest last); `pushLog: 403` refuses the events endpoint.
+   */
+  updates?: { at: string; before: string; after: string; action?: "pushed" | "created" | "removed" }[];
+  pushLog?: 403;
 }
 
 export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
@@ -106,6 +113,15 @@ export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
     return json(items.slice((n - 1) * per, n * per), n * per < items.length ? { link: `<${next.href}>; rel="next"` } : {});
   };
   const pr = (iid: string) => sc.prs.find((p) => p.number === Number(iid))!;
+  // P3: the branch's push events, oldest first.
+  const zero = "0".repeat(40);
+  const updates = (() => {
+    if (opts.updates) return opts.updates;
+    const chain: ScCommit[] = [];
+    for (let c = sc.byOid.get(sc.head); c; c = c.parents[0] ? sc.byOid.get(c.parents[0]) : undefined) chain.unshift(c);
+    return chain.map((c, i) => ({ at: c.date, before: i === 0 ? zero : chain[i - 1]!.oid, after: c.oid, action: (i === 0 ? "created" : "pushed") as "created" | "pushed" }));
+  })();
+  const events = updates.map((u, i) => ({ id: 9000 + i, project_id: pid, action_name: u.action === "created" ? "pushed new" : u.action === "removed" ? "deleted" : "pushed to", created_at: new Date(u.at).toISOString(), author_username: "maint", push_data: { commit_count: 1, action: u.action ?? "pushed", ref_type: "branch", commit_from: u.before === zero ? null : u.before, commit_to: u.after === zero ? null : u.after, ref: sc.defaultBranch, commit_title: "update" } }));
 
   const f = (async (input: string | URL | Request, init?: RequestInit) => {
     served++;
@@ -151,6 +167,18 @@ export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
       return json({ errors: [{ message: "unknown query" }] });
     }
     const base = `/api/v4/projects/${pid}`;
+    if (path === `/api/v4/projects/${encodeURIComponent(sc.repo)}/events` || path === `${base}/events`) {
+      if (opts.pushLog === 403) return new Response(JSON.stringify({ message: "403 Forbidden" }), { status: 403 });
+      const items = url.searchParams.get("action") && url.searchParams.get("action") !== "pushed" ? [] : [...events].reverse();
+      return page(url, items, 100);
+    }
+    if (path === `${base}/repository/merge_base`) {
+      const [x, y] = url.searchParams.getAll("refs[]");
+      if (!x || !y || !sc.byOid.has(x) || !sc.byOid.has(y)) return new Response(JSON.stringify({ message: "404 Commit Not Found" }), { status: 404 });
+      const fromY = new Set(sc.reachable(y).map((c) => c.oid));
+      const common = sc.reachable(x).find((c) => fromY.has(c.oid));
+      return common ? json({ id: common.oid }) : new Response(JSON.stringify({ message: "404 Not Found" }), { status: 404 });
+    }
     if (path === `/api/v4/projects/${encodeURIComponent(sc.repo)}` || path === `/api/v4/projects/${sc.repo}` || path === `/api/v4/projects/${pid}`) return json({ id: pid, default_branch: sc.defaultBranch, path_with_namespace: sc.repo, visibility: "public", archived: false, created_at: "2020-01-01T00:00:00.000Z" });
     if (path === `${base}/merge_requests`) {
       const after = Date.parse(url.searchParams.get("updated_after") ?? "1970-01-01T00:00:00Z");

@@ -1,5 +1,5 @@
 import { canonicalJson } from "../core/canonical.js";
-import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
+import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, blindRateLimitWaitMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, rateLimitedByBody, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   DEFAULT_REVIEW_GRANULARITY,
   REPO_UNAVAILABLE,
@@ -86,6 +86,13 @@ export interface ConformanceFixture {
    * must not count as a gone repository (`isRepoUnavailable` false), because a rate limit never is one.
    */
   repoUnavailable?: { gone: string };
+  /**
+   * P3 (`push-log`): the transport serves the push log of `request.repo`'s `branch`, whose tip now is `head`, with an
+   * update at or before `since`. `pushLog` must return well-formed updates, newest first, each starting where the one
+   * before it ended, the newest ending at `head`, reaching back to `since`; and, for a provider given as a factory, a
+   * 403 on every request must be thrown, never returned as an empty log (an empty log reads as "nothing was pushed").
+   */
+  pushLog?: { branch: string; since: string; head: string };
   /** How many requests/pages the fixture transport has served (pagination check). Defaults to the harness's request count. */
   pagesServed?: () => number;
   /**
@@ -166,7 +173,7 @@ export const CONFORMANCE_CHECKS = [
 /** The checks every fixture runs. Unchanged by the opt-in checks, so an exhaustive switch over it still compiles. */
 export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
 /** Checks that run only for a fixture that opts in (`listRepos`, `estimate`, `repoUnavailable`): a fixture without them adds no result. */
-export const OPT_IN_CONFORMANCE_CHECKS = ["list-repos", "estimate-requests", "repo-unavailable"] as const;
+export const OPT_IN_CONFORMANCE_CHECKS = ["list-repos", "estimate-requests", "repo-unavailable", "push-log"] as const;
 export type OptInConformanceCheck = (typeof OPT_IN_CONFORMANCE_CHECKS)[number];
 
 /** The Retry-After the kit sends with its injected 429, in seconds. */
@@ -224,8 +231,13 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
         const checked = await checkJsonBody(res, hints.acceptJson);
         if (checked.problem === null) return checked.response;
         problem = checked.problem;
-      } else if (!isRetryableStatus(res)) return res;
-      else {
+      } else if (!isRetryableStatus(res)) {
+        // As the broker (P3): a 403 or 429 whose body the caller calls a rate limit.
+        const body = await rateLimitedByBody(res, hints);
+        if (body === null) return res;
+        problem = `HTTP ${res.status} (a rate limit, by its body: ${body})`;
+        rateLimited = true;
+      } else {
         problem = `HTTP ${res.status}`;
         rateLimited = isRateLimited(res);
         // As the broker: a non-idempotent request (a ledger write) is never retried after a 5xx, only on a rate limit.
@@ -237,9 +249,11 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
       if ((e as Error).name === "AbortError") throw e;
       problem = (e as Error).message;
     }
-    const giveUp = told !== null ? ++waits > max : ++errors > max || (rateLimited && ++blind > (hints.maxBlindRateLimitRetries ?? max));
+    const blindWait = rateLimited && told === null ? blindRateLimitWaitMs(hints, blind + 1) : null;
+    const maxBlind = hints.maxBlindRateLimitRetries ?? max;
+    const giveUp = told !== null ? ++waits > max : blindWait !== null ? ++blind > maxBlind : ++errors > max || (rateLimited && ++blind > maxBlind);
     if (giveUp) throw Object.assign(new Error(`conformance harness: gave up after ${attempt} attempts (${problem})`), { code: RETRIES_EXHAUSTED, attempts: attempt, lastProblem: problem, rateLimited });
-    await sleep(told ?? backoffMs(errors, 0.5));
+    await sleep(told ?? blindWait ?? backoffMs(errors, 0.5));
   }
 }
 
@@ -546,8 +560,55 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const ru = await repoUnavailableCheck(provider, f, f.repoUnavailable);
       push("repo-unavailable", ru.length === 0, ru.join("; "));
     }
+    if (f.pushLog) {
+      const pl = await pushLogCheck(provider, f, f.pushLog);
+      push("push-log", pl.length === 0, pl.join("; "));
+    }
   }
   return { ok: results.every((r) => r.ok), results };
+}
+
+/** `push-log` (P3): see `ConformanceFixture.pushLog`. */
+async function pushLogCheck(provider: ProviderUnderTest, f: ConformanceFixture, want: NonNullable<ConformanceFixture["pushLog"]>): Promise<string[]> {
+  const p = await instantiate(provider, f, makeHarness());
+  if (typeof p.pushLog !== "function") return ["the fixture expects pushLog, but the provider implements none"];
+  const msg = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 200);
+  const problems: string[] = [];
+  let log: Awaited<ReturnType<NonNullable<ScmProvider["pushLog"]>>>;
+  try {
+    log = await p.pushLog({ repo: f.request.repo, branch: want.branch, since: want.since });
+  } catch (e) {
+    return [`pushLog threw ${msg(e)}`];
+  }
+  const events = log?.events;
+  if (!Array.isArray(events)) return [`pushLog returned ${JSON.stringify(log)?.slice(0, 120)}, not { events: [...] }`];
+  const hex = /^(?:[0-9a-f]{40,64})?$/;
+  const kinds = new Set(["fast-forward", "forced", "created", "deleted", "unknown"]);
+  for (const [i, e] of events.entries()) {
+    if (!e || typeof e.id !== "string" || !e.id) problems.push(`update ${i} has no id`);
+    else if (typeof e.at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(e.at)) problems.push(`update ${e.id} has time ${JSON.stringify(e.at)}, not ISO 8601 UTC`);
+    else if (typeof e.before !== "string" || typeof e.after !== "string" || !hex.test(e.before) || !hex.test(e.after)) problems.push(`update ${e.id} has before/after that are not lowercase commit ids`);
+    else if (!kinds.has(e.kind)) problems.push(`update ${e.id} has kind ${JSON.stringify(e.kind)}`);
+    if (i > 0 && Date.parse(events[i - 1]!.at) < Date.parse(e?.at)) problems.push(`updates are not newest first (${events[i - 1]!.id} before ${e?.id})`);
+    if (i > 0 && events[i - 1]!.before !== "" && e?.after !== "" && events[i - 1]!.before !== e?.after) problems.push(`update ${events[i - 1]!.id} starts from ${events[i - 1]!.before.slice(0, 12)}, but the update before it (${e?.id}) ended at ${e?.after?.slice(0, 12)}`);
+  }
+  if (!events.length) problems.push("pushLog returned no update, but the transport holds the branch's log");
+  else {
+    if (events[0]!.after !== want.head.toLowerCase()) problems.push(`the newest update ends at ${events[0]!.after.slice(0, 12)}, not the branch's tip ${want.head.slice(0, 12)}`);
+    if (!events.some((e) => Date.parse(e.at) <= Date.parse(want.since)) && events.at(-1)!.kind !== "created") problems.push(`the log does not reach back to ${want.since} (its oldest update is from ${events.at(-1)!.at})`);
+  }
+  if (typeof provider === "function") {
+    const refused = (): Response => new Response(JSON.stringify({ message: "Forbidden" }), { status: 403, headers: { "content-type": "application/json" } });
+    const faults = Array.from({ length: 200 }, (_, i): Fault => ({ call: i + 1, response: refused, minWaitMs: 0, label: "403" }));
+    const q = await instantiate(provider, f, makeHarness(faults));
+    try {
+      const got = await q.pushLog!({ repo: f.request.repo, branch: want.branch, since: want.since });
+      problems.push(`with every request answered 403, pushLog returned ${got?.events?.length ?? 0} update(s) instead of throwing: a log that cannot be read must not read as one with nothing in it`);
+    } catch {
+      // As it should.
+    }
+  }
+  return problems;
 }
 
 /**

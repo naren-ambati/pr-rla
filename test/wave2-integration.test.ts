@@ -18,12 +18,12 @@ import { readGrants, resolvePlugin } from "../src/plugins/lock.js";
 import { approveBuiltin } from "../src/plugins/approvals.js";
 import { normalizeSelector } from "../src/core/selector.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
-import type { DrawsFile, TimestampEvidence } from "../src/core/records.js";
+import type { DrawsFile, ManifestV2, TimestampEvidence } from "../src/core/records.js";
 import { ledgerIndexSha256, type LedgerIndex } from "../src/ledgers/issue-index.js";
 import { isoMs, readToken } from "../src/timestamp/verify.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
 import { FakeGitHubIssues } from "./helpers/fake-issue-trackers.js";
-import { fakeOrg, orgSpec, type FakeOrg } from "./helpers/fake-org.js";
+import { fakeOrg, orgSpec, ORG, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAuthority } from "./helpers/test-tsa.js";
 import { classificationScenario, fakeGitHub } from "./helpers/fake-github.js";
@@ -432,4 +432,34 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     expect(v).toMatchObject({ ok: false, verdict: "FAILED", exitCode: 1 });
     expect(v.checks.find((c) => c.n === 7)).toMatchObject({ status: "FAIL" });
   }, 120_000);
+});
+
+describe("P3's push-log proof and verify's per-repo lines through pr-rla/api/read (bolt/u5-audit-api-mcp × fix/p3-pool-head)", () => {
+  it("a public-only rule over a 30-repo GitHub org: the write API records every head's push-log evidence; read.verify, in read-only mode, proves each head from the log and carries check 5's per-repo lines in `verbose` (the MCP verify tool's object)", async () => {
+    const org = fakeOrg(orgSpec({ eligible: 30, archived: 2, forks: 1, scale: 2 }));
+    const s = setupPoolAudit(org, { repos: `{ owner: ${ORG}, visibility: [public] }` });
+    expect(await s.clock.run(registerCommand(s.ctx, {}))).toBe(0);
+    await s.advance(12 * 3600_000);
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
+    const m = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3.manifest.json"), "utf8")) as ManifestV2;
+    expect(m.headEvidence!.map((e) => [e.repo, e.headSha, e.status])).toEqual(m.repos.map((r) => [r.repo, r.headSha, "tip"]));
+
+    const seen: { method: string; path: string; auth: string | null }[] = [];
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      seen.push({ method: init?.method ?? "GET", path: url.pathname, auth: new Headers(init?.headers).get("authorization") });
+      return org.fetch(input, init);
+    }) as typeof globalThis.fetch;
+    const r = await s.clock.run(read.verify({ dir: s.dir, offline: false }, { nowMs: () => s.clock.now(), sleep: (ms) => s.clock.sleep(ms), fetch, env: s.ctx.env }));
+    const c5 = r.checks.find((c) => c.n === 5)!;
+    expect(c5.details).toContain(`push log: ${m.repos.length} of ${m.repos.length} frozen head(s) were their default branch's tip at freeze`);
+    const hidden = org.spec.repos.filter((x) => (x.visibility ?? "public") !== "public" && !x.archived && !x.fork).map((x) => `${ORG}/${x.name}`);
+    expect(c5.details.filter((d) => d.startsWith("WARN "))).toHaveLength(1);
+    expect(c5.verbose!.map((l) => /^WARN repo (\S+)/.exec(l)![1]).sort()).toEqual(hidden.sort());
+    // Read-only: every request was a read, each push log among them, with the default token swapped in on its origin.
+    expect(seen.filter((x) => x.method !== "GET" && !(x.method === "POST" && x.path === "/graphql"))).toEqual([]);
+    expect(seen.filter((x) => /\/activity$/.test(x.path)).length).toBeGreaterThanOrEqual(m.repos.length);
+    expect(new Set(seen.map((x) => x.auth))).toEqual(new Set(["Bearer synthetic-token-not-real"]));
+    expect(JSON.stringify(r)).not.toContain("synthetic-token-not-real");
+  }, 180_000);
 });

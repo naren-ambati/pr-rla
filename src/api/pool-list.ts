@@ -1,4 +1,5 @@
-import type { GoneRepo, ManifestRepo, PluginIdentity, RegisteredRepo, RepoListing, RepoSet } from "../core/records.js";
+import type { GoneRepo, HeadEvidence, ManifestRepo, PluginIdentity, RegisteredRepo, RepoListing, RepoSet } from "../core/records.js";
+import { freezeHeadEvidence } from "../core/head-proof.js";
 import { assemblePopulation, buildPopulation, checkListed, listRepoChanges, type Population } from "../core/population.js";
 import { isTransientFailure, looksUnavailable, probeRepo } from "../core/failures.js";
 import { describeRepoSet, resolvePool, RepoSetError, type PoolResolution, type ResolvedRepo } from "../core/repo-set.js";
@@ -179,8 +180,10 @@ export interface PooledFreeze {
   /** Repos taken from checkpoints, and repos listed by this invocation. */
   resumed: number;
   fetched: number;
-  /** Lines the command prints (what the listing could not prove it saw). */
+  /** Lines the command prints (what the listing could not prove it saw, and what the push log could not show). */
   notes: string[];
+  /** P3: what each pinned head's push log showed (null: the provider has no push log); the manifest records it. */
+  headEvidence: HeadEvidence[] | null;
 }
 
 /** The listing of an empty repository: nothing landed in it in any window. */
@@ -190,14 +193,16 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Lists the repos of a set and builds their pooled population, resuming a stopped run when there is one. */
 export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
   const common = { window: o.window, selector: o.selector, cutoffIso: o.startedAt };
+  const now = o.now ?? (() => o.startedAt);
   if (o.set.kind === "repo") {
     // A pool of one: no run to resume, and the provider's own errors reach the caller (an empty repo stops it, as before U8).
     const population = await buildPopulation(o.provider, { repo: o.set.repo, ...common, ...(o.signal ? { signal: o.signal } : {}) });
     const r = population.repos[0]!;
-    return { population, repos: [{ repo: r.repo, repoId: null, defaultBranch: r.defaultBranch, headSha: r.headSha }], listing: null, gone: [], startedAt: o.startedAt, runId: null, resumed: 0, fetched: 1, notes: [] };
+    const repos: ManifestRepo[] = [{ repo: r.repo, repoId: null, defaultBranch: r.defaultBranch, headSha: r.headSha }];
+    const ev = await freezeHeadEvidence(o.provider, repos, { window: o.window, from: o.startedAt, until: now(), concurrency: 1, ...(o.signal ? { signal: o.signal } : {}) });
+    return { population, repos, listing: null, gone: [], startedAt: o.startedAt, runId: null, resumed: 0, fetched: 1, notes: [...unreachableNotes([{ repo: r.repo, listed: population.listed }]), ...(ev?.notes ?? [])], headEvidence: ev?.evidence ?? null };
   }
 
-  const now = o.now ?? (() => o.startedAt);
   let resolution: PoolResolution;
   try {
     resolution = await resolvePool(o.provider, o.set, { ...(o.registered ? { registered: o.registered } : {}), now });
@@ -245,12 +250,20 @@ export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
       if (i >= n) return;
       const { repo } = resolved[i]!;
       try {
-        const cached = store?.readRepo(repo) ?? null;
+        let cached = store?.readRepo(repo) ?? null;
         if (cached && "gone" in cached) {
-          listGone.push(cached.gone);
-          results[i] = null;
-          o.log(`freeze: [${++finished}/${n}] ${repo}: gone (from the checkpoint)`);
-          continue;
+          // P3 (pass 2, #8): a gone marker is probed again on resume; it is never signed on its own word.
+          const p = await probeRepo(o.provider, { repo });
+          if (p.kind === "transient") throw p.error;
+          if (p.kind === "gone") {
+            listGone.push(cached.gone);
+            results[i] = null;
+            o.log(`freeze: [${++finished}/${n}] ${repo}: gone (from the checkpoint, and probed again: HTTP ${p.status})`);
+            continue;
+          }
+          if (p.kind !== "exists") throw new Error(`${repo}: its checkpoint says it is gone, and probing it again says ${p.kind === "unsupported" ? `nothing (provider ${o.provider.name} has no describeRepo)` : p.detail}; nothing is skipped`);
+          o.log(`freeze: the checkpoint says ${repo} is gone, but it exists; listing it`);
+          cached = null;
         }
         let listed: ListChangesResult | null = null;
         if (cached) {
@@ -307,7 +320,23 @@ export async function listPool(o: PooledFreezeOptions): Promise<PooledFreeze> {
   const population = assemblePopulation(o.provider.name, kept.map((x) => ({ repo: x.r.repo, listed: x.listed })), at);
   const repos: ManifestRepo[] = kept.map((x) => ({ repo: x.r.repo, repoId: x.r.repoId, defaultBranch: x.listed.defaultBranch, headSha: typeof x.listed.headSha === "string" ? x.listed.headSha : null }));
   const gone = [...header.gone, ...listGone].sort((a, b) => cmp(a.repo, b.repo));
-  return { population, repos, listing: header.listing, gone, startedAt, runId, resumed: n - fetched, fetched, notes: visibilityNotes(o.set, header.listing) };
+  // P3: the push log of every pinned head, read once the listings are done (a stop here resumes with every listing kept).
+  let ev: Awaited<ReturnType<typeof freezeHeadEvidence>>;
+  try {
+    ev = await freezeHeadEvidence(o.provider, repos, { window: o.window, from: startedAt, until: now(), concurrency: o.concurrency, ...(o.signal ? { signal: o.signal } : {}) });
+  } catch (e) {
+    if (o.signal?.aborted || isTransientFailure(e)) throw new FreezeStopped(`stopped after all ${n} repos were listed, while reading their push logs: ${(e as Error).message}`, runId, n, n, e);
+    throw e;
+  }
+  const notes = [...visibilityNotes(o.set, header.listing), ...unreachableNotes(kept.map((x) => ({ repo: x.r.repo, listed: x.listed }))), ...(ev?.notes ?? [])];
+  return { population, repos, listing: header.listing, gone, startedAt, runId, resumed: n - fetched, fetched, notes, headEvidence: ev?.evidence ?? null };
+}
+
+/** P3: the pull requests a listing says the head does not reach (the stopgap): verify will FAIL check 5 on them. */
+function unreachableNotes(listings: readonly { repo: string; listed: ListChangesResult }[]): string[] {
+  const hit = listings.filter((l) => l.listed.unreachable?.length);
+  if (!hit.length) return [];
+  return [`warning: in ${hit.length} repo(s) (${hit.slice(0, 3).map((l) => `${l.repo}: ${l.listed.unreachable!.slice(0, 2).join(", ")}`).join("; ")}) a pull request merged in the window is not reachable from the default branch's head: the branch was rewritten after it merged, and verify will FAIL check 5`];
 }
 
 /** One repo's checked listing; null when it answers 404/403 and the set is a registered list (the caller probes it). */

@@ -199,6 +199,7 @@ export class BitbucketDataCenterProvider implements ScmProvider {
     // The pinned head (U3): verify passes the frozen head; freeze walks from the branch's latest commit.
     const head = (req.head ?? branch.latestCommit).toLowerCase();
     let landedVia = new Map<string, string>();
+    let unreachable: string[] | undefined;
     if (req.kinds.includes("direct_push")) {
       // Merge commits are claimed from the listing (or the MERGED activity); PR commit lists are read only while commits are unclaimed.
       const known = new Map<string, number>();
@@ -238,8 +239,35 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         { label: "rebased commits linked by author, author time and message", value: res.byRebase },
         { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
+      // P3: a PR merged in the window whose merge commit the history walk from the head did not reach (the stopgap).
+      if (req.kinds.includes("pull_request")) {
+        const walked = new Set(history.map((c) => c.id.toLowerCase()));
+        unreachable = await this.unreachablePrs(path, head, changes.filter((c) => c.kind === "pull_request" && !walked.has(c.mergeSha)), req.signal);
+      }
     }
-    return { changes, defaultBranch: branch.displayId, limitations: landedVia.size ? [...BITBUCKET_DC_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_DC_LIMITATIONS, diagnostics, headSha: head };
+    return { changes, defaultBranch: branch.displayId, limitations: landedVia.size ? [...BITBUCKET_DC_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_DC_LIMITATIONS, diagnostics, headSha: head, ...(unreachable ? { unreachable } : {}) };
+  }
+
+  /**
+   * Of the PRs merged in the window whose merge commit the walk from `head` did not visit, the ones the server confirms
+   * are not ancestors of `head` (P3): `commits?until=<merge>&since=<head>&limit=1` lists the commits reachable from the
+   * merge and not from the head, so it is empty when the merge commit is an ancestor (built from the documented API,
+   * unverified against a live server, like this provider). At most 10 are asked; asking stops at the third.
+   */
+  async unreachablePrs(path: string, head: string, candidates: readonly ChangeRecord[], signal?: AbortSignal): Promise<string[]> {
+    const out: string[] = [];
+    for (const c of [...candidates].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 10)) {
+      let values: unknown[];
+      try {
+        values = (await this.http.get<{ values?: unknown[] }>(`${path}/commits?until=${c.mergeSha}&since=${head}&limit=1`, signal)).data.values ?? [];
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) continue;
+        throw e;
+      }
+      if (values.length) out.push(c.id);
+      if (out.length >= 3) break;
+    }
+    return out;
   }
 }
 

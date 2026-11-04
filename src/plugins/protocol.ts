@@ -32,7 +32,7 @@ export type PluginKind = "provider" | "ledger";
  * `writePaths(options)` without creating an instance; `create` makes the instance; the rest
  * are the SDK's instance methods.
  */
-export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath"] as const;
+export const PROVIDER_METHODS = ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog"] as const;
 export const LEDGER_METHODS = ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const;
 export type PluginMethod = "describe" | "create" | (typeof PROVIDER_METHODS)[number] | (typeof LEDGER_METHODS)[number];
 
@@ -126,7 +126,7 @@ export interface FetchMessage {
   body?: string;
   bodyEncoding?: "utf8" | "base64";
   /** The broker contract fields a wired request passes (contracts.md §2); `acceptJson` becomes a flag. */
-  broker?: { destination?: string; idempotent?: boolean; retry?: false | { maxRetries?: number; maxBlindRateLimitRetries?: number; acceptJson?: boolean } };
+  broker?: { destination?: string; idempotent?: boolean; retry?: false | { maxRetries?: number; maxBlindRateLimitRetries?: number; blindRateLimitWaitMs?: number; acceptJson?: boolean } };
 }
 /**
  * parent -> child (v2, finding 10): the broker asks the plugin's own `acceptJson(body)` rule about a

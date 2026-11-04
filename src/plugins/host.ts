@@ -401,9 +401,14 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         const r = m.broker.retry;
         // An isolated plugin cannot raise the attempt limit past the broker's own (contracts.md §2: at most 7 attempts).
         const cap = (n: number) => Math.max(0, Math.min(DEFAULT_MAX_RETRIES, Math.floor(n)));
+        // P3's wait for a rate limit that names none: a plugin may lengthen it, never below the broker's own first
+        // backoff (1 s before jitter, so never faster than without the hint), never past MAX_WAIT_MS. Its
+        // `rateLimitBody` pattern is not carried: it would run in this process, where a pathological pattern stalls
+        // the broker for every caller (BUILD-NOTES, "Integration: wave 2", merge 8).
+        const blindWait = (n: number) => (Number.isFinite(n) ? Math.min(MAX_WAIT_MS, Math.max(1000, Math.floor(n))) : 1000);
         if (r === false) init.retry = false;
         // The plugin's acceptJson rule runs in the child: the broker awaits its answer, as it would in process (finding 10).
-        else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.acceptJson ? { acceptJson: (body: unknown) => askAccept(m.fid, body) } : {}) };
+        else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.blindRateLimitWaitMs !== undefined ? { blindRateLimitWaitMs: blindWait(r.blindRateLimitWaitMs) } : {}), ...(r.acceptJson ? { acceptJson: (body: unknown) => askAccept(m.fid, body) } : {}) };
       }
       const res = await io.fetch(m.url, init);
       // Everything the child sees of the response is scrubbed: its body, headers, status text and final URL.
@@ -708,6 +713,7 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], either(req.signal, ctx.signal)) as never;
   if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], either(req.signal, ctx.signal)) as never;
   if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], either(signal, ctx.signal)) as never;
+  if (has.has("pushLog")) p.pushLog = ({ signal, ...req }) => host.call("pushLog", [req], either(signal, ctx.signal)) as never;
   for (const m of ["listRepos", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
   // describeChange(change, { signal }): only the change crosses to the child; the signal stays here.
   if (has.has("describeChange")) p.describeChange = (change, o) => host.call("describeChange", [change], either(o?.signal, ctx.signal)) as never;

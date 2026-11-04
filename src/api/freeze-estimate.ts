@@ -94,7 +94,10 @@ export async function estimateFreeze(a: EstimateArgs): Promise<FreezeEstimate> {
   );
   const scale = n / sample.length;
   const sum = (f: (e: RequestEstimate) => number) => parts.reduce((t, e) => t + f(e), 0);
-  const requests = Math.round(sum((e) => e.requests) * scale);
+  // P3: freeze reads each repo's push log once its listing is done: one REST page per repo, more only for a branch
+  // updated over 100 times since the window closed.
+  const pushLogs = typeof a.provider.pushLog === "function" ? n : 0;
+  const requests = Math.round(sum((e) => e.requests) * scale) + pushLogs;
   const graphql = Math.round(sum((e) => e.graphql ?? 0) * scale);
   const rest = requests - graphql;
   const probed = sum((e) => e.probed ?? 0);

@@ -10,6 +10,9 @@ import {
   type ListChangesResult,
   type ListingVisibility,
   type ProviderContext,
+  type PushLog,
+  type PushLogEvent,
+  type PushLogRequest,
   type RepoRef,
   type RepoSetRule,
   type RepoVisibility,
@@ -60,6 +63,24 @@ interface RestRepo {
   visibility?: string;
   created_at?: string | null;
 }
+
+/** One entry of `GET /repos/{owner}/{repo}/activity` (REST API version 2022-11-28, the version pr-rla requests). */
+interface RestActivity {
+  id: number | string;
+  before?: string;
+  after?: string;
+  ref?: string;
+  timestamp?: string;
+  activity_type?: string;
+}
+
+const ACTIVITY_KIND: Record<string, PushLogEvent["kind"]> = { push: "fast-forward", pr_merge: "fast-forward", merge_queue_merge: "fast-forward", force_push: "forced", branch_creation: "created", branch_deletion: "deleted" };
+
+/** At most this many pages of a branch's activity (100 updates each) are read for one push log. */
+export const MAX_ACTIVITY_PAGES = 100;
+
+export const GITHUB_PUSH_LOG_LIMITATION =
+  "push log: GitHub's repository activity (GET /repos/{owner}/{repo}/activity, the activity view's data); GitHub documents no retention. Seen 2026-11-04: github/gh-aw's log starts at its branch's creation (2025-08-12), torvalds/linux's on 2023-03-07, so updates before about March 2023 are not in it.";
 
 /** A REST repository as a RepoRef: `visibility` when GitHub sends it (internal included), else from `private`. */
 function repoRef(r: RestRepo): RepoRef {
@@ -131,15 +152,43 @@ export class GitHubProvider implements ScmProvider {
       for (const pr of prs) changes.push(pr);
     }
     let viaMerge = false;
+    let unreachable: string[] | undefined;
     if (req.kinds.includes("direct_push")) {
-      const { directPushes, linkedPrs, inWindow, merges, landedVia } = await this.walkHistory(owner, name, req, ref.name, headSha, listed.mergeCommits);
+      const { directPushes, linkedPrs, inWindow, merges, landedVia, visited } = await this.walkHistory(owner, name, req, ref.name, headSha, listed.mergeCommits);
       changes.push(...directPushes.map((c) => normalizeDirectPush(req.repo, c, landedVia.get(c.oid)?.toLowerCase())));
       viaMerge = landedVia.size > 0;
       diagnostics.push({ label: "default-branch commits in window", value: inWindow });
       diagnostics.push({ label: "commits linked to a merged PR", value: linkedPrs });
       diagnostics.push({ label: "direct pushes that are merge commits", value: merges });
+      // P3: a pull request merged in the window whose merge commit the walk from the head did not reach.
+      if (req.kinds.includes("pull_request")) unreachable = await this.unreachablePulls(req, headSha, changes.filter((c) => c.kind === "pull_request" && !visited.has(c.mergeSha)));
     }
-    return { changes, defaultBranch: ref.name, limitations: viaMerge ? [...GITHUB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITHUB_LIMITATIONS, diagnostics, headSha };
+    return { changes, defaultBranch: ref.name, limitations: viaMerge ? [...GITHUB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITHUB_LIMITATIONS, diagnostics, headSha, ...(unreachable ? { unreachable } : {}) };
+  }
+
+  /**
+   * Of the pull requests merged in the window whose merge commit the history walk from `head` did not visit, the ones
+   * GitHub confirms are not ancestors of `head` (P3, the stopgap): `GET /repos/{repo}/compare/{merge}...{head}` says
+   * `ahead` or `identical` when the merge commit is reachable. The walk visits every commit reachable from `head` dated
+   * since the window opened, and GitHub dates a merge, squash or rebase-merge commit at its merge, so an unvisited one
+   * is rare in an honest history (a pull request merged by pushing its own older commit). At most 10 are asked, and
+   * asking stops at the third unreachable one: one is enough to fail the frozen head.
+   */
+  async unreachablePulls(req: ListChangesRequest, head: string, candidates: readonly ChangeRecord[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const c of [...candidates].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 10)) {
+      req.signal?.throwIfAborted();
+      let status: string;
+      try {
+        status = (await this.http.rest<{ status: string }>(`/repos/${req.repo}/compare/${c.mergeSha}...${head}?per_page=1`)).data.status;
+      } catch (e) {
+        if (e instanceof GitHubHttpError && (e.status === 404 || e.status === 422)) continue; // GitHub cannot compare them: unknown, so not reported
+        throw e;
+      }
+      if (status === "behind" || status === "diverged") out.push(c.id);
+      if (out.length >= 3) break;
+    }
+    return out;
   }
 
   /** REST pulls (state=closed, sort=updated desc), filtered by merged_at, plus a re-scan for PRs updated during the walk. */
@@ -250,6 +299,8 @@ export class GitHubProvider implements ScmProvider {
     const result = classifyHistory([...nodes.values()].map(toNode), req.window, defaultBranch, mergeCommits);
     const parents = new Map([...nodes.values()].map((c) => [c.oid, c.parents.nodes.map((p) => p.oid)]));
     return {
+      /** Every commit the walk reached (reachable from the head, dated since the window opened), lowercase. */
+      visited: new Set([...nodes.keys()].map((o) => o.toLowerCase())),
       landedVia: landedViaMerges(parents, result.directPushes),
       directPushes: result.directPushes.map((oid) => nodes.get(oid)!),
       linkedPrs: [...result.prCommits.values()].reduce((a, v) => a + v.length, 0),
@@ -370,7 +421,12 @@ export class GitHubProvider implements ScmProvider {
     try {
       user = await this.http.rest<{ login: string }>("/user");
     } catch (e) {
-      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) return none(`the token cannot read /user (HTTP ${e.status}), as a GitHub App installation token (GITHUB_TOKEN in Actions) cannot: it sees only the repositories it was granted`);
+      if (e instanceof GitHubHttpError && (e.status === 401 || e.status === 403 || e.status === 404)) {
+        // A GitHub App installation token (GITHUB_TOKEN in Actions) is not a user (P3): it proves itself by its installation.
+        const app = await this.installationProof(set);
+        if (app) return { identity: app.identity, visibilities: { public: publicProof, private: app.proof, internal: app.proof } };
+        return none(`the token cannot read /user (HTTP ${e.status}), as a GitHub App installation token (GITHUB_TOKEN in Actions) cannot, and GitHub does not say it was installed on every repository of ${set.owner} (GET /installation/repositories: repository_selection "all"): it sees only the repositories it was granted`);
+      }
       throw e;
     }
     identity = user.data.login;
@@ -379,8 +435,9 @@ export class GitHubProvider implements ScmProvider {
     const list = scopes.split(",").map((x) => x.trim()).filter(Boolean);
     if (!list.includes("repo")) return none(`the classic token's scopes (${list.join(", ") || "none"}) do not include repo, so GitHub shows it no private repository`);
     let isOrg = true;
+    let org: { total_private_repos?: unknown } = {};
     try {
-      await this.http.rest(`/orgs/${encodeURIComponent(set.owner)}`);
+      org = (await this.http.rest<{ total_private_repos?: unknown }>(`/orgs/${encodeURIComponent(set.owner)}`)).data ?? {};
     } catch (e) {
       if (!(e instanceof GitHubHttpError && e.status === 404)) throw e;
       isOrg = false;
@@ -398,10 +455,71 @@ export class GitHubProvider implements ScmProvider {
       throw e;
     }
     if (m.state === "active" && m.role === "admin") {
-      const owner = { complete: true, reason: `${identity} is an owner (admin) of ${set.owner}, with a classic token holding the repo scope: GitHub shows org owners every repository of the org` };
-      return { identity, visibilities: { public: publicProof, private: owner, internal: owner } };
+      // P3: the org's own count of its private repositories (GitHub sends it to an owner whose token has admin:org),
+      // which the core holds the listing to. An OAuth App token (gho_, as the gh CLI's) is subject to the org's OAuth
+      // App access restrictions, which hide private repositories with no response saying so: it needs the count.
+      const total = typeof org.total_private_repos === "number" && Number.isFinite(org.total_private_repos) ? org.total_private_repos : null;
+      const expected = total === null ? undefined : [{ visibilities: ["private", "internal"] as RepoVisibility[], count: total, source: `GitHub's total_private_repos for ${set.owner}` }];
+      if (this.http.tokenKind === "oauth-app" && total === null)
+        return none(`${identity} is an owner of ${set.owner}, but the token is an OAuth App token (gho_), which the org's OAuth App access restrictions can limit to public repositories with no response saying so, and GitHub did not send the org's total_private_repos to check the listing against (it needs the admin:org scope); use a classic token, or add admin:org`);
+      const owner = { complete: true, reason: `${identity} is an owner (admin) of ${set.owner}, with a ${this.http.tokenKind === "oauth-app" ? "OAuth App" : "classic"} token holding the repo scope: GitHub shows org owners every repository of the org${total === null ? "" : `, and the listing is held to the org's total_private_repos (${total})`}` };
+      return { identity, visibilities: { public: publicProof, private: owner, internal: owner }, ...(expected ? { expected } : {}) };
     }
     return none(`${identity} is ${m.state === "active" ? `a ${m.role ?? "member"}` : `a ${m.state ?? "non-active"} member`} of ${set.owner}, not an owner: GitHub shows a member only the private repositories they were granted, so only an owner's listing is complete`);
+  }
+
+  /**
+   * A GitHub App installation token's proof (P3): `GET /installation/repositories` says `repository_selection: "all"`
+   * (the app was installed on every repository of its account, present and future) and its repositories are the
+   * owner's. Null when it says anything else, or cannot be read.
+   */
+  private async installationProof(set: RepoSetRule): Promise<{ identity: string; proof: { complete: true; reason: string } } | null> {
+    let data: { total_count?: number; repository_selection?: string; repositories?: { owner?: { login?: string } }[] };
+    try {
+      data = (await this.http.rest<typeof data>("/installation/repositories?per_page=1")).data;
+    } catch (e) {
+      if (e instanceof GitHubHttpError && e.status !== GAVE_UP) return null;
+      throw e;
+    }
+    const account = data.repositories?.[0]?.owner?.login;
+    if (data.repository_selection !== "all") return null;
+    if ((data.total_count ?? 0) > 0 && (typeof account !== "string" || account.toLowerCase() !== set.owner.toLowerCase())) return null;
+    return { identity: `github-app-installation@${set.owner}`, proof: { complete: true, reason: `a GitHub App installation on ${set.owner} with access to all of its repositories (GET /installation/repositories: repository_selection "all")` } };
+  }
+
+  /**
+   * The default branch's push log (P3): `GET /repos/{owner}/{repo}/activity?ref=refs/heads/<branch>`, newest first,
+   * paged by the Link header, until an update at or before `since` (at most MAX_ACTIVITY_PAGES pages). API version
+   * 2022-11-28 gives `id`, `before`, `after`, `ref`, `timestamp` and `activity_type` (push, force_push,
+   * branch_creation, branch_deletion, pr_merge, merge_queue_merge); GitHub records each update when it happens. Works
+   * without a token on a public repository; a fine-grained token needs Contents read.
+   */
+  async pushLog(req: PushLogRequest): Promise<PushLog> {
+    const since = Date.parse(req.since);
+    const want = `refs/heads/${req.branch}`;
+    let url: string | null = `/repos/${req.repo}/activity?ref=${encodeURIComponent(want)}&direction=desc&per_page=${this.pageSize}`;
+    const events: PushLogEvent[] = [];
+    for (let pages = 0; url && pages < MAX_ACTIVITY_PAGES; pages++) {
+      req.signal?.throwIfAborted();
+      const page: { data: RestActivity[]; next: string | null } = await this.http.rest<RestActivity[]>(url);
+      if (!Array.isArray(page.data)) throw new GitHubHttpError(`GitHub GET /repos/${req.repo}/activity: not a list`, 200);
+      let reached = false;
+      for (const a of page.data) {
+        if (a.ref !== undefined && a.ref !== want) continue;
+        const t = Date.parse(a.timestamp ?? "");
+        events.push({
+          id: String(a.id),
+          before: (a.before ?? "").toLowerCase(),
+          after: (a.after ?? "").toLowerCase(),
+          at: Number.isFinite(t) ? new Date(t).toISOString().replace(".000Z", "Z") : String(a.timestamp),
+          kind: ACTIVITY_KIND[a.activity_type ?? ""] ?? "unknown",
+        });
+        if (Number.isFinite(t) && t <= since) reached = true;
+      }
+      if (reached) break;
+      url = page.next;
+    }
+    return { events, limitations: [GITHUB_PUSH_LOG_LIMITATION] };
   }
 
   /**

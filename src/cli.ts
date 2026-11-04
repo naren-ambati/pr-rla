@@ -157,6 +157,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--tsa-trust <file>", "timestamp-authority anchors you trust beyond the shipped bundle (repeatable)", collect)
     .option("--beacon-file <path>", "recorded quicknet beacon for round R")
     .option("--json", "machine-readable output")
+    .option("--verbose", "also print the per-repo lines a summary line stands for (--json always has them)")
     .addHelpText("after", "\nExit codes: 0 VERIFIED · 1 FAILED (a check failed) · 6 INCOMPLETE (nothing failed, but part of the population could not be rebuilt, or its completeness could not be established; --json has the verdict)")
     .action(function (this: Command) {
       return run((ctx) => verifyCommand(ctx, this.opts()), !!this.opts().json)();

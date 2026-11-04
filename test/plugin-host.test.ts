@@ -631,6 +631,47 @@ export default defineProvider({
   });
 });
 
+describe("P3's rate-limit hints through the host (fix/p3-pool-head × fix/plugins-broker)", () => {
+  /** A plugin whose requests carry P3's hints: a blind wait (shorter than the broker's own) and a body pattern. */
+  const SOURCE = `import { defineProvider } from "pr-rla/provider";
+export default defineProvider({
+  providerApiVersion: 1, name: "waits", hosts: () => ["scm.example.com"],
+  create(options, ctx) {
+    return { apiVersion: 1, name: "waits", async listChanges(req) {
+      const res = await ctx.fetch("https://scm.example.com/" + req.repo, { destination: "scm", retry: { blindRateLimitWaitMs: 5, maxBlindRateLimitRetries: 2, rateLimitBody: "secondary rate limit" } });
+      return { changes: [], defaultBranch: "main", limitations: [res.status + " " + (await res.text())] };
+    } };
+  },
+});
+`;
+  const list = (p: ScmProvider, repo: string) => p.listChanges({ repo, window: WINDOW, kinds: ["pull_request"] });
+  it("blindRateLimitWaitMs crosses the host, floored at the broker's own first backoff; rateLimitBody does not (it would run in pr-rla's process), so a body-only limit comes back at once", async () => {
+    const dir = auditDirWith({});
+    writeFileSync(join(dir, "waits.mjs"), SOURCE);
+    await lockPlugin(dir, "./waits.mjs");
+    const calls: Record<string, number> = {};
+    const transport = (async (input: string | URL) => {
+      const repo = new URL(String(input)).pathname.slice(1);
+      const n = (calls[repo] = (calls[repo] ?? 0) + 1);
+      // a/limited: a 429 that names no wait, twice; a/body: GitHub's secondary limit, said only in a 403's body.
+      if (repo === "a/limited" && n <= 2) return new Response("slow down", { status: 429 });
+      if (repo === "a/body") return new Response("You have exceeded a secondary rate limit", { status: 403 });
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    const waits: number[] = [];
+    const actx = createAuditContext({ mode: "read-only", fetch: transport, sleep: async (ms) => void waits.push(ms), log: () => {} });
+    const p = await openProvider(actx, { use: "./waits.mjs", options: {} }, dir);
+    expect((await list(p, "a/limited")).limitations).toEqual(["200 ok"]);
+    expect(calls["a/limited"]).toBe(3);
+    // The plugin asked for 5 ms; the broker waited 1 s, then 2 s (doubling), never less than its own first backoff.
+    expect(waits.filter((ms) => ms >= 1000)).toEqual([1000, 2000]);
+    waits.length = 0;
+    expect((await list(p, "a/body")).limitations).toEqual(["403 You have exceeded a secondary rate limit"]);
+    expect(calls["a/body"]).toBe(1);
+    expect(waits.filter((ms) => ms >= 1000)).toEqual([]);
+  });
+});
+
 describe("pr-rla/http through the host (finding 15)", () => {
   /** The retrying JSON client, behind the broker as the SDK says (maxRetries: 0), with a rule for a transient GraphQL error. */
   const SOURCE = `import { defineProvider } from "pr-rla/provider";

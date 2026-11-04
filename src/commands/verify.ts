@@ -7,13 +7,15 @@ export interface VerifyOptions {
   logKey?: string;
   beaconFile?: string;
   json?: boolean;
+  /** Also print the per-item lines a summary line stands for (VerifyCheck.verbose); --json always has them. */
+  verbose?: boolean;
   /** Timestamp-authority anchors the verifier adds to the shipped bundle (files). The audit repo cannot add its own. */
   tsaTrust?: string[];
 }
 
 /** The verify report (src/api/read/verify.ts), for callers that format it themselves. */
 export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promise<VerifyResult> {
-  const { json: _json, ...rest } = opts;
+  const { json: _json, verbose: _verbose, ...rest } = opts;
   return verify(ctx, rest satisfies ApiVerifyOptions);
 }
 
@@ -28,16 +30,17 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
     ctx.out(JSON.stringify(report, null, 2));
     return verifyExitCode(report);
   }
-  printVerify(ctx, report);
+  printVerify(ctx, report, { verbose: opts.verbose === true });
   return verifyExitCode(report);
 }
 
-/** The text form of a verify result: the seven checks, then the certificate. */
-export function printVerify(ctx: Pick<CommandContext, "out">, report: VerifyResult): void {
+/** The text form of a verify result: the seven checks, then the certificate; `verbose` adds the per-item lines a summary line stands for (P3). */
+export function printVerify(ctx: Pick<CommandContext, "out">, report: VerifyResult, o: { verbose?: boolean } = {}): void {
   const mark = (s: string) => (s === "PASS" ? "✓" : s === "WARN" ? "(warn)" : s === "SKIP" ? "(skipped)" : s === "INCOMPLETE" ? "(incomplete)" : "✗");
   for (const c of report.checks) {
     ctx.out(`${String(c.n)}. ${c.status.padEnd(4)} ${c.name}: ${c.summary}`);
     for (const d of c.details) ctx.out(`        ${d}`);
+    if (o.verbose) for (const d of c.verbose ?? []) ctx.out(`          ${d}`);
   }
   ctx.out(report.checks.map((c) => (c.n === 1 ? c.summary : `${c.summary} ${mark(c.status)}`)).join(" · "));
   for (const p of report.fullTrustPlugins) ctx.out(`PLUGIN TRUST: full (${p.name}@${p.version ?? "unversioned"} runs with your environment and files)`);

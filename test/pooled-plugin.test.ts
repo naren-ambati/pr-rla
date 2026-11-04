@@ -48,6 +48,11 @@ export default defineProvider({
       async estimateRequests(req) {
         return { requests: 7 + Number(req.repo.slice(-2)), graphql: 2, probed: 1 };
       },
+      // P3: the default branch's push log, over IPC: created at its head before the window closed, never moved since.
+      async pushLog(req) {
+        if (req.branch !== "main" || typeof req.since !== "string" || !req.signal) throw new Error("pooled plugin: pushLog got " + JSON.stringify(req));
+        return { events: [{ id: "1", at: "2026-08-31T10:00:00Z", before: "0".repeat(40), after: sha("head" + req.repo), kind: "created" }], limitations: ["synthetic push log"] };
+      },
       async listChanges(req) {
         inflight++;
         peak = Math.max(peak, inflight);
@@ -105,7 +110,8 @@ describe("an isolated external provider freezes a pool through the plugin host (
     expect(await freezeCommand(at("2026-10-20T12:30:00Z"), { estimate: true, json: true, dryRun: true })).toBe(0);
     const est = (JSON.parse(s.out.find((l) => l.startsWith("{"))!) as { estimate: { supported: boolean; repos: number; requests: { repos: number; graphql: number; probed: number } } }).estimate;
     expect(est).toMatchObject({ supported: true, repos: 11 });
-    expect(est.requests).toMatchObject({ repos: Array.from({ length: 11 }, (_, i) => 7 + i).reduce((a, b) => a + b, 0), graphql: 22, probed: 11 });
+    // P3: plus one push log read per repo.
+    expect(est.requests).toMatchObject({ repos: Array.from({ length: 11 }, (_, i) => 7 + i).reduce((a, b) => a + b, 0) + 11, graphql: 22, probed: 11 });
     const report = await runVerify(at("2026-10-20T13:00:00Z"), { offline: false });
     const c5 = report.checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("PASS");
@@ -113,6 +119,9 @@ describe("an isolated external provider freezes a pool through the plugin host (
     // listingVisibility crossed the host: the private and internal visibilities are proven complete, not INCOMPLETE.
     expect(c5.details).toContain("private repositories under acme-org: listed completely (synthetic: every repository is public)");
     expect(m.repoListing!.identity).toBe("synthetic");
+    // P3: pushLog crossed the host too (with the call's abort signal): every frozen head is proven, at freeze and at verify.
+    expect(m.headEvidence!.map((e) => e.status)).toEqual(Array(11).fill("tip"));
+    expect(c5.details).toContain("push log: 11 of 11 frozen head(s) were their default branch's tip at freeze");
     expect(report.verdict).toBe("VERIFIED");
     // describeRepo crosses the host too, and a RepoUnavailableError keeps its code and status over IPC.
     const hosted = await providerFor(at("2026-10-20T13:00:00Z"), configFor(at("2026-10-20T13:00:00Z")).config);

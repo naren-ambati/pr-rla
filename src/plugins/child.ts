@@ -34,7 +34,7 @@ interface Definition {
 }
 
 const METHODS: Record<ChildBoot["kind"], readonly string[]> = {
-  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath"],
+  provider: ["listChanges", "nativeCounts", "listRepos", "describeChange", "estimateRequests", "describeRepo", "listingVisibility", "firstParentPath", "pushLog"],
   ledger: ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"],
 };
 
@@ -133,7 +133,7 @@ async function hostFetch(input: string | URL | Request, init: (RequestInit & Rec
   if (signal?.aborted) throw abortError();
   const msg: FetchMessage = { type: "fetch", fid: nextFid++, url, method: (req.method ?? "GET").toUpperCase(), headers: [...new Headers(req.headers)], ...(await encodeBody(req.body)) };
   if (typeof req.destination === "string") {
-    const r = req.retry as false | { maxRetries?: unknown; maxBlindRateLimitRetries?: unknown; acceptJson?: unknown } | undefined;
+    const r = req.retry as false | { maxRetries?: unknown; maxBlindRateLimitRetries?: unknown; blindRateLimitWaitMs?: unknown; acceptJson?: unknown } | undefined;
     if (r && typeof r.acceptJson === "function") acceptors.set(msg.fid, r.acceptJson as (body: unknown) => unknown);
     msg.broker = {
       destination: req.destination,
@@ -145,6 +145,7 @@ async function hostFetch(input: string | URL | Request, init: (RequestInit & Rec
               retry: {
                 ...(typeof r.maxRetries === "number" ? { maxRetries: r.maxRetries } : {}),
                 ...(typeof r.maxBlindRateLimitRetries === "number" ? { maxBlindRateLimitRetries: r.maxBlindRateLimitRetries } : {}),
+                ...(typeof r.blindRateLimitWaitMs === "number" ? { blindRateLimitWaitMs: r.blindRateLimitWaitMs } : {}),
                 ...(r.acceptJson ? { acceptJson: true } : {}),
               },
             }
@@ -248,7 +249,7 @@ async function run(m: CallMessage): Promise<void> {
       if (!METHODS[boot.kind].includes(m.method) || typeof fn !== "function") throw new Error(`the plugin has no ${m.method}()`);
       const args = [...m.args];
       // A request object carries the call's abort signal (the parent's `cancel`).
-      if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests" || m.method === "firstParentPath") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
+      if ((m.method === "listChanges" || m.method === "nativeCounts" || m.method === "estimateRequests" || m.method === "firstParentPath" || m.method === "pushLog") && args[0] && typeof args[0] === "object") args[0] = { ...(args[0] as object), signal: ctrl.signal };
       value = await (fn as Fn).apply(instance, args);
     }
     send({ type: "result", id: m.id, value: value === undefined ? null : value });

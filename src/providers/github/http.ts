@@ -35,6 +35,21 @@ const TRANSIENT_GRAPHQL = /something went wrong|timeout|timed out|rate limit|abu
 /** A 403 body that says the request was rate limited (primary or secondary limit, or the older abuse-detection wording). */
 export const RATE_LIMIT_BODY = /rate limit|abuse detection/i;
 
+/**
+ * GitHub's guidance for a secondary rate limit that names no wait (P3, finding 9): "wait for at least one minute
+ * before retrying", then "an exponentially increasing amount of time between retries", and "throw an error after a
+ * specific number of retries". Behind the broker these are the request's retry hints: 1, 2, 4, 8, 15 minutes, then a
+ * give-up the freeze stops on (exit 4, resumable).
+ */
+export const SECONDARY_LIMIT_WAIT_MS = 60_000;
+export const SECONDARY_LIMIT_RETRIES = 5;
+
+/** What kind of token a GitHub token is, by its documented prefix (never logged): it decides what its listing can prove. */
+export type GitHubTokenKind = "classic" | "oauth-app" | "fine-grained" | "installation" | "app-user" | "other";
+export function githubTokenKind(token: string): GitHubTokenKind {
+  return token.startsWith("ghp_") ? "classic" : token.startsWith("gho_") ? "oauth-app" : token.startsWith("github_pat_") ? "fine-grained" : token.startsWith("ghs_") ? "installation" : token.startsWith("ghu_") ? "app-user" : "other";
+}
+
 export class GitHubHttp {
   readonly apiUrl: string;
   readonly graphqlUrl: string;
@@ -57,7 +72,7 @@ export class GitHubHttp {
   private async request<T>(url: string, base: RequestInit, accept: (body: unknown) => string | null = () => null, maxRetries?: number): Promise<{ body: T; res: Response }> {
     const own = this.o.maxRetries ?? DEFAULT_MAX_RETRIES;
     const max = Math.min(own, maxRetries ?? own);
-    const retry: RetryHints = { acceptJson: accept, ...(maxRetries !== undefined ? { maxRetries } : {}) };
+    const retry: RetryHints = { acceptJson: accept, ...(maxRetries !== undefined ? { maxRetries } : {}), rateLimitBody: RATE_LIMIT_BODY.source, blindRateLimitWaitMs: SECONDARY_LIMIT_WAIT_MS, maxBlindRateLimitRetries: SECONDARY_LIMIT_RETRIES };
     // The BrokerInit fields are ignored by a plain fetch and read by the broker.
     const init: RequestInit & Pick<BrokerInit, "destination" | "retry"> = { ...base, destination: "scm", retry };
     const sleep = this.o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
@@ -123,6 +138,11 @@ export class GitHubHttp {
   /** Whether requests carry a token. */
   get authenticated(): boolean {
     return !!this.o.token;
+  }
+
+  /** The kind of token requests carry (by its prefix), or null without one. */
+  get tokenKind(): GitHubTokenKind | null {
+    return this.o.token ? githubTokenKind(this.o.token) : null;
   }
 
   async graphql<T>(query: string, variables: Record<string, unknown>, opts: { maxRetries?: number } = {}): Promise<T> {

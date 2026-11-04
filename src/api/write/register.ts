@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { describeRepoSet, RepoSetError, resolveRepoSet } from "../../core/repo-set.js";
-import { beaconParams, derivedRoundFor, type AuditMode, type LoggedEntry, type RegisteredRepo, type RegistrationRecordV2, type RekorV2Entry, type SignedRecord } from "../../core/records.js";
+import { describeRepoSet, registerRuleRepos, RepoSetError, resolveRepoSet } from "../../core/repo-set.js";
+import { beaconParams, derivedRoundFor, type AuditMode, type LoggedEntry, type RegisteredRepo, type RegisteredVisibility, type RegistrationRecordV2, type RekorV2Entry, type SignedRecord } from "../../core/records.js";
 import { unixToIso } from "../../core/seed.js";
 import { ephemeralKey, loadOrCreateKey, signRecord } from "../../core/signing.js";
 import { effectiveCap, stoppingTable } from "../../core/sprt.js";
@@ -69,8 +69,11 @@ export interface RegistrationPlan {
   landedViaWarning: string | null;
   /** Warnings about the verdict rules (U9): keys registered while unsigned verdicts would still count, and the like. */
   verdictWarnings: string[];
-  /** A pooled registration (U8): the repo set, how many repos it resolves to now, and whether they are signed in by id. */
-  pool: { describe: string; count: number; registeredById: boolean } | null;
+  /**
+   * A pooled registration (U8): the repo set, how many repos it resolves to now, and whether they are signed in by id;
+   * `warnings` (P3): each private or internal visibility the token could not prove it saw, printed loud.
+   */
+  pool: { describe: string; count: number; registeredById: boolean; warnings: string[] } | null;
   /** The built-in git-file ledger's path from the toplevel, signed in (P4), or why there is none; null for other ledgers. */
   ledgerPath: { path: string } | { path: null; why: string } | null;
 }
@@ -148,12 +151,14 @@ function registeredLedgerPath(windowDir: string, options: Record<string, unknown
  * only). Returns the repos it resolves to, or null for a single repo. A rule's are signed into the registration
  * (`registeredRepos`, by id), so a repo archived, renamed or made private after registration stays in the pool.
  */
-async function preflightRepoSet(ctx: ApiContext, config: PrRlaConfig): Promise<{ count: number; registered: RegisteredRepo[] | null } | null> {
+async function preflightRepoSet(ctx: ApiContext, config: PrRlaConfig): Promise<{ count: number; registered: RegisteredRepo[] | null; visibility: RegisteredVisibility | null; warnings: string[] } | null> {
   if (config.repoSet.kind === "repo") return null;
   try {
-    const resolved = await resolveRepoSet(await providerFor(ctx, config), config.repoSet);
-    if (resolved.length === 0) throw new AuditError(`${describeRepoSet(config.repoSet)} matches no repository the token can see; widen the rule, or check the token's access`);
-    return { count: resolved.length, registered: config.repoSet.kind === "rule" ? resolved.map((r) => ({ repo: r.repo, repoId: r.repoId! })) : null };
+    // A rule (P3): the repos it matches, by id, and what the token can prove it saw (src/core/repo-set.ts).
+    const rule = config.repoSet.kind === "rule" ? await registerRuleRepos(await providerFor(ctx, config), config.repoSet) : null;
+    const count = rule ? rule.registered.length : (await resolveRepoSet(await providerFor(ctx, config), config.repoSet)).length;
+    if (count === 0) throw new AuditError(`${describeRepoSet(config.repoSet)} matches no repository the token can see; widen the rule, or check the token's access`);
+    return { count, registered: rule?.registered ?? null, visibility: rule?.visibility ?? null, warnings: rule?.warnings ?? [] };
   } catch (e) {
     if (e instanceof RepoSetError) throw new AuditError(e.message);
     throw e;
@@ -179,6 +184,7 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     schema: "pr-rla/registration/v2",
     repos: config.repoSet,
     ...(pool?.registered ? { registeredRepos: pool.registered } : {}),
+    ...(pool?.visibility ? { registeredVisibility: pool.visibility } : {}),
     window: config.window,
     selector: config.selector,
     protocolSha256: protocolSha256(config),
@@ -216,7 +222,7 @@ export async function register(ctx: ApiContext, opts: RegisterOptions = {}, hook
     claimed,
     landedViaWarning: null,
     verdictWarnings,
-    pool: pool ? { describe: describeRepoSet(config.repoSet), count: pool.count, registeredById: !!pool.registered } : null,
+    pool: pool ? { describe: describeRepoSet(config.repoSet), count: pool.count, registeredById: !!pool.registered, warnings: pool.warnings } : null,
     ledgerPath,
   };
   hooks.onHeader?.(plan);

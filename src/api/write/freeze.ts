@@ -168,6 +168,8 @@ export async function freeze(ctx: ApiContext, opts: FreezeOptions = {}, hooks: F
     // A rule's unfiltered owner listing and the registered repos found gone (U8): what verify holds the pool to.
     ...(run.listing ? { repoListing: run.listing } : {}),
     ...(run.gone.length ? { goneRepos: run.gone } : {}),
+    // P3: what each pinned head's push log showed (when the provider keeps one).
+    ...(run.headEvidence ? { headEvidence: run.headEvidence } : {}),
     provider: { ...providerId, apiVersion: PROVIDER_API_VERSION, reviewGranularity: traits.reviewGranularity },
     window,
     frozenAt,

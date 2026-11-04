@@ -39,6 +39,7 @@ export function printRegistrationHeader(ctx: Pick<CommandContext, "out">, p: Reg
   for (const w of p.verdictWarnings) ctx.out(`  warning: ${w}`);
   ctx.out(`${p.dryRun ? "[dry run] " : ""}registration ${p.signed.sha256.slice(0, 12)}… · ${repoSetLabel(record.repos)} · window ${record.window.name} (${record.window.start}..${record.window.end})`);
   if (p.pool) ctx.out(`  repos: ${p.pool.describe} · resolves to ${p.pool.count} now${p.pool.registeredById ? " (signed by repo id: they stay in the pool whatever their name, archive state or visibility at freeze)" : ""}; resolved again at freeze, one certificate for the pool`);
+  for (const w of p.pool?.warnings ?? []) ctx.out(`  WARNING: ${w}`);
   ctx.out(`  claim D: detected-defect rate <= ${pct(params.p0)} (p1 ${pct(params.p1)}, risk ${pct(params.alpha)}) · certify after ${p.stoppingTable.join(" / ")} draws with 0/1/2 fails · cap ${p.cap}`);
   ctx.out(`  selector ${JSON.stringify(record.selector)}`);
 }

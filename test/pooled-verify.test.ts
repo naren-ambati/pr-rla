@@ -58,14 +58,33 @@ describe("verify on an untouched pooled freeze", () => {
 });
 
 describe("a repo created after freeze (FR5.2; test-design U8)", () => {
-  it("makes check 5 FAIL when it holds changes in the window, naming the repo and the count", async () => {
+  it("one the freeze's listing did not show, with changes in the window, is INCOMPLETE: it may have been transferred in (P3; U8 made it a FAIL)", async () => {
     const org = org30();
     const s = await frozen(org);
     org.addRepo({ name: "svc-late", prs: 12, pushes: 2 });
     const { report, check: c5 } = await check(s, 5);
-    expect(c5.status).toBe("FAIL");
-    expect(c5.summary).toMatch(/^repo acme-org\/svc-late matches the registered rule but is not in the manifest \(\d+ changes landed in the window\)$/);
+    expect(c5.status).toBe("INCOMPLETE");
+    expect(c5.details.join("\n")).toMatch(/INCOMPLETE repo acme-org\/svc-late matches the registered rule but was not in the freeze's listing, and \d+ of its changes landed in the window: it may have been transferred in after freeze/);
     expect(report.ok).toBe(false);
+  });
+
+  it("one the freeze's own listing says the rule matched, left out of the manifest: FAIL (checks 2 and 5)", async () => {
+    const org = org30();
+    const s = await frozen(org);
+    const victim = `${ORG}/svc-05`;
+    const m = readManifest(s);
+    const changes = m.changes.filter((c) => c.repo !== victim);
+    const body = { ...m, repos: m.repos.filter((r) => r.repo !== victim), changes, N: changes.length, headEvidence: m.headEvidence!.filter((e) => e.repo !== victim), registrationSha256: m.registrationSha256 } as Partial<ManifestV2>;
+    delete body.sha256;
+    const sha = manifestSha256(body as ManifestV2);
+    writeFileSync(join(s.dir, MANIFEST), JSON.stringify({ ...body, sha256: sha }, null, 2));
+    const CM = "audit/2026-q3/manifest-commitment.json";
+    const cm = JSON.parse(readFileSync(join(s.dir, CM), "utf8")) as SignedRecord<CommitmentRecordV2>;
+    writeFileSync(join(s.dir, CM), JSON.stringify(signRecord({ ...cm.record, manifestSha256: sha, N: changes.length }, loadOrCreateKey(join(s.dir, ".pr-rla/signing-key.pem"))), null, 2));
+    const { report, check: c5 } = await check(s, 5);
+    expect(report.checks.find((c) => c.n === 2)!.status).toBe("FAIL");
+    expect(c5.status).toBe("FAIL");
+    expect(c5.details.join("\n")).toMatch(/FAIL registered repo acme-org\/svc-05 is not in the manifest/);
   });
 
   it("does not, when the SCM says it was created after the window closed (it cannot hold a window landing)", async () => {
@@ -80,7 +99,7 @@ describe("a repo created after freeze (FR5.2; test-design U8)", () => {
   it("nor when the SCM gives no creation time but the repo lists no change in the window", async () => {
     const org = org30();
     const s = await frozen(org);
-    org.addRepo({ name: "svc-quiet", prs: 0, pushes: 0, createdAfterWindow: true });
+    org.addRepo({ name: "svc-quiet", prs: 0, pushes: 0, createdAfterWindow: true, createdAt: null }); // no created_at in GitHub's answer
     const { check: c5 } = await check(s, 5);
     expect(c5.status).toBe("PASS");
     expect(c5.details).toContain("repo acme-org/svc-quiet matches the registered rule but is not in the manifest; it lists no change in the window, so it cannot change the population");

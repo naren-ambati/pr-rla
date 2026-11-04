@@ -185,7 +185,8 @@
    "Later units add their functions on top: U4 (checkpoints), U8 (pooled freeze), U9 (presence), and U5 moves every command onto it.",
    "U9: git-file reaches account and presence through per-verdict signatures; SSH keys count only there.",
    "Built-in ledgers whose per-verdict signatures the core's PresenceVerifier checks (src/core/presence).",
-   "Made by scripts/make-presence-fixtures.mjs."
+   "Made by scripts/make-presence-fixtures.mjs.",
+   "The five demo scripts (demo-broker, demo-ledgers, demo-plugin-host, demo-presence, demo-sdk-carry-overs) exit 0."
   ],
   "mechanism": [
    "Verdict provenance: self-asserted; with the reviewers' SSH keys registered and each verdict signed on its own (pr-rla record --sign), account, or presence with a FIDO security key and the user-presence flag set ([signed verdicts](#signed-verdicts-git-file), below).",

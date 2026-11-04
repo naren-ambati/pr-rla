@@ -289,7 +289,35 @@ export class BitbucketCloudProvider implements ScmProvider {
         { label: "direct pushes that are merge commits", value: res.pushes.filter((c) => c.parents.length > 1).length },
       );
     }
-    return { changes, defaultBranch: branch, limitations: landedVia.size ? [...BITBUCKET_CLOUD_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_CLOUD_LIMITATIONS, diagnostics, headSha: head };
+    // P3: a PR merged in the window whose merge commit the history walk from the head did not reach (the stopgap).
+    let unreachable: string[] | undefined;
+    if (req.kinds.includes("pull_request") && req.kinds.includes("direct_push")) {
+      const walked = new Set(history.map((c) => c.hash.toLowerCase()));
+      unreachable = await this.unreachablePrs(base, head, changes.filter((c) => c.kind === "pull_request" && !walked.has(c.mergeSha)), req.signal);
+    }
+    return { changes, defaultBranch: branch, limitations: landedVia.size ? [...BITBUCKET_CLOUD_LIMITATIONS, LANDED_VIA_LIMITATION] : BITBUCKET_CLOUD_LIMITATIONS, diagnostics, headSha: head, ...(unreachable ? { unreachable } : {}) };
+  }
+
+  /**
+   * Of the PRs merged in the window whose merge commit the walk from `head` did not visit, the ones Bitbucket confirms
+   * are not ancestors of `head` (P3): `commits?include=<merge>&exclude=<head>` lists the commits reachable from the
+   * merge and not from the head, so it is empty when the merge commit is an ancestor. At most 10 are asked; asking
+   * stops at the third unreachable one.
+   */
+  async unreachablePrs(base: string, head: string, candidates: readonly ChangeRecord[], signal?: AbortSignal): Promise<string[]> {
+    const out: string[] = [];
+    for (const c of [...candidates].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 10)) {
+      let values: unknown[];
+      try {
+        values = (await this.http.get<{ values?: unknown[] }>(`${base}/commits?include=${c.mergeSha}&exclude=${head}&pagelen=1&fields=values.hash`, signal)).data.values ?? [];
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) continue; // Bitbucket cannot say: unknown, so not reported
+        throw e;
+      }
+      if (values.length) out.push(c.id);
+      if (out.length >= 3) break;
+    }
+    return out;
   }
 
   /**
