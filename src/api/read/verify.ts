@@ -24,8 +24,15 @@ export interface VerifyOptions {
   tsaTrust?: string[];
 }
 
+/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (U8). The read side imports nothing of src/cli. */
+export function verdictExitCode(verdict: VerifyReport["verdict"]): 0 | 1 | 6 {
+  return verdict === "VERIFIED" ? 0 : verdict === "INCOMPLETE" ? 6 : 1;
+}
+
 /** The seven checks (core/verify.ts) plus what the certificate prints around them. */
 export interface VerifyResult extends VerifyReport {
+  /** What `pr-rla verify` exits with for this verdict: 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (nothing failed, but not a verification). */
+  exitCode: 0 | 1 | 6;
   /** The certificate line, when the audit has draws. */
   statusLine: string | null;
   /** Registered plugins that run with the verifier's environment and files (`PLUGIN TRUST: full`). */
@@ -117,6 +124,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
+    exitCode: verdictExitCode(report.verdict),
     ...(errors.length ? { untrusted: { errors } } : {}),
   };
 }

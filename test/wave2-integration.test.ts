@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import * as read from "pr-rla/api/read";
+import { recordCommand } from "../src/commands/record.js";
 import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
@@ -13,6 +15,7 @@ import { buildPooledPopulation } from "../src/core/population.js";
 import { rebuildRepo } from "../src/core/rebuild.js";
 import { hostedProvider, startPluginHost } from "../src/plugins/host.js";
 import { readGrants, resolvePlugin } from "../src/plugins/lock.js";
+import { approveBuiltin } from "../src/plugins/approvals.js";
 import { normalizeSelector } from "../src/core/selector.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
 import type { DrawsFile, TimestampEvidence } from "../src/core/records.js";
@@ -23,6 +26,11 @@ import { FakeGitHubIssues } from "./helpers/fake-issue-trackers.js";
 import { fakeOrg, orgSpec, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAuthority } from "./helpers/test-tsa.js";
+import { classificationScenario, fakeGitHub } from "./helpers/fake-github.js";
+import { commitAll } from "./helpers/signed-commits.js";
+import { makeTestKey, type TestKey } from "./helpers/sshsig-signer.js";
+import { NAMESPACE } from "./helpers/verdict-lines.js";
+import { PRESENCE_LIMIT } from "../src/core/presence/index.js";
 
 /**
  * Integration: wave 2. Where two merged branches' contracts meet, end to end on the CLI's own
@@ -42,6 +50,10 @@ import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAutho
  *
  * fix/plugins-broker × bolt/u8-org-pooled-freeze: U8's error fields (status, rateLimited) cross the
  * plugin host on pr-rla/ipc/v2, so check 5's rebuild tells a rate limit from a missing repository.
+ *
+ * bolt/u5-audit-api-mcp × the rest, through `pr-rla/api/read` (the functions the MCP tools call; the
+ * MCP package's own wave-2 test drives the tools themselves): U9's per-verdict signatures in status and
+ * the draw context, and read-only mode under this machine's approvals (the plugins round).
  */
 const W = "audit/2026-q3";
 let tsa: MockTsaServer;
@@ -279,5 +291,91 @@ export default defineProvider({
     } finally {
       host.close();
     }
+  });
+});
+
+describe("per-verdict signatures through pr-rla/api/read: status and the draw context (bolt/u5-audit-api-mcp × bolt/u9-presence-verdicts)", () => {
+  const keys: Record<string, TestKey> = {};
+  let keysDir: string;
+  let s: Scenario;
+  let signedDraws: number[];
+  const readOpts = () => ({ nowMs: () => s.clock.now, fetch: s.fetch, env: s.ctx.env });
+
+  beforeAll(async () => {
+    keysDir = mkdtempSync(join(tmpdir(), "prrla-wave2-keys-"));
+    for (const [name, type] of [["bob", "sk-ssh-ed25519@openssh.com"], ["alice", "ssh-ed25519"]] as const) {
+      keys[name] = makeTestKey(type);
+      writeFileSync(join(keysDir, `${name}.pub`), `${keys[name].publicText} ${name}\n`); // public halves only
+    }
+    s = setupAuditRepo({ changes: makeChanges(200) });
+    appendFileSync(join(s.dir, ".pr-rla.yml"), `ledger: git-file\nverdicts: { min_provenance: account, allowed_signers: [${JSON.stringify(keys.bob!.allowedSigner("bob", `namespaces="${NAMESPACE}"`))}, ${JSON.stringify(keys.alice!.allowedSigner("alice"))}] }\n`);
+    s.git("commit", "-qam", "signed verdicts");
+    s.clock.now = T("2026-10-20T00:00:00Z");
+    expect(await registerCommand(s.ctx, {})).toBe(0);
+    s.clock.now = T("2026-10-20T12:00:00Z");
+    expect(await freezeCommand(s.ctx, {})).toBe(0);
+    s.clock.now = T("2026-10-21T01:00:00Z");
+    expect(await sampleCommand(s.ctx, {})).toBe(0);
+    s.git("add", "-A");
+    s.git("commit", "-qm", "registration, manifest, draws");
+    // The reviewers sign one verdict each with record --sign (a software-emulated authenticator stands in for ssh-keygen, D7).
+    s.ctx.signVerdict = async (payload, path) => keys[basename(path)]!.sign(payload, { namespace: NAMESPACE, flags: 0x01, counter: 1 });
+    s.clock.now = T("2026-10-21T03:00:00Z");
+    const first = readJ<DrawsFile>(s, "audit/2026-q3/draws.json").draws.filter((d) => d.firstOccurrence).slice(0, 3);
+    signedDraws = first.slice(0, 2).map((d) => d.draw);
+    expect(await recordCommand(s.ctx, String(first[0]!.draw), "pass", { sign: join(keysDir, "bob") })).toBe(0);
+    commitAll(s.dir, "verdict by bob", null);
+    expect(await recordCommand(s.ctx, String(first[1]!.draw), "pass", { sign: join(keysDir, "alice") })).toBe(0);
+    commitAll(s.dir, "verdict by alice", null);
+    expect(await recordCommand(s.ctx, String(first[2]!.draw), "pass", { reviewer: "carol" })).toBe(0);
+    commitAll(s.dir, "an unsigned verdict", null);
+  }, 120_000);
+
+  it("status counts each signed verdict at the level its signature proves, flags the unsigned one, and carries no signature field", async () => {
+    const r = await read.status({ dir: s.dir }, readOpts());
+    expect(r).toMatchObject({ phase: "sampled", verdictsRead: true, minProvenance: "account" });
+    if (r.phase !== "sampled" || !r.verdictsRead) throw new Error("not sampled");
+    expect(Object.fromEntries(r.provenance.map((p) => [p.level, p.count]))).toEqual({ presence: 1, account: 1, "self-asserted": 1 });
+    expect(r.belowMinimum).toHaveLength(1);
+    expect(r.verdictNotes).toContain(PRESENCE_LIMIT); // the T16 limit, wherever presence is counted
+    expect(JSON.stringify(r)).not.toMatch(/sshsig|registrationSha256":"[0-9a-f]{64}","reviewer/);
+  });
+
+  it("the draw context shows a signed verdict's level, keeps who recorded it in the fence, and carries no signature", async () => {
+    const bob = await read.drawContext({ dir: s.dir, draw: signedDraws[0]! }, readOpts());
+    expect(bob.state).toMatchObject({ read: true, verdict: "pass", provenance: "presence" });
+    expect(bob.untrusted.verdict).toMatchObject({ reviewer: "bob" });
+    const alice = await read.drawContext({ dir: s.dir, draw: signedDraws[1]! }, readOpts());
+    expect(alice.state).toMatchObject({ read: true, verdict: "pass", provenance: "account" });
+    for (const c of [bob, alice]) expect(JSON.stringify(c)).not.toMatch(/sshsig|U1NIU0lH/); // no SSHSIG blob ("SSHSIG" in base64) anywhere
+  });
+});
+
+describe("read-only mode honours this machine's approvals (bolt/u5-audit-api-mcp × fix/plugins-broker)", () => {
+  it("a GitHub Enterprise Server audit read through pr-rla/api/read: unapproved, it runs anonymously; approved, the token reaches ghe.example.com and nowhere else", async () => {
+    const sc = classificationScenario();
+    const ghe = fakeGitHub(sc.repo, sc.head, sc.commits, sc.prs, { restBase: "https://ghe.example.com/api/v3" });
+    const seen: { url: string; auth: string | null }[] = [];
+    const fetch = (async (input: string | URL, init?: RequestInit) => (seen.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") }), ghe.fetch(input as never, init as never))) as typeof globalThis.fetch;
+    const s = setupAuditRepo({ changes: [] });
+    const yml = join(s.dir, ".pr-rla.yml");
+    writeFileSync(yml, readFileSync(yml, "utf8").replace("provider: { use: json-file, options: { path: changes.json } }", "provider: { use: github, options: { base_url: https://ghe.example.com } }").replace("window: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }", "window: { name: 2026-08-01, start: 2026-08-01, end: 2026-08-01 }"));
+    s.git("commit", "-qam", "a GitHub Enterprise Server audit");
+    const file = join(mkdtempSync(join(tmpdir(), "prrla-wave2-approvals-")), "approvals.json");
+    const log: string[] = [];
+    const opts = { nowMs: () => T("2026-08-03T00:00:00Z"), fetch, env: { GH_ENTERPRISE_TOKEN: "ghe_OPERATOR_SECRET", PR_RLA_APPROVALS_FILE: file }, log: (l: string) => log.push(l) };
+
+    const anonymous = await read.freezePreview({ dir: s.dir }, opts);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((x) => x.auth !== null)).toEqual([]);
+    expect(log.join("\n")).toMatch(/GH_ENTERPRISE_TOKEN -> https:\/\/ghe\.example\.com is not approved on this machine, so withheld .*pr-rla plugin approve github/);
+
+    approveBuiltin(file, "GH_ENTERPRISE_TOKEN", "https://ghe.example.com", "2026-08-03T00:00:00Z");
+    seen.length = 0;
+    const approved = await read.freezePreview({ dir: s.dir }, opts);
+    expect(approved.N).toBe(anonymous.N);
+    expect([...new Set(seen.map((x) => x.auth))]).toEqual(["Bearer ghe_OPERATOR_SECRET"]);
+    expect([...new Set(seen.map((x) => new URL(x.url).host))]).toEqual(["ghe.example.com"]);
+    expect(JSON.stringify(approved)).not.toContain("ghe_OPERATOR_SECRET");
   });
 });

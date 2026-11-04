@@ -182,9 +182,9 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
       "verify",
       {
         title: "Verify an audit",
-        description: "A third party's check of the seven audit properties (registration, timing, seed, population, draws, labels and protocol). Offline by default; offline: false rebuilds the population from the SCM and reads the tracker, and becomes a job if it runs past 25 s.",
+        description: "A third party's check of the seven audit properties (registration, timing, seed, population, draws, labels and protocol). `verdict` is VERIFIED, FAILED, or INCOMPLETE (nothing failed, but part could not be checked: not a verification), and `exitCode` what pr-rla verify exits with (0, 1, 6). Offline by default; offline: false rebuilds the population from the SCM and reads the tracker, and becomes a job if it runs past 25 s.",
         inputSchema: z.strictObject({ dir, window, offline }),
-        outputSchema: z.looseObject({ ok: z.boolean().optional(), checks: z.array(z.looseObject({ n: z.number(), status: z.string() })).optional(), ...handle }),
+        outputSchema: z.looseObject({ ok: z.boolean().optional(), verdict: z.enum(["VERIFIED", "FAILED", "INCOMPLETE"]).optional(), exitCode: z.number().optional(), checks: z.array(z.looseObject({ n: z.number(), status: z.string() })).optional(), ...handle }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>

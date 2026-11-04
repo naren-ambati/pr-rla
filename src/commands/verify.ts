@@ -1,5 +1,4 @@
-import { verify, type VerifyOptions as ApiVerifyOptions, type VerifyResult } from "../api/read/verify.js";
-import { EXIT } from "../cli/exit-codes.js";
+import { verdictExitCode, verify, type VerifyOptions as ApiVerifyOptions, type VerifyResult } from "../api/read/verify.js";
 import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
 import type { CommandContext } from "./context.js";
 
@@ -20,7 +19,7 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
 
 /** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. */
 export function verifyExitCode(report: Pick<VerifyResult, "verdict">): number {
-  return report.verdict === "VERIFIED" ? EXIT.OK : report.verdict === "INCOMPLETE" ? EXIT.INCOMPLETE : EXIT.FAIL;
+  return verdictExitCode(report.verdict);
 }
 
 export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): Promise<number> {

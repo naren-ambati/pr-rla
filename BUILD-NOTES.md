@@ -2647,3 +2647,78 @@ Merged after U8 and before U5, on the coordinator's instruction. The branch was 
   - `u9-review-regressions.test.ts › a locally locked external ledger, swapped in …`: this round refuses to load a `trust: full` plugin nobody approved, so verify threw before check 7. Both behaviours are kept and tested: unapproved, verify rejects with `NOT_APPROVED` and loads nothing; locked with approval (as `plugin add` and `plugin lock` record it), check 7 FAILs on U9's identity rule as before.
 - **Integration test:** an isolated provider throws a rate-limited 403. On v2 it reaches the parent with `status` 403 and `rateLimited`, and U8's `rebuildRepo` classifies it as INCOMPLETE ("a rate limit or an outage … run verify again"), not as a FAIL or a gone repo. U8's own `pooled-plugin.test.ts`, unchanged, now runs its pooled freeze, estimate, `listingVisibility` and `describeRepo` over v2.
 - **Verified** (in this worktree, 2026-11-04T07:02Z, load average 2–16): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 (both tsconfigs) · `npm test` 73 files, **1057 passed (1057)** (this round runs the RK-02 test that was skipped) · gitea 1 pass · jira 1 pass · all five demos exit 0. `~/.config/pr-rla` does not exist after the run.
+
+### Merge 6: `bolt/u5-audit-api-mcp` (3e21347)
+
+The last wave-2 branch, merged after plugins-broker on the coordinator's instruction. U5 branched from master `a360348`, so every other branch's edits to `src/commands/*` had to be ported into U5's `src/api` modules (U5's map, "Bolt 6 (U5)"). The command files are formatters again: each one is U5's version plus the output lines the other rounds added.
+
+**What was ported where:**
+
+| From | What | Now in |
+|---|---|---|
+| trusted time | `logPublicKey` is `trustedLogKey(logUrl, --log-key file)` (no audit-repo key, no `/publicKey`); `logBound` exported | `src/api/translog.ts`, `src/api/timestamps.ts` |
+| trusted time | status's v1 log check and `timestamp anchors` (as `timestampAnchors`); `reportTimestamps` prints the anchor lines | `src/api/read/status.ts`, `src/commands/{status,timestamps}.ts` |
+| U9 | counted verdicts (`countedVerdicts`, `registeredCeiling`) in status, the draws and the draw context, through one helper, `countedLedgerVerdicts`; the shown verdicts carry no `sshsig` or `registrationSha256` | `src/api/read/{status,draws,draw-context}.ts` |
+| U9 | verify passes `ledgerIdentity` and the ceiling; `record --sign` with the `signVerdict` hook (now on `ApiContext`); register's `allowed_signers` rules and warnings | `src/api/read/verify.ts`, `src/api/write/{record,register}.ts`, `src/api/session.ts` |
+| U8 | the pooled run, `--resume`, the R deadlines (start, end, before write), the manifest's `repos`, `repoListing` and `goneRepos`, the commitment signed at the end of a pooled run | `planFreeze` (`src/api/read/freeze-preview.ts`) and `src/api/write/freeze.ts` |
+| U8 | the estimate: `freezeEstimate`; `freeze_preview`'s `estimate` runs it, and `UNSUPPORTED` is gone from both error lists | `src/api/read/freeze-preview.ts`, `src/api/read/index.ts`, `packages/pr-rla-mcp` |
+| U8 | the pool label, the pooled status line, `registeredRepos` at register, INCOMPLETE and exit 6 in verify | the matching `src/api` modules; `VerifyResult.exitCode` |
+| ledgers | `sample` binds `ledgerIndexSha256`; checkpoints carry `prevLineSha256` and the index hash; `readManifest` checks pinned heads | `src/api/write/{sample,checkpoint}.ts`, `src/api/read/checkpoints.ts`, `src/api/session.ts` |
+| plugins | every identity and traits read passes the AuditContext; `plugin approve`; `add` and `lock` record the approval; `plugin check` runs the ledger kit | `src/api/**`, `src/api/write/plugin.ts`, `src/api/plugin-check.ts` |
+
+`src/commands/freeze-pool.ts` (U8's command-side pooled run) is gone: its two functions are `runPool` and `freezeEstimate` in the API. Its `resumeCommand` and the summary line came along.
+
+**Joined into one mechanism each:**
+
+- **Consent.**
+  - Read-only mode and the CLI ask the same approvals store: `builtinEnvironment` for built-ins, `pluginConsent` for isolated plugins. U5's own table (`src/api/credentials.ts`, with `operatorConsents`) and `grantedCredentials` are gone: two tables of the built-ins' credential uses would drift.
+  - What U5 added and stays, read-only only:
+    - `approvedOnly`: consent from stored approvals and the built-in defaults, never `--accept-lock-grants` or `PR_RLA_ACCEPT_LOCK_GRANTS`, which accept a repo's grants and are only for a repo you control;
+    - built-ins get placeholders, never the secrets, and the broker swaps each on its approved origin;
+    - `isolated-only`: `trust: full` never runs, approved or not (`refuseFullTrust` beside the plugins round's `refuseFullTrustUnapproved`).
+  - The plugins round's origin-exact, https-only broker rule supersedes U5's read-only https check (U5's notes said it would).
+- **git.**
+  - `src/io/git-safe.ts` carries the union of both guards: inherited `GIT_*` dropped, `GIT_NO_LAZY_FETCH`, `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0` (U5's), `GIT_CEILING_DIRECTORIES` (the audit root's parent plus, in a confined call, the roots' parents: U5's), `--no-replace-objects`, `core.commitGraph=false`, `core.fsmonitor=false`, `gc.auto=0`, `maintenance.auto=false`, and `--no-textconv`.
+  - The `.git`-file check stays in git-file's `confineGitDir`, now on U9's discovery. `src/io/git-read.ts` is gone. git-file keeps U9's history walk; U5's confined reads (`readTextConfinedAsync`, `readConfined`) and `gitFilePath` are folded in.
+  - The checkpoint push (`src/io/git-transport.ts`) runs in `gitWriteEnv`: the user's transport settings kept, the variables that point git at another repository dropped.
+- **Watchdog.** The plugins round's limit counts from `ready`, with start-up under its own limit. U5's decision runs in a `setImmediate` after the poll phase, with a generation counter. Both are on the v2 code. U5's test of it is kept beside the plugins round's heartbeat tests.
+- **The checkpoint store stays write-side.** The pooled run moved to `src/api/pool-list.ts`, which reaches the store only through a `RunStores` interface. The write side fills it (`withCheckpointStore` in `src/api/pooled-freeze.ts`, still the only importer of `freeze-store.ts`). The run's record types and `differingInputs` moved with it; `freeze-store.ts` re-exports them. The read graph has neither module, and the boundary tests pass unchanged on that point.
+
+**Fixes the merge needed, beyond the ports:**
+
+- **A plugin host's wait.**
+  - U5's wrapper dropped the host's signal, so a wait the host cancelled kept its timer. The wait now ends on the host's signal or the call's (`hostSleep`).
+  - pr-rla's own waits reject on abort (U5, so a cancelled call stops) while the host's resolve. The host's handler now takes both, where a rejection was unhandled.
+- **The read graph stays off `src/cli`.** Exit 4 is a local constant there, and the CLI's `verifyExitCode` uses the read side's `verdictExitCode`.
+- **`readIndexDocument`** (ledgers) reads confined, and its JSON error no longer quotes the file.
+- **The MCP package's tests** and the servers they start use a temp approvals file and fail if the real one changes (`test/helpers.mjs`). The package's engines are `>=22.15`, as the root's.
+
+**Tests changed where two branches met, none weakened:**
+
+- **Expectations that moved with U5's code:**
+  - the log-key importer is `api/translog.ts`;
+  - `readManifest` throws the API's `AuditError` (CommandError's base);
+  - an identity read of a `trust: full` plugin uses the CLI's read-write context.
+- **Expectations that follow the joined rules, each stricter or equal:**
+  - the boundary list gains `git-safe.ts` and `approvals.ts`, with reasons;
+  - the runtime trace expects the full git guard and U9's commands;
+  - U5's credential unit tests now run on the store: placeholders; withheld until approved; an http: origin never; `PR_RLA_ACCEPT_LOCK_GRANTS` ignored in read-only;
+  - an isolated plugin's grant: withheld in both modes until approved, a placeholder in both after;
+  - U9's git env test adds `GIT_TERMINAL_PROMPT`;
+  - the plugins round's `--accept-lock-grants` test runs read-write (the CLI's flag) and now also shows read-only ignoring it;
+  - its sleep test accepts an AbortError rejection;
+  - the MCP tests expect the approvals line and U9's partial-clone refusal, which happens before anything is read.
+- **The `estimate` tests:** in place of `UNSUPPORTED`, they run U8's estimator. A provider without `estimateRequests` gives its reason, and the estimate and the population are cached apart.
+- **Two plugin-host timeouts:** U5's 180 s Jira hang guard is dropped for the plugins round's host pool, as the coordinator asked.
+
+**Integration tests:**
+
+- **`test/wave2-integration.test.ts`**, through `pr-rla/api/read`:
+  - per-verdict signatures in status: presence 1, account 1, self-asserted 1; the unsigned one below the registered minimum; the T16 note; no signature field;
+  - the draw context: presence and account; the reviewer in the fence; no SSHSIG blob;
+  - read-only mode on a GitHub Enterprise Server audit: anonymous until `GH_ENTERPRISE_TOKEN` is approved for its origin, then the token reaches `ghe.example.com` only and never the result.
+- **`packages/pr-rla-mcp/test/mcp-wave2.test.mjs`**, through the MCP tools of an in-process server:
+  - on a pooled audit (an isolated plugin's org; the token cannot be shown to see every private repo), the `verify` tool returns `verdict: "INCOMPLETE"`, `exitCode: 6`, `ok: false`, and check 5 says why, while the CLI's verify exits 6;
+  - `draw_context` serves a pooled draw (a repo-qualified change, the provider's description in the fence), and the draws span the pool's repos.
+- **The isolated-plugin approval test above** (`test/api-read-fix.test.ts`) is the third "approvals in read-only mode" case.
+- **Status has no INCOMPLETE:** it never rebuilds the population, so U8's verdict cannot arise there. The time round B item (#6, "unify verdict") is where status's own exit model is settled.
