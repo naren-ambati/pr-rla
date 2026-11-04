@@ -1,4 +1,4 @@
-import type { ChangeRecord, RepoSetRule } from "../sdk/provider.js";
+import type { ChangeRecord, RepoSetRule, RepoVisibility } from "../sdk/provider.js";
 import { canonicalJson, hashCanonical, sha256Hex } from "./canonical.js";
 import type { FunnelStep, Selector } from "./selector.js";
 import { QUICKNET, SEED_DELAY_SECONDS, deriveSeedRound, isoToUnix, roundPublishTime, unixToIso } from "./seed.js";
@@ -162,6 +162,56 @@ export interface RegistrationRecordV2 {
   verdicts: { minProvenance: ProvenanceLevel; reviewers: string[] | null; require_signed?: boolean };
   /** The pr-rla release that wrote the record. */
   prRlaVersion: string;
+  /**
+   * A `rule` registration only (U8): the repositories the rule matched when it was registered, by stable id, sorted by
+   * repo. Freeze includes every one of them that still exists, whatever its archive state, visibility or name by then,
+   * so nothing the auditee changes after registration takes a repository out of the pool. Absent in registrations
+   * written before this field existed; verify then holds the pool to the rule alone.
+   */
+  registeredRepos?: RegisteredRepo[];
+}
+
+/** A repository a rule matched at `register` (RegistrationRecordV2.registeredRepos). */
+export interface RegisteredRepo {
+  repo: string;
+  repoId: string;
+}
+
+/** One repository of the owner's unfiltered listing at freeze, as the SCM described it, and why the rule left it out. */
+export interface ListedRepo {
+  repo: string;
+  repoId: string;
+  defaultBranch: string;
+  archived: boolean;
+  fork: boolean;
+  visibility: RepoVisibility;
+  /** When the SCM created it (null when the provider does not say). */
+  createdAt: string | null;
+  /** The rule's clauses that exclude it (src/core/repo-set.ts `ruleExclusions`); empty when the rule matches it. */
+  excludedBy: string[];
+}
+
+/**
+ * A pooled manifest's record of what the freeze saw under the owner (U8): every repository the token listed, not only
+ * those in the pool, with the identity that listed them and, per visibility, how many it listed and whether the
+ * listing was provably complete (null: the provider cannot say). verify compares it, by repo id, with what it sees.
+ */
+export interface RepoListing {
+  owner: string;
+  identity: string | null;
+  visibility: Record<RepoVisibility, { listed: number; complete: boolean | null; reason: string }>;
+  /** Sorted by repo. */
+  repos: ListedRepo[];
+}
+
+/** A registered repository that a repo-level probe found gone at freeze (manifest `goneRepos`), with the evidence. */
+export interface GoneRepo {
+  repo: string;
+  /** Null for a repo of a registered list (lists carry no ids). */
+  repoId: string | null;
+  status: 403 | 404;
+  detail: string;
+  probedAt: string;
 }
 
 export interface ManifestRepo {
@@ -190,6 +240,10 @@ export interface ManifestV2 {
   /** Sorted by id (UTF-16 code-unit order). Reviews are as of frozenAt. */
   changes: ManifestEntry[];
   prRlaVersion: string;
+  /** A `rule` pool only (U8): the owner's unfiltered listing at freeze. Absent for a repo or a list, and in older manifests. */
+  repoListing?: RepoListing;
+  /** A pool only (U8): registered repos found gone at freeze. Their changes are not in the manifest; verify reports them. */
+  goneRepos?: GoneRepo[];
   /** SHA-256 over canonicalJson of every other field. */
   sha256: string;
 }
@@ -235,6 +289,11 @@ export function manifestRepo(m: AnyManifest): string {
   if (m.schema !== "pr-rla/manifest/v2") return m.repo;
   if (m.repos.length !== 1) throw new Error(`manifest covers ${m.repos.length} repos, not one repository`);
   return m.repos[0]!.repo;
+}
+
+/** The registered repos of a rule registration (empty for a repo or list set, and for registrations made before the field existed). */
+export function registeredRepos(reg: SignedRecord<AnyRegistration>): RegisteredRepo[] {
+  return reg.record.schema === "pr-rla/registration/v2" ? (reg.record.registeredRepos ?? []) : [];
 }
 
 /** The repositories a manifest covers, in manifest order (a v1 manifest has one, without id or head). */

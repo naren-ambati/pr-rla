@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { runVerify } from "../src/commands/verify.js";
+import { configFor, providerFor } from "../src/commands/context.js";
 import type { ManifestV2 } from "../src/core/records.js";
 import { fakeOrg, orgSpec } from "./helpers/fake-org.js";
 import { lockPlugin } from "./helpers/plugin-lock.js";
@@ -34,6 +35,16 @@ export default defineProvider({
       async listRepos(rule) {
         return names.map((n, i) => ({ repo: rule.owner + "/" + n, id: String(500 + i), defaultBranch: "main", archived: i === 11, fork: false, visibility: "public" }));
       },
+      // U8 fix round: what the token sees (every repository here is public) and one repo's metadata, over IPC.
+      async listingVisibility() {
+        const all = { complete: true, reason: "synthetic: every repository is public" };
+        return { identity: "synthetic", visibilities: { public: all, private: all, internal: all } };
+      },
+      async describeRepo(ref) {
+        const i = names.indexOf(ref.repo.split("/")[1]);
+        if (i < 0) throw Object.assign(new Error(ref.repo + ": HTTP 404"), { code: "REPO_UNAVAILABLE", status: 404 });
+        return { repo: ref.repo, id: String(500 + i), defaultBranch: "main", archived: i === 11, fork: false, visibility: "public" };
+      },
       async estimateRequests(req) {
         return { requests: 7 + Number(req.repo.slice(-2)), graphql: 2, probed: 1 };
       },
@@ -43,7 +54,8 @@ export default defineProvider({
         await new Promise((r) => setTimeout(r, 20));
         inflight--;
         const idx = Number(req.repo.slice(-2));
-        const changes = Array.from({ length: 10 + idx * 3 }, (_, k) => {
+        // The archived repo (svc-11) was archived before the window: nothing landed in it.
+        const changes = Array.from({ length: idx === 11 ? 0 : 10 + idx * 3 }, (_, k) => {
           const day = 1 + ((k * 7 + idx) % 27);
           return {
             id: "pooled:" + req.repo + "#" + (k + 1),
@@ -94,8 +106,17 @@ describe("an isolated external provider freezes a pool through the plugin host (
     const est = (JSON.parse(s.out.find((l) => l.startsWith("{"))!) as { estimate: { supported: boolean; repos: number; requests: { repos: number; graphql: number; probed: number } } }).estimate;
     expect(est).toMatchObject({ supported: true, repos: 11 });
     expect(est.requests).toMatchObject({ repos: Array.from({ length: 11 }, (_, i) => 7 + i).reduce((a, b) => a + b, 0), graphql: 22, probed: 11 });
-    const c5 = (await runVerify(at("2026-10-20T13:00:00Z"), { offline: false })).checks.find((c) => c.n === 5)!;
+    const report = await runVerify(at("2026-10-20T13:00:00Z"), { offline: false });
+    const c5 = report.checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("PASS");
     expect(c5.summary).toBe(`population ${m.N}/${m.N} match`);
+    // listingVisibility crossed the host: the private and internal visibilities are proven complete, not INCOMPLETE.
+    expect(c5.details).toContain("private repositories under acme-org: listed completely (synthetic: every repository is public)");
+    expect(m.repoListing!.identity).toBe("synthetic");
+    expect(report.verdict).toBe("VERIFIED");
+    // describeRepo crosses the host too, and a RepoUnavailableError keeps its code and status over IPC.
+    const hosted = await providerFor(at("2026-10-20T13:00:00Z"), configFor(at("2026-10-20T13:00:00Z")).config);
+    expect(await hosted.describeRepo!({ repo: "acme-org/svc-03" })).toMatchObject({ repo: "acme-org/svc-03", id: "503" });
+    await expect(hosted.describeRepo!({ repo: "acme-org/nope" })).rejects.toMatchObject({ code: "REPO_UNAVAILABLE", status: 404 });
   });
 });

@@ -1,6 +1,5 @@
-import { assertChangeRecord, isRepoUnavailable, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
-import { sortChanges, type ManifestEntry, type RepoSet } from "./records.js";
-import { resolveRepoSet } from "./repo-set.js";
+import { assertChangeRecord, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
+import { sortChanges, type ManifestEntry } from "./records.js";
 import { applySelector, reviewsAsOf, type ActorAliases, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
 
@@ -31,7 +30,7 @@ export interface Population {
   headSha: string | null;
   /** Direct pushes that arrived through a pushed merge, per merge commit (from `landedVia`), most first. */
   viaMerge: { merge: string; count: number }[];
-  /** One entry per repo of the pool, in the order given (sorted by repo for a freeze). A single repo is a pool of one. */
+  /** One entry per repo of the pool, sorted by repo. A single repo is a pool of one. */
   repos: PopulationRepo[];
 }
 
@@ -85,7 +84,9 @@ const schemeOf = (id: string) => id.slice(0, id.indexOf(":"));
  * the sort, the draw formula and N need nothing else. One provider per pool (FR5.6): a pool whose
  * changes carry two id schemes is refused here, for every caller.
  */
-export function assemblePopulation(providerName: string, perRepo: readonly { repo: string; listed: ListChangesResult }[], args: PoolArgs): Population {
+export function assemblePopulation(providerName: string, unordered: readonly { repo: string; listed: ListChangesResult }[], args: PoolArgs): Population {
+  // Sorted by repo, so the order repos were given or finished in cannot change a byte of the result (NFR6).
+  const perRepo = [...unordered].sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
   const only = perRepo.length === 1 ? perRepo[0]!.listed : null;
   const changes = only ? only.changes : perRepo.flatMap((r) => r.listed.changes);
   if (!only) {
@@ -161,42 +162,18 @@ export async function mapPool<T, R>(items: readonly T[], limit: number, fn: (ite
   return out;
 }
 
-export interface UnavailableRepo {
-  repo: string;
-  error: Error;
-}
-
-export interface PooledPopulation extends Population {
-  /** Repos that could not be read (404/403): left out of the population; verify reports their changes as unverified. */
-  unavailable: UnavailableRepo[];
-}
-
 /**
- * A pooled population built straight from the provider (verify, status): each repo listed from its own
- * pinned head, `concurrency` at a time, then assembled in the order given. A repo the provider reports
- * unavailable (`isRepoUnavailable`) is left out and returned in `unavailable` when `tolerateUnavailable`;
- * otherwise it fails the build. `freeze` does not use this: it lists through the checkpointed run in src/api.
+ * A pooled population built straight from the provider: each repo listed (from its own head when one is given),
+ * `concurrency` at a time, then assembled in the order given. Any repo's failure fails the build. `freeze` lists through
+ * the checkpointed run in src/api, and `verify` through src/core/rebuild.ts, which tell a gone repo from a broken one.
  */
-export async function buildPooledPopulation(
-  provider: ScmProvider,
-  args: PoolArgs & { repos: readonly { repo: string; head?: string }[]; concurrency?: number; tolerateUnavailable?: boolean },
-): Promise<PooledPopulation> {
-  const unavailable: UnavailableRepo[] = [];
-  const got = await mapPool(args.repos, args.concurrency ?? 4, async (r) => {
-    try {
-      const listed = await listRepoChanges(provider, { repo: r.repo, window: args.window, selector: args.selector, ...(args.signal ? { signal: args.signal } : {}), ...(r.head !== undefined ? { head: r.head } : {}) });
-      checkListed(provider.name, listed, { repo: r.repo, window: args.window, selector: args.selector });
-      return { repo: r.repo, listed };
-    } catch (e) {
-      if (args.tolerateUnavailable && isRepoUnavailable(e)) {
-        unavailable.push({ repo: r.repo, error: e as Error });
-        return null;
-      }
-      throw e;
-    }
+export async function buildPooledPopulation(provider: ScmProvider, args: PoolArgs & { repos: readonly { repo: string; head?: string }[]; concurrency?: number }): Promise<Population> {
+  const perRepo = await mapPool(args.repos, args.concurrency ?? 4, async (r) => {
+    const listed = await listRepoChanges(provider, { repo: r.repo, window: args.window, selector: args.selector, ...(args.signal ? { signal: args.signal } : {}), ...(r.head !== undefined ? { head: r.head } : {}) });
+    checkListed(provider.name, listed, { repo: r.repo, window: args.window, selector: args.selector });
+    return { repo: r.repo, listed };
   });
-  const perRepo = got.filter((x): x is { repo: string; listed: ListChangesResult } => x !== null);
-  return { ...assemblePopulation(provider.name, perRepo, args), unavailable: unavailable.sort((a, b) => (a.repo < b.repo ? -1 : 1)) };
+  return assemblePopulation(provider.name, perRepo, args);
 }
 
 /**
@@ -207,14 +184,4 @@ export function manifestAliases(changes: readonly ChangeRecord[]): Map<string, s
   const out = new Map<string, string>();
   for (const c of changes) for (const a of [c.author, ...(c.mergedBy ? [c.mergedBy] : []), ...c.reviews.map((r) => r.author)]) if (a.id !== undefined && !out.has(a.id)) out.set(a.id, a.login);
   return out;
-}
-
-/**
- * The population of a registered repo set as it stands now (status, "N so far"): the set resolved through the
- * provider and built like a freeze would, but straight from the provider, with no checkpoints.
- */
-export async function buildSetPopulation(provider: ScmProvider, set: RepoSet, args: PoolArgs & { concurrency?: number }): Promise<Population> {
-  if (set.kind === "repo") return buildPopulation(provider, { repo: set.repo, ...args });
-  const resolved = await resolveRepoSet(provider, set);
-  return buildPooledPopulation(provider, { repos: resolved, ...args });
 }

@@ -22,6 +22,7 @@ import {
 import { logPublicKey } from "./translog.js";
 import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
 import { readCheckpoints } from "../api/checkpoint.js";
+import { EXIT } from "../cli/exit-codes.js";
 import { PR_RLA_VERSION } from "../version.js";
 
 export interface VerifyOptions {
@@ -97,13 +98,18 @@ function noteProviderIdentity(report: VerifyReport, registered: PluginIdentity, 
   if (c5.status === "PASS") c5.status = "WARN";
 }
 
+/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. */
+export function verifyExitCode(report: Pick<VerifyReport, "verdict">): number {
+  return report.verdict === "VERIFIED" ? EXIT.OK : report.verdict === "INCOMPLETE" ? EXIT.INCOMPLETE : EXIT.FAIL;
+}
+
 export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): Promise<number> {
   const report = await runVerify(ctx, opts);
   if (opts.json) {
     ctx.out(JSON.stringify(report, null, 2));
-    return report.ok ? 0 : 1;
+    return verifyExitCode(report);
   }
-  const mark = (s: string) => (s === "PASS" ? "✓" : s === "WARN" ? "(warn)" : s === "SKIP" ? "(skipped)" : "✗");
+  const mark = (s: string) => (s === "PASS" ? "✓" : s === "WARN" ? "(warn)" : s === "SKIP" ? "(skipped)" : s === "INCOMPLETE" ? "(incomplete)" : "✗");
   for (const c of report.checks) {
     ctx.out(`${String(c.n)}. ${c.status.padEnd(4)} ${c.name}: ${c.summary}`);
     for (const d of c.details) ctx.out(`        ${d}`);
@@ -125,6 +131,7 @@ export async function verifyCommand(ctx: CommandContext, opts: VerifyOptions): P
     const reg = readRegistration(configFor(ctx).paths);
     ctx.out(statusLine(report.status, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode: report.mode, selector: reg.record.selector }));
   }
-  ctx.out(report.ok ? "VERIFIED" : `FAILED: ${report.checks.filter((c) => c.status === "FAIL").map((c) => `check ${c.n} (${c.name})`).join(", ")}`);
-  return report.ok ? 0 : 1;
+  const list = (st: string) => report.checks.filter((c) => c.status === st).map((c) => `check ${c.n} (${c.name})`).join(", ");
+  ctx.out(report.verdict === "VERIFIED" ? "VERIFIED" : report.verdict === "FAILED" ? `FAILED: ${list("FAIL")}` : `INCOMPLETE: ${list("INCOMPLETE")} could not be completed; nothing failed, but this is not a verification (exit 6)`);
+  return verifyExitCode(report);
 }

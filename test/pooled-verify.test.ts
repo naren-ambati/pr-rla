@@ -6,16 +6,18 @@ import { recordCommand } from "../src/commands/record.js";
 import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
-import { runVerify } from "../src/commands/verify.js";
+import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { manifestSha256, type CommitmentRecordV2, type ManifestV2, type SignedRecord } from "../src/core/records.js";
 import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { fakeOrg, orgSpec, ORG, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 
 /**
- * U8 at verify, status and sample, on the synthetic org (fixture kind: synthetic): check 5 re-resolves the registered
- * rule and rebuilds each repo from its pinned head. A repo created after freeze makes it FAIL; a repo that is gone gives a
- * WARN with a count (draft 05 §U8, "Repo creation and deletion"). Check 2 holds the manifest to the registered repo set.
+ * U8 at verify, status and sample, on the synthetic org (fixture kind: synthetic): check 5 re-lists the owner, rebuilds
+ * each repo from its pinned head and holds the pool to the rule and the registered repos. A repo created after freeze
+ * makes it FAIL; a repo that is gone, or that this token cannot read, makes it INCOMPLETE with a count (the U8 fix
+ * round; draft 05 §U8 had a WARN). Check 2 holds the manifest to the registered repo set. Every command runs on the
+ * scenario's fake clock (test/helpers/fake-clock.ts), which gives real I/O real time.
  */
 const MANIFEST = "audit/2026-q3.manifest.json";
 const readManifest = (s: PoolScenario) => JSON.parse(readFileSync(join(s.dir, MANIFEST), "utf8")) as ManifestV2;
@@ -28,8 +30,8 @@ async function frozen(org: FakeOrg, o: Parameters<typeof setupPoolAudit>[1] = {}
   expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
   return s;
 }
-const check = async (s: PoolScenario, n: number) => {
-  const r = await runVerify(s.ctx, { offline: false });
+const check = async (s: PoolScenario, n: number, ctx = s.ctx) => {
+  const r = await s.clock.run(runVerify(ctx, { offline: false }));
   return { report: r, check: r.checks.find((c) => c.n === n)! };
 };
 
@@ -49,7 +51,7 @@ describe("verify on an untouched pooled freeze", () => {
 
   it("offline, check 5 is skipped and the rest still run", async () => {
     const s = await frozen(org30());
-    const r = await runVerify(s.ctx, { offline: true });
+    const r = await s.clock.run(runVerify(s.ctx, { offline: true }));
     expect(r.checks.find((c) => c.n === 5)!.status).toBe("SKIP");
     expect(r.checks.find((c) => c.n === 2)!.status).not.toBe("FAIL");
   });
@@ -66,13 +68,22 @@ describe("a repo created after freeze (FR5.2; test-design U8)", () => {
     expect(report.ok).toBe(false);
   });
 
-  it("does not, when its first commit came after the window closed (it cannot change the population)", async () => {
+  it("does not, when the SCM says it was created after the window closed (it cannot hold a window landing)", async () => {
     const org = org30();
     const s = await frozen(org);
-    org.addRepo({ name: "svc-newer", prs: 0, pushes: 0, createdAfterWindow: true });
+    org.addRepo({ name: "svc-newer", prs: 0, pushes: 0, createdAfterWindow: true, createdAt: "2026-10-09T08:00:00Z" });
     const { check: c5 } = await check(s, 5);
     expect(c5.status).toBe("PASS");
-    expect(c5.details.join("\n")).toMatch(/repo acme-org\/svc-newer matches the registered rule but is not in the manifest; it has no change in the window \(its first commit is after the window closed\)/);
+    expect(c5.details).toContain("repo acme-org/svc-newer matches the registered rule but is not in the manifest; it was created 2026-10-09T08:00:00Z, after the window closed, so it cannot hold a window landing");
+  });
+
+  it("nor when the SCM gives no creation time but the repo lists no change in the window", async () => {
+    const org = org30();
+    const s = await frozen(org);
+    org.addRepo({ name: "svc-quiet", prs: 0, pushes: 0, createdAfterWindow: true });
+    const { check: c5 } = await check(s, 5);
+    expect(c5.status).toBe("PASS");
+    expect(c5.details).toContain("repo acme-org/svc-quiet matches the registered rule but is not in the manifest; it lists no change in the window, so it cannot change the population");
   });
 
   it("an empty repo created after freeze is the same", async () => {
@@ -83,8 +94,8 @@ describe("a repo created after freeze (FR5.2; test-design U8)", () => {
   });
 });
 
-describe("a repo that is gone (FR5.2): WARN with a count, never a silent pass", () => {
-  it("deleted: check 5 WARNs, names the repo and how many of its changes are unverified; the audit still verifies", async () => {
+describe("a repo that is gone or unreadable (FR5.2): INCOMPLETE with a count, never a silent pass", () => {
+  it("deleted: check 5 is INCOMPLETE, names the repo and how many of its changes were not rebuilt; verify exits 6", async () => {
     const org = org30();
     const s = await frozen(org);
     const m = readManifest(s);
@@ -93,23 +104,36 @@ describe("a repo that is gone (FR5.2): WARN with a count, never a silent pass", 
     expect(n).toBeGreaterThan(0);
     org.removeRepo("svc-05");
     const { report, check: c5 } = await check(s, 5);
-    expect(c5.status).toBe("WARN");
-    expect(c5.details).toContain(`WARN cannot rebuild ${gone} (404): its ${n} changes are unverified`);
+    expect(c5.status).toBe("INCOMPLETE");
+    expect(c5.details).toContain(`INCOMPLETE ${gone}: gone: not in acme-org's listing, and its repo-level metadata answers HTTP 404 (deleted, or hidden from this token): its ${n} changes in the manifest were not rebuilt`);
     expect(c5.summary).toBe(`population ${(m.N - n).toLocaleString("en-US")}/${(m.N - n).toLocaleString("en-US")} match · ${n} changes in 1 repo(s) could not be rebuilt`);
-    expect(report.ok).toBe(true);
+    expect(report).toMatchObject({ ok: false, verdict: "INCOMPLETE" });
+    expect(await s.clock.run(verifyCommand(s.ctx, {}))).toBe(6);
   });
 
-  it("no longer visible to the verifier's token (403): the same WARN, and the other repos still match", async () => {
+  it("listed but unreadable by the verifier's token (403 on its metadata): no access, said differently from gone; the other repos still match", async () => {
     const org = org30();
     const s = await frozen(org);
     const m = readManifest(s);
     org.control.gone.set(`${ORG}/svc-09`, 403);
-    org.control.gone.set(`${ORG}/svc-10`, 403);
-    const n = m.changes.filter((c) => c.repo === `${ORG}/svc-09` || c.repo === `${ORG}/svc-10`).length;
+    org.control.gone.set(`${ORG}/svc-11`, 403);
+    const n = m.changes.filter((c) => c.repo === `${ORG}/svc-09` || c.repo === `${ORG}/svc-11`).length;
     const { check: c5 } = await check(s, 5);
-    expect(c5.status).toBe("WARN");
-    expect(c5.details.filter((d) => d.startsWith("WARN cannot rebuild"))).toHaveLength(2);
+    expect(c5.status).toBe("INCOMPLETE");
+    expect(c5.details.filter((d) => /^INCOMPLETE acme-org\/svc-(09|11): no access: its repo-level metadata answers HTTP 403/.test(d))).toHaveLength(2);
     expect(c5.summary).toMatch(new RegExp(`${n} changes in 2 repo\\(s\\) could not be rebuilt$`));
+  });
+
+  it("not visible to the verifier's token at all, as GitHub hides a private repo (left out of the listing, 404 everywhere): INCOMPLETE, and why", async () => {
+    const org = org30();
+    const s = await frozen(org);
+    org.control.invisible.add(`${ORG}/svc-03`); // private
+    org.control.viewer.role = "member";
+    const { report, check: c5 } = await check(s, 5);
+    expect(c5.status).toBe("INCOMPLETE");
+    expect(c5.details.join("\n")).toMatch(/INCOMPLETE acme-org\/svc-03: gone: not in acme-org's listing, and its repo-level metadata answers HTTP 404 \(deleted, or hidden from this token\)/);
+    expect(c5.details.join("\n")).toMatch(/INCOMPLETE cannot establish that this token sees every private repository under acme-org: auditor is a member of acme-org, not an owner/);
+    expect(report.verdict).toBe("INCOMPLETE");
   });
 
   it("a gone repo does not hide a real difference in the others", async () => {
@@ -128,16 +152,15 @@ describe("a repo that is gone (FR5.2): WARN with a count, never a silent pass", 
   });
 });
 
-describe("a rule the verifier cannot re-resolve", () => {
-  it("is a WARN that says repos added after freeze would not be seen, not a silent pass", async () => {
+describe("a rule the verifier cannot re-list", () => {
+  it("is INCOMPLETE: repos added or excluded since freeze would not be seen; every manifest repo is still rebuilt", async () => {
     const org = org30();
     const s = await frozen(org);
-    const noListing = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).pathname.startsWith("/orgs/") ? Promise.resolve(new Response('{"message":"Forbidden"}', { status: 403 })) : org.fetch(input, init))) as typeof fetch;
-    const r = await runVerify(s.ctxFor(noListing), { offline: false });
-    const c5 = r.checks.find((c) => c.n === 5)!;
-    expect(c5.status).toBe("WARN");
-    expect(c5.details.join("\n")).toMatch(/WARN cannot re-resolve the registered rule \(.*HTTP 403.*\): repos added after freeze would not be seen/);
-    expect(c5.summary).toMatch(/^population [\d,]+\/[\d,]+ match$/); // every manifest repo was still rebuilt
+    const noListing = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).pathname === `/orgs/${ORG}/repos` ? Promise.resolve(new Response('{"message":"Forbidden"}', { status: 403 })) : org.fetch(input, init))) as typeof fetch;
+    const { check: c5 } = await check(s, 5, s.ctxFor(noListing));
+    expect(c5.status).toBe("INCOMPLETE");
+    expect(c5.details.join("\n")).toMatch(/INCOMPLETE cannot re-list the repositories under acme-org \(.*HTTP 403.*\): repos added, renamed or excluded since freeze would not be seen/);
+    expect(c5.summary).toMatch(/^population [\d,]+\/[\d,]+ match · completeness not established \(1 reason\(s\) below\)$/);
   });
 });
 
@@ -158,15 +181,17 @@ describe("the manifest is held to the registered repo set (check 2, and check 5 
     });
     const { report, check: c5 } = await check(s, 5);
     expect(c5.status).toBe("FAIL");
-    expect(c5.summary).toMatch(/^repo acme-org\/svc-12 matches the registered rule but is not in the manifest \(\d+ changes landed in the window\)$/);
-    // The commitment still names the original manifest.
-    expect(report.checks.find((c) => c.n === 2)!.status).toBe("FAIL");
+    expect(c5.summary).toMatch(/^registered repo acme-org\/svc-12 is not in the manifest \(\d+ changes landed in the window\)$/);
+    // Check 2 FAILs too: the commitment still names the original manifest, and the manifest drops a registered repo.
+    const c2 = report.checks.find((c) => c.n === 2)!;
+    expect(c2.status).toBe("FAIL");
+    expect(c2.details.join("\n")).toMatch(/manifest drops 1 registered repo\(s\) \(e\.g\. acme-org\/svc-12\)/);
   });
 
   it("padding: a repo outside the registered rule is refused by check 2, with no network", async () => {
     const s = await frozen(org30());
     rewrite(s, (m) => ({ ...m, repos: [...m.repos, { repo: "elsewhere/other", repoId: null, defaultBranch: "main", headSha: null }].sort((a, b) => (a.repo < b.repo ? -1 : 1)) }));
-    const r = await runVerify(s.ctx, { offline: true });
+    const r = await s.clock.run(runVerify(s.ctx, { offline: true }));
     const c2 = r.checks.find((c) => c.n === 2)!;
     expect(c2.status).toBe("FAIL");
     expect(c2.details.join("\n")).toMatch(/manifest lists 1 repo\(s\) outside the registered rule \(e\.g\. elsewhere\/other\)/);
@@ -175,7 +200,7 @@ describe("the manifest is held to the registered repo set (check 2, and check 5 
   it("a change from a repo the manifest does not list is refused by check 2", async () => {
     const s = await frozen(org30());
     rewrite(s, (m) => ({ ...m, changes: m.changes.map((c, i) => (i === 0 ? { ...c, repo: `${ORG}/svc-unlisted` } : c)) }));
-    const r = await runVerify(s.ctx, { offline: true });
+    const r = await s.clock.run(runVerify(s.ctx, { offline: true }));
     expect(r.checks.find((c) => c.n === 2)!.details.join("\n")).toMatch(/manifest has changes from 1 repo\(s\) it does not list \(e\.g\. acme-org\/svc-unlisted\)/);
   });
 
@@ -184,7 +209,7 @@ describe("the manifest is held to the registered repo set (check 2, and check 5 
     const s = await frozen(org, { repos: `[${ORG}/svc-01, ${ORG}/svc-02, ${ORG}/svc-03]` });
     expect((await check(s, 5)).check.status).toBe("PASS");
     rewrite(s, (m) => ({ ...m, repos: m.repos.filter((r) => r.repo !== `${ORG}/svc-03`), changes: m.changes.filter((c) => c.repo !== `${ORG}/svc-03`), N: m.changes.filter((c) => c.repo !== `${ORG}/svc-03`).length }));
-    const r = await runVerify(s.ctx, { offline: true });
+    const r = await s.clock.run(runVerify(s.ctx, { offline: true }));
     expect(r.checks.find((c) => c.n === 2)!.details.join("\n")).toMatch(/manifest repos differ from the registered list: 1 registered repo\(s\) missing \(e\.g\. acme-org\/svc-03\)/);
   });
 });
@@ -211,36 +236,38 @@ describe("FR5.3: one certificate for the pool; per-repo counts are descriptive",
     const org = org30();
     const s = await frozen(org);
     await s.advance(13 * 3600_000); // 2026-10-21T01:00Z: R has published
-    expect(await sampleCommand(s.ctx, { through: 40 })).toBe(0);
+    expect(await s.clock.run(sampleCommand(s.ctx, { through: 40 }))).toBe(0);
     const draws = JSON.parse(readFileSync(join(s.dir, "audit/2026-q3/draws.json"), "utf8")) as { repo: string; draws: { draw: number; changeId: string }[] };
     expect(draws.repo).toBe("acme-org (30 repos)");
-    for (const d of draws.draws.slice(0, 12)) expect(await recordCommand(s.ctx, String(d.draw), "pass", { reviewer: "alice" })).toBe(0);
+    for (const d of draws.draws.slice(0, 12)) expect(await s.clock.run(recordCommand(s.ctx, String(d.draw), "pass", { reviewer: "alice" }))).toBe(0);
     s.out.length = 0;
-    expect(await statusCommand(s.ctx, {})).toBe(0);
+    expect(await s.clock.run(statusCommand(s.ctx, {}))).toBe(0);
     const text = s.out.join("\n");
     expect(text).toMatch(/per-repo counts are descriptive; the risk limit applies to the pool/);
     expect(text).toMatch(/\n {2}repo +N +draws +fails\n/);
     expect(text).toMatch(/acme-org\/svc-\d\d +\d+ +\d+ +0/);
     s.out.length = 0;
-    await statusCommand(s.ctx, { json: true });
+    await s.clock.run(statusCommand(s.ctx, { json: true }));
     const json = JSON.parse(s.out.join("\n")) as { perRepo: { repo: string; N: number; draws: number; fails: number }[] };
     const m = readManifest(s);
     expect(json.perRepo.length).toBe(30);
     expect(json.perRepo.reduce((n, r) => n + r.N, 0)).toBe(m.N);
     expect(json.perRepo.reduce((n, r) => n + r.draws, 0)).toBe(12);
     // And the whole audit still verifies.
-    const r = await runVerify(s.ctx, { offline: false });
+    const r = await s.clock.run(runVerify(s.ctx, { offline: false }));
     expect(r.checks.find((c) => c.n === 5)!.status).toBe("PASS");
     expect(r.checks.find((c) => c.n === 6)!.status).toBe("PASS");
   });
 
-  it("status before the freeze reports N so far from the whole pool", async () => {
+  it("status before the freeze does not list a pool (that costs about what the freeze does); it says how to get N", async () => {
     const org = org30();
     const s = setupPoolAudit(org);
     await s.clock.run(registerCommand(s.ctx, {}));
     await s.advance(1000);
     s.out.length = 0;
-    await statusCommand(s.ctx, {});
-    expect(s.out.join("\n")).toMatch(/window closed, not frozen · N so far [\d,]+/);
+    const before = org.requests();
+    await s.clock.run(statusCommand(s.ctx, {}));
+    expect(org.requests()).toBe(before);
+    expect(s.out.join("\n")).toMatch(/window closed, not frozen · N so far: not computed for a pool .*"pr-rla freeze --dry-run --estimate" predicts them and "pr-rla freeze --dry-run" counts N/);
   });
 });

@@ -12,7 +12,11 @@ import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
-import type { DrawsFile, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
+import type { CommitmentRecordV2, DrawsFile, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
+import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
+import { trustFor } from "../src/commands/context.js";
+import { obtainTimestamps } from "../src/commands/timestamps.js";
+import { TSA_RETRY_DEADLINE_MS } from "../src/net/contract.js";
 import { roundPublishTime } from "../src/core/seed.js";
 import { loadConfig } from "../src/config.js";
 import { isoMs, readToken } from "../src/timestamp/verify.js";
@@ -178,14 +182,26 @@ describe("U_k at the ±1 s boundaries", () => {
     expect(await registerCommand(s.ctx, {})).toBe(0);
     const R = 33245812;
     const pub = roundPublishTime(R);
+    const deadline = TSA_RETRY_DEADLINE_MS / 1000;
+    // U8 fix round (finding 10): freeze no longer starts when its tokens could be issued after R, i.e. within the
+    // authorities' retry deadline of it. Just outside that, it freezes and U = clock + 1 s passes check 2.
     const ok = cloneScenario(s);
-    at(ok, new Date((pub - 2) * 1000).toISOString()); // U = pub - 1
+    at(ok, new Date((pub - deadline - 2) * 1000).toISOString());
     expect(await freezeCommand(ok.ctx, {})).toBe(0);
     expect((await runVerify(ok.ctx, { offline: true })).checks[1]!.status).toBe("PASS");
-    const late = cloneScenario(s);
-    at(late, new Date((pub - 1) * 1000).toISOString()); // U = pub
-    await freezeCommand(late.ctx, {});
-    expect(late.out).toContain("FAIL manifest logged after the seed was public");
+    const near = cloneScenario(s);
+    at(near, new Date((pub - deadline) * 1000).toISOString());
+    await expect(freezeCommand(near.ctx, {})).rejects.toThrow(/within the timestamp authorities' 5-minute retry deadline/);
+    expect(existsSync(join(near.dir, `${W}/manifest-commitment.json`))).toBe(false);
+    // A commitment signed before R whose tokens say U = publishTime(R) still FAILs check 2 (another tool could write one).
+    const late = cloneScenario(ok);
+    const cmPath = `${W}/manifest-commitment.json`;
+    const cm = readJ<SignedRecord<CommitmentRecordV2>>(late, cmPath);
+    const reg = readJ<SignedRecord<RegistrationRecordV2>>(late, `${W}/registration.json`);
+    at(late, new Date((pub - 1) * 1000).toISOString()); // genTime = clock, accuracy 1 s → U = pub
+    const signed = signRecord({ ...cm.record, frozenAt: new Date((pub - 1) * 1000).toISOString().replace(".000Z", "Z") }, loadOrCreateKey(join(late.dir, ".pr-rla/signing-key.pem")));
+    const got = await obtainTimestamps(late.ctx, signed, signed.record.frozenAt, reg.record.timestamping, trustFor(late.ctx));
+    writeJ(late, cmPath, { ...signed, timestamps: got.timestamps });
     const c2 = (await runVerify(late.ctx, { offline: true })).checks[1]!;
     expect(c2.status).toBe("FAIL");
     expect(c2.summary).toBe("manifest logged after the seed was public");

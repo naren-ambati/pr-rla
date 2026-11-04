@@ -39,12 +39,23 @@ async function registered(org: FakeOrg, o: Parameters<typeof setupPoolAudit>[1] 
 }
 
 describe("FR5.1 / FR5.7: registering a repo rule", () => {
-  it("signs the rule, not its resolution, and says what it resolves to now (archived repos and forks are out by default)", async () => {
+  it("signs the rule and, by repo id, the repos it resolves to now (archived repos and forks are out by default)", async () => {
     const org = org40();
     const s = setupPoolAudit(org);
     expect(await s.clock.run(registerCommand(s.ctx, {}))).toBe(0);
-    expect(registrationOf(s).record.repos).toEqual({ kind: "rule", owner: ORG, include: ["*"], exclude: [], archived: false, forks: false, visibility: ["internal", "private", "public"] });
-    expect(s.out.join("\n")).toMatch(/repos: rule acme-org: include \* · archived excluded · forks excluded · visibility internal, private, public · resolves to 40 now; resolved again at freeze/);
+    const rec = registrationOf(s).record;
+    expect(rec.repos).toEqual({ kind: "rule", owner: ORG, include: ["*"], exclude: [], archived: false, forks: false, visibility: ["internal", "private", "public"] });
+    // U8 fix round (finding 1): the resolution is signed too, so an attribute changed after registration cannot take a repo out.
+    expect(rec.registeredRepos).toHaveLength(40);
+    expect(rec.registeredRepos!.map((r) => r.repo)).toEqual(Array.from({ length: 40 }, (_, i) => `${ORG}/svc-${String(i).padStart(2, "0")}`));
+    expect(rec.registeredRepos![7]).toEqual({ repo: `${ORG}/svc-07`, repoId: org.idOf("svc-07") });
+    expect(s.out.join("\n")).toMatch(/repos: rule acme-org: include \* · archived excluded · forks excluded · visibility internal, private, public · resolves to 40 now \(signed by repo id: they stay in the pool whatever their name, archive state or visibility at freeze\); resolved again at freeze/);
+  });
+
+  it("a list signs its repos as written, with no ids (the SCM is not asked)", async () => {
+    const s = setupPoolAudit(org40(), { repos: `[${ORG}/svc-01, ${ORG}/svc-02]` });
+    expect(await s.clock.run(registerCommand(s.ctx, {}))).toBe(0);
+    expect(registrationOf(s).record.registeredRepos).toBeUndefined();
   });
 
   it("archived: true and forks: true put them back in", async () => {
@@ -114,10 +125,24 @@ describe("FR5.2 / FR5.3 / FR5.7: the pooled freeze writes one manifest and one c
 
   it("a list registers exactly its repos (no ids: the SCM was not asked), P=4 listings at a time", async () => {
     const org = org40();
-    const s = await registered(org, { repos: `[${ORG}/svc-03, ${ORG}/svc-01, ${ORG}/svc-02]` });
-    expect(registrationOf(s).record.repos).toEqual({ kind: "list", repos: [`${ORG}/svc-01`, `${ORG}/svc-02`, `${ORG}/svc-03`] });
-    await s.clock.run(freezeCommand(s.ctx, {}));
-    expect(manifestOf(s).repos.map((r) => [r.repo, r.repoId])).toEqual([[`${ORG}/svc-01`, null], [`${ORG}/svc-02`, null], [`${ORG}/svc-03`, null]]);
+    const list = [3, 1, 2, 9, 8, 6].map((i) => `${ORG}/svc-0${i}`);
+    const s = await registered(org, { repos: `[${list.join(", ")}]` });
+    expect(registrationOf(s).record.repos).toEqual({ kind: "list", repos: [...list].sort() });
+    // Every request takes 2 s on the test's clock, so listings overlap as they would against a real server.
+    org.control.latency = { ms: 2000, sleep: (ms) => s.clock.sleep(ms) };
+    s.out.length = 0;
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
+    expect(manifestOf(s).repos.map((r) => [r.repo, r.repoId])).toEqual([...list].sort().map((r) => [r, null]));
+    expect(s.out.join("\n")).toMatch(/freeze: list of 6 repositories → 6 repos, 4 at a time/);
+    expect(org.peakReposInFlight()).toBe(4); // P = 4 (FR5.7): four repos at once, never more, with six to list
+  });
+
+  it("P follows freeze.concurrency: one at a time when it says 1", async () => {
+    const org = org40();
+    const s = await registered(org, { repos: `[${ORG}/svc-01, ${ORG}/svc-02, ${ORG}/svc-03]`, extra: `${SLOW}\nfreeze: { concurrency: 1 }` });
+    org.control.latency = { ms: 2000, sleep: (ms) => s.clock.sleep(ms) };
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
+    expect(org.peakReposInFlight()).toBe(1);
   });
 });
 
@@ -207,7 +232,7 @@ describe("FR5.4 / NFR5: a rate-limited, stopped or killed freeze resumes to a by
     expect(await s.clock.run(freezeCommand(s.ctx, { resume: runId }))).toBe(0);
     expect(manifestText(s)).toBe(want.text);
     expect(org.requests() - before).toBeLessThan(want.requests);
-    expect(new FreezeCheckpointStore(s.dir, "2026-q3", runId).complete).toBe(true);
+    expect(new FreezeCheckpointStore(s.dir, "2026-q3", runId).header()).not.toBeNull();
   });
 
   it("--resume takes a unique prefix of the run id, and refuses what it cannot continue", async () => {
@@ -227,6 +252,23 @@ describe("FR5.4 / NFR5: a rate-limited, stopped or killed freeze resumes to a by
     expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
     expect(manifestOf(s).repos.length).toBe(41);
     expect(FreezeCheckpointStore.runs(s.dir, "2026-q3").length).toBe(2);
+  });
+
+  it("a re-freeze with --force that stops prints the command that finishes it, --force included, and that command continues the run", async () => {
+    const want = await reference();
+    const org = org40();
+    const s = await registered(org);
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0); // the window is frozen; replacing it needs --force
+    org.control.stuck.add(`${ORG}/svc-17`);
+    let msg = "";
+    await s.clock.run(freezeCommand(s.ctx, { force: true })).catch((e) => (msg = (e as Error).message));
+    expect(msg).toMatch(/Continue with: pr-rla freeze --force --resume [0-9a-f]{64}$/);
+    org.control.stuck.clear();
+    const runId = /--resume ([0-9a-f]{64})$/.exec(msg)![1]!;
+    await expect(s.clock.run(freezeCommand(s.ctx, { resume: runId }))).rejects.toThrow(/exists: this window is frozen/);
+    const before = org.requests();
+    expect(await s.clock.run(freezeCommand(s.ctx, { force: true, resume: runId }))).toBe(0);
+    expect(org.requests() - before).toBeLessThan(want.requests);
   });
 
   it("a plain re-run of the same command also continues its run (same inputs, same id)", async () => {
@@ -251,20 +293,48 @@ describe("FR5.4 / NFR5: a rate-limited, stopped or killed freeze resumes to a by
     expect(org.requests() - before).toBeGreaterThan(400); // listed again, all of it
   });
 
-  it("--resume on a single repo, or on a dry run, has nothing to resume; with --force it is contradictory", async () => {
+  it("--resume on a single repo, or on a dry run, has nothing to resume; with --force it continues a forced run and refuses an unknown one", async () => {
     const s = await registered(org40());
     await expect(s.clock.run(freezeCommand(s.ctx, { dryRun: true, resume: "abcdef0123" }))).rejects.toThrow(/nothing to resume/);
-    await expect(s.clock.run(freezeCommand(s.ctx, { force: true, resume: "abcdef0123" }))).rejects.toThrow(/--resume continues a stopped run and --force starts over/);
+    await expect(s.clock.run(freezeCommand(s.ctx, { force: true, resume: "abcdef0123" }))).rejects.toThrow(/no checkpoint for run abcdef0123/);
   });
 });
 
 describe("FR5.4: all-or-nothing (no --skip-repo)", () => {
-  it.each([[403], [404]] as const)("a repo that answers %i fails the run, names the repo and writes no manifest", async (status) => {
+  it.each([[403], [404]] as const)("a repo the owner's listing shows that answers %i fails the run, names the repo and writes no manifest", async (status) => {
     const org = org40();
     const s = await registered(org);
     org.control.gone.set(`${ORG}/svc-21`, status);
     await expect(s.clock.run(freezeCommand(s.ctx, {}))).rejects.toThrow(new RegExp(`repo ${ORG}/svc-21: .*A repo the token cannot read must be excluded in the registered rule, before the seed; nothing is skipped`));
     expect(existsSync(join(s.dir, "audit/2026-q3.manifest.json"))).toBe(false);
+  });
+
+  it("a registered repo deleted before freeze is recorded as gone, with the probe's evidence; verify is then INCOMPLETE, never VERIFIED", async () => {
+    const org = org40();
+    const s = await registered(org);
+    org.removeRepo("svc-21");
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
+    const m = manifestOf(s);
+    expect(m.repos.map((r) => r.repo)).not.toContain(`${ORG}/svc-21`);
+    expect(m.goneRepos).toEqual([{ repo: `${ORG}/svc-21`, repoId: org.idOf("svc-21"), status: 404, detail: expect.stringMatching(/HTTP 404/), probedAt: "2026-10-20T12:00:00Z" }]);
+    expect(s.out.join("\n")).toMatch(/1 registered repo\(s\) are gone \(acme-org\/svc-21: HTTP 404\)/);
+    const r = await s.clock.run(runVerify(s.ctx, { offline: false }));
+    expect(r.checks.find((c) => c.n === 2)!.status).not.toBe("FAIL");
+    expect(r.checks.find((c) => c.n === 5)!.details).toContain(`INCOMPLETE registered repo ${ORG}/svc-21 was gone at freeze (HTTP 404 at 2026-10-20T12:00:00Z) and still is (HTTP 404): its changes in the window are unknown`);
+    expect(r.verdict).toBe("INCOMPLETE");
+    // If it comes back with changes in the window, it was hidden from the population: FAIL.
+    org.addRepo({ name: "svc-21", prs: 10, pushes: 2 });
+    const back = await s.clock.run(runVerify(s.ctx, { offline: false }));
+    expect(back.checks.find((c) => c.n === 5)!.details.join("\n")).toMatch(/FAIL registered repo acme-org\/svc-21 was recorded gone at freeze \(HTTP 404 at 2026-10-20T12:00:00Z\) but exists, with \d+ changes in the window that are not in the manifest/);
+  });
+
+  it("a listed repo that is gone (a registered list) is recorded the same way, and a resumed run keeps the first probe's evidence", async () => {
+    const org = org40();
+    const s = await registered(org, { repos: `[${ORG}/svc-01, ${ORG}/svc-02, ${ORG}/svc-03]` });
+    org.removeRepo("svc-02");
+    expect(await s.clock.run(freezeCommand(s.ctx, {}))).toBe(0);
+    expect(manifestOf(s).goneRepos).toEqual([{ repo: `${ORG}/svc-02`, repoId: null, status: 404, detail: expect.stringMatching(/HTTP 404/), probedAt: expect.any(String) }]);
+    expect(manifestOf(s).repos.map((r) => r.repo)).toEqual([`${ORG}/svc-01`, `${ORG}/svc-03`]);
   });
 });
 
@@ -308,6 +378,49 @@ describe("FR5.5: freeze --dry-run --estimate", () => {
     expect(Math.abs(estimate.requests.total - requests) / requests).toBeLessThanOrEqual(0.2);
     expect(Math.abs(estimate.wallMs.predicted - wallMs) / wallMs).toBeLessThanOrEqual(0.5);
   });
+
+  it("bound by request latency rather than the budget (a slow server, 1.5 s a request): the same bounds, and the latency is measured", async () => {
+    const run = async (o: { latency: number }) => {
+      const org = org40();
+      const s = await registered(org, { extra: "" });
+      org.control.latency = { ms: o.latency, sleep: (ms) => s.clock.sleep(ms) };
+      return { org, s };
+    };
+    const a = await run({ latency: 1500 });
+    await a.s.clock.run(freezeCommand(a.s.ctx, { estimate: true, json: true }));
+    const { estimate } = estimateOf(a.s);
+    expect(estimate.wallMs.work).toBeGreaterThan(estimate.wallMs.budget); // the work, not the budget, binds
+    expect((estimate as unknown as { latencyMs: number }).latencyMs).toBe(1500);
+    const b = await run({ latency: 1500 });
+    const r0 = b.org.requests();
+    const t0 = b.s.clock.now();
+    expect(await b.s.clock.run(freezeCommand(b.s.ctx, {}))).toBe(0);
+    const requests = b.org.requests() - r0;
+    const wallMs = b.s.clock.now() - t0;
+    expect(wallMs).toBeGreaterThan(60_000);
+    expect(Math.abs(estimate.requests.total - requests) / requests).toBeLessThanOrEqual(0.2);
+    expect(Math.abs(estimate.wallMs.predicted - wallMs) / wallMs).toBeLessThanOrEqual(0.5);
+  });
+
+  it("an org larger than the probe limit (240 repos, every 1.2th probed and scaled), with latency: within the same bounds", async () => {
+    const mk = () => fakeOrg(orgSpec({ eligible: 240, archived: 3, forks: 2, scale: 1, seed: 11 }));
+    const orgA = mk();
+    const a = await registered(orgA, { extra: "" });
+    orgA.control.latency = { ms: 800, sleep: (ms) => a.clock.sleep(ms) };
+    await a.clock.run(freezeCommand(a.ctx, { estimate: true, json: true }));
+    const { estimate } = estimateOf(a);
+    expect(estimate).toMatchObject({ supported: true, repos: 240, sampled: 200 });
+    const orgB = mk();
+    const b = await registered(orgB, { extra: "" });
+    orgB.control.latency = { ms: 800, sleep: (ms) => b.clock.sleep(ms) };
+    const r0 = orgB.requests();
+    const t0 = b.clock.now();
+    expect(await b.clock.run(freezeCommand(b.ctx, {}))).toBe(0);
+    const requests = orgB.requests() - r0;
+    const wallMs = b.clock.now() - t0;
+    expect(Math.abs(estimate.requests.total - requests) / requests).toBeLessThanOrEqual(0.2);
+    expect(Math.abs(estimate.wallMs.predicted - wallMs) / wallMs).toBeLessThanOrEqual(0.5);
+  }, 180_000);
 
   it("prints the figures, the budget it paced to and the time left before R; reads only", async () => {
     const org = org40();
@@ -359,19 +472,11 @@ describe("timestamps on a pooled freeze that takes a long time (tokens bound the
       Object.defineProperty(tsa, "nowMs", { get: () => s.clock.now() });
       const mixed = ((input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).hostname === "api.github.com" ? org.fetch(input, init) : globalThis.fetch(input, init))) as typeof fetch;
       const ctx = s.ctxFor(mixed);
-      const drive = async <T>(work: Promise<T>): Promise<T> => {
-        for (;;) {
-          try {
-            return await s.clock.run(work);
-          } catch (e) {
-            if (!/waiting on something other than the clock/.test((e as Error).message)) throw e;
-            await new Promise((r) => setTimeout(r, 5));
-          }
-        }
-      };
-      expect(await drive(registerCommand(ctx, {}))).toBe(0);
+      // The authorities answer over real loopback HTTP: the fake clock gives those round trips real time while no fake
+      // timer is pending (test/helpers/fake-clock.ts), so the commands run on it like every other.
+      expect(await s.clock.run(registerCommand(ctx, {}))).toBe(0);
       await s.advance(12 * 3600_000);
-      expect(await drive(freezeCommand(ctx, {}))).toBe(0);
+      expect(await s.clock.run(freezeCommand(ctx, {}))).toBe(0);
       const m = manifestOf(s);
       const done = commitmentOf(s).record.frozenAt;
       expect(Date.parse(done) - Date.parse(m.frozenAt)).toBeGreaterThan(10 * 60_000); // longer than the tokens' 10-minute tolerance
@@ -379,7 +484,7 @@ describe("timestamps on a pooled freeze that takes a long time (tokens bound the
       expect(signed.timestamps.map((t) => t.tsa).sort()).toEqual(["test-a", "test-b"]);
       expect(signed.timestamps.every((t) => Math.abs(Date.parse(t.genTime) - Date.parse(done)) < 5000)).toBe(true);
       expect(s.out.join("\n")).toMatch(/timestamps: 2 of 2 TSAs \(test-a, test-b\) · k = 2 · PROVEN/);
-      const report = await drive(runVerify(ctx, { offline: false }));
+      const report = await s.clock.run(runVerify(ctx, { offline: false }));
       expect(report.timestampTamperProof).toBe(true);
       expect(report.checks.find((c) => c.n === 2)!.status).toBe("PASS");
       expect(report.checks.find((c) => c.n === 5)!.status).toBe("PASS");

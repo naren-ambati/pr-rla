@@ -1,5 +1,6 @@
 import { REPO_VISIBILITIES, type RepoRef, type RepoSetRule, type RepoVisibility, type ScmProvider } from "../sdk/provider.js";
-import type { RepoSet } from "./records.js";
+import { probeRepo } from "./failures.js";
+import type { GoneRepo, ListedRepo, RegisteredRepo, RepoListing, RepoSet } from "./records.js";
 
 /**
  * Repo sets (U8, FR5.1/FR5.6/FR5.7): what an audit covers, how a rule resolves, and the population
@@ -62,9 +63,50 @@ export function repoMatchesRule(rule: RepoSetRule, repo: string): boolean {
   return underOwner(rule.owner, repo) && rule.include.some((g) => globMatches(g, repo)) && !rule.exclude.some((g) => globMatches(g, repo));
 }
 
+/**
+ * Every clause of the rule that excludes a repository, in rule order (empty: the rule matches it): `owner` (not under
+ * the rule's owner), `include` (no include glob matches its path), `exclude:<glob>`, `archived`, `fork`,
+ * `visibility:<v>`. All but `owner` and `fork` are attributes the repo's owners can change at any time (its name, its
+ * archive state, its visibility): see `isMutableExclusion`.
+ */
+export function ruleExclusions(rule: RepoSetRule, ref: Pick<RepoRef, "repo" | "archived" | "fork" | "visibility">): string[] {
+  const out: string[] = [];
+  if (!underOwner(rule.owner, ref.repo)) out.push("owner");
+  if (!rule.include.some((g) => globMatches(g, ref.repo))) out.push("include");
+  const ex = rule.exclude.find((g) => globMatches(g, ref.repo));
+  if (ex !== undefined) out.push(`exclude:${ex}`);
+  if (ref.archived && !rule.archived) out.push("archived");
+  if (ref.fork && !rule.forks) out.push("fork");
+  if (!rule.visibility.includes(ref.visibility)) out.push(`visibility:${ref.visibility}`);
+  return out;
+}
+
+/** A clause the repo's owners can change after registration: its name (include, exclude), archive state or visibility. */
+export function isMutableExclusion(clause: string): boolean {
+  return clause === "include" || clause === "archived" || clause.startsWith("exclude:") || clause.startsWith("visibility:");
+}
+
+/** How an exclusion reads in output: `archived`, `visibility private`, `no include glob matches`, `exclude glob *-sandbox`. */
+export function describeExclusions(clauses: readonly string[]): string {
+  return clauses.map((c) => (c === "include" ? "no include glob matches its name" : c.startsWith("exclude:") ? `exclude glob ${c.slice(8)}` : c.startsWith("visibility:") ? `visibility ${c.slice(11)}` : c === "owner" ? "not under the owner" : c)).join(", ");
+}
+
 /** The repositories a rule keeps: globs and the archived, fork and visibility flags (FR5.7: archived and forks are out unless the rule says so). */
 export function applyRule(rule: RepoSetRule, refs: readonly RepoRef[]): RepoRef[] {
-  return refs.filter((r) => repoMatchesRule(rule, r.repo) && (rule.archived || !r.archived) && (rule.forks || !r.fork) && rule.visibility.includes(r.visibility));
+  return refs.filter((r) => ruleExclusions(rule, r).length === 0);
+}
+
+/**
+ * The entry of `items` that is the same repository as `key`: by stable id first, then by path (case-insensitive) where
+ * either id is unknown. Two known, different ids are two repositories even under one path (deleted and created again).
+ */
+export function matchRepo<T extends { repo: string; repoId?: string | null }>(items: readonly T[], key: { repo: string; repoId?: string | null }): T | undefined {
+  if (key.repoId) {
+    const byId = items.find((x) => x.repoId === key.repoId);
+    if (byId) return byId;
+  }
+  const name = lower(key.repo);
+  return items.find((x) => lower(x.repo) === name && (!key.repoId || !x.repoId));
 }
 
 // ---------------------------------------------------------------------------
@@ -235,15 +277,117 @@ export async function resolveRepoSet(provider: Pick<ScmProvider, "name" | "listR
     .sort((a, b) => cmp(a.repo, b.repo));
 }
 
+/** `listRepos` for a rule, every entry re-validated (well formed, under the owner, listed once). */
+export async function listOwner(provider: Pick<ScmProvider, "name" | "listRepos">, set: RepoSetRule): Promise<RepoRef[]> {
+  const refs = await provider.listRepos!(set);
+  if (!Array.isArray(refs)) throw new RepoSetError(`provider ${provider.name}: listRepos returned ${typeof refs}, not a list`);
+  const seen = new Set<string>();
+  for (const [i, ref] of refs.entries()) {
+    const why = refProblems(ref, set.owner);
+    if (why) throw new RepoSetError(`provider ${provider.name}: listRepos entry ${i} ${why}`);
+    const k = lower(ref.repo);
+    if (seen.has(k)) throw new RepoSetError(`provider ${provider.name}: listRepos returned ${ref.repo} twice`);
+    seen.add(k);
+  }
+  return refs;
+}
+
+/** A RepoRef as a manifest listing entry, with the rule's clauses that exclude it. */
+export function listedRepo(rule: RepoSetRule, r: RepoRef): ListedRepo {
+  return { repo: r.repo, repoId: r.id, defaultBranch: r.defaultBranch, archived: r.archived, fork: r.fork, visibility: r.visibility, createdAt: typeof r.createdAt === "string" ? r.createdAt : null, excludedBy: ruleExclusions(rule, r) };
+}
+
+/** The unfiltered listing of a rule's owner, as a manifest records it (sorted by repo), with what the token could see. */
+export async function ownerListing(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility">, set: RepoSetRule, refs?: readonly RepoRef[]): Promise<RepoListing> {
+  const all = refs ?? (await listOwner(provider, set));
+  const repos = all.map((r) => listedRepo(set, r)).sort((a, b) => cmp(a.repo, b.repo));
+  const seen = typeof provider.listingVisibility === "function" ? await provider.listingVisibility(set) : null;
+  const visibility = Object.fromEntries(
+    REPO_VISIBILITIES.map((v) => {
+      const proof = seen?.visibilities?.[v];
+      const listed = repos.filter((r) => r.visibility === v).length;
+      return [v, proof ? { listed, complete: proof.complete === true, reason: String(proof.reason) } : { listed, complete: null, reason: `provider ${provider.name} cannot say what its token sees (it has no listingVisibility)` }];
+    }),
+  ) as RepoListing["visibility"];
+  return { owner: set.owner, identity: seen?.identity ?? null, visibility, repos };
+}
+
+/** What a pooled freeze lists: the pool, a rule's owner listing, and the registered repos that are gone. */
+export interface PoolResolution {
+  /** Sorted by repo, under each repo's path now. */
+  pool: ResolvedRepo[];
+  /** A rule's unfiltered owner listing; null for a repo or a list. */
+  listing: RepoListing | null;
+  /** Registered repos the owner's listing no longer holds and a repo-level probe found gone (404, or a documented hidden 403). */
+  gone: GoneRepo[];
+}
+
 /**
- * What is wrong with the repositories a manifest lists, given the registered set (verify check 2; offline):
- * the manifest must cover exactly the registered repo or list, or only repos inside the registered rule, sorted
- * and unique, and every change must come from a listed repo. A rule's completeness is check 5's job (it
- * needs the provider).
+ * The pool a freeze lists (U8; the review's findings 1 and 8): for a `rule`, the repos it matches now plus every
+ * registered repo that still exists, whatever its archive state, visibility or name now, matched by id first. A
+ * registered repo the listing no longer holds is probed once, by id: found (renamed, or transferred out of the owner),
+ * it is in the pool under its path now; gone (404, or a documented hidden 403), it is recorded as gone with the
+ * probe's evidence. Any other probe failure stops the freeze: nothing is skipped. A `list` or `repo` set is itself.
  */
-export function manifestRepoProblems(set: RepoSet, manifestRepos: readonly string[], changeRepos: Iterable<string> = []): string[] {
+export async function resolvePool(provider: Pick<ScmProvider, "name" | "listRepos" | "listingVisibility" | "describeRepo">, set: RepoSet, o: { registered?: readonly RegisteredRepo[]; now: () => string }): Promise<PoolResolution> {
+  if (set.kind !== "rule") return { pool: await resolveRepoSet(provider, set), listing: null, gone: [] };
+  validateRepoSet(set, provider);
+  const refs = await listOwner(provider, set);
+  const listing = await ownerListing(provider, set, refs);
+  const pool = new Map<string, ResolvedRepo>();
+  for (const r of applyRule(set, refs)) pool.set(r.id, { repo: r.repo, repoId: r.id });
+  const gone: GoneRepo[] = [];
+  const asResolved = refs.map((r) => ({ repo: r.repo, repoId: r.id }));
+  for (const reg of o.registered ?? []) {
+    const now = matchRepo(asResolved, reg);
+    if (now) {
+      pool.set(now.repoId, now);
+      continue;
+    }
+    const probed = await probeRepo(provider, { repo: reg.repo, id: reg.repoId });
+    switch (probed.kind) {
+      case "exists":
+        pool.set(probed.ref.id, { repo: probed.ref.repo, repoId: probed.ref.id });
+        break;
+      case "gone":
+        gone.push({ repo: reg.repo, repoId: reg.repoId, status: probed.status, detail: probed.detail, probedAt: o.now() });
+        break;
+      case "transient":
+        throw probed.error; // a rate limit or an outage: the freeze stops (exit 4) and the same command finishes it
+      case "unsupported":
+        throw new RepoSetError(`registered repo ${reg.repo} (id ${reg.repoId}) is not in ${set.owner}'s listing, and provider ${provider.name} cannot probe a repository (it has no describeRepo) to tell whether it is gone; nothing is skipped`);
+      default:
+        throw new RepoSetError(`registered repo ${reg.repo} (id ${reg.repoId}) is not in ${set.owner}'s listing, and probing it failed (${probed.kind === "no-access" ? `no access: ${probed.detail}` : probed.detail}); nothing is skipped`);
+    }
+  }
+  return { pool: [...pool.values()].sort((a, b) => cmp(a.repo, b.repo)), listing, gone: gone.sort((a, b) => cmp(a.repo, b.repo)) };
+}
+
+/** What a manifest records about its repos, for check 2 (`poolRecordProblems`). */
+export interface PoolRecord {
+  repos: readonly { repo: string; repoId: string | null }[];
+  /** The repos its changes name. */
+  changeRepos?: Iterable<string>;
+  listing?: RepoListing | null;
+  gone?: readonly GoneRepo[];
+  /** The registration's `registeredRepos` (empty when it has none). */
+  registered?: readonly RegisteredRepo[];
+}
+
+/**
+ * What is wrong with the repositories a manifest lists, given the registered set (verify check 2; offline): the
+ * manifest must cover exactly the registered repo or list (a listed repo may instead be recorded gone), or, for a rule,
+ * only repos inside the rule or registered, every registered repo (listed, or recorded gone), and a listing that agrees
+ * with itself and with the rule; sorted and unique, and every change from a listed repo. Whether the rule's pool is
+ * complete against the SCM is check 5's job (it needs the provider).
+ */
+export function poolRecordProblems(set: RepoSet, rec: PoolRecord): string[] {
   const p: string[] = [];
+  const manifestRepos = rec.repos.map((r) => r.repo);
   const lowerRepos = manifestRepos.map(lower);
+  const gone = rec.gone ?? [];
+  const registered = rec.registered ?? [];
+  const eg = (xs: readonly string[]) => `(e.g. ${xs.slice(0, 3).join(", ")})`;
   if (manifestRepos.length === 0) p.push("manifest lists no repos");
   if (new Set(lowerRepos).size !== lowerRepos.length) p.push("manifest lists a repo twice");
   else if (manifestRepos.some((r, i) => i > 0 && cmp(manifestRepos[i - 1]!, r) >= 0)) p.push("manifest repos are not sorted by repo");
@@ -251,17 +395,52 @@ export function manifestRepoProblems(set: RepoSet, manifestRepos: readonly strin
     if (manifestRepos.length !== 1 || manifestRepos[0] !== splitScheme(set.repo).path) p.push("manifest repo differs from the registration");
   } else if (set.kind === "list") {
     const want = new Set(set.repos.map((e) => lower(splitScheme(e).path)));
-    const have = new Set(lowerRepos);
+    const have = new Set([...lowerRepos, ...gone.map((g) => lower(g.repo))]);
     const missing = [...want].filter((r) => !have.has(r)).sort();
     const extra = [...have].filter((r) => !want.has(r)).sort();
-    if (missing.length) p.push(`manifest repos differ from the registered list: ${missing.length} registered repo(s) missing (e.g. ${missing.slice(0, 3).join(", ")})`);
-    if (extra.length) p.push(`manifest repos differ from the registered list: ${extra.length} repo(s) not registered (e.g. ${extra.slice(0, 3).join(", ")})`);
+    if (missing.length) p.push(`manifest repos differ from the registered list: ${missing.length} registered repo(s) missing ${eg(missing)}`);
+    if (extra.length) p.push(`manifest repos differ from the registered list: ${extra.length} repo(s) not registered ${eg(extra)}`);
   } else {
-    const outside = manifestRepos.filter((r) => !repoMatchesRule(set, r));
-    if (outside.length) p.push(`manifest lists ${outside.length} repo(s) outside the registered rule (e.g. ${outside.slice(0, 3).join(", ")})`);
+    const regIds = new Set(registered.map((r) => r.repoId));
+    const outside = rec.repos.filter((r) => !repoMatchesRule(set, r.repo) && !(r.repoId && regIds.has(r.repoId))).map((r) => r.repo);
+    if (outside.length) p.push(`manifest lists ${outside.length} repo(s) outside the registered rule ${eg(outside)}`);
+    if (registered.length) {
+      const ids = new Set([...rec.repos.map((r) => r.repoId), ...gone.map((g) => g.repoId)]);
+      const dropped = registered.filter((r) => !ids.has(r.repoId)).map((r) => r.repo);
+      if (dropped.length) p.push(`manifest drops ${dropped.length} registered repo(s) ${eg(dropped)}: each must be in the manifest, or recorded gone with a probe's evidence`);
+      const strayGone = gone.filter((g) => !g.repoId || !regIds.has(g.repoId)).map((g) => g.repo);
+      if (strayGone.length) p.push(`manifest records ${strayGone.length} repo(s) as gone that were not registered ${eg(strayGone)}`);
+    } else if (gone.length) p.push(`manifest records ${gone.length} repo(s) as gone, but the registration names no repos`);
+    const goneAndListed = gone.filter((g) => g.repoId && rec.repos.some((r) => r.repoId === g.repoId)).map((g) => g.repo);
+    if (goneAndListed.length) p.push(`manifest records ${goneAndListed.length} repo(s) both as listed and as gone ${eg(goneAndListed)}`);
+    const l = rec.listing;
+    if (l) {
+      if (lower(l.owner) !== lower(set.owner)) p.push(`manifest listing is of ${l.owner}, not the registered owner ${set.owner}`);
+      const names = l.repos.map((r) => r.repo);
+      if (new Set(names.map(lower)).size !== names.length || new Set(l.repos.map((r) => r.repoId)).size !== names.length) p.push("manifest listing shows a repo twice");
+      else if (names.some((r, i) => i > 0 && cmp(names[i - 1]!, r) >= 0)) p.push("manifest listing is not sorted by repo");
+      const wrong = l.repos.filter((r) => canonical(ruleExclusions(set, r)) !== canonical(r.excludedBy)).map((r) => r.repo);
+      if (wrong.length) p.push(`manifest listing gives ${wrong.length} repo(s) an exclusion their recorded attributes do not ${eg(wrong)}`);
+      const poolIds = new Set(rec.repos.map((r) => r.repoId));
+      // By the attributes the listing records, not the exclusion it claims: a claimed exclusion cannot hide a repo.
+      const unlisted = l.repos.filter((r) => ruleExclusions(set, r).length === 0 && !poolIds.has(r.repoId)).map((r) => r.repo);
+      if (unlisted.length) p.push(`manifest listing shows ${unlisted.length} repo(s) the rule matches that the manifest does not list ${eg(unlisted)}`);
+      const listedIds = new Set(l.repos.map((r) => r.repoId));
+      const unseen = rec.repos.filter((r) => !(r.repoId && (listedIds.has(r.repoId) || regIds.has(r.repoId)))).map((r) => r.repo);
+      if (unseen.length) p.push(`manifest lists ${unseen.length} repo(s) that are neither in its listing nor registered ${eg(unseen)}`);
+      const badCounts = REPO_VISIBILITIES.filter((v) => l.visibility?.[v]?.listed !== l.repos.filter((r) => r.visibility === v).length);
+      if (badCounts.length) p.push(`manifest listing's ${badCounts.join(", ")} count(s) do not match its repos`);
+    }
   }
   const listed = new Set(lowerRepos);
-  const stray = [...new Set(changeRepos)].filter((r) => !listed.has(lower(r))).sort();
-  if (stray.length) p.push(`manifest has changes from ${stray.length} repo(s) it does not list (e.g. ${stray.slice(0, 3).join(", ")})`);
+  const stray = [...new Set(rec.changeRepos ?? [])].filter((r) => !listed.has(lower(r))).sort();
+  if (stray.length) p.push(`manifest has changes from ${stray.length} repo(s) it does not list ${eg(stray)}`);
   return p;
+}
+
+const canonical = (xs: readonly string[]) => JSON.stringify(xs);
+
+/** `poolRecordProblems` for names only (a manifest without ids, listing or gone repos). */
+export function manifestRepoProblems(set: RepoSet, manifestRepos: readonly string[], changeRepos: Iterable<string> = []): string[] {
+  return poolRecordProblems(set, { repos: manifestRepos.map((repo) => ({ repo, repoId: null })), changeRepos });
 }

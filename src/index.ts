@@ -8,6 +8,8 @@ export * from "./core/records.js";
 export * from "./core/population.js";
 export * from "./core/repo-set.js";
 export * from "./core/pooled-report.js";
+export * from "./core/rebuild.js";
+export { looksUnavailable, probeRepo, type ProbeResult } from "./core/failures.js";
 export * from "./core/status.js";
 export * from "./core/simulate.js";
 export * from "./core/verify.js";
@@ -36,7 +38,7 @@ export {
 export { BUDGET_FAMILIES, DEFAULT_HOSTS, defaultBudgets, parseRate, type HostBudgetDefault, type RateRule, type RateLimitOverrides } from "./net/rate-limits.js";
 export { createAuditContext, openProvider, openLedger, requireReadWrite, AuditApiError, type AuditContext, type AuditContextOptions, type AuditMode } from "./api/context.js";
 export { freezeRepos, FreezeStopped, FreezeRepoFailed, ResumeRefused, isTransientFailure, type PooledFreeze, type PooledFreezeOptions } from "./api/pooled-freeze.js";
-export { FreezeCheckpointStore, freezeRunId, type FreezeRunInputs } from "./api/freeze-store.js";
+export { FreezeCheckpointStore, freezeRunId, type FreezeRunInputs, type FreezeRunHeader } from "./api/freeze-store.js";
 export { estimateFreeze, estimateLines, type FreezeEstimate } from "./api/freeze-estimate.js";
 export { PR_RLA_VERSION } from "./version.js";
 export { createProvider, createLedger, loadProviderDefinition, loadLedgerDefinition, BUILTIN_PROVIDERS, BUILTIN_LEDGERS } from "./registry.js";

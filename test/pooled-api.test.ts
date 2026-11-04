@@ -9,7 +9,7 @@ import { createAuditContext } from "../src/api/context.js";
 import { BrokerRetriesExhausted, BrokerTimeout } from "../src/net/contract.js";
 import type { PluginIdentity } from "../src/core/records.js";
 import { normalizeSelector } from "../src/core/selector.js";
-import { RepoUnavailableError, type ChangeRecord, type ListChangesRequest, type ListChangesResult, type ScmProvider } from "../src/sdk/provider.js";
+import { RepoEmptyError, RepoUnavailableError, type ChangeRecord, type ListChangesRequest, type ListChangesResult, type ScmProvider } from "../src/sdk/provider.js";
 
 /**
  * The pooled-freeze API (src/api/pooled-freeze.ts, freeze-store.ts, freeze-estimate.ts) against in-memory providers
@@ -103,7 +103,7 @@ describe("the run stops or fails as a whole (FR5.4: all-or-nothing)", () => {
     expect(err.done).toBe(3);
   });
 
-  it("a 404 fails the run naming the repo and what to do (exclude it in the rule, before the seed), and starts nothing new", async () => {
+  it("a 404 the provider cannot confirm with a repo-level probe fails the run naming the repo, and starts nothing new", async () => {
     const dir = tmp();
     const p = stub((req) => {
       if (req.repo === "o/r1") throw new RepoUnavailableError(req.repo, 404);
@@ -112,8 +112,25 @@ describe("the run stops or fails as a whole (FR5.4: all-or-nothing)", () => {
     const err = await failure<FreezeRepoFailed>(freezeRepos(base(p, ["o/r0", "o/r1", "o/r2", "o/r3", "o/r4", "o/r5"], { concurrency: 1, checkpoint: cp(dir) })));
     expect(err).toBeInstanceOf(FreezeRepoFailed);
     expect(err.repo).toBe("o/r1");
-    expect(err.message).toMatch(/^repo o\/r1: o\/r1: HTTP 404 .*must be excluded in the registered rule, before the seed; nothing is skipped$/);
+    expect(err.message).toMatch(/^repo o\/r1: o\/r1 answers 404 or 403, and its repo-level probe says nothing \(provider stub has no describeRepo\) .*must be excluded in the registered rule, before the seed; nothing is skipped$/);
     expect(p.calls).toEqual(["o/r0", "o/r1"]);
+  });
+
+  it("a listed repo of a registered list that the probe finds gone is recorded as gone; one the probe finds is a FAIL (part of it is missing)", async () => {
+    const gone = stub((req) => (req.repo === "o/r1" ? Promise.reject(new RepoUnavailableError(req.repo, 404)) : ok(req.repo)), { describeRepo: async (ref) => Promise.reject(new RepoUnavailableError(ref.repo, 404, "Not Found")) });
+    const run = await freezeRepos(base(gone, ["o/r0", "o/r1", "o/r2"], { concurrency: 1, now: () => "2026-10-20T12:05:00Z" }));
+    expect(run.repos.map((r) => r.repo)).toEqual(["o/r0", "o/r2"]);
+    expect(run.gone).toEqual([{ repo: "o/r1", repoId: null, status: 404, detail: "o/r1: HTTP 404 Not Found", probedAt: "2026-10-20T12:05:00Z" }]);
+    const there = stub((req) => (req.repo === "o/r1" ? Promise.reject(new RepoUnavailableError(req.repo, 404)) : ok(req.repo)), { describeRepo: async (ref) => ({ repo: ref.repo, id: "1", defaultBranch: "main", archived: false, fork: false, visibility: "public" }) });
+    const err = await failure<FreezeRepoFailed>(freezeRepos(base(there, ["o/r0", "o/r1"], { concurrency: 1 })));
+    expect(err.message).toMatch(/its repo-level probe says it exists \(so a part of it is missing\)/);
+  });
+
+  it("an empty repository is a repo with nothing in it inside a pool (and stops a single-repo freeze, as before U8)", async () => {
+    const p = stub((req) => (req.repo === "o/empty" ? Promise.reject(new RepoEmptyError(req.repo)) : ok(req.repo)));
+    const run = await freezeRepos(base(p, ["o/a", "o/empty"]));
+    expect(run.repos).toEqual([{ repo: "o/a", repoId: null, defaultBranch: "main", headSha: sha("head-o/a") }, { repo: "o/empty", repoId: null, defaultBranch: "", headSha: null }]);
+    await expect(freezeRepos(base(p, [], { set: { kind: "repo", repo: "o/empty" } }))).rejects.toThrow(/^o\/empty has no default branch$/);
   });
 
   it("a provider that breaks the contract (a change from another repo) fails the run naming the repo", async () => {
@@ -188,59 +205,67 @@ describe("resuming: a repo with a done-marker is not listed again; everything el
     expect(ResumeRefused.name).toBe("ResumeRefused");
   });
 
-  it("two registrations of one window, or two rules, have different run ids; the same inputs have one", () => {
-    const inputs: FreezeRunInputs = { registrationSha256: "r", repos: [{ repo: "o/a", repoId: "1" }], prRlaVersion: "0.1.0", provider: PROVIDER_ID };
-    expect(freezeRunId(inputs)).toMatch(/^[0-9a-f]{64}$/);
-    expect(freezeRunId({ ...inputs })).toBe(freezeRunId(inputs));
-    expect(freezeRunId({ ...inputs, registrationSha256: "r2" })).not.toBe(freezeRunId(inputs));
-    expect(freezeRunId({ ...inputs, repos: [{ repo: "o/a", repoId: "2" }] })).not.toBe(freezeRunId(inputs));
+  it("two registrations of one window, or two rules, have different run ids; so do two starts of one run (the start time is covered)", () => {
+    const inputs: FreezeRunInputs = { registrationSha256: "r", repos: [{ repo: "o/a", repoId: "1" }], gone: [], prRlaVersion: "0.1.0", provider: PROVIDER_ID };
+    const id = (over: Partial<FreezeRunInputs> = {}, startedAt = "2026-10-20T12:00:00Z") => freezeRunId({ inputs: { ...inputs, ...over }, startedAt, listing: null, gone: [] });
+    expect(id()).toMatch(/^[0-9a-f]{64}$/);
+    expect(id({})).toBe(id());
+    expect(id({ registrationSha256: "r2" })).not.toBe(id());
+    expect(id({ repos: [{ repo: "o/a", repoId: "2" }] })).not.toBe(id());
+    expect(id({}, "2026-10-20T12:00:01Z")).not.toBe(id());
     expect(differingInputs(inputs, { ...inputs, repos: [] })).toEqual(["the resolved repo list (0 added, 1 removed since that run started)"]);
+    expect(differingInputs(inputs, { ...inputs, gone: [{ repo: "o/z", repoId: "9" }] })).toEqual(["the registered repos found gone"]);
   });
 });
 
 describe("FreezeCheckpointStore", () => {
-  const inputs: FreezeRunInputs = { registrationSha256: "r", repos: [{ repo: "o/a", repoId: null }], prRlaVersion: "0.1.0", provider: PROVIDER_ID };
-  const open = (dir: string) => new FreezeCheckpointStore(dir, "w", freezeRunId(inputs));
+  const inputs: FreezeRunInputs = { registrationSha256: "r", repos: [{ repo: "o/a", repoId: null }], gone: [], prRlaVersion: "0.1.0", provider: PROVIDER_ID };
+  const start = (dir: string, startedAt = "2026-10-20T12:00:00Z", opts: { fresh?: boolean } = {}) => FreezeCheckpointStore.begin(dir, "w", { inputs, startedAt, listing: null, gone: [] }, opts);
 
-  it("begin keeps the first start time; fresh starts over and discards the markers", () => {
+  it("find continues the newest run of the same inputs; fresh discards them and starts over", () => {
     const dir = tmp();
-    const s = open(dir);
-    expect(s.begin(inputs, "2026-10-20T12:00:00Z")).toMatchObject({ resumed: false, header: { startedAt: "2026-10-20T12:00:00Z" } });
+    const s = start(dir);
     s.writeRepo("o/a", ok("o/a"));
-    expect(open(dir).begin(inputs, "2026-10-20T18:00:00Z")).toMatchObject({ resumed: true, header: { startedAt: "2026-10-20T12:00:00Z" } });
-    expect(open(dir).readRepo("o/a")?.changes).toHaveLength(3);
-    expect(open(dir).begin(inputs, "2026-10-21T01:00:00Z", { fresh: true })).toMatchObject({ resumed: false, header: { startedAt: "2026-10-21T01:00:00Z" } });
-    expect(open(dir).readRepo("o/a")).toBeNull();
+    expect(FreezeCheckpointStore.find(dir, "w", inputs)?.header()).toMatchObject({ startedAt: "2026-10-20T12:00:00Z" });
+    expect((FreezeCheckpointStore.find(dir, "w", inputs)!.readRepo("o/a") as { listed: ListChangesResult }).listed.changes).toHaveLength(3);
+    expect(FreezeCheckpointStore.find(dir, "w", { ...inputs, registrationSha256: "other" })).toBeNull();
+    const again = start(dir, "2026-10-21T01:00:00Z", { fresh: true });
+    expect(FreezeCheckpointStore.runs(dir, "w")).toEqual([again.runId]);
+    expect(again.readRepo("o/a")).toBeNull();
   });
 
-  it("a damaged or foreign marker is not trusted; a header whose id does not match its inputs is not a header", () => {
+  it("a damaged, foreign or edited marker is not trusted; a header whose content does not hash to its id is not a header", () => {
     const dir = tmp();
-    const s = open(dir);
-    s.begin(inputs, "2026-10-20T12:00:00Z");
+    const s = start(dir);
     s.writeRepo("o/a", ok("o/a"));
     const file = join(s.dir, "repos", readdirSync(join(s.dir, "repos"))[0]!);
-    writeFileSync(file, readFileSync(file, "utf8").slice(0, 40)); // truncated, as a crash mid-write would leave a non-atomic file
-    expect(open(dir).readRepo("o/a")).toBeNull();
-    writeFileSync(file, JSON.stringify({ schema: "pr-rla/freeze-repo/v1", repo: "o/other", listed: { changes: [] } }));
-    expect(open(dir).readRepo("o/a")).toBeNull();
-    const header = JSON.parse(readFileSync(join(s.dir, "run.json"), "utf8")) as { inputs: { registrationSha256: string } };
-    header.inputs.registrationSha256 = "tampered";
+    const good = readFileSync(file, "utf8");
+    writeFileSync(file, good.slice(0, 40)); // truncated, as a crash mid-write would leave a non-atomic file
+    expect(s.readRepo("o/a")).toBeNull();
+    writeFileSync(file, JSON.stringify({ schema: "pr-rla/freeze-repo/v2", repo: "o/other", listed: { changes: [] }, sha256: "x" }));
+    expect(s.readRepo("o/a")).toBeNull();
+    const edited = JSON.parse(good) as { listed: ListChangesResult };
+    edited.listed.changes.pop(); // an edit that leaves the recorded digest as it was
+    writeFileSync(file, JSON.stringify(edited));
+    expect(s.readRepo("o/a")).toBeNull();
+    writeFileSync(file, good);
+    expect(s.readRepo("o/a")).not.toBeNull();
+    const header = JSON.parse(readFileSync(join(s.dir, "run.json"), "utf8")) as { startedAt: string };
+    header.startedAt = "2026-10-20T13:00:00Z";
     writeFileSync(join(s.dir, "run.json"), JSON.stringify(header));
-    expect(open(dir).header()).toBeNull();
+    expect(s.header()).toBeNull();
+    expect(FreezeCheckpointStore.find(dir, "w", inputs)).toBeNull();
   });
 
-  it("writes are atomic: no temporary file is left behind, and runs() lists the runs of a window", () => {
+  it("writes are atomic: no temporary file is left behind; runs() lists the runs of a window; nothing marks a run complete", () => {
     const dir = tmp();
-    const s = open(dir);
-    s.begin(inputs, "2026-10-20T12:00:00Z");
+    const s = start(dir);
     for (let i = 0; i < 5; i++) s.writeRepo(`o/r${i}`, ok(`o/r${i}`));
     expect(readdirSync(join(s.dir, "repos")).filter((f) => f.endsWith(".tmp"))).toEqual([]);
     expect(readdirSync(s.dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
-    expect(FreezeCheckpointStore.runs(dir, "w")).toEqual([freezeRunId(inputs)]);
+    expect(readdirSync(s.dir).sort()).toEqual(["repos", "run.json"]);
+    expect(FreezeCheckpointStore.runs(dir, "w")).toEqual([s.runId]);
     expect(FreezeCheckpointStore.runs(dir, "other")).toEqual([]);
-    expect(s.complete).toBe(false);
-    s.markComplete();
-    expect(open(dir).complete).toBe(true);
   });
 });
 

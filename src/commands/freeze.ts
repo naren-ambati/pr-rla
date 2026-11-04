@@ -21,6 +21,7 @@ import { loadOrCreateKey, signRecord } from "../core/signing.js";
 import { providerTraits } from "../provider-traits.js";
 import { pluginIdentity } from "../registry.js";
 import { PROVIDER_API_VERSION } from "../sdk/provider.js";
+import { TSA_RETRY_DEADLINE_MS } from "../net/contract.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
 import { auditContextFor, CommandError, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, trustFor, writeJson, type CommandContext } from "./context.js";
@@ -94,6 +95,11 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   const round = reg ? derivedRoundFor(reg) : null;
   if (!opts.dryRun && round && now >= round.publishesAt)
     throw new CommandError(`seed round ${round.round} published at ${unixToIso(round.publishesAt)}: a manifest frozen now would be written after the seed was public (verify check 2 fails). Register a new audit.`);
+  // The commitment's tokens may take up to the authorities' retry deadline to arrive: they must all be issued before R.
+  const tsaMs = reg && isRegistrationV2(reg) && reg.record.timestamping.authorities.length ? TSA_RETRY_DEADLINE_MS : 0;
+  const tooLate = (atMs: number) => !!round && atMs + tsaMs >= round.publishesAt * 1000;
+  if (!opts.dryRun && tooLate(ctx.nowMs()))
+    throw new CommandError(`seed round ${round!.round} publishes at ${unixToIso(round!.publishesAt)}, within the timestamp authorities' ${tsaMs / 60_000}-minute retry deadline: the commitment's tokens could be issued after the seed is public (verify check 2 fails). Register a new audit.`);
   if (!opts.dryRun && !opts.force && existsSync(paths.commitment))
     throw new CommandError(`${paths.commitment} exists: this window is frozen. Use --force only if the manifest was never shown to anyone (it is replaced, with new timestamps).`);
   const api = rekorApi(opts.rekorApi);
@@ -114,7 +120,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   }
 
   const provider = await providerFor(ctx, config);
-  if (opts.estimate) return estimateCommand(ctx, { provider, repoSet, window, selector, concurrency: config.freeze.concurrency, publishesAt: round?.publishesAt ?? null, json: opts.json });
+  if (opts.estimate) return estimateCommand(ctx, { provider, repoSet, reg, window, selector, concurrency: config.freeze.concurrency, publishesAt: round?.publishesAt ?? null, json: opts.json });
   const run = await runFreezeRepos(ctx, config, { provider, repoSet, window, selector, startedAt: frozenAt, reg, dryRun: !!opts.dryRun, force: !!opts.force, resume: opts.resume });
   const pop = run.population;
   // The as-of time of the reviews and of the manifest: the command's start, or (a resumed pooled run) the run's own.
@@ -156,8 +162,13 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   // A pooled freeze can run for hours: its commitment is signed when it finishes (its tokens then agree with its signed
   // time), while the manifest keeps the run's start as its as-of time. A single repo signs both at the command's start.
   const committedAt = pooled ? isoNow(ctx) : frozenAt;
-  if (pooled && isoToUnix(committedAt) >= round!.publishesAt)
-    throw new CommandError(`the freeze finished ${committedAt}, after seed round ${round!.round} published (${unixToIso(round!.publishesAt)}): a manifest written now would be written after the seed was public (verify check 2 fails). Its checkpoints are kept; register a new audit`);
+  // The end check (single repos too): the listing took time, and the tokens are requested only now.
+  if (tooLate(ctx.nowMs()))
+    throw new CommandError(`the freeze finished ${isoNow(ctx)}, ${ctx.nowMs() >= round!.publishesAt * 1000 ? "after" : `less than the timestamp authorities' ${tsaMs / 60_000}-minute retry deadline before`} seed round ${round!.round} published (${unixToIso(round!.publishesAt)}): a manifest written now could be committed after the seed was public (verify check 2 fails). ${pooled ? "Its checkpoints are kept; register" : "Register"} a new audit`);
+  /** Re-checked right before anything is written: nothing lands after R, whatever the authorities or the log took. */
+  const beforeWrite = () => {
+    if (ctx.nowMs() >= round!.publishesAt * 1000) throw new CommandError(`seed round ${round!.round} published (${unixToIso(round!.publishesAt)}) before the commitment could be written (${isoNow(ctx)}): nothing was written. Register a new audit`);
+  };
   if (!isRegistrationV2(reg!)) {
     // A v1 registration (made before bolt 1) is frozen as v1, so the audit stays one schema end to end.
     const body: Omit<Manifest, "sha256"> = {
@@ -190,6 +201,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     };
     let signed: SignedRecord<ManifestCommitmentRecord> = signRecord(commitment, key);
     if (url) signed = await submitSigned(ctx, signed, url);
+    beforeWrite();
     writeJson(paths.manifest, manifest);
     writeJson(paths.commitment, signed);
     ctx.out(`manifest ${manifest.sha256} · N ${fmt(N)} → ${paths.manifest} (schema v1, as the registration)`);
@@ -209,6 +221,9 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
     schema: "pr-rla/manifest/v2",
     registrationSha256: v2reg.sha256,
     repos: run.repos,
+    // A rule's unfiltered owner listing and the registered repos found gone (U8): what verify holds the pool to.
+    ...(run.listing ? { repoListing: run.listing } : {}),
+    ...(run.gone.length ? { goneRepos: run.gone } : {}),
     provider: { ...providerId, apiVersion: PROVIDER_API_VERSION, reviewGranularity: traits.reviewGranularity },
     window,
     frozenAt: asOf,
@@ -238,9 +253,9 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   let signed: SignedRecord<CommitmentRecordV2> = signRecord(commitment, key);
   const got = await obtainTimestamps(ctx, signed, committedAt, ts, bundle);
   signed = { ...signed, timestamps: got.timestamps };
+  beforeWrite();
   writeJson(paths.manifest, manifest);
   writeJson(paths.commitment, signed);
-  run.finish();
   ctx.out(`manifest ${manifest.sha256} · N ${fmt(N)}${pooled ? ` · ${fmt(run.repos.length)} repos` : ""} → ${paths.manifest}`);
   if (url) {
     try {

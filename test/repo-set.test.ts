@@ -206,21 +206,48 @@ describe("FR5.2: the pooled population is the union of per-repo populations unde
     expect(pooled.headSha).toBeNull();
   });
 
-  it("the same pool in any listing order and any concurrency is the same population", async () => {
-    const p = stub("github", sizes);
+  it("the same pool in any order, finishing in any order, is the same population, byte for byte", async () => {
+    // Each repo lists its changes in a different order on every call, carries its own limitation and diagnostic,
+    // and answers after a delay that depends on the call, so the repos finish in a different order each time.
+    let call = 0;
+    const p: ScmProvider = {
+      apiVersion: 1,
+      name: "github",
+      async listChanges(req) {
+        const k = ++call;
+        await new Promise((r) => setTimeout(r, (k * 7) % 5));
+        const changes = Array.from({ length: sizes[req.repo as keyof typeof sizes] }, (_, i) => change("github", req.repo, i + 1));
+        if (k % 2) changes.reverse();
+        return { changes, defaultBranch: "main", limitations: [`limit of ${req.repo}`, "shared"], diagnostics: [{ label: `only ${req.repo}`, value: sizes[req.repo as keyof typeof sizes] }, { label: "all", value: 1 }], headSha: sha(`head:${req.repo}`) };
+      },
+    };
     const a = await buildPooledPopulation(p, { repos: [{ repo: "acme/a" }, { repo: "acme/b" }, { repo: "acme/c" }], concurrency: 1, ...args });
-    const b = await buildPooledPopulation(p, { repos: [{ repo: "acme/a" }, { repo: "acme/b" }, { repo: "acme/c" }], concurrency: 3, ...args });
-    expect(JSON.stringify(a.entries)).toBe(JSON.stringify(b.entries));
+    const b = await buildPooledPopulation(p, { repos: [{ repo: "acme/c" }, { repo: "acme/a" }, { repo: "acme/b" }], concurrency: 3, ...args });
+    const c = await buildPooledPopulation(p, { repos: [{ repo: "acme/b" }, { repo: "acme/c" }, { repo: "acme/a" }], concurrency: 2, ...args });
+    for (const x of [b, c]) {
+      expect(JSON.stringify(x.entries)).toBe(JSON.stringify(a.entries));
+      expect(x.limitations).toEqual(a.limitations);
+      expect(x.selection.funnel).toEqual(a.selection.funnel);
+      expect(x.repos).toEqual(a.repos);
+      expect(x.listed.diagnostics).toEqual(a.listed.diagnostics);
+    }
+    expect(a.limitations).toEqual(["limit of acme/a", "shared", "limit of acme/b", "limit of acme/c"]);
   });
 
-  it("a single repo is a pool of one: the same population through the same code", async () => {
-    const p = stub("github", sizes);
+  it("a single repo is a pool of one: the pooled assembly of it (with an empty repo beside it) is the single repo's population", async () => {
+    const p: ScmProvider = { ...stub("github", sizes), listChanges: async (req) => (req.repo === "acme/empty" ? { changes: [], defaultBranch: "", limitations: [] } : stub("github", sizes).listChanges(req)) };
     const one = await buildPopulation(p, { repo: "acme/a", ...args });
-    const pool = await buildPooledPopulation(p, { repos: [{ repo: "acme/a" }], ...args });
+    // Two repos take the pooled path (merged listings, the duplicate and scheme checks); the empty one adds nothing.
+    const pool = await buildPooledPopulation(p, { repos: [{ repo: "acme/empty" }, { repo: "acme/a" }], ...args });
     expect(JSON.stringify(pool.entries)).toBe(JSON.stringify(one.entries));
     expect(pool.selection.funnel).toEqual(one.selection.funnel);
+    expect(pool.limitations).toEqual(one.limitations);
+    expect(pool.byKind).toEqual(one.byKind);
+    expect(pool.viaMerge).toEqual(one.viaMerge);
     expect(one.headSha).toBe(sha("head:acme/a"));
+    expect(pool.headSha).toBeNull(); // a pool has one head per repo
     expect(one.repos).toEqual([{ repo: "acme/a", defaultBranch: "main", headSha: sha("head:acme/a"), listed: 30 }]);
+    expect(pool.repos).toEqual([{ repo: "acme/a", defaultBranch: "main", headSha: sha("head:acme/a"), listed: 30 }, { repo: "acme/empty", defaultBranch: "", headSha: null, listed: 0 }]);
   });
 
   it("each repo is listed from its own head", async () => {
@@ -236,13 +263,9 @@ describe("FR5.2: the pooled population is the union of per-repo populations unde
     expect(() => checkListed("github", { changes: [change("github", "acme/a", 1, { mergedAt: "2026-11-01T00:00:00Z" })], defaultBranch: "main", limitations: [] }, base)).toThrow(/outside the window/);
   });
 
-  it("a repo the provider reports gone fails the build, unless the caller tolerates it (verify)", async () => {
+  it("a repo the provider reports gone fails the build: only verify's rebuild (src/core/rebuild.ts) tells gone from broken, by a probe", async () => {
     const p = stub("github", sizes);
-    const repos = [{ repo: "acme/a" }, { repo: "acme/deleted" }];
-    await expect(buildPooledPopulation(p, { repos, ...args })).rejects.toThrow(/acme\/deleted: HTTP 404/);
-    const t = await buildPooledPopulation(p, { repos, tolerateUnavailable: true, ...args });
-    expect(t.unavailable.map((u) => u.repo)).toEqual(["acme/deleted"]);
-    expect(t.repos.map((r) => r.repo)).toEqual(["acme/a"]);
+    await expect(buildPooledPopulation(p, { repos: [{ repo: "acme/a" }, { repo: "acme/deleted" }], ...args })).rejects.toThrow(/acme\/deleted: HTTP 404/);
   });
 
   it("mapPool runs at most `limit` at once, keeps item order, and stops starting new work after a failure", async () => {
