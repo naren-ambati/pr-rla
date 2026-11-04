@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { ToolError, toToolError, type ToolErrorBody } from "./errors.js";
 
@@ -84,16 +85,39 @@ export function tooLarge(bytes: number, limit: number, tool: string): ToolError 
   return new ToolError("RESULT_TOO_LARGE", `the ${tool} result is ${bytes.toLocaleString("en-US")} bytes, over the ${limit.toLocaleString("en-US")}-byte limit`, tool === "draw_context" ? "call draw_context again with a smaller maxPatchBytes" : `narrow the call, or run the pr-rla CLI for the full result`);
 }
 
-/** Why a call's signal aborted: the deadline, the server closing, or the client cancelling the request. */
+/** Why a call's signal aborted: the deadline, the server closing, the client cancelling the request, or (FAILED) the process guard. */
 class Stopped extends Error {
   constructor(
     message: string,
-    readonly code: "TIMEOUT" | "CANCELLED",
+    readonly code: "TIMEOUT" | "CANCELLED" | "FAILED",
+    /** FAILED: what the failure said (a rejection nothing awaited), for the error's `untrusted`. */
+    readonly untrusted?: string,
   ) {
     super(message);
     this.name = "Stopped";
   }
 }
+
+/**
+ * The tool call a piece of async work belongs to (S1). Each call runs inside it, in its tool handler and, for a long
+ * call, as a job; the context follows the call's promises, so the process guard (src/guard.ts) can fail the call a
+ * rejection that nothing awaited came from, rather than letting the process exit or the call wait for its deadline.
+ */
+export interface CallScope {
+  tool: string;
+  fail(reason: unknown): void;
+}
+export const callScope = new AsyncLocalStorage<CallScope>();
+
+/** A rejection's text for an error's `untrusted`: whatever threw it may quote a server or a plugin. */
+export const reasonText = (reason: unknown): string => {
+  const m = (reason as { message?: unknown } | null)?.message;
+  return (typeof m === "string" ? m : String(reason)).slice(0, 2048);
+};
+
+/** The error a call fails with when the process guard caught a rejection from it. */
+export const guardFailure = (tool: string, reason: unknown) =>
+  new Stopped(`${tool} failed: an internal error in it was not handled where it happened (a promise rejected that nothing awaited); the server keeps serving other calls`, "FAILED", reasonText(reason));
 
 export class Jobs {
   private readonly jobs = new Map<string, Job>();
@@ -169,9 +193,14 @@ export class Jobs {
     const onRequestAbort = () => ctrl.abort(new Stopped(`${tool} was cancelled by the client`, "CANCELLED"));
     if (requestSignal?.aborted) onRequestAbort();
     else requestSignal?.addEventListener("abort", onRequestAbort, { once: true });
+    const scope: CallScope = { tool, fail: (reason) => ctrl.abort(guardFailure(tool, reason)) };
     const settled = (async () => {
       try {
-        return { ok: true as const, value: await work({ progress, signal: ctrl.signal }) };
+        const value = await callScope.run(scope, () => work({ progress, signal: ctrl.signal }));
+        // A stopped call has no result, even when its work caught the stop and finished (S1: the guard's stop, or a
+        // deadline, arriving as one failed request makes a result that is not the call's).
+        if (ctrl.signal.aborted && ctrl.signal.reason instanceof Stopped) return { ok: false as const, error: ctrl.signal.reason };
+        return { ok: true as const, value };
       } catch (e) {
         // A stop by the deadline or by close() is reported as such, whatever the work threw on its way out.
         return { ok: false as const, error: ctrl.signal.aborted && ctrl.signal.reason instanceof Stopped ? ctrl.signal.reason : e };

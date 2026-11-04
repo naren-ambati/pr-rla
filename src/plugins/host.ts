@@ -16,6 +16,7 @@ import {
   type ReviewGranularity,
   type ScmProvider,
 } from "../sdk/provider.js";
+import { bounded } from "../core/text.js";
 import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "../net/scrub.js";
 import { PluginError } from "./errors.js";
 import type { LockedCredential } from "./lock.js";
@@ -188,7 +189,8 @@ function scrubber(secrets: readonly SecretValue[]): { bytes: (b: Buffer) => Buff
 }
 
 function tooLarge(label: string, what: string, bytes: number, max: number): PluginError {
-  return new PluginError(`plugin ${label}: ${what} is ${bytes} bytes, over the ${Math.round(max / 1024 / 1024)} MiB message limit; refused`, "MESSAGE_TOO_LARGE");
+  const limit = max >= 1024 * 1024 ? `${Math.round(max / 1024 / 1024)} MiB` : `${max}-byte`;
+  return new PluginError(`plugin ${label}: ${what} is ${bytes} bytes, over the ${limit} message limit; refused`, "MESSAGE_TOO_LARGE");
 }
 
 /** One frame: a 4-byte big-endian length, then the JSON (pr-rla/ipc/v2). */
@@ -366,6 +368,34 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     pipe.write(f);
   }
 
+  /**
+   * Answers something the child is waiting for, from a handler: it never throws there (S1: a throw inside an
+   * unawaited handler is an unhandled rejection, which ends the process). An answer that cannot be framed (larger
+   * than the message limit, or not serializable) is replaced by `instead`, a small fixed error for the same request,
+   * so the child's call fails rather than waiting forever. If even that cannot be sent, the host stops: every
+   * pending call fails with the reason, none silently.
+   */
+  function reply(m: ParentMessage, instead: (problem: string) => ParentMessage): void {
+    try {
+      post(m);
+      return;
+    } catch (e) {
+      try {
+        post(instead(bounded((e as Error)?.message ?? String(e))));
+        return;
+      } catch (e2) {
+        die(new PluginError(`plugin ${o.label}: an answer to it could not be sent (${bounded((e2 as Error)?.message ?? String(e2))}), so its host was stopped`, "PLUGIN_HOST_FAILED"));
+        child.kill("SIGKILL");
+      }
+    }
+  }
+
+  /** The error frame fields of a thrown value, each bounded (S1): a server or the child chose them. */
+  const errorFields = (e: unknown): { name: string; message: string; code?: string } => {
+    const err = e as { name?: unknown; code?: unknown; message?: unknown };
+    return { name: bounded(typeof err?.name === "string" ? err.name : "Error"), message: bounded(scrub.text(typeof err?.message === "string" ? err.message : String(e))), ...(typeof err?.code === "string" ? { code: bounded(err.code) } : {}) };
+  };
+
   /** Asks the plugin's own acceptJson rule about a body (finding 10); what the child sees is scrubbed, as every response is. */
   function askAccept(fid: number, body: unknown): Promise<string | null> {
     const aid = nextAid++;
@@ -384,8 +414,9 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   async function serveFetch(m: FetchMessage): Promise<void> {
     // Like a sleep, a fetch is served only while a call is in flight, and only so many at once.
     const refusal = loading || pending.size === 0 ? "the plugin fetched outside a call; nothing was sent" : fetches.size >= MAX_PLUGIN_FETCHES ? `the plugin has ${MAX_PLUGIN_FETCHES} fetches in flight already; nothing was sent` : null;
+    const failed = (problem: string): ParentMessage => ({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: "MESSAGE_TOO_LARGE", message: `the answer to this fetch could not be sent (${problem}); nothing more of it is` } });
     if (refusal) {
-      post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: "PLUGIN_FETCH_REFUSED", message: refusal } });
+      reply({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: "PLUGIN_FETCH_REFUSED", message: refusal } }, failed);
       return;
     }
     const ctrl = new AbortController();
@@ -399,39 +430,42 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         init.destination = m.broker.destination;
         if (m.broker.idempotent !== undefined) init.idempotent = m.broker.idempotent;
         const r = m.broker.retry;
+        // A hint is a number the child wrote into a JSON frame: anything but a finite number (NaN, {}, a string) is
+        // left out, so the broker's default applies (S1: Math.floor({}) is NaN, and a NaN cap never stops retrying).
+        const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
         // An isolated plugin cannot raise the attempt limit past the broker's own (contracts.md §2: at most 7 attempts).
-        const cap = (n: number) => Math.max(0, Math.min(DEFAULT_MAX_RETRIES, Math.floor(n)));
+        const cap = (n: unknown) => (finite(n) ? { ok: Math.max(0, Math.min(DEFAULT_MAX_RETRIES, Math.floor(n))) } : null);
         // P3's wait for a rate limit that names none: a plugin may lengthen it, never below the broker's own first
         // backoff (1 s before jitter, so never faster than without the hint), never past MAX_WAIT_MS. Its
         // `rateLimitBody` pattern is not carried: it would run in this process, where a pathological pattern stalls
         // the broker for every caller (BUILD-NOTES, "Integration: wave 2", merge 8).
-        const blindWait = (n: number) => (Number.isFinite(n) ? Math.min(MAX_WAIT_MS, Math.max(1000, Math.floor(n))) : 1000);
+        const blindWait = (n: unknown) => (finite(n) ? { ok: Math.min(MAX_WAIT_MS, Math.max(1000, Math.floor(n))) } : null);
+        const retries = r ? cap(r.maxRetries) : null;
+        const blindRetries = r ? cap(r.maxBlindRateLimitRetries) : null;
+        const wait = r ? blindWait(r.blindRateLimitWaitMs) : null;
         if (r === false) init.retry = false;
         // The plugin's acceptJson rule runs in the child: the broker awaits its answer, as it would in process (finding 10).
-        else if (r) init.retry = { ...(r.maxRetries !== undefined ? { maxRetries: cap(r.maxRetries) } : {}), ...(r.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: cap(r.maxBlindRateLimitRetries) } : {}), ...(r.blindRateLimitWaitMs !== undefined ? { blindRateLimitWaitMs: blindWait(r.blindRateLimitWaitMs) } : {}), ...(r.acceptJson ? { acceptJson: (body: unknown) => askAccept(m.fid, body) } : {}) };
+        else if (r) init.retry = { ...(retries ? { maxRetries: retries.ok } : {}), ...(blindRetries ? { maxBlindRateLimitRetries: blindRetries.ok } : {}), ...(wait ? { blindRateLimitWaitMs: wait.ok } : {}), ...(r.acceptJson ? { acceptJson: (body: unknown) => askAccept(m.fid, body) } : {}) };
       }
       const res = await io.fetch(m.url, init);
       // Everything the child sees of the response is scrubbed: its body, headers, status text and final URL.
       const body = scrub.bytes(Buffer.from(await res.arrayBuffer())).toString("base64");
       const headers = [...res.headers].map(([k, v]) => [k, scrub.text(v)] as [string, string]);
-      try {
-        post({ type: "fetchResult", fid: m.fid, status: res.status, statusText: scrub.text(res.statusText), headers, body, url: scrub.text(res.url) });
-      } catch (e) {
-        post({ type: "fetchResult", fid: m.fid, error: { name: "PluginError", code: (e as PluginError).code, message: (e as Error).message } });
-      }
+      reply({ type: "fetchResult", fid: m.fid, status: res.status, statusText: scrub.text(res.statusText), headers, body, url: scrub.text(res.url) }, failed);
     } catch (e) {
-      const err = e as { name?: unknown; code?: unknown; message?: unknown; host?: unknown; next?: unknown };
-      post({
-        type: "fetchResult",
-        fid: m.fid,
-        error: {
-          name: typeof err?.name === "string" ? err.name : "Error",
-          message: scrub.text(typeof err?.message === "string" ? err.message : String(e)),
-          ...(typeof err?.code === "string" ? { code: err.code } : {}),
-          ...(typeof err?.host === "string" ? { host: scrub.text(err.host) } : {}),
-          ...(typeof err?.next === "string" ? { next: scrub.text(err.next) } : {}),
+      const err = e as { host?: unknown; next?: unknown };
+      reply(
+        {
+          type: "fetchResult",
+          fid: m.fid,
+          error: {
+            ...errorFields(e),
+            ...(typeof err?.host === "string" ? { host: bounded(scrub.text(err.host)) } : {}),
+            ...(typeof err?.next === "string" ? { next: bounded(scrub.text(err.next)) } : {}),
+          },
         },
-      });
+        failed,
+      );
     } finally {
       fetches.delete(m.fid);
       busy();
@@ -461,9 +495,19 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   pipe.on("data", (chunk: Buffer) => reader.push(chunk));
   pipe.on("error", () => {});
 
+  /** The request ids the child sends are echoed in the answers: anything but a whole number is a protocol violation (S1). */
+  const ID_OF: Partial<Record<string, "fid" | "sid" | "xid" | "aid" | "id">> = { fetch: "fid", sleep: "sid", index: "xid", acceptResult: "aid", result: "id", error: "id" };
+
   function receive(m: ChildMessage): void {
     if (dead || closed) return;
     arm();
+    const idKey = ID_OF[(m as { type?: unknown } | null)?.type as string];
+    const idValue = idKey ? (m as unknown as Record<string, unknown>)[idKey] : undefined;
+    if (idKey && !(Number.isSafeInteger(idValue) || (idKey === "id" && m.type === "error" && idValue === null))) {
+      die(new PluginError(`plugin ${o.label} sent a ${m.type} message whose ${idKey} is not a whole number`, "PLUGIN_HOST_FAILED"));
+      child.kill("SIGKILL");
+      return;
+    }
     switch (m?.type) {
       case "ready":
         loading = false;
@@ -500,7 +544,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         void (io?.sleep ?? realSleep)(Math.min(MAX_PLUGIN_SLEEP_MS, Math.max(0, Number(m.ms) || 0)), ctrl.signal).then(
           () => {
             sleeps.delete(ctrl);
-            if (!ctrl.signal.aborted) post({ type: "slept", sid: m.sid });
+            if (!ctrl.signal.aborted) reply({ type: "slept", sid: m.sid }, () => ({ type: "slept", sid: m.sid }));
           },
           () => sleeps.delete(ctrl),
         );
@@ -516,14 +560,17 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         return;
       }
       case "log":
-        io?.log(String(m.line));
+        io?.log(bounded(String(m.line)));
         return;
       case "index": {
         const store = io?.index;
-        const op = !store ? Promise.reject(new Error("this plugin has no local index (LedgerContext.index is for ledgers)")) : m.op === "write" ? store.write(m.value).then(() => null) : store.read();
+        // The index is read and written whole (S1: one larger than a frame used to throw inside this handler, and the
+        // child waited for an answer that never came). An answer that cannot be framed fails the child's index call.
+        const failed = (problem: string): ParentMessage => ({ type: "indexResult", xid: m.xid, error: { name: "PluginError", code: "MESSAGE_TOO_LARGE", message: `the ledger index could not be sent to the plugin (${problem})` } });
+        const op = !store ? Promise.reject(new Error("this plugin has no local index (LedgerContext.index is for ledgers)")) : m.op === "write" ? Promise.resolve().then(() => store.write(m.value)).then(() => null) : Promise.resolve().then(() => store.read());
         void op.then(
-          (value) => post({ type: "indexResult", xid: m.xid, value: value ?? null }),
-          (e: { name?: unknown; code?: unknown; message?: unknown }) => post({ type: "indexResult", xid: m.xid, error: { name: typeof e?.name === "string" ? e.name : "Error", message: typeof e?.message === "string" ? e.message : String(e), ...(typeof e?.code === "string" ? { code: e.code } : {}) } }),
+          (value) => reply({ type: "indexResult", xid: m.xid, value: value ?? null }, failed),
+          (e: unknown) => reply({ type: "indexResult", xid: m.xid, error: errorFields(e) }, failed),
         );
         return;
       }
@@ -568,7 +615,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         }
         signal?.addEventListener("abort", () => {
           if (!pending.delete(id)) return;
-          post({ type: "cancel", id });
+          reply({ type: "cancel", id }, () => ({ type: "cancel", id }));
           for (const f of fetches.values()) f.abort();
           reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
           busy();

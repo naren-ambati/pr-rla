@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { installProcessGuard } from "./guard.js";
 import { createPrRlaMcp } from "./server.js";
 import { PR_RLA_MCP_VERSION } from "./version.js";
 
@@ -40,6 +41,9 @@ function parse(argv: string[]): { roots: string[]; plugins?: "builtin-only"; han
   }
   return { roots, ...(plugins ? { plugins } : {}), ...(handoffMs !== undefined ? { handoffMs } : {}) };
 }
+
+// A rejection nothing awaited fails the call it came from and is logged; it does not end the server (src/guard.ts).
+installProcessGuard((line) => void process.stderr.write(`[pr-rla-mcp] ${line}\n`));
 
 try {
   const args = parse(process.argv.slice(2));

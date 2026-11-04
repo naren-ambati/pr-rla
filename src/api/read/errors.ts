@@ -9,7 +9,7 @@ export const MAX_UNTRUSTED_ERROR_BYTES = 2048;
 /** Plugin refusals pr-rla makes itself (its own text); the rest of PluginError's codes carry a plugin's output. */
 const PLUGIN_REFUSALS = new Set(["NOT_LOCKED", "LOCK_MISMATCH", "BUILTIN_ONLY", "TREE_ESCAPE", "PLUGIN_UNRESOLVED", "FULL_TRUST_REFUSED", "NODE_TOO_OLD"]);
 /** Broker refusals of a request pr-rla would not send (its own text). */
-const BROKER_REFUSALS = new Set(["HOST_NOT_ALLOWED", "WRITE_PATH_NOT_ALLOWED", "CREDENTIAL_HOST_MISMATCH", "TOO_MANY_REDIRECTS"]);
+const BROKER_REFUSALS = new Set(["HOST_NOT_ALLOWED", "WRITE_PATH_NOT_ALLOWED", "CREDENTIAL_HOST_MISMATCH", "TOO_MANY_REDIRECTS", "RETRY_HINT_INVALID"]);
 
 const cut = (s: string) => {
   const b = Buffer.from(escapeControls(s), "utf8");

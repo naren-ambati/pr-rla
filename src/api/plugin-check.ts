@@ -8,6 +8,7 @@ import type { ConformanceReport } from "../testing/conformance.js";
 import { AuditError } from "./errors.js";
 import { auditContextFor, type ApiContext } from "./session.js";
 import { configIn, configuredPlugin, installScriptWarnings, type PluginKind } from "./write/plugin.js";
+import { ExecutableNotFound, resolveExecutable } from "../io/executables.js";
 
 export interface PluginCheckOptions {
   /** Recorded fixtures to run the kit on, besides those the plugin's package.json lists. */
@@ -44,7 +45,15 @@ export interface PluginCheckResult {
 function npmSignatures(plugin: ResolvedPlugin, offline: boolean | undefined): string {
   if (plugin.source === "path") return "not applicable: a path plugin is not from the npm registry";
   if (offline) return "skipped (--offline)";
-  const r = spawnSync("npm", ["audit", "signatures"], { cwd: dirname(plugin.npm?.lockfile ?? plugin.root), encoding: "utf8", timeout: 120_000 });
+  // By absolute path from PATH's absolute entries (S1, as git and ssh-keygen are, P4): the cwd is the plugin's own
+  // directory inside the audit repo, so a bare name could run an npm that repository supplies.
+  let npm: string;
+  try {
+    npm = resolveExecutable("npm");
+  } catch (e) {
+    return `skipped: ${e instanceof ExecutableNotFound ? "npm is not on PATH" : (e as Error).message}`;
+  }
+  const r = spawnSync(npm, ["audit", "signatures"], { cwd: dirname(plugin.npm?.lockfile ?? plugin.root), encoding: "utf8", timeout: 120_000 });
   if (r.error) return `skipped: ${(r.error as NodeJS.ErrnoException).code === "ENOENT" ? "npm is not on PATH" : r.error.message}`;
   const summary = `${r.stdout}\n${r.stderr}`.split("\n").map((l) => l.trim()).filter((l) => /signature|attestation|audited/i.test(l));
   return `${r.status === 0 ? "ok" : "FAILED"}: ${summary.join("; ") || "no output"}`;

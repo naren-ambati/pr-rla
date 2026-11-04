@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { bounded } from "../core/text.js";
 import { abortable, sleepFor } from "./abort.js";
 import { DEFAULT_MAX_RETRIES, backoffMs, blindRateLimitWaitMs, checkJsonBody, isRateLimited, isRetryableStatus, rateLimitedByBody, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
@@ -12,6 +13,7 @@ import {
   DESTINATION_TIMEOUT_MS,
   HostNotAllowed,
   ReadOnlyViolation,
+  RetryHintInvalid,
   TSA_RETRY_DEADLINE_MS,
   WritePathNotAllowed,
   type BrokerFetch,
@@ -360,7 +362,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const original = new Headers(call.req.headers);
     let downgraded = false;
     for (let hop = 0; ; hop++) {
-      if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
+      if (hop > MAX_REDIRECTS) throw new BrokerError(`${bounded(url.host)}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
       // A method override must be allowed too, every one of them: a server may run any of the methods.
@@ -425,6 +427,12 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
    * the caller's `blindRateLimitWaitMs`, doubling, and gives up after `maxBlindRateLimitRetries` of them.
    */
   async function withRetries(call: Call, hints: RetryHints): Promise<Response> {
+    // Every caller's limits are checked here, whatever checked them before (S1): a cap that is not a finite number
+    // (NaN compares false with everything) would never be reached.
+    for (const k of ["maxRetries", "maxBlindRateLimitRetries", "blindRateLimitWaitMs"] as const) {
+      const v: unknown = hints[k];
+      if (v !== undefined && !(typeof v === "number" && Number.isFinite(v) && v >= 0)) throw new RetryHintInvalid(k, call.url.host);
+    }
     const max = hints.maxRetries ?? DEFAULT_MAX_RETRIES;
     const maxBlind = hints.maxBlindRateLimitRetries ?? max;
     const start = now();

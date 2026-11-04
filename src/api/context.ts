@@ -169,7 +169,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     log,
     broker,
     plugins: readOnlyPolicy(o.mode, o.plugins ?? pluginPolicy(undefined, env)),
-    consent: approvedOnly(o.mode, localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
+    consent: approvedOnly(o.mode, localConsent(o.mode === "read-only" ? withoutAcceptLockGrants(env, log) : env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
@@ -197,6 +197,25 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
   };
   if (o.rateLimits) ctx.setRateLimits(o.rateLimits);
   return ctx;
+}
+
+let warnedAcceptLockGrants = false;
+
+/**
+ * Read-only mode never reads PR_RLA_ACCEPT_LOCK_GRANTS (S1, item 7): it takes only approvals stored on this machine
+ * (`approvedOnly` below), so the variable cannot change anything there, and a value the CLI would refuse (anything but
+ * unset, empty, 0 or 1) must not make every read call throw. Set to anything but empty or 0, it gets one warning per
+ * process, the first time a read-only context sees it.
+ */
+function withoutAcceptLockGrants(env: Readonly<Record<string, string | undefined>>, log: (line: string) => void): Readonly<Record<string, string | undefined>> {
+  const v = env.PR_RLA_ACCEPT_LOCK_GRANTS;
+  if (v === undefined) return env;
+  if (v !== "" && v !== "0" && !warnedAcceptLockGrants) {
+    warnedAcceptLockGrants = true;
+    log("PR_RLA_ACCEPT_LOCK_GRANTS is ignored in read-only mode (pr-rla/api/read, the MCP server): it takes only the approvals stored on this machine (pr-rla plugin approve)");
+  }
+  const { PR_RLA_ACCEPT_LOCK_GRANTS: _ignored, ...rest } = env;
+  return rest;
 }
 
 /**
