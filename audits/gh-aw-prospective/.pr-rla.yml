@@ -1,7 +1,7 @@
 # Prospective audit of github/gh-aw: the launch artifact (docs/design/spec.md, validation gate).
-# Prepared in bolt 1; REGISTERED BY THE FOUNDER, AFTER BOLT 3. See docs/gh-aw-prospective.md.
-# Until it is edited this file does not load (the window dates are placeholders), so nothing can
-# register it by accident.
+# Prepared in bolt 1, completed in bolt 3; REGISTERED BY THE FOUNDER. See docs/gh-aw-prospective.md.
+# Four values are placeholders (marked EDIT: the window dates, the audit repo, your login). Until they are
+# replaced this file does not pass register's preflight, so nothing can register it by accident.
 provider: github                # the built-in provider, at the registering pr-rla version
 repo: github/gh-aw
 
@@ -34,14 +34,10 @@ timestamping:                   # the four default authorities, k = 2
   authorities: [sigstore, digicert, globalsign, microsoft]
   min_tokens: 2
 
-# --- available from bolt 3 (U4, issue ledgers) -------------------------------------------------
-# The github-issues ledger does not exist in bolt 1, so `register` refuses this file until bolt 3
-# ships it. Option names follow docs/design/phase-3-4 (§U4); bolt 3 confirms them.
-ledger:
+ledger:                         # the built-in github-issues ledger (bolt 3): one issue per drawn change
   use: github-issues
   options:
-    repo: <owner>/<audit-repo>  # the audit repo the founder owns: draw issues and verdict labels live there
+    repo: <owner>/<audit-repo>  # EDIT: the audit repo you own (draw issues and verdict labels live there; gh-aw is only read)
 verdicts:
   min_provenance: account       # label events by a GitHub account; the default with an issue ledger
-  reviewers: ["<founder's GitHub login>"]   # only these accounts' label events count
-# ------------------------------------------------------------------------------------------------
+  reviewers: ["<founder's GitHub login>"]   # EDIT: only these accounts' label events count
