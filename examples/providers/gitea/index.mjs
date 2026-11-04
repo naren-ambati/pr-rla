@@ -277,6 +277,11 @@ export default defineProvider({
   providerApiVersion: 1,
   name: NAME,
   description: "Gitea / Forgejo (Codeberg): merged PRs, reviews and default-branch history (example plugin)",
+  // What the plugin reaches, for the fetch broker. Run isolated (pr-rla's plugin host, the default),
+  // it may contact these hosts only, and GITEA_TOKEN reaches it as a placeholder the broker swaps
+  // for the token on codeberg.org only.
+  hosts: (options) => [new URL(options?.base_url ?? "https://codeberg.org").host],
+  credentials: [{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }],
   create(options, ctx) {
     return new GiteaProvider(options ?? {}, ctx);
   },
