@@ -20,8 +20,10 @@ const ROOT = join(__dirname, "..");
 const git = (...args: string[]) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
 
 const DUMP = String.raw`import { it } from "vitest";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+const sha1 = (s) => createHash("sha1").update(s).digest("hex");
 const R = process.env.ANCHOR_ROOT, OUT = process.env.ANCHOR_OUT, KEY = process.env.ANCHOR_KEY;
 const strip = (v) => (Array.isArray(v) ? v.map(strip) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "signature").map(([k, x]) => [k, strip(x)])) : v);
 it("dump", async () => {
@@ -70,6 +72,33 @@ it("dump", async () => {
   });
   const org2 = fakeOrg({ owner: "acme", seed: 5, repos: [{ name: "widgets", prs: 0, pushes: 0, empty: true }] });
   await scenario("githubEmpty", setupAuditRepo({ changes: [], provider: "github", fetch: org2.fetch }));
+  // P3: the head moves after freeze, by every honest shape the second review listed (GitHub records each push when it
+  // happens, after the freeze at 12:00); verify runs a week later.
+  const shapes = {
+    postWindowLinear: (org) => { const h = org.history("widgets").head; org.pushCommits("widgets", [{ oid: sha1("p1"), date: "2026-10-22T09:00:00Z", parents: [h] }, { oid: sha1("p2"), date: "2026-10-23T09:00:00Z", parents: [sha1("p1")] }], { at: "2026-10-23T09:05:00Z" }); },
+    fr72LateMerge: (org) => { const h = org.history("widgets"); const ph = h.commits.find((c) => c.oid === h.head).parents[0]; org.pushCommits("widgets", [{ oid: sha1("lc"), date: "2026-09-30T12:00:00Z", parents: [ph] }, { oid: sha1("lm"), date: "2026-10-25T09:00:00Z", parents: [h.head, sha1("lc")] }], { at: "2026-10-25T09:00:00Z" }); },
+    backdatedPush: (org) => { const h = org.history("widgets").head; org.pushCommits("widgets", [{ oid: sha1("bd"), date: "2026-09-30T20:00:00Z", parents: [h] }], { at: "2026-10-20T15:00:00Z" }); },
+    foxtrotPull: (org) => { const h = org.history("widgets"); const old = h.commits.find((c) => c.oid === h.head).parents[0]; const old2 = h.commits.find((c) => c.oid === old).parents[0]; org.pushCommits("widgets", [{ oid: sha1("local"), date: "2026-09-30T21:00:00Z", parents: [old2] }, { oid: sha1("pull"), date: "2026-10-26T09:00:00Z", parents: [sha1("local"), h.head] }], { at: "2026-10-26T09:00:00Z" }); },
+    foxtrotPullAfterDated: (org) => { const h = org.history("widgets"); const old = h.commits.find((c) => c.oid === h.head).parents[0]; org.pushCommits("widgets", [{ oid: sha1("local2"), date: "2026-10-21T21:00:00Z", parents: [old] }, { oid: sha1("pull2"), date: "2026-10-26T09:00:00Z", parents: [sha1("local2"), h.head] }], { at: "2026-10-26T09:00:00Z" }); },
+    ffLocal: (org) => { const h = org.history("widgets").head; org.pushCommits("widgets", [{ oid: sha1("ff1"), date: "2026-09-29T10:00:00Z", parents: [h] }, { oid: sha1("ff2"), date: "2026-09-30T10:00:00Z", parents: [sha1("ff1")] }], { at: "2026-10-27T10:00:00Z" }); },
+  };
+  result.moved = {};
+  for (const [name, push] of Object.entries(shapes)) {
+    const org = fakeOrg({ owner: "acme", seed: 5, repos: [{ name: "widgets", prs: 120, pushes: 25, after: 3 }] });
+    const s = setupAuditRepo({ changes: [], provider: "github", fetch: org.fetch });
+    mkdirSync(join(s.dir, ".pr-rla"), { recursive: true });
+    copyFileSync(KEY, join(s.dir, ".pr-rla/signing-key.pem"));
+    s.clock.now = T("2026-10-20T00:00:00Z");
+    await registerCommand(s.ctx, {});
+    s.clock.now = T("2026-10-20T12:00:00Z");
+    await freezeCommand(s.ctx, {});
+    push(org);
+    s.clock.now = T("2026-10-28T00:00:00Z");
+    const v = await runVerify(s.ctx, { offline: false });
+    const from = s.out.length;
+    const code = await verifyCommand(s.ctx, {});
+    result.moved[name] = { ok: v.ok, statuses: v.checks.map((c) => [c.n, c.status]), c5: v.checks.find((c) => c.n === 5).details, code, last: s.out.slice(from).at(-1) };
+  }
   writeFileSync(OUT, JSON.stringify(result).replace(/\/(private\/)?(var|tmp)\/[^"\s]*?prrla-audit-[A-Za-z0-9]+/g, "<DIR>"));
 });
 `;
@@ -86,16 +115,16 @@ const R = ${JSON.stringify(root)};
 export default defineConfig({
   resolve: { alias: { "pr-rla/provider": R + "/src/sdk/provider.ts", "pr-rla/ledger": R + "/src/sdk/ledger.ts", "pr-rla/testing": R + "/src/testing/index.ts" } },
   server: { fs: { strict: false } },
-  test: { include: [${JSON.stringify(`${name}.anchor.test.ts`)}], setupFiles: [R + "/test/setup/network-deny.ts"], testTimeout: 120_000 },
+  test: { include: [${JSON.stringify(`${name}.anchor.test.ts`)}], setupFiles: [R + "/test/setup/network-deny.ts"], testTimeout: 280_000 },
 });
 `,
   );
-  execFileSync(process.execPath, [join(ROOT, "node_modules", "vitest", "vitest.mjs"), "run", "--config", cfg, "--root", work], { cwd: work, env: { ...process.env, ANCHOR_ROOT: root, ANCHOR_OUT: out, ANCHOR_KEY: key }, stdio: "pipe", timeout: 170_000 });
+  execFileSync(process.execPath, [join(ROOT, "node_modules", "vitest", "vitest.mjs"), "run", "--config", cfg, "--root", work], { cwd: work, env: { ...process.env, ANCHOR_ROOT: root, ANCHOR_OUT: out, ANCHOR_KEY: key }, stdio: "pipe", timeout: 290_000 });
   return JSON.parse(readFileSync(out, "utf8")) as Record<string, Record<string, unknown>>;
 }
 
 describe("single-repo audits behave as master does (a pool of one), against the master build itself", () => {
-  it("json-file (400 changes), a GitHub repo, and an empty GitHub repo: every output, record and verify result is master's, but for the listed U8 changes", { timeout: 180_000 }, () => {
+  it("json-file (400 changes), a GitHub repo, an empty GitHub repo, and a GitHub repo whose head moved after freeze in six honest ways: every output, record and verify result is master's, but for the listed U8 and P3 changes", { timeout: 300_000 }, () => {
     // master here, or origin/master in a fresh clone of this branch.
     const commit = (name: string) => {
       try {
@@ -120,7 +149,7 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       const before = dump(baseRoot, work, key, "master");
       const now = dump(ROOT, work, key, "branch");
 
-      // The intended single-repo changes of the U8 fix round, and nothing else:
+      // The intended single-repo changes of the U8 fix round and of P3, and nothing else:
       // 1. a single repo deleted after freeze: master's verify threw the provider's error; it is now INCOMPLETE (exit 6);
       const after = (now.github1!.steps as Record<string, { value?: { ok: boolean; checks: unknown[][] } }>).after!.value!;
       expect((before.github1!.steps as Record<string, { threw?: string }>).after!.threw).toMatch(/^GitHub POST \/graphql: HTTP 404/);
@@ -128,7 +157,38 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt"]);
       delete (before.github1!.steps as Record<string, unknown>).after;
       delete (now.github1!.steps as Record<string, unknown>).after;
-      // 2. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
+      // P3. 2. a GitHub manifest records what the push log showed about its head (headEvidence), so its sha and the
+      // commitment's differ; verify says so in one line of check 5.
+      const m = now.github1!["audit/2026-q3.manifest.json"] as { headEvidence?: unknown; sha256: string };
+      expect(m.headEvidence).toEqual([{ repo: "acme/widgets", headSha: "29791b4e876b9ec17c0392c6208ab7f64bdcdbec", status: "tip", since: "2026-10-04T00:00:00Z", event: expect.stringMatching(/^\d+$/), detail: expect.stringMatching(/^it became the default branch's tip at 2026-10-04T00:00:00Z \(update \d+, fast-forward\)$/) }]);
+      const unhash = (r: Record<string, unknown>) => {
+        const x = structuredClone(r) as Record<string, Record<string, unknown>> & { steps: Record<string, { out: string[]; value?: { checks: unknown[][] } }> };
+        delete x["audit/2026-q3.manifest.json"]?.headEvidence;
+        delete x["audit/2026-q3.manifest.json"]?.sha256;
+        const c = x["audit/2026-q3/manifest-commitment.json"] as { record?: { manifestSha256?: string }; sha256?: string } | null;
+        if (c?.record) delete c.record.manifestSha256;
+        if (c) delete c.sha256;
+        for (const st of Object.values(x.steps)) {
+          st.out = st.out.filter((l) => !/^ *push log: /.test(l)).map((l) => l.replace(/^manifest [0-9a-f]{64} /, "manifest <sha> "));
+          for (const ch of st.value?.checks ?? []) if (Array.isArray(ch[3])) ch[3] = (ch[3] as string[]).filter((d) => !d.startsWith("push log: "));
+        }
+        return x;
+      };
+      now.github1 = unhash(now.github1!);
+      before.github1 = unhash(before.github1!);
+      // 3. moved heads: every honest shape is VERIFIED on both builds, check by check (P3: the push log places the
+      // window commits the frozen head does not reach; U8 had FAILed three of them).
+      const moved = (r: Record<string, unknown>) => r.moved as Record<string, { ok: boolean; statuses: unknown[]; c5: string[]; code: number; last: string }>;
+      expect(Object.keys(moved(now))).toHaveLength(6);
+      for (const [name, b] of Object.entries(moved(now))) {
+        const a = moved(before)[name]!;
+        expect({ name, ok: b.ok, statuses: b.statuses, code: b.code, last: b.last }).toEqual({ name, ok: a.ok, statuses: a.statuses, code: a.code, last: a.last });
+        expect(b.last).toBe("VERIFIED");
+        if (["fr72LateMerge", "backdatedPush", "foxtrotPull", "ffLocal"].includes(name)) expect(b.c5.join("\n")).toMatch(/reached the default branch after the window closed, not through the frozen head .*\(FR7\.2\)/);
+      }
+      delete now.moved;
+      delete before.moved;
+      // 4. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
       expect(now).toEqual(before);
       // And the scenarios really ran: master's own outputs, checked here so that an empty dump cannot pass.
       const steps = (s: string) => now[s]!.steps as Record<string, { value?: unknown; threw?: string; out: string[] }>;

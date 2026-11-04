@@ -5,7 +5,7 @@ import { isMutableExclusion, matchRepo, poolRecordProblems, resolvePool, ruleExc
 import type { ListedRepo, RepoListing } from "../src/core/records.js";
 import { normalizeSelector } from "../src/core/selector.js";
 import { BrokerRetriesExhausted, BrokerTimeout } from "../src/net/contract.js";
-import { RepoEmptyError, RepoUnavailableError, type ChangeRecord, type FirstParentCommit, type ListChangesRequest, type ListChangesResult, type RepoRef, type RepoSetRule, type ScmProvider } from "../src/sdk/provider.js";
+import { NO_COMMIT, RepoEmptyError, RepoUnavailableError, type ChangeRecord, type FirstParentCommit, type ListChangesRequest, type ListChangesResult, type PushLogEvent, type RepoRef, type RepoSetRule, type ScmProvider } from "../src/sdk/provider.js";
 
 /**
  * The U8 fix round's core, on in-memory providers (fixture kind: synthetic): rule exclusions and repo matching, the
@@ -116,8 +116,12 @@ describe("poolRecordProblems (check 2, offline): the manifest's repos against th
   });
 });
 
-/** A provider over one repo's two histories: the frozen head's and the current head's, each with its window listing. */
-function twoHeads(o: { frozen: ChangeRecord[]; now: ChangeRecord[]; path?: FirstParentCommit[] | null; pins?: boolean; failFrozen?: unknown; describe?: ScmProvider["describeRepo"] }): ScmProvider {
+/**
+ * A provider over one repo's two histories: the frozen head's and the current head's, each with its window listing
+ * (synthetic: it lists pull requests through history, as no built-in does; the built-ins are in p3-pool-head.test.ts).
+ * `log` is the branch's push log, newest first (P3).
+ */
+function twoHeads(o: { frozen: ChangeRecord[]; now: ChangeRecord[]; path?: FirstParentCommit[] | null; pins?: boolean; failFrozen?: unknown; describe?: ScmProvider["describeRepo"]; log?: PushLogEvent[] }): ScmProvider {
   const H0 = sha("frozen-head");
   const H1 = sha("current-head");
   const result = (changes: ChangeRecord[], head: string): ListChangesResult => ({ changes, defaultBranch: "main", limitations: [], headSha: head });
@@ -133,10 +137,16 @@ function twoHeads(o: { frozen: ChangeRecord[]; now: ChangeRecord[]; path?: First
     },
     ...(o.path !== undefined ? { firstParentPath: async () => o.path! } : {}),
     ...(o.describe ? { describeRepo: o.describe } : {}),
+    ...(o.log ? { pushLog: async () => ({ events: o.log! }) } : {}),
   };
 }
 const H0 = sha("frozen-head");
+const H1 = sha("current-head");
 const args = (over = {}) => ({ repo: "acme/a", frozenHead: H0, frozenEmpty: false, window: WINDOW, selector: SEL, ...over });
+/** The freeze span verify holds a frozen head to: the manifest's as-of time until R. */
+const SPAN = { freezeSpan: { from: "2026-10-20T12:00:00Z", until: "2026-10-21T00:00:00Z" } };
+const ev = (id: string, at: string, before: string, after: string, kind: PushLogEvent["kind"] = "fast-forward"): PushLogEvent => ({ id, at, before, after, kind });
+const B = sha("base");
 
 describe("rebuildRepo: the frozen head against the current head (finding 3)", () => {
   const frozen = [pr("acme/a", 1), push("acme/a", "p1")];
@@ -150,22 +160,23 @@ describe("rebuildRepo: the frozen head against the current head (finding 3)", ()
     expect(r).toMatchObject({ history: "pinned", fail: [], incomplete: [] });
   });
 
-  it("a window commit reachable now but not from the frozen head: excused only when every first-parent commit after the head is dated after the window (FR7.2)", async () => {
-    const after = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("merge"), committedAt: "2026-10-25T09:00:00Z" }] }), args());
-    expect(after.fail).toEqual([]);
-    expect(after.notes.join("\n")).toMatch(/1 commit\(s\) dated in the window arrived on the default branch after it closed.*\(FR7\.2\)/);
-    expect(after.listed!.changes).toEqual(frozen); // the rebuild is the frozen head's
-    const during = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("late"), committedAt: "2026-09-30T12:00:00Z" }] }), args());
-    expect(during.fail.join("\n")).toMatch(/1 direct push\(es\) dated in the window .* 1 first-parent commit\(s\) after the frozen head are dated before the window closed/);
-    const offChain = await rebuildRepo(twoHeads({ frozen, now: later, path: null }), args());
-    expect(offChain.fail.join("\n")).toMatch(/the frozen head [0-9a-f]{12}… is not on the default branch's first-parent history/);
-    const cannot = await rebuildRepo(twoHeads({ frozen, now: later }), args());
-    expect(cannot.fail).toEqual([]);
-    expect(cannot.incomplete.join("\n")).toMatch(/provider two cannot report first-parent history \(no firstParentPath\): whether they arrived after freeze \(FR7\.2\) or the frozen head hides them is unverified/);
+  it("a window commit reachable now but not from the frozen head (P3): FR7.2 when the push log proves the head, FAIL when it disproves it, INCOMPLETE without a log; commit dates and first parents decide nothing", async () => {
+    const log = (head: string) => [ev("3", "2026-10-25T09:00:00Z", head, H1), ev("2", "2026-09-30T10:00:00Z", B, head), ev("1", "2026-06-01T00:00:00Z", NO_COMMIT, B, "created")];
+    const proven = await rebuildRepo(twoHeads({ frozen, now: later, log: log(H0) }), args(SPAN));
+    expect(proven.fail).toEqual([]);
+    expect(proven.incomplete).toEqual([]);
+    expect(proven.notes.join("\n")).toMatch(/1 commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*: the push log shows [0-9a-f]{12}… was the branch's tip at freeze \(it became the default branch's tip at 2026-09-30T10:00:00Z \(update 2, fast-forward\)\) .*\(FR7\.2\)/);
+    expect(proven.listed!.changes).toEqual(frozen); // the rebuild is the frozen head's
+    // A first-parent path dated after the window, which U8 took as proof, changes nothing when the log disagrees.
+    const disproven = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("merge"), committedAt: "2026-10-25T09:00:00Z" }], log: log(sha("real-tip")) }), args(SPAN));
+    expect(disproven.fail.join("\n")).toMatch(/^the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze: the push log shows that at 2026-10-20T12:00:00Z the tip was [0-9a-f]{12}… \(since 2026-09-30T10:00:00Z, update 2\)/);
+    const none = await rebuildRepo(twoHeads({ frozen, now: later, path: [{ sha: sha("merge"), committedAt: "2026-10-25T09:00:00Z" }] }), args(SPAN));
+    expect(none.fail).toEqual([]);
+    expect(none.incomplete.join("\n")).toMatch(/1 direct push\(es\) dated in the window are on the default branch now but not reachable from the frozen head .*there is no push-time evidence to place them \(provider two keeps no push log pr-rla can read \(it has no pushLog\)\): whether they arrived after freeze \(FR7\.2\) or the frozen head hides them is unverified/);
   });
 
-  it("a pull request reachable now but not from the frozen head always FAILs: its merge time is the SCM's", async () => {
-    const r = await rebuildRepo(twoHeads({ frozen, now: [...frozen, pr("acme/a", 2)], path: [] }), args());
+  it("a pull request reachable now but not from the frozen head always FAILs (a provider that lists pull requests through history)", async () => {
+    const r = await rebuildRepo(twoHeads({ frozen, now: [...frozen, pr("acme/a", 2)] }), args());
     expect(r.fail.join("\n")).toMatch(/1 pull request\(s\) merged in the window are on the default branch now but not in the history from the frozen head/);
   });
 

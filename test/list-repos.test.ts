@@ -347,7 +347,7 @@ describe("kit: repo-unavailable is an opt-in check (finding 6)", () => {
     };
     expect(CONFORMANCE_CHECKS.map(label).length).toBe(17);
     const optIn: readonly OptInConformanceCheck[] = OPT_IN_CONFORMANCE_CHECKS;
-    expect(optIn).toEqual(["list-repos", "estimate-requests", "repo-unavailable"]);
+    expect(optIn).toEqual(["list-repos", "estimate-requests", "repo-unavailable", "push-log"]);
   });
 });
 

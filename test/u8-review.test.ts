@@ -99,8 +99,10 @@ describe("finding 1: an attribute changed after registration cannot take a repo 
     const r = await verify(s);
     expect(check(r, 2).status).not.toBe("FAIL");
     expect(r.verdict).toBe("VERIFIED");
-    // The three are rebuilt; the only warnings are for the repos that were never public, so the public-only rule never had them.
-    const warned = check(r, 5).details.filter((d) => d.startsWith("WARN ")).map((d) => /^WARN repo (\S+)/.exec(d)?.[1]);
+    // The three are rebuilt; the only warnings are for the repos that were never public, so the public-only rule never had
+    // them: one summary line (P3, pass 2 finding 10), each repo behind it in `verbose`.
+    expect(check(r, 5).details.filter((d) => d.startsWith("WARN "))).toHaveLength(1);
+    const warned = (check(r, 5).verbose ?? []).map((d) => /^WARN repo (\S+)/.exec(d)?.[1]);
     expect(warned.sort()).toEqual(org.spec.repos.filter((x) => (x.visibility ?? "public") !== "public").map((x) => `${ORG}/${x.name}`).sort());
     expect(lines(r, 5)).toContain("history walked from the frozen heads of 23 repo(s)");
   });
@@ -112,7 +114,8 @@ describe("finding 1: an attribute changed after registration cannot take a repo 
     expect(readManifest(s).repos.map((r) => r.repo)).not.toContain(`${ORG}/svc-07`);
     const r = await verify(s);
     expect(check(r, 5).status).toBe("WARN");
-    expect(lines(r, 5)).toMatch(/WARN repo acme-org\/svc-07 is excluded by archived now, an attribute its owners can change, and has \d+ changes in the window that are not in the population \(the registration came after the window opened, so a change made before it cannot be detected\)/);
+    expect(lines(r, 5)).toMatch(/WARN 1 repo\(s\) excluded only by attributes their owners can change \(name, archive state, visibility\) have \d+ changes in the window that are not in the population \(e\.g\. acme-org\/svc-07\): the registration came after the window opened/);
+    expect(check(r, 5).verbose!.join("\n")).toMatch(/WARN repo acme-org\/svc-07 is excluded by archived now, an attribute its owners can change, and has \d+ changes in the window that are not in the population \(the registration came after the window opened, so a change made before it cannot be detected\)/);
   });
 });
 
@@ -198,7 +201,9 @@ describe("finding 3: the pinned head cannot hide window landings", () => {
     });
     const r = await verify(s);
     expect(check(r, 5).status).toBe("FAIL");
-    expect(lines(r, 5)).toMatch(new RegExp(`FAIL ${victim}: \\d+ direct push\\(es\\) dated in the window are on the default branch now but not reachable from the frozen head [0-9a-f]{12}… .*first-parent commit\\(s\\) after the frozen head are dated before the window closed`));
+    // P3: by the push log (the frozen head was not the branch's tip at freeze) and the stopgap, never by commit dates.
+    expect(lines(r, 5)).toMatch(new RegExp(`FAIL ${victim}: the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze`));
+    expect(lines(r, 5)).toMatch(new RegExp(`FAIL ${victim}: \\d+ pull request\\(s\\) merged in the window have a merge commit that is not reachable from the frozen head`));
   });
 
   it("a single repo: the same rewind FAILs (master trusted the frozen head too)", async () => {
@@ -214,7 +219,7 @@ describe("finding 3: the pinned head cannot hide window landings", () => {
     });
     const r = await runVerify(s.ctx, { offline: false });
     expect(check(r, 5).status).toBe("FAIL");
-    expect(check(r, 5).summary).toMatch(/^\d+ direct push\(es\) dated in the window are on the default branch now but not reachable from the frozen head/);
+    expect(lines(r, 5)).toMatch(/FAIL the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze/);
   });
 
   it("FR7.2 still holds: a merge pushed after freeze that brings in work dated in the window is not a failure", async () => {
@@ -224,18 +229,20 @@ describe("finding 3: the pinned head cannot hide window landings", () => {
     const parentOfHead = h.commits.find((c) => c.oid === h.head)!.parents[0]!;
     const lc = { oid: sha1("late-work"), date: "2026-09-30T12:00:00Z", parents: [parentOfHead], author: { name: "Late", email: "late@example.invalid", login: "late" } };
     const lm = { oid: sha1("late-merge"), date: "2026-10-25T09:00:00Z", parents: [h.head, lc.oid] };
-    org.pushCommits("svc-03", [lc, lm]);
+    org.pushCommits("svc-03", [lc, lm]); // GitHub records the push when it happens: here, at the merge's date
     const r = await verify(s);
     expect(check(r, 5).status).toBe("PASS");
-    expect(lines(r, 5)).toMatch(/1 commit\(s\) dated in the window arrived on the default branch after it closed, through 1 first-parent commit\(s\) after the frozen head, all dated after the window .*\(FR7\.2\)/);
+    expect(lines(r, 5)).toMatch(/1 commit\(s\) dated in the window reached the default branch after the window closed, not through the frozen head .*\(FR7\.2\)/);
   });
 
-  it("a commit dated in the window pushed straight onto the frozen head after freeze FAILs: by its date it is a window landing", async () => {
+  it("a commit dated in the window pushed straight onto the frozen head after freeze is FR7.2 too (P3: this test used to pin it as a FAIL)", async () => {
     const org = org30();
     const s = await frozen(org);
     const h = org.history("svc-03");
-    org.pushCommits("svc-03", [{ oid: sha1("backdated"), date: "2026-09-30T20:00:00Z", parents: [h.head] }]);
-    expect(check(await verify(s), 5).status).toBe("FAIL");
+    org.pushCommits("svc-03", [{ oid: sha1("backdated"), date: "2026-09-30T20:00:00Z", parents: [h.head] }], { at: "2026-10-20T15:00:00Z" });
+    const r = await verify(s);
+    expect(check(r, 5).status).toBe("PASS");
+    expect(r.verdict).toBe("VERIFIED");
   });
 
   it("an edited checkpoint is listed again, one that breaks the contract is refused, and one re-hashed to rewind a head is caught by verify", async () => {
@@ -281,7 +288,7 @@ describe("finding 3: the pinned head cannot hide window landings", () => {
     expect(await s.clock.run(freezeCommand(s.ctx, { force: true, resume: c.runId }))).toBe(0);
     const r = await verify(s);
     expect(check(r, 5).status).toBe("FAIL");
-    expect(lines(r, 5)).toMatch(new RegExp(`FAIL ${c.marker.repo}: \\d+ direct push\\(es\\) dated in the window`));
+    expect(lines(r, 5)).toMatch(new RegExp(`FAIL ${c.marker.repo}: the frozen head [0-9a-f]{12}… was not the default branch's tip at freeze`));
   });
 });
 
