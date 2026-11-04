@@ -28,7 +28,7 @@ Components work only from the same GitLab instance, so a self-managed instance m
 | `fail-on` | `escalate,refusal,timestamps,incomplete` | Which of exits 2, 3, 5 and 6 fail the job |
 | `plugins` | `builtin-only` | `allow` lets the audit's locked plugins load |
 | `approve-origins` | empty | `ENV_VAR=https://host` entries; see Credentials |
-| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the project, separated by spaces or commas; passed as `--tsa-trust` (`PRRLA_TSA_TRUST` in the plain snippet). Needed only for an authority outside the shipped bundle: without it such an audit's certificate is withheld (exit 6) |
+| `tsa-trust` | empty | Timestamp-authority anchor files you trust beyond the shipped bundle, relative to the project, separated by spaces or commas; passed as `--tsa-trust` (`PRRLA_TSA_TRUST` in the plain snippet). Needed only for an authority outside the shipped bundle: without it such an audit's certificate is withheld (exit 6; with an issue ledger, exit 1, since check 7 FAILs a draw → issue publication its authorities are not trusted for) |
 | `accept-lock-grants` | `"false"` | Only for an audit repository you control |
 | `image` | `node:24-alpine@sha256:…` | A Node 24 image pinned by digest (the tag's index digest on 2026-11-04) |
 | `stage` | `test` | |

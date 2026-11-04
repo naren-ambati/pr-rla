@@ -214,7 +214,7 @@ pr-rla reads credentials from the environment and sends each one only where a lo
 
 - App passwords can no longer be created (Atlassian stopped on 2025-09-09). Use an API token or an access token.
 - `PRRLA_APPROVE_ORIGINS` takes `ENV_VAR=https://host` entries separated by spaces or commas. Each one runs `pr-rla plugin approve --env ENV_VAR --origin https://host --yes` in the job, with the approvals file in the container's temporary directory (`PR_RLA_APPROVALS_FILE`), never in the clone.
-- `PRRLA_TSA_TRUST` names timestamp-authority anchor files you trust beyond the shipped bundle (relative to the clone, separated by spaces or commas), passed as `--tsa-trust`. It is needed only for an authority outside the shipped bundle: without it such an audit's certificate is withheld (exit 6).
+- `PRRLA_TSA_TRUST` names timestamp-authority anchor files you trust beyond the shipped bundle (relative to the clone, separated by spaces or commas), passed as `--tsa-trust`. It is needed only for an authority outside the shipped bundle: without it such an audit's certificate is withheld (exit 6; with an issue ledger, exit 1, since check 7 FAILs a draw → issue publication its authorities are not trusted for).
 - `PRRLA_ACCEPT_LOCK_GRANTS=true` takes the grants and trust in the audit repository's `pr-rla.lock.json` as given. Use it only for an audit repository you control.
 - If the log says `is not approved on this machine, so withheld`, a credential did not reach its host and the run was anonymous; a private host that refused every read leaves the check unestablished, so pr-rla exits 6 (INCOMPLETE). Add the origin to `PRRLA_APPROVE_ORIGINS`.
 
