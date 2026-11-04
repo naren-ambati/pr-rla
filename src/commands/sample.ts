@@ -3,6 +3,7 @@ import { manifestSha256, manifestRepo, derivedRoundFor } from "../core/records.j
 import { computeDraws, QUICKNET, unixToIso } from "../core/seed.js";
 import { effectiveCap, zeroFailureStop } from "../core/sprt.js";
 import { existsSync } from "node:fs";
+import { readIndexDocument } from "../ledgers/issue-index.js";
 import {
   CommandError,
   configFor,
@@ -74,6 +75,9 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   writeJson(paths.draws, file);
   const ledger = await ledgerFor(ctx, config, paths);
   await ledger.publishDraws?.(draws.slice(0, issued), { window: config.window.name, protocolSha256: reg.record.protocolSha256, registrationSha256: reg.sha256, repo: manifestRepo(manifest) });
+  // The ledger's draw → issue index now exists: bind it to the draws (verify compares this hash with the file).
+  const index = readIndexDocument(paths.windowDir);
+  if (index) writeJson(paths.draws, { ...file, ledgerIndexSha256: index.sha256 });
   ctx.out(`round ${round} verified (BLS, drand quicknet) · randomness ${beacon.randomness.slice(0, 16)}… · N ${fmt(manifest.N)} · issued ${issued} of cap ${cap}`);
   for (const d of draws.slice(0, issued)) ctx.out(`  #${String(d.draw).padStart(3)}  ${d.changeId}  ${d.url}${d.firstOccurrence ? "" : "  (drawn before: reuses its verdict)"}`);
   if (ledger.publishDraws)

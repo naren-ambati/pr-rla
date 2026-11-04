@@ -318,5 +318,11 @@ export interface DrawsFile {
   issued: number;
   cap: number;
   draws: { draw: number; index: number; changeId: string; url: string; mergeSha: string; firstOccurrence: boolean }[];
+  /**
+   * Optional (added after the first draws files): `ledgerIndexSha256` of the window's `ledger-index.json`
+   * as `sample` left it, for a ledger that keeps one. `verify` compares it with the file now, so the
+   * draw → issue mapping cannot be edited after the draws were published (contracts.md §5).
+   */
+  ledgerIndexSha256?: string;
 }
 

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   CHECKPOINTS_FILE,
+  chainTip,
   HISTORY_DIR,
   eventsSha256,
   firstVerdictsForCheckpoint,
@@ -30,10 +31,10 @@ export const checkpointsPath = (windowDir: string) => join(windowDir, CHECKPOINT
 export const historyDirPath = (windowDir: string) => join(windowDir, HISTORY_DIR);
 
 /** Every checkpoint in the window (de-duplicated by identity), with its stored event list. */
-export function readCheckpoints(windowDir: string): { checkpoints: CheckpointArtifact[]; problems: string[] } {
+export function readCheckpoints(windowDir: string): { checkpoints: CheckpointArtifact[]; problems: string[]; unchained: number } {
   const file = checkpointsPath(windowDir);
-  if (!existsSync(file)) return { checkpoints: [], problems: [] };
-  const { lines, problems } = parseCheckpointLines(readFileSync(file, "utf8"), CHECKPOINTS_FILE);
+  if (!existsSync(file)) return { checkpoints: [], problems: [], unchained: 0 };
+  const { lines, problems, unchained } = parseCheckpointLines(readFileSync(file, "utf8"), CHECKPOINTS_FILE);
   const checkpoints = lines.map((line) => {
     const rel = `${HISTORY_DIR}/${historyFileName(line.takenAt, line.eventsSha256)}`;
     let events: LedgerHistoryEvent[] | null = null;
@@ -44,7 +45,13 @@ export function readCheckpoints(windowDir: string): { checkpoints: CheckpointArt
     }
     return { line, events, file: rel };
   });
-  return { checkpoints, problems };
+  return { checkpoints, problems, unchained };
+}
+
+/** The hash the next line of this window's `ledger-checkpoints.jsonl` carries as `prevLineSha256` (null before the first). */
+export function checkpointChainTip(windowDir: string): string | null {
+  const file = checkpointsPath(windowDir);
+  return chainTip(existsSync(file) ? readFileSync(file, "utf8") : "");
 }
 
 /** The newest checkpoint's time, or null. */
@@ -54,7 +61,7 @@ export function latestCheckpointAt(windowDir: string): string | null {
 }
 
 /** The record a checkpoint signs nothing over but time-stamps: what the ledger's history is now. */
-export async function buildCheckpoint(ctx: AuditContext, input: { ledger: Ledger; identity: PluginIdentity; window: string; firstVerdicts: readonly VerdictEvent[]; takenAt: string }): Promise<{ record: LedgerCheckpointRecord; events: LedgerHistoryEvent[] }> {
+export async function buildCheckpoint(ctx: AuditContext, input: { ledger: Ledger; identity: PluginIdentity; window: string; firstVerdicts: readonly VerdictEvent[]; takenAt: string; prevLineSha256?: string | null; ledgerIndexSha256?: string | null }): Promise<{ record: LedgerCheckpointRecord; events: LedgerHistoryEvent[] }> {
   requireReadWrite(ctx, "checkpoint");
   if (!input.ledger.readHistory) throw new Error(`ledger ${input.ledger.name} has no readHistory, so it cannot be checkpointed (checkpoints anchor issue-tracker ledgers; git-file's tamper trail is git history itself)`);
   const events = canonicalHistory(await input.ledger.readHistory());
@@ -67,6 +74,8 @@ export async function buildCheckpoint(ctx: AuditContext, input: { ledger: Ledger
       count: events.length,
       perDrawFirstVerdict: firstVerdictsForCheckpoint(input.firstVerdicts),
       takenAt: input.takenAt,
+      ...(input.prevLineSha256 !== undefined ? { prevLineSha256: input.prevLineSha256 } : {}),
+      ...(input.ledgerIndexSha256 ? { ledgerIndexSha256: input.ledgerIndexSha256 } : {}),
     },
     events,
   };

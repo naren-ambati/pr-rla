@@ -73,17 +73,21 @@ export function ledgerIndexSha256(value: unknown): string {
   return sha256Hex(canonicalJson(value));
 }
 
-/** The window's `ledger-index.json` as parsed JSON with its hash, or null when there is none. Does not check the schema (an external ledger keeps its own). */
-export function readIndexDocument(windowDir: string): { sha256: string; value: unknown } | null {
+/**
+ * The window's `ledger-index.json` as parsed JSON with its hash, or null when there is none. Does not check
+ * the schema (an external ledger keeps its own). A file that is not JSON comes back with `error` set and
+ * the hash of its bytes, so `verify` can FAIL on it instead of crashing.
+ */
+export function readIndexDocument(windowDir: string): { sha256: string; value: unknown; error?: string } | null {
   const p = indexPath(windowDir);
   if (!existsSync(p)) return null;
-  let value: unknown;
+  const text = readFileSync(p, "utf8");
   try {
-    value = JSON.parse(readFileSync(p, "utf8"));
+    const value: unknown = JSON.parse(text);
+    return { sha256: ledgerIndexSha256(value), value };
   } catch (e) {
-    throw new Error(`${p} is not valid JSON: ${(e as Error).message}`);
+    return { sha256: sha256Hex(text), value: null, error: `${INDEX_FILE} is not valid JSON: ${(e as Error).message}` };
   }
-  return { sha256: ledgerIndexSha256(value), value };
 }
 
 /**
