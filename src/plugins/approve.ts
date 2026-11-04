@@ -20,7 +20,7 @@ export interface ApprovalPlan {
 }
 
 export function trustLine(trust: PluginTrust): string {
-  return trust === "full" ? "full: IN THIS PROCESS, with your environment and files" : "isolated: out of process; it sees placeholders, never your secrets";
+  return trust === "full" ? "full: IN THIS PROCESS, with your environment and files (its imports are held to its hashed files; what it reads and runs is its own)" : "isolated: out of process; it sees placeholders, never your secrets";
 }
 
 export function entryApprovalLines(use: string, entry: LockEntry): string[] {

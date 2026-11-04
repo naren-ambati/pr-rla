@@ -63,6 +63,8 @@ export function operationKinds(document: string): OperationKind[] {
   return kinds;
 }
 
+const READ_KEYS: ReadonlySet<string> = new Set(["query", "operationName", "variables"]);
+
 /** The documents in a GraphQL-over-HTTP body (`{ query }` or a batch of them), or null if it is not one. */
 export function graphqlDocuments(body: string): string[] | null {
   let parsed: unknown;
@@ -76,8 +78,9 @@ export function graphqlDocuments(body: string): string[] | null {
   for (const item of items) {
     const q = item && typeof item === "object" ? (item as { query?: unknown }).query : undefined;
     if (typeof q !== "string") return null;
-    // A persisted or stored document (extensions.persistedQuery, documentId) may run instead of the visible one: not readable, so not a read.
-    if ("extensions" in (item as object) || "documentId" in (item as object)) return null;
+    // Only the GraphQL-over-HTTP keys a query needs. Any other (extensions.persistedQuery, documentId,
+    // a server's own id or queryId) may name a stored document that runs instead of the visible one.
+    if (Object.keys(item as object).some((k) => !READ_KEYS.has(k))) return null;
     docs.push(q);
   }
   return docs.length ? docs : null;

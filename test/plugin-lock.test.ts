@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProgram } from "../src/cli.js";
@@ -334,6 +336,58 @@ describe("trust: full loads only the pr-rla running it, self-reference included 
     expect(r.code).toBe(1);
     expect(text(r)).toMatch(/would load pr-rla from .* \(package\.json named pr-rla, which the plugin's imports of pr-rla\/… resolve to\), not the pr-rla running it/);
     expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("trust: full imports only what its tree hash covers (review of this round)", () => {
+  // Vitest resolves a test's imports itself, so the resolve hook is exercised in plain Node processes:
+  // the guard module type-stripped from src/, and the built CLI when dist/ is there.
+  const marker = () => join(tmpdir(), `prrla-undeclared-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+  const UNHASHED = (m: string) => `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(m)}, "unhashed code ran in process");\nexport default 1;\n`;
+  /** An audit dir with a package the plugin never declared in its node_modules, and the plugin. */
+  function auditWith(source: string, m: string): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "prrla-guard-")));
+    const pkg = join(dir, "node_modules", "left-pad-unhashed");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "left-pad-unhashed", version: "1.0.0", type: "module", exports: "./index.js" }));
+    writeFileSync(join(pkg, "index.js"), UNHASHED(m));
+    mkdirSync(join(dir, "plugins"));
+    writeFileSync(join(dir, "plugins", "p.mjs"), source);
+    writeFileSync(join(dir, "plugins", "helper.mjs"), UNHASHED(m));
+    return dir;
+  }
+  const run = (args: string[], env: Record<string, string> = {}) => spawnSync(process.execPath, args, { encoding: "utf8", env: { PATH: process.env.PATH ?? "", PR_RLA_APPROVALS_FILE: process.env.PR_RLA_APPROVALS_FILE!, ...env }, timeout: 60_000 });
+
+  it("the resolve hook refuses an undeclared package and an unhashed sibling file, and allows node: built-ins (Node's own resolution)", () => {
+    const m = marker();
+    const guard = pathToFileURL(join(ROOT, "src", "plugins", "inprocess-guard.ts")).href;
+    for (const [importLine, refused] of [
+      ['import "left-pad-unhashed";', true],
+      ['import "./helper.mjs";', true],
+      ['import { readFileSync } from "node:fs"; void readFileSync;', false],
+    ] as [string, boolean][]) {
+      const dir = auditWith(`${importLine}\nexport default { ok: true };\n`, m);
+      const plugin = join(dir, "plugins", "p.mjs");
+      const script = join(dir, "load.mjs");
+      writeFileSync(script, `const { guardInProcessImports } = await import(${JSON.stringify(guard)});\nguardInProcessImports("./plugins/p.mjs", [${JSON.stringify(plugin)}], [${JSON.stringify(plugin)}]);\ntry { await import(${JSON.stringify(pathToFileURL(plugin).href)}); console.log("LOADED"); } catch (e) { console.log(JSON.stringify({ code: e.code, message: e.message })); }\n`);
+      const r = run(["--disable-warning=ExperimentalWarning", script]);
+      if (refused) expect(JSON.parse(r.stdout.trim()), importLine).toMatchObject({ code: "TREE_ESCAPE", message: expect.stringMatching(/^plugin \.\/plugins\/p\.mjs imports ".*", which resolves to .*, outside the files its tree hash covers/) });
+      else expect(r.stdout.trim(), importLine).toBe("LOADED");
+    }
+    expect(existsSync(m)).toBe(false);
+  });
+
+  const DIST = join(ROOT, "dist", "plugins", "inprocess-guard.js");
+  it.skipIf(!existsSync(DIST))("the built CLI refuses a trust: full plugin's undeclared import before it runs (needs npm run build)", async () => {
+    const m = marker();
+    const dir = auditWith(`if (process.env.PR_RLA_HOST !== "1") await import("left-pad-unhashed");\nexport default { providerApiVersion: 1, name: "acme", create() { return { apiVersion: 1, name: "acme", async listChanges() { return { changes: [], defaultBranch: "main" }; } }; } };\n`, m);
+    const s = setupAuditRepo({ changes: [], provider: "{ use: ./plugins/p.mjs, options: {} }" });
+    cpSync(dir, s.dir, { recursive: true });
+    expect((await cli(s, ["plugin", "add", "./plugins/p.mjs", "--trust", "full", "--yes"])).code).toBe(0);
+    const r = run([join(ROOT, "dist", "cli.js"), "-C", s.dir, "freeze", "--dry-run"]);
+    expect(r.stderr).toMatch(/plugin \.\/plugins\/p\.mjs imports "left-pad-unhashed", which resolves to .*node_modules\/left-pad-unhashed\/index\.js, outside the files its tree hash covers/);
+    expect(r.status).toBe(1);
+    expect(existsSync(m)).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_A
 import { approveCommand, grantsOf, grantText, refuseFullTrustUnapproved, type ConsentSource } from "./approvals.js";
 import { PluginError } from "./errors.js";
 import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
-import { assertLinksRunningPrRla, placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
+import { guardFullTrust, placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
 
 /**
  * How the PluginRegistry opens an external plugin for a command (functional-design.md §U2b):
@@ -85,7 +85,7 @@ async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", s
 }
 
 async function importInProcess(kind: "provider" | "ledger", spec: PluginSpec, entry: LockEntry, plugin: ResolvedPlugin): Promise<unknown> {
-  assertLinksRunningPrRla(plugin);
+  guardFullTrust(plugin);
   const mod = (await import(pathToFileURL(plugin.entry).href)) as Record<string, unknown>;
   const def = mod.default ?? mod[kind];
   if (kind === "provider") assertProviderDefinition(def, `provider "${spec.use}"`);

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "../io/atomic.js";
 import type { LocalConsent } from "./approvals.js";
 import { PluginError } from "./errors.js";
+import { guardInProcessImports } from "./inprocess-guard.js";
 
 /**
  * `pr-rla.lock.json` (contracts.md §5; functional-design.md §U2b item 4; FR2.2, FR2.3).
@@ -446,6 +447,17 @@ export function assertLinksRunningPrRla(p: ResolvedPlugin): void {
     const scope = packageScope(dir);
     if (scope && str(readPackageJson(scope)?.name) === "pr-rla" && realpathSync(scope) !== RUNNING_PR_RLA) throw refuse(`${scope} (package.json named pr-rla, which the plugin's imports of pr-rla/… resolve to)`);
   }
+}
+
+/**
+ * Before a `trust: full` plugin is imported in this process: every pr-rla it can resolve must be the
+ * running one, and every import its modules make must resolve inside the files its tree hash covers,
+ * its dependencies' or the running pr-rla's (./inprocess-guard.ts), so an approval pins what runs.
+ */
+export function guardFullTrust(p: ResolvedPlugin): void {
+  assertLinksRunningPrRla(p);
+  const tree = [p.root, ...p.deps.map((d) => d.dir)];
+  guardInProcessImports(p.use, tree, [...tree, RUNNING_PR_RLA]);
 }
 
 /** The directory of the nearest package.json at or above `dir` (Node's package scope), or null. */

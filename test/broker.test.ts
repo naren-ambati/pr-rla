@@ -125,7 +125,7 @@ describe("finding 6: a GraphQL document in the URL, and method overrides, are he
     await expect(provider("https://gitlab.com/api/graphql?query=not%20graphql%20%7D%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     // The path in any case, and a body that names a stored document, are held to the same rules (review of this round).
     await expect(provider("https://gitlab.com/api/GraphQL?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
-    for (const extra of [{ extensions: { persistedQuery: { version: 1, sha256Hash: "ab" } } }, { documentId: "destroy-everything" }])
+    for (const extra of [{ extensions: { persistedQuery: { version: 1, sha256Hash: "ab" } } }, { documentId: "destroy-everything" }, { id: "stored-1" }, { queryId: "q" }])
       await expect(provider("https://gitlab.com/api/graphql", { method: "POST", body: JSON.stringify({ query: "query { viewer { login } }", ...extra }) })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
     await provider("https://gitlab.com/api/graphql?query=%7B%20viewer%20%7B%20login%20%7D%20%7D&operationName=V");
     await provider("https://gitlab.com/api/v4/projects?query=mutation");
