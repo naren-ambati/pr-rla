@@ -16,7 +16,8 @@ import { readGrants, readLock, resolvePlugin } from "../src/plugins/lock.js";
 import { ledgerIndexStore } from "../src/plugins/open.js";
 import { providerTraits } from "../src/provider-traits.js";
 import { optionsDigest, pluginIdentity } from "../src/registry.js";
-import type { DrawForLedger, LedgerContext, LedgerDefinition, PublishContext } from "../src/sdk/ledger.js";
+import { verdictIneligibility, type DrawForLedger, type LedgerContext, type LedgerDefinition, type PublishContext } from "../src/sdk/ledger.js";
+import { actorMatches } from "../src/core/selector.js";
 import { assertProviderDefinition } from "../src/sdk/provider.js";
 import { formatLedgerConformanceReport, runLedgerConformance, type LedgerFixture, type LedgerUnderTest } from "../src/testing/index.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
@@ -303,5 +304,23 @@ export default defineLedger({
     s.clock.now = T("2026-06-20T00:00:00Z");
     await expect(registerCommand(s.ctx, { dryRun: true })).rejects.toMatchObject({ code: "NOT_LOCKED", message: expect.stringMatching(/plugin \.\/plugins\/tracker\/index\.mjs is not locked; review it and run "pr-rla plugin add/) });
     expect(existsSync(join(s.dir, "pr-rla.lock.json"))).toBe(false);
+  });
+});
+
+describe("registered reviewers match as U3's selectors do (U4 eligibility with Actor.id)", () => {
+  // A GitHub label event by account 77, whose login was alice when registered and alice-renamed now.
+  const event = (login: string, actorId?: string) => ({ reviewer: login, provenance: { level: "account" as const, source: "scm-label-event", ...(actorId !== undefined ? { actorId } : {}), viaApp: null } });
+  const actor = (login: string, id?: string) => ({ login, kind: "human" as const, ...(id !== undefined ? { id } : {}) });
+  const cases: [string, string, string | undefined, boolean][] = [
+    ["id:77", "alice-renamed", "77", true], // an id entry survives a rename
+    ["id:77", "alice", "78", false],
+    ["id:77", "alice", undefined, false], // no id on the event: an id entry cannot match
+    ["Alice", "alice", "77", true], // a login, case-insensitively
+    ["77", "alice", "77", false], // a bare entry is a login, never an id
+    ["77", "77", "1", true],
+  ];
+  it.each(cases)("%s against %s (id %s): counts = %s, the same answer as actorMatches", (entry, login, id, counts) => {
+    expect(verdictIneligibility(event(login, id), [entry]) === null).toBe(counts);
+    expect(actorMatches(actor(login, id), entry)).toBe(counts);
   });
 });

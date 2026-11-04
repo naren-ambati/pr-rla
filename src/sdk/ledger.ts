@@ -244,8 +244,11 @@ const BOT_SUFFIX = "[bot]";
 /**
  * Why a verdict event cannot count, or null if it can (functional-design.md §U4):
  * a bot account (`[bot]` login), an app (`viaApp`), or, when reviewers are registered,
- * an account that is not on the list. Entries match a login (case-insensitive) or
- * `id:<account id>`. An ineligible event is ignored and reported, so its draw stays unlabelled.
+ * an account that is not on the list. Entries match as U3's selectors do (`actorMatches` in
+ * src/core/selector.ts): `id:<account id>` matches the event's account id (`provenance.actorId`,
+ * the `Actor.id` of the tracker's event) exactly, so it survives a renamed login; any other entry is
+ * a login, matched case-insensitively, never an id. An ineligible event is ignored and reported, so
+ * its draw stays unlabelled.
  */
 export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "provenance">, reviewers?: readonly string[] | null): string | null {
   const login = event.reviewer.trim().toLowerCase();
@@ -256,7 +259,7 @@ export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "pro
     const id = event.provenance?.actorId;
     const listed = reviewers.some((r) => {
       const entry = r.trim();
-      return entry.toLowerCase() === login || (id !== undefined && (entry === `id:${id}` || entry === id));
+      return entry.startsWith("id:") ? id !== undefined && entry.slice(3) === id : entry.toLowerCase() === login;
     });
     if (!listed) return `${event.reviewer} is not a registered reviewer`;
   }
