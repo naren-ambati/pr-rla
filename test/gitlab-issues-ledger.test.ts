@@ -111,15 +111,28 @@ async function cases() {
   f = await probe(cp);
   defs.push({ fixture: { name: "synthetic gitlab checkpoint round trip", case: "checkpoint-round-trip", erasedEventId: String(ids.c), expect: { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: at(f, ids.c!).replace(".000Z", "Z") } }, integrity: "PASS" } }, setup: cp, erase: (g) => g.eraseEvent(ids.c!) });
 
+  const early: Setup = (g, i) => {
+    g.setTime("2026-10-21T00:30:00Z");
+    ids.ea = g.label(i(1), PASS, alice)[0]!;
+  };
+  f = await probe(early);
+  defs.push({ fixture: { name: "synthetic gitlab verdict before seed", case: "verdict-before-seed", expect: { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: at(f, ids.ea!).replace(".000Z", "Z") } }, integrity: "PASS", seedPublishedAt: "2026-10-22T00:00:00Z" } }, setup: early });
+
   const pubFake = new FakeGitLabIssues(BASE, "acme/audit");
   const pubDir = tmp();
+  // The write-fault phases get a tracker of their own: "publish-faults" starts fresh, "publish-recover" continues where it left off.
+  const wfFake = new FakeGitLabIssues(BASE, "acme/audit");
+  const wfDir = tmp();
   const fixtures: LedgerFixture[] = [
     ...defs.map((d) => ({ draws: DRAWS, ...d.fixture, source: "synthetic" as const, http: true })),
     { name: "synthetic gitlab idempotent publish", case: "idempotent-publish", source: "synthetic", http: true, draws: DRAWS, publish: PUB, forgetLocalState: () => rmSync(join(pubDir, "ledger-index.json")), expect: { counted: {}, integrity: "PASS" } },
   ];
   const byName = new Map(defs.map((d) => [d.fixture.name, d]));
   const factory = async (fx: LedgerFixture, h: LedgerHarness): Promise<Ledger> => {
-    if (fx.case === "idempotent-publish") return gitlabIssues.create(OPTIONS, h.context({ fetch: pubFake.fetch, windowDir: pubDir, env: { GITLAB_TOKEN: "t" } }));
+    if (fx.case === "idempotent-publish") {
+      const faulty = h.phase === "publish-faults" || h.phase === "publish-recover";
+      return gitlabIssues.create(OPTIONS, h.context({ fetch: (faulty ? wfFake : pubFake).fetch, windowDir: faulty ? wfDir : pubDir, env: { GITLAB_TOKEN: "t" } }));
+    }
     const d = byName.get(fx.name)!;
     const s = await scenario(d.setup, d.labels);
     if (h.phase === "after-erasure") d.erase?.(s.fake);
@@ -133,6 +146,8 @@ describe("gitlab-issues on a synthetic self-managed GitLab: the ledger kit", () 
     const { fixtures, factory } = await cases();
     const report = await runLedgerConformance(factory, fixtures);
     expect(report.ok, formatLedgerConformanceReport(report)).toBe(true);
+    expect(report.results.filter((r) => r.skipped)).toEqual([]);
+    expect(report.results.filter((r) => r.check === "transient-write-faults").map((r) => r.ok)).toEqual([true]);
   });
 });
 

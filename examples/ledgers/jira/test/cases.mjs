@@ -78,6 +78,9 @@ export async function jiraCases(jira) {
 
   const pubFake = new FakeJira(BASE, "AUD");
   const pubDir = tmp();
+  // The write-fault phases get a tracker of their own: "publish-faults" starts fresh, "publish-recover" continues where it left off.
+  const wfFake = new FakeJira(BASE, "AUD");
+  const wfDir = tmp();
   const rec = recordings();
   const recorded = [
     { name: "recorded hibernate HHH-17005 (Approved) and HHH-16971 (Rejected)", rec: rec.first, case: "first-label", expect: { counted: { 1: { verdict: "pass", reviewer: "557058:99e61e65-956b-4a21-b29c-06057642e9ea", recordedAt: "2023-07-28T10:43:22.045Z" }, 2: { verdict: "fail", reviewer: "557058:db1a3420-e3e5-4207-9989-5d434a8152e9", recordedAt: "2023-07-24T19:23:03.408Z" } }, integrity: "PASS" } },
@@ -91,7 +94,10 @@ export async function jiraCases(jira) {
   const byName = new Map(defs.map((d) => [d.name, d]));
   const recByName = new Map(recorded.map((r) => [r.name, r]));
   const factory = async (f, h) => {
-    if (f.case === "idempotent-publish") return jira.create(OPTIONS, h.context({ fetch: pubFake.fetch, windowDir: pubDir }));
+    if (f.case === "idempotent-publish") {
+      const faulty = h.phase === "publish-faults" || h.phase === "publish-recover";
+      return jira.create(OPTIONS, h.context({ fetch: (faulty ? wfFake : pubFake).fetch, windowDir: faulty ? wfDir : pubDir }));
+    }
     const r = recByName.get(f.name);
     if (r) {
       const windowDir = tmp();

@@ -1,4 +1,4 @@
-import { provenanceRank, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
+import { provenanceRank, recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import type { ScmProvider } from "../sdk/provider.js";
@@ -408,7 +408,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       lastCountedAt = [...countedIds].map((id) => firstFor.get(id)?.recordedAt).filter((t): t is string => !!t).sort((x, y) => Date.parse(x) - Date.parse(y)).at(-1) ?? null;
       for (const id of countedIds) {
         const v = firstFor.get(id);
-        if (v && Date.parse(v.recordedAt) / 1000 < derived.publishesAt) {
+        if (v && recordedBeforeSeed(v.recordedAt, derived.publishesAt)) {
           c7.status = "FAIL";
           c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
         }

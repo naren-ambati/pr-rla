@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChangeRecord, ProviderContext, ScmProvider } from "../src/sdk/provider.js";
-import { CONFORMANCE_CHECKS, runProviderConformance, formatConformanceReport, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
+import { CONFORMANCE_CHECKS, assertProviderConformance, runProviderConformance, formatConformanceReport, type ConformanceFixture, type ConformanceHarness } from "../src/testing/index.js";
 
 /**
  * The kit's own tests: a small HTTP provider that passes, and one broken
@@ -36,6 +36,7 @@ type Variant =
   | "bot-as-human"
   | "bypasses-harness"
   | "drops-page-on-error"
+  | "drops-change"
   // U3:
   | "phase-2"
   | "ignores-head"
@@ -85,6 +86,7 @@ function provider(variant: Variant, ctx: ProviderContext): ScmProvider {
         page = body.next;
       }
       if (variant === "ff-leak") out.push(push("c"));
+      if (variant === "drops-change") out.splice(1, 1);
       if (variant === "bot-as-human") for (const c of out) for (const r of c.reviews) r.author.kind = "human";
       const run = ++runs;
       for (const c of out) {
@@ -109,6 +111,11 @@ const fixture: ConformanceFixture = {
   request: { repo: "acme/w", window: W, kinds: ["pull_request", "direct_push"] },
   expect: {
     ids: ["fake:acme/w#1", "fake:acme/w#2", `fake:acme/w@${sha("d")}`],
+    pullRequests: ["fake:acme/w#1", "fake:acme/w#2"],
+    directPushes: [`fake:acme/w@${sha("d")}`],
+    reviewers: { "fake:acme/w#1": [{ login: "reviewer[bot]", kind: "bot" }], "fake:acme/w#2": [{ login: "carol", kind: "human" }] },
+    actors: { "fake:acme/w#1": { author: { login: "agent[bot]", kind: "bot" }, mergedBy: { login: "maint", kind: "human" } } },
+    changedLines: { "fake:acme/w#1": 10, "fake:acme/w#2": 20 },
     prCommits: { "fake:acme/w#2": [sha("b"), sha("c")] },
     mergeShas: { "fake:acme/w#2": sha("b") },
     bots: ["agent[bot]", "reviewer[bot]"],
@@ -215,5 +222,43 @@ describe("conformance kit: the U3 checks (pinned-head, actor-ids, review-granula
 
   it("revoked-approval: a revoked approval that comes back as APPROVED fails", async () => {
     expect(await failed("approves-revoked")).toEqual(["revoked-approval"]);
+  });
+});
+
+describe("conformance kit: a check that has nothing to check says so (finding 10, tests that cannot fail)", () => {
+  it("a kit given no fixtures fails: it checked nothing", async () => {
+    const r = await runProviderConformance(under("good"), []);
+    expect(r.ok).toBe(false);
+    expect(r.results).toEqual([expect.objectContaining({ fixture: "(no fixtures)", ok: false, message: expect.stringMatching(/given no fixtures/) })]);
+    await expect(assertProviderConformance(under("good"), [])).rejects.toThrow(/provider conformance failed/);
+  });
+
+  it("window-and-kinds asserts completeness: a provider that silently drops a change fails", async () => {
+    const r = await runProviderConformance(under("drops-change"), [fixture]);
+    expect(r.results.find((x) => x.check === "window-and-kinds")).toMatchObject({ ok: false, message: expect.stringMatching(/1 change\(s\) of the window are missing \(e\.g\. fake:acme\/w#2\)/) });
+  });
+
+  it("completeness needs a stated set: ids, or pullRequests and directPushes; with neither, window-and-kinds fails and says how to fix it", async () => {
+    const { ids: _i, pullRequests: _p, directPushes: _d, ...rest } = fixture.expect;
+    const none = await runProviderConformance(under("good"), [{ ...fixture, expect: rest }]);
+    expect(none.results.find((x) => x.check === "window-and-kinds")).toMatchObject({ ok: false, message: expect.stringMatching(/declares no expect\.ids/) });
+    const derived = await runProviderConformance(under("drops-change"), [{ ...fixture, expect: { ...rest, pullRequests: fixture.expect.pullRequests!, directPushes: fixture.expect.directPushes! } }]);
+    expect(derived.results.find((x) => x.check === "window-and-kinds")?.ok).toBe(false);
+  });
+
+  it("a check whose expectation the fixture does not declare is skipped, not ok", async () => {
+    const r = await runProviderConformance(under("good"), [{ name: "ids only", request: fixture.request, expect: { ids: fixture.expect.ids! }, http: true }]);
+    expect(r.ok, formatConformanceReport(r)).toBe(true);
+    const skipped = Object.fromEntries(r.results.filter((x) => x.skipped).map((x) => [x.check, x.message]));
+    expect(skipped).toMatchObject({
+      classification: "the fixture declares neither pullRequests nor directPushes",
+      "merge-strategies": "the fixture declares neither prCommits nor mergeShas",
+      "review-state-mapping": "the fixture declares neither reviewStates nor reviewers",
+      actors: "the fixture declares neither actors nor changedLines",
+    });
+    for (const c of ["classification", "merge-strategies", "review-state-mapping", "actors"]) expect(r.results.find((x) => x.check === c)).toMatchObject({ ok: true, skipped: true });
+    // ...and a pagination expectation that is absent is skipped too (ids is declared here, so it runs).
+    const noPaging = await runProviderConformance(under("good"), [{ ...fixture, expect: { pullRequests: fixture.expect.pullRequests! } }]);
+    expect(noPaging.results.find((x) => x.check === "pagination")).toMatchObject({ ok: true, skipped: true, message: "the fixture declares neither ids nor minPages" });
   });
 });

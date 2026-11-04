@@ -298,6 +298,65 @@ export function compareByTimeThenId(a: { at: string; id: string }, b: { at: stri
   return a.at < b.at ? -1 : a.at > b.at ? 1 : compareEventIds(a.id, b.id);
 }
 
+/** One verdict the core did not count, and why (reported by `status` and check 7 as "ignored"). */
+export interface IgnoredVerdictEvent {
+  event: VerdictEvent;
+  reason: string;
+}
+
+export interface VerdictClassification {
+  /** The first eligible verdict of each drawn change, by change id, in the order the ledger returned them. */
+  first: Map<string, VerdictEvent>;
+  ignored: IgnoredVerdictEvent[];
+  /** Later verdicts on a change that disagree with its first (the first counts). */
+  relabels: { changeId: string; first: VerdictEvent; later: VerdictEvent }[];
+}
+
+/**
+ * How the core treats the verdicts a ledger returns (`computeStatus`, check 7 and the ledger kit share
+ * this): one made under another protocol, on a change that was not drawn, on a draw that is not that
+ * change, or by an ineligible account is ignored with a reason; of the rest, the FIRST per change counts,
+ * in the order the ledger returned them (a ledger returns them in recorded order: time, then event id).
+ */
+export function classifyVerdicts(verdicts: readonly VerdictEvent[], ctx: { protocolSha256: string; draws: readonly { draw: number; changeId: string }[]; reviewers?: readonly string[] | null }): VerdictClassification {
+  const drawByNumber = new Map(ctx.draws.map((d) => [d.draw, d]));
+  const drawnIds = new Set(ctx.draws.map((d) => d.changeId));
+  const first = new Map<string, VerdictEvent>();
+  const ignored: IgnoredVerdictEvent[] = [];
+  const relabels: VerdictClassification["relabels"] = [];
+  for (const ev of verdicts) {
+    if (ev.protocolSha256 !== ctx.protocolSha256) {
+      ignored.push({ event: ev, reason: `protocol ${ev.protocolSha256.slice(0, 8)}… is not the registered protocol ${ctx.protocolSha256.slice(0, 8)}…` });
+      continue;
+    }
+    if (!drawnIds.has(ev.changeId)) {
+      ignored.push({ event: ev, reason: "change was not drawn" });
+      continue;
+    }
+    const d = drawByNumber.get(ev.draw);
+    if (!d || d.changeId !== ev.changeId) {
+      ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
+      continue;
+    }
+    const ineligible = verdictIneligibility(ev, ctx.reviewers);
+    if (ineligible) {
+      ignored.push({ event: ev, reason: ineligible });
+      continue;
+    }
+    const prior = first.get(ev.changeId);
+    if (!prior) first.set(ev.changeId, ev);
+    else if (prior.verdict !== ev.verdict) relabels.push({ changeId: ev.changeId, first: prior, later: ev });
+  }
+  return { first, ignored, relabels };
+}
+
+/**
+ * Whether a counted verdict was recorded before the seed was public (`publishesAtUnix`, seconds):
+ * check 7 FAILs it, and the ledger kit's verdict-before-seed check asks this same question of the
+ * verdicts a ledger returns.
+ */
+export const recordedBeforeSeed = (recordedAt: string, publishesAtUnix: number): boolean => Date.parse(recordedAt) / 1000 < publishesAtUnix;
+
 /** A history event as it is hashed into a checkpoint: no `raw`, keys fixed. */
 export type CanonicalHistoryEvent = Omit<LedgerHistoryEvent, "raw">;
 

@@ -1,4 +1,4 @@
-import { PROVENANCE_LEVELS, verdictIneligibility, type ProvenanceLevel, type VerdictEvent } from "../sdk/ledger.js";
+import { PROVENANCE_LEVELS, classifyVerdicts, type ProvenanceLevel, type VerdictEvent } from "../sdk/ledger.js";
 import { evaluateSequence, type SequenceResult, type SprtParams } from "./sprt.js";
 
 export interface DrawnChange {
@@ -63,34 +63,7 @@ export function computeStatus(input: {
 }): StatusReport {
   const { N, minPopulation, draws, verdicts, params } = input;
   const refusal = N < minPopulation ? `population ${N} < ${minPopulation}: review all ${N} instead` : null;
-  const drawByNumber = new Map(draws.map((d) => [d.draw, d]));
-  const drawnIds = new Set(draws.map((d) => d.changeId));
-  const ignored: IgnoredVerdict[] = [];
-  const first = new Map<string, VerdictEvent>();
-  const relabels: StatusReport["relabels"] = [];
-  for (const ev of verdicts) {
-    if (ev.protocolSha256 !== input.protocolSha256) {
-      ignored.push({ event: ev, reason: `protocol ${ev.protocolSha256.slice(0, 8)}… is not the registered protocol ${input.protocolSha256.slice(0, 8)}…` });
-      continue;
-    }
-    if (!drawnIds.has(ev.changeId)) {
-      ignored.push({ event: ev, reason: "change was not drawn" });
-      continue;
-    }
-    const d = drawByNumber.get(ev.draw);
-    if (!d || d.changeId !== ev.changeId) {
-      ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
-      continue;
-    }
-    const ineligible = verdictIneligibility(ev, input.reviewers);
-    if (ineligible) {
-      ignored.push({ event: ev, reason: ineligible });
-      continue;
-    }
-    const prior = first.get(ev.changeId);
-    if (!prior) first.set(ev.changeId, ev);
-    else if (prior.verdict !== ev.verdict) relabels.push({ changeId: ev.changeId, first: prior, later: ev });
-  }
+  const { first, ignored, relabels } = classifyVerdicts(verdicts, { protocolSha256: input.protocolSha256, draws, reviewers: input.reviewers ?? null });
   const seq: ("pass" | "fail")[] = [];
   let blockingDraw: DrawnChange | null = null;
   const ordered = [...draws].sort((a, b) => a.draw - b.draw);

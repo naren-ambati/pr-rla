@@ -3,8 +3,12 @@ import {
   PROVENANCE_LEVELS,
   SUPPORTED_LEDGER_API_VERSIONS,
   canonicalHistory,
+  classifyVerdicts,
+  compareByTimeThenId,
   historyDiff,
   historyEventProblems,
+  recordedBeforeSeed,
+  type VerdictClassification,
   verdictEventProblems,
   verdictIneligibility,
   type DrawForLedger,
@@ -45,7 +49,7 @@ export const LEDGER_CASES = [
 ] as const;
 export type LedgerCase = (typeof LEDGER_CASES)[number];
 
-export const LEDGER_CONFORMANCE_CHECKS = ["api-version", "normalization", "first-label", "integrity", ...LEDGER_CASES.filter((c) => c !== "first-label"), "transient-faults"] as const;
+export const LEDGER_CONFORMANCE_CHECKS = ["api-version", "normalization", "first-label", "integrity", ...LEDGER_CASES.filter((c) => c !== "first-label"), "transient-faults", "transient-write-faults"] as const;
 export type LedgerConformanceCheck = (typeof LEDGER_CONFORMANCE_CHECKS)[number];
 
 /** The integrity result the design requires for each case (functional-design.md §U4, FR4.3). */
@@ -94,7 +98,7 @@ export interface LedgerFixture {
 }
 
 /** Which tracker state the factory must serve. */
-export type LedgerPhase = "clean" | "repeat" | "faults" | "after-erasure" | "publish-1" | "publish-2" | "publish-3";
+export type LedgerPhase = "clean" | "repeat" | "faults" | "after-erasure" | "publish-1" | "publish-2" | "publish-3" | "publish-faults" | "publish-recover";
 
 export interface LedgerHarness extends Omit<ConformanceHarness, "context"> {
   readonly phase: LedgerPhase;
@@ -127,17 +131,38 @@ async function readAll(l: Ledger): Promise<Reads> {
 
 const integrityOf = (r: LedgerIntegrityReport | null): "PASS" | "WARN" | "FAIL" => (!r ? "WARN" : !r.ok ? "FAIL" : r.warnings?.length || !r.tamperTrail ? "WARN" : "PASS");
 
-/** The first eligible verdict per draw, as the core counts it. */
+/**
+ * The first eligible verdict per draw. "First" is by the tracker's time and then its event id (numeric
+ * ids as integers: `compareByTimeThenId`), whatever order the ledger returned them in; the core counts in
+ * the order the ledger returns them, so the kit also requires that order (normalization).
+ */
 export function countedVerdicts(verdicts: readonly VerdictEvent[], reviewers?: readonly string[] | null): Map<number, VerdictEvent> {
   const out = new Map<number, VerdictEvent>();
-  for (const v of verdicts) if (!out.has(v.draw) && !verdictIneligibility(v, reviewers)) out.set(v.draw, v);
+  const ordered = [...verdicts].sort((a, b) => compareByTimeThenId({ at: a.recordedAt, id: a.provenance?.eventId ?? "" }, { at: b.recordedAt, id: b.provenance?.eventId ?? "" }));
+  for (const v of ordered) if (!out.has(v.draw) && !verdictIneligibility(v, reviewers)) out.set(v.draw, v);
   return out;
+}
+
+export interface LedgerConformanceOptions {
+  /**
+   * Cases (`LEDGER_CASES`) this run does not exercise, each with the reason. The kit fails a case no
+   * fixture covers; a case named here is reported as skipped with the reason instead (a run over
+   * recorded public timelines, say, cannot show an unlisted reviewer).
+   */
+  skipCases?: Partial<Record<LedgerCase, string>>;
+}
+
+/** The core's view of what the ledger returned: the verdicts it would count and ignore (`classifyVerdicts`, which `computeStatus` and check 7 run). */
+function coreView(f: LedgerFixture, verdicts: readonly VerdictEvent[]): VerdictClassification {
+  return classifyVerdicts(verdicts, { protocolSha256: verdicts[0]?.protocolSha256 ?? "0".repeat(64), draws: f.draws, reviewers: f.reviewers ?? null });
 }
 
 const matches = (msgs: readonly string[], p: string | RegExp) => msgs.some((m) => (typeof p === "string" ? m.includes(p) : p.test(m)));
 
-export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: readonly LedgerFixture[]): Promise<ConformanceReport> {
+export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: readonly LedgerFixture[], options: LedgerConformanceOptions = {}): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
+  // A kit given nothing to check has checked nothing: that is a failure, not a pass.
+  if (fixtures.length === 0) return { ok: false, results: [{ fixture: "(no fixtures)", check: "normalization", ok: false, message: "the kit was given no fixtures, so it checked nothing: pass a fixture for each case (LEDGER_CASES), or name the cases you skip in options.skipCases" }] };
   for (const f of fixtures) {
     const push = (check: LedgerConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
     const skip = (check: LedgerConformanceCheck, message: string) => results.push({ fixture: f.name, check, ok: true, skipped: true, message });
@@ -170,6 +195,15 @@ export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: re
       if (p.length) np.push(`verdict on draw #${v.draw}: ${p.join("; ")}`);
       if (!draws.has(v.draw)) np.push(`verdict on draw #${v.draw}, which the fixture does not index`);
       if (!v.provenance || !PROVENANCE_LEVELS.includes(v.provenance.level) || typeof v.provenance.source !== "string") np.push(`verdict on draw #${v.draw} has no provenance { level, source }`);
+    }
+    // The core counts verdicts in the order the ledger returns them ("in recorded order", contracts.md §1): by time, then event id.
+    for (let i = 1; i < clean.verdicts.length; i++) {
+      const a = clean.verdicts[i - 1]!;
+      const b = clean.verdicts[i]!;
+      if (compareByTimeThenId({ at: a.recordedAt, id: a.provenance?.eventId ?? "" }, { at: b.recordedAt, id: b.provenance?.eventId ?? "" }) > 0) {
+        np.push(`readVerdicts is not in recorded order: draw #${b.draw}'s verdict (${b.recordedAt}, event ${b.provenance?.eventId ?? "?"}) comes after draw #${a.draw}'s (${a.recordedAt}, event ${a.provenance?.eventId ?? "?"}); the core counts the first it is given`);
+        break;
+      }
     }
     if (!clean.history) np.push("the ledger has no readHistory(), so it cannot be checkpointed");
     for (const e of clean.history ?? []) {
@@ -212,22 +246,40 @@ export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: re
         if (!f.reviewers) cp.push("the fixture registers no reviewers");
         const unlisted = clean.verdicts.filter((v) => verdictIneligibility(v, f.reviewers)?.includes("not a registered reviewer"));
         if (!unlisted.length) cp.push("no verdict event by an unlisted account came back from readVerdicts (the ledger must return it, so it is reported as ignored)");
-        if (unlisted.some((u) => counted.get(u.draw) === u)) cp.push("an unlisted reviewer's verdict counted");
+        // The core's own handling of what the ledger returned: the event is ignored with a reason, and does not count.
+        const core = coreView(f, clean.verdicts);
+        for (const u of unlisted) {
+          if (!core.ignored.some((i) => i.event === u && /not a registered reviewer/.test(i.reason))) cp.push(`the core did not ignore ${u.reviewer}'s verdict on draw #${u.draw} as unlisted`);
+          if ([...core.first.values()].includes(u)) cp.push(`the core counted ${u.reviewer}'s verdict on draw #${u.draw}, who is not a registered reviewer`);
+        }
+        // The ledger's own path: its integrity report names the unlisted account (it was opened with the registered reviewers).
+        if (unlisted.length && !matches(msgs, /not a registered reviewer/)) cp.push("the ledger's own integrity report does not mention the unlisted account: it must be told the registered reviewers (LedgerContext.reviewers) and report an ineligible event");
         push("unlisted-reviewer", cp.length === 0, cp.join("; "));
         break;
       }
       case "app-applied": {
         const apps = clean.verdicts.filter((v) => /^applied by (app|bot)/.test(verdictIneligibility(v, null) ?? ""));
         if (!apps.length) cp.push("no verdict event applied by an app or bot account came back (it must be returned with a [bot] reviewer or viaApp, so it is reported as ignored)");
-        if (apps.some((a) => counted.get(a.draw) === a)) cp.push("an app-applied verdict counted");
+        const core = coreView(f, clean.verdicts);
+        for (const a of apps) {
+          if (!core.ignored.some((i) => i.event === a && /^applied by (app|bot)/.test(i.reason))) cp.push(`the core did not ignore the verdict applied by ${a.reviewer} on draw #${a.draw}`);
+          if ([...core.first.values()].includes(a)) cp.push(`the core counted a verdict applied by ${a.reviewer} (an app or bot) on draw #${a.draw}`);
+        }
+        if (apps.length && !matches(msgs, /applied by (app|bot)/)) cp.push("the ledger's own integrity report does not mention the app-applied event: it must report an ineligible event");
         push("app-applied", cp.length === 0, cp.join("; "));
         break;
       }
       case "verdict-before-seed": {
         const seed = f.expect.seedPublishedAt;
-        const early = [...counted.values()].filter((v) => seed && Date.parse(v.recordedAt) < Date.parse(seed));
         if (!seed) cp.push("the fixture gives no seedPublishedAt");
-        else if (!early.length) cp.push(`no counted verdict is dated before ${seed}: recordedAt must be the tracker's own event time, so check 7 can FAIL it`);
+        else {
+          // The core counts the first eligible verdict; check 7 FAILs a counted one recorded before the seed was public.
+          const core = coreView(f, clean.verdicts);
+          const seedUnix = Date.parse(seed) / 1000;
+          const refused = [...core.first.values()].filter((v) => recordedBeforeSeed(v.recordedAt, seedUnix));
+          if (!refused.length) cp.push(`no counted verdict is dated before ${seed}: recordedAt must be the tracker's own event time, so check 7 can FAIL it`);
+          else if (!refused.every((v) => v.provenance && v.provenance.level !== "self-asserted")) cp.push("the early verdict carries no account provenance, so it is not the tracker's own time");
+        }
         push("verdict-before-seed", cp.length === 0, cp.join("; "));
         break;
       }
@@ -260,6 +312,15 @@ export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: re
       else skip("transient-faults", "the ledger made no requests through the harness (not an HTTP ledger)");
     } else push("transient-faults", ...(await transientFaults(ledger, f, clean, cleanRequests)));
   }
+  // Every case of the design needs a fixture, or a stated reason it is not exercised here.
+  const covered = new Set(fixtures.map((f) => f.case));
+  for (const c of LEDGER_CASES) {
+    if (covered.has(c)) continue;
+    const why = options.skipCases?.[c];
+    if (why !== undefined) results.push({ fixture: "(case coverage)", check: c, ok: true, skipped: true, message: `not exercised by this run: ${why}` });
+    else results.push({ fixture: "(case coverage)", check: c, ok: false, message: `no fixture exercises the case "${c}": add one, or name it in options.skipCases with the reason so the report says it was not run` });
+  }
+  for (const c of Object.keys(options.skipCases ?? {})) if (!(LEDGER_CASES as readonly string[]).includes(c)) results.push({ fixture: "(case coverage)", check: "normalization", ok: false, message: `options.skipCases names "${c}", which is not a ledger case (${LEDGER_CASES.join(", ")})` });
   return { ok: results.every((r) => r.ok), results };
 }
 
@@ -297,7 +358,79 @@ async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture): Pro
     if (writes[2]) p.push(`run 3 (index forgotten) made ${writes[2]} write(s); it must find the issues by their markers and make none`);
   }
   res("idempotent-publish", p.length === 0, p.join("; "));
+  // Faults on the write path (a publish and a record), on a tracker of their own, once the clean runs have shown what a publish writes.
+  if (!p.length && f.http) out.push(await transientWriteFaults(ledger, f, writes[0]!));
   return out;
+}
+
+/**
+ * Faults on writes. The fetch broker retries a write only before it is sent and on a rate limit, never
+ * after a 5xx (a lost response may mean the write happened), so the kit injects what that leaves the ledger
+ * to handle: a 429 with Retry-After on a publish's first write (it must wait, then repeat that write), and a
+ * 503 on its second write (call 3, after the repeat of the first) that arrives AFTER the write happened (the ledger must not write it again: the
+ * tracker must end up with exactly the writes a clean publish makes). The faulted publish may throw; a second
+ * publish on the same tracker must finish the job. Then a `record` (appendVerdict) meets a 429 of its own.
+ * The factory serves phase "publish-faults" on a fresh tracker and "publish-recover" on the one the faulted run left.
+ */
+async function transientWriteFaults(ledger: LedgerUnderTest, f: LedgerFixture, cleanWrites: number): Promise<ConformanceResult> {
+  const check = "transient-write-faults" as const;
+  const done = (ok: boolean, message?: string, skipped = false): ConformanceResult => ({ fixture: f.name, check, ok, ...(skipped ? { skipped: true } : {}), ...(message && (!ok || skipped) ? { message } : {}) });
+  if (cleanWrites < 2) return done(true, `a clean publish makes ${cleanWrites} write(s); two are needed to fault the second`, true);
+  const text = (status: number, headers: Record<string, string> = {}) => () => new Response(status === 429 ? "too many requests" : "service unavailable", { status, headers: { "content-type": "text/plain", ...headers } });
+  const faults: Fault[] = [
+    { call: 0, write: 1, response: text(429, { "retry-after": String(INJECTED_RETRY_AFTER_SECONDS) }), minWaitMs: INJECTED_RETRY_AFTER_SECONDS * 1000, label: `429 with Retry-After: ${INJECTED_RETRY_AFTER_SECONDS} on the first write` },
+    // Call 3: the 429'd write is call 1 and its repeat call 2, so call 3 is the second write the publish means to make.
+    { call: 0, write: 3, lost: true, response: text(503), minWaitMs: 0, label: "503 after the second write happened (lost response)" },
+  ];
+  const problems: string[] = [];
+  const h = ledgerHarness("publish-faults", f.reviewers, faults);
+  let faultedThrew: string | null = null;
+  try {
+    const l = await ledger(f, h);
+    try {
+      await l.publishDraws!(f.draws, f.publish);
+    } catch (e) {
+      faultedThrew = (e as Error).message;
+    }
+  } catch (e) {
+    return done(false, `opening the ledger for phase publish-faults threw: ${(e as Error).message}`);
+  }
+  const writeCalls = h.inner.log.filter((x) => x.method !== "GET" && x.method !== "HEAD");
+  if (writeCalls.length < 2) return done(true, `the faulted publish made ${writeCalls.length} write(s): serve a fresh tracker (no issues, no local index) for phase "publish-faults" so writes can be faulted`, true);
+  // The 429'd write must be repeated, after waiting as long as Retry-After says.
+  const at = h.inner.log.indexOf(writeCalls[0]!);
+  const first = h.inner.log[at]!;
+  const next = h.inner.log[at + 1];
+  if (!next || next.url !== first.url || next.method !== first.method) problems.push(`after the injected 429 on ${first.method} ${first.url} the ledger sent ${next ? `${next.method} ${next.url}` : "nothing"} instead of repeating the write`);
+  else if (Math.max(first.sleptAfter, next.at - first.at) < INJECTED_RETRY_AFTER_SECONDS * 1000) problems.push(`after the injected 429 the ledger waited ${Math.max(first.sleptAfter, next.at - first.at)} ms < ${INJECTED_RETRY_AFTER_SECONDS * 1000} ms`);
+  // Recovery on the same tracker: whatever the faulted run left, a clean publish finishes it.
+  const h2 = ledgerHarness("publish-recover", f.reviewers);
+  try {
+    const l2 = await ledger(f, h2);
+    await l2.publishDraws!(f.draws, f.publish);
+    const after = await readAll(l2);
+    if (after.integrity && !after.integrity.ok) problems.push(`integrity FAIL after recovering: ${after.integrity.findings.join(" | ")}`);
+  } catch (e) {
+    problems.push(`the publish after the faults threw: ${(e as Error).message}${faultedThrew ? ` (the faulted publish had thrown: ${faultedThrew})` : ""}`);
+  }
+  // Each logical write reached the tracker once: the 429'd call did not reach it, the lost-response call did.
+  const reached = writeCalls.length - 1 + h2.writes();
+  if (reached !== cleanWrites) problems.push(`the tracker received ${reached} write(s) across the faulted publish and its recovery, a clean publish makes ${cleanWrites}: a write was ${reached > cleanWrites ? "repeated after its response was lost (a duplicate)" : "never made"}`);
+  // A record meets a rate limit: it waits, then repeats the write.
+  const h3 = ledgerHarness("publish-recover", f.reviewers, [{ call: 0, write: 1, response: text(429, { "retry-after": String(INJECTED_RETRY_AFTER_SECONDS) }), minWaitMs: INJECTED_RETRY_AFTER_SECONDS * 1000, label: "429" }]);
+  try {
+    const l3 = await ledger(f, h3);
+    const d = f.draws[0]!;
+    await l3.appendVerdict({ draw: d.draw, changeId: d.changeId, verdict: "pass", protocolSha256: f.publish!.protocolSha256, reviewer: "conformance-kit", recordedAt: "2026-01-01T00:00:00Z" });
+    const w = h3.inner.log.filter((x) => x.method !== "GET" && x.method !== "HEAD");
+    const i = h3.inner.log.indexOf(w[0]!);
+    const n = h3.inner.log[i + 1];
+    if (!n || n.url !== w[0]!.url || n.method !== w[0]!.method) problems.push(`after the injected 429 on a record the ledger sent ${n ? `${n.method} ${n.url}` : "nothing"} instead of repeating the write`);
+    else if (Math.max(w[0]!.sleptAfter, n.at - w[0]!.at) < INJECTED_RETRY_AFTER_SECONDS * 1000) problems.push("after the injected 429 on a record the ledger did not wait as long as Retry-After says");
+  } catch (e) {
+    problems.push(`a record under a 429 threw: ${(e as Error).message}`);
+  }
+  return done(problems.length === 0, problems.join("; "));
 }
 
 /**
@@ -343,8 +476,8 @@ export function formatLedgerConformanceReport(r: ConformanceReport): string {
   return r.results.map((x) => `${x.ok ? (x.skipped ? "skip" : "ok  ") : "FAIL"} ${x.fixture} › ${x.check}${x.message ? `: ${x.message}` : ""}`).join("\n");
 }
 
-export async function assertLedgerConformance(ledger: LedgerUnderTest, fixtures: readonly LedgerFixture[]): Promise<ConformanceReport> {
-  const r = await runLedgerConformance(ledger, fixtures);
+export async function assertLedgerConformance(ledger: LedgerUnderTest, fixtures: readonly LedgerFixture[], options: LedgerConformanceOptions = {}): Promise<ConformanceReport> {
+  const r = await runLedgerConformance(ledger, fixtures, options);
   if (!r.ok) throw new Error(`ledger conformance failed:\n${formatLedgerConformanceReport(r)}`);
   return r;
 }

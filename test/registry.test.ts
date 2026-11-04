@@ -24,7 +24,7 @@ describe("provider registry (bring-your-own providers)", () => {
     const changes = readJsonFixture<{ changes: unknown[] }>("changes", "acme-2026-08-01.json").changes;
     const p = await createProvider({ use: "./examples/provider-template.mjs", options: { changes } }, pctx(ROOT));
     expect(p.name).toBe("example");
-    const report = await runProviderConformance(p, [{ name: "template", request: { repo: "acme/widgets", window: W, kinds: ["pull_request", "direct_push"] }, expect: {} }]);
+    const report = await runProviderConformance(p, [{ name: "template", request: { repo: "acme/widgets", window: W, kinds: ["pull_request", "direct_push"] }, expect: { ids: (changes as { id: string; mergedAt: string }[]).filter((c) => c.mergedAt >= W.opensAt && c.mergedAt < W.closesAt).map((c) => c.id) } }]);
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 

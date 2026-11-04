@@ -158,8 +158,12 @@ const diff = (want: readonly string[], got: readonly string[]) => {
 
 /** A response injected by the harness (also used by the ledger kit). */
 export interface Fault {
-  /** 1-based call number through the wrapped fetch. */
+  /** 1-based call number through the wrapped fetch. With `write`, the call number is ignored. */
   call: number;
+  /** Instead of `call`: the 1-based number of the write (a call that is not GET or HEAD) to fault. */
+  write?: number;
+  /** The write reaches the tracker, and its response is replaced: the lost response of a write that happened. */
+  lost?: boolean;
   response: () => Response;
   /** The provider must wait at least this long before its next call. */
   minWaitMs: number;
@@ -177,7 +181,7 @@ export interface Harness extends ConformanceHarness {
  * the request's limit, waiting as long as the rate-limit headers say, else with backoff.
  */
 async function brokerShaped(send: (input: string | URL | Request, init: RequestInit) => Promise<Response>, input: string | URL | Request, init: RequestInit & { destination: string; retry?: RetryHints | false }, sleep: (ms: number) => Promise<void>): Promise<Response> {
-  const { destination: _d, retry, pluginId: _p, idempotent: _i, ...req } = init as typeof init & { pluginId?: string; idempotent?: boolean };
+  const { destination: _d, retry, pluginId: _p, idempotent, ...req } = init as typeof init & { pluginId?: string; idempotent?: boolean };
   if (retry === false) return send(input, req);
   const hints = retry ?? {};
   const max = hints.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -198,6 +202,8 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
       else {
         problem = `HTTP ${res.status}`;
         rateLimited = isRateLimited(res);
+        // As the broker: a non-idempotent request (a ledger write) is never retried after a 5xx, only on a rate limit.
+        if (idempotent === false && !rateLimited) return res;
         told = waitFromHeaders(res.headers, Date.now());
         await res.body?.cancel().catch(() => {});
       }
@@ -213,14 +219,22 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
 
 export function makeHarness(faults: readonly Fault[] = []): Harness {
   const log: Harness["log"] = [];
+  let writes = 0;
   const h: Harness = {
     log,
     requests: () => log.length,
     wrapFetch(inner) {
       const logged = async (input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        log.push({ url, method: (init?.method ?? "GET").toUpperCase(), sleptAfter: 0, at: Date.now() });
-        const fault = faults.find((f) => f.call === log.length);
+        const method = (init?.method ?? "GET").toUpperCase();
+        log.push({ url, method, sleptAfter: 0, at: Date.now() });
+        const isWrite = method !== "GET" && method !== "HEAD";
+        if (isWrite) writes++;
+        const fault = faults.find((f) => (f.write !== undefined ? isWrite && f.write === writes : f.call === log.length));
+        if (fault?.lost) {
+          await inner(input as string, init); // the write happens; only its answer is lost
+          return fault.response();
+        }
         if (fault) return fault.response();
         return inner(input as string, init);
       };
@@ -271,6 +285,8 @@ function idMaps(changes: readonly ChangeRecord[]): { byLogin: Map<string, Set<st
 
 export async function runProviderConformance(provider: ProviderUnderTest, fixtures: readonly ConformanceFixture[], options: ConformanceOptions = {}): Promise<ConformanceReport> {
   const results: ConformanceResult[] = [];
+  // A kit given nothing to check has checked nothing: that is a failure, not a pass.
+  if (fixtures.length === 0) return { ok: false, results: [{ fixture: "(no fixtures)", check: "normalization", ok: false, message: "the kit was given no fixtures, so it checked nothing: pass at least one fixture (recorded or synthetic SCM data and what it must normalize to)" }] };
   for (const f of fixtures) {
     const push = (check: ConformanceCheck, ok: boolean, message?: string) => results.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
     const skip = (check: ConformanceCheck, message: string) => results.push({ fixture: f.name, check, ok: true, skipped: true, message });
@@ -297,7 +313,20 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     const closes = Date.parse(f.request.window.closesAt);
     const outside = first.filter((c) => Date.parse(c.mergedAt) < opens || Date.parse(c.mergedAt) >= closes);
     const wrongKind = first.filter((c) => !f.request.kinds.includes(c.kind));
-    push("window-and-kinds", outside.length === 0 && wrongKind.length === 0, outside.length ? `${outside[0]!.id} landed ${outside[0]!.mergedAt}, outside the window` : `${wrongKind[0]?.id} is kind ${wrongKind[0]?.kind}`);
+    // Nothing outside the window or the requested kinds, and (completeness) everything the fixture says landed in it.
+    // The expected set is expect.ids, or the pull requests and direct pushes together; with neither, the kit cannot
+    // tell a provider that dropped changes from one that returned them all, and says so.
+    const wk: string[] = [];
+    if (outside.length) wk.push(`${outside[0]!.id} landed ${outside[0]!.mergedAt}, outside the window`);
+    if (wrongKind.length) wk.push(`${wrongKind[0]!.id} is kind ${wrongKind[0]!.kind}, which was not requested`);
+    const landed = f.expect.ids ?? (f.expect.pullRequests || f.expect.directPushes ? [...(f.expect.pullRequests ?? []), ...(f.expect.directPushes ?? [])] : undefined);
+    if (!landed) wk.push("the fixture declares no expect.ids (or pullRequests and directPushes), so completeness (every change in the window came back) is not checked: list the ids the window must return");
+    else {
+      const returned = new Set(first.map((c) => c.id));
+      const missing = landed.filter((id) => !returned.has(id));
+      if (missing.length) wk.push(`${missing.length} change(s) of the window are missing (e.g. ${missing.slice(0, 3).join(", ")})`);
+    }
+    push("window-and-kinds", wk.length === 0, wk.join("; "));
 
     const classProblems: string[] = [];
     for (const c of first) {
@@ -307,7 +336,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     const byKind = (k: ChangeKind) => first.filter((c) => c.kind === k).map((c) => c.id);
     if (f.expect.pullRequests && !sameSet(f.expect.pullRequests, byKind("pull_request"))) classProblems.push(`pull requests: ${diff(f.expect.pullRequests, byKind("pull_request"))}`);
     if (f.expect.directPushes && !sameSet(f.expect.directPushes, byKind("direct_push"))) classProblems.push(`direct pushes: ${diff(f.expect.directPushes, byKind("direct_push"))}`);
-    push("classification", classProblems.length === 0, classProblems.join("; "));
+    if (!f.expect.pullRequests && !f.expect.directPushes) skip("classification", "the fixture declares neither pullRequests nor directPushes");
+    else push("classification", classProblems.length === 0, classProblems.join("; "));
 
     const ms: string[] = [];
     const directBySha = new Map(first.filter((c) => c.kind === "direct_push").map((c) => [c.mergeSha, c.id]));
@@ -323,7 +353,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       if (c && c.mergeSha !== sha.toLowerCase()) ms.push(`${id} mergeSha ${c.mergeSha.slice(0, 12)} ≠ ${sha.slice(0, 12)}`);
       if (!c && f.request.kinds.includes(id.includes("#") ? "pull_request" : "direct_push")) ms.push(`${id} missing`);
     }
-    push("merge-strategies", ms.length === 0, ms.join("; "));
+    if (!f.expect.prCommits && !f.expect.mergeShas) skip("merge-strategies", "the fixture declares neither prCommits nor mergeShas");
+    else push("merge-strategies", ms.length === 0, ms.join("; "));
 
     const ids = first.map((c) => c.id);
     const shas = first.map((c) => c.mergeSha);
@@ -354,7 +385,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const got = c?.reviews.map((r) => r.author) ?? null;
       if (!got || got.length !== actors.length || got.some((a, i) => !sameActor(a, actors[i]!))) rs.push(`${id}: reviewers ${canonicalJson(got)}`);
     }
-    push("review-state-mapping", rs.length === 0, rs.join("; "));
+    if (!f.expect.reviewStates && !f.expect.reviewers) skip("review-state-mapping", "the fixture declares neither reviewStates nor reviewers");
+    else push("review-state-mapping", rs.length === 0, rs.join("; "));
 
     const ac: string[] = [];
     for (const [id, exp] of Object.entries(f.expect.actors ?? {})) {
@@ -369,7 +401,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
       const c = first.find((x) => x.id === id);
       if (c?.changedLines !== n) ac.push(`${id} changedLines ${c?.changedLines} ≠ ${n}`);
     }
-    push("actors", ac.length === 0, ac.join("; "));
+    if (!f.expect.actors && !f.expect.changedLines) skip("actors", "the fixture declares neither actors nor changedLines");
+    else push("actors", ac.length === 0, ac.join("; "));
 
     if (f.expect.bots || f.expect.humans) {
       const bd: string[] = [];
@@ -388,7 +421,8 @@ export async function runProviderConformance(provider: ProviderUnderTest, fixtur
     const pg: string[] = [];
     if (f.expect.ids && !sameSet(f.expect.ids, ids)) pg.push(`ids: ${diff(f.expect.ids, ids)}`);
     if (f.expect.minPages !== undefined && pages !== undefined && pages < f.expect.minPages) pg.push(`transport served ${pages} requests < ${f.expect.minPages}: the fixture does not exercise pagination`);
-    push("pagination", pg.length === 0, pg.join("; "));
+    if (!f.expect.ids && f.expect.minPages === undefined) skip("pagination", "the fixture declares neither ids nor minPages");
+    else push("pagination", pg.length === 0, pg.join("; "));
 
     if (f.request.kinds.length > 1) {
       const kp: string[] = [];

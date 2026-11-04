@@ -139,13 +139,19 @@ async function cases(): Promise<{ fixtures: LedgerFixture[]; factory: (f: Ledger
   // idempotent-publish keeps one tracker and one window directory across its three runs.
   const pubFake = new FakeGitHubIssues();
   const pubDir = tmp();
+  // The write-fault phases get a tracker of their own: "publish-faults" starts fresh, "publish-recover" continues where it left off.
+  const wfFake = new FakeGitHubIssues();
+  const wfDir = tmp();
   const fixtures: LedgerFixture[] = [
     ...defs.map((d) => ({ draws: DRAWS, ...d.fixture, source: "synthetic" as const, http: true })),
     { name: "synthetic idempotent publish", case: "idempotent-publish", source: "synthetic", http: true, draws: [...DRAWS, draw(4, 102, false)], publish: PUB, forgetLocalState: () => rmSync(join(pubDir, "ledger-index.json")), expect: { counted: {}, integrity: "PASS" } },
   ];
   const byName = new Map(defs.map((d) => [d.fixture.name, d]));
   const factory = async (fx: LedgerFixture, h: LedgerHarness) => {
-    if (fx.case === "idempotent-publish") return githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: pubFake.fetch, windowDir: pubDir, env: { GITHUB_TOKEN: "t" } }));
+    if (fx.case === "idempotent-publish") {
+      const faulty = h.phase === "publish-faults" || h.phase === "publish-recover";
+      return githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: (faulty ? wfFake : pubFake).fetch, windowDir: faulty ? wfDir : pubDir, env: { GITHUB_TOKEN: "t" } }));
+    }
     const d = byName.get(fx.name)!;
     const s = await scenario(d.setup);
     if (h.phase === "after-erasure") d.erase?.(s.fake);
@@ -160,7 +166,8 @@ describe("github-issues on a synthetic GitHub: the ledger kit", () => {
     const report = await runLedgerConformance(factory, fixtures);
     expect(report.ok, formatLedgerConformanceReport(report)).toBe(true);
     const checks = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
-    for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults"]) expect(checks).toContain(c);
+    for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults", "transient-write-faults"]) expect(checks).toContain(c);
+    expect(report.results.filter((r) => r.skipped)).toEqual([]);
   });
 });
 
