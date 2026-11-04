@@ -76,7 +76,7 @@ describe("FR7.1: the registered bot list is signed into the registration and re-
     expect(m.N).toBe(360); // the 360 PRs (every 10th generated change is a direct push, which merged_by never matches)
     expect(m.changes.every((c) => c.mergedBy?.kind === "bot" && c.mergedBy.login === "maint")).toBe(true);
     // 360 mergers plus the 40 direct pushes' commit author, also maint.
-    expect(m.funnel[1]).toEqual({ step: "actor entries re-labelled as bot by selector", count: 400 });
+    expect(m.funnel[1]).toEqual({ step: "actors re-labelled as bot by selector", count: 400 });
     const c5 = (await runVerify(s.ctx, { offline: false })).checks.find((c) => c.n === 5)!;
     expect(c5.status).toBe("PASS");
   });

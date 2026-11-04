@@ -252,6 +252,6 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
     const sel = (direct_push_via_merge: "include" | "exclude") => applySelector(r.changes, normalizeSelector({ unreviewed: "no-human-review", direct_push_via_merge }), rec.recordedAt);
     expect(sel("include").selected.map((c) => c.id).sort()).toEqual([merge, ...release].map(push).sort());
     expect(sel("exclude").selected.map((c) => c.id)).toEqual([push(merge)]);
-    expect(sel("exclude").funnel.find((s) => s.step === "excluding direct pushes via a pushed merge")).toEqual({ step: "excluding direct pushes via a pushed merge", count: 1 });
+    expect(sel("exclude").funnel.find((s) => s.step === "excluding pushes via a pushed merge")).toEqual({ step: "excluding pushes via a pushed merge", count: 1 });
   });
 });

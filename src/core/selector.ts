@@ -114,8 +114,8 @@ export function applyBotList(changes: readonly ChangeRecord[], bots: readonly st
 }
 
 /** Funnel step names the selector adds for U3 options (none of them mention reviews). */
-export const BOT_LIST_STEP = "actor entries re-labelled as bot by selector";
-export const VIA_MERGE_STEP = "excluding direct pushes via a pushed merge";
+export const BOT_LIST_STEP = "actors re-labelled as bot by selector";
+export const VIA_MERGE_STEP = "excluding pushes via a pushed merge";
 
 /** Reviews visible as of `cutoffIso` (inclusive). Later reviews are not part of the frozen record. */
 export function reviewsAsOf(change: ChangeRecord, cutoffIso: string): Review[] {

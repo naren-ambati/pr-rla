@@ -301,7 +301,7 @@ describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, Octo
     expect(step(withBots)).toBe(4);
     // Each was approved only by GitLabDuo (bot: true) and gitlab-bot (checked by hand with curl on /approvals, 2026-11-04).
     expect(withBots.selected.map((c) => c.id)).toEqual([id(4191), id(4247), id(4251), id(4253)]);
-    expect(withBots.funnel[1]).toEqual({ step: "actor entries re-labelled as bot by selector", count: 164 });
+    expect(withBots.funnel[1]).toEqual({ step: "actors re-labelled as bot by selector", count: 164 });
     // The example's 200-line cap keeps 3 of them (!4247 has 569 lines).
     expect(applySelector(out.changes, selector(["gitlab-bot"]), r.rec.recordedAt).selected.map((c) => c.id)).toEqual([id(4191), id(4251), id(4253)]);
     // The same list by account id: gitlab-bot is user 1786152 on gitlab.com.
