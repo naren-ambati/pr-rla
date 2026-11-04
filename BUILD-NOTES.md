@@ -1611,7 +1611,7 @@ The review's master and branch CLIs, with the branch rebuilt at `ba882bb` and ag
 
 - describeChange's base commits on GitHub Enterprise Server, GitLab self-managed and Bitbucket Data Center (DC entirely synthetic; `toRef.latestCommit` of a merged DC pull request in particular), GitHub's 3,000-file cap and GitLab's `collapsed` and `changes_count: "1000+"` on a real change.
 - The deadline, cancellation and `close()` against a real SCM's rate-limit waits (tested on mocks and fake waits).
-- Windows and Linux. The timing tests ran green on this machine under load averages up to about 40 (below); at 100 to 170 (other work on the machine) master's own heartbeat test failed, which `69f0af7` addresses for this process's side; a child starved for longer than a test's timeout still fails that test, by design.
+- Windows and Linux. The timing tests ran green on this machine under load averages up to about 40 (below); at 100 to 170 (other work on the machine) master's own heartbeat test failed, which `69f0af7` addresses for this process's side; a child starved for longer than a test's timeout still fails that test, by design. Master's Jira conformance test (`test/wave1-integration.test.ts`, about 13 s alone on master and on this branch) took over 60 s in one parallel run at a load average of 24 and now has a 180 s hang guard of its own.
 
 ### For the integration
 

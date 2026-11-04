@@ -217,7 +217,9 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
     } finally {
       hosts.forEach((h) => h.close());
     }
-  });
+    // A hang guard, not a budget: about 13 s alone, it starts a plugin host per instance, and on a
+    // loaded machine running the whole suite in parallel it took over 60 s (U5 fix round).
+  }, 180_000);
 
   it("isolated, the Jira ledger gets placeholders, the broker builds Basic auth for the base_url host only, and pr-rla writes its index", async () => {
     const audit = jiraAudit();
