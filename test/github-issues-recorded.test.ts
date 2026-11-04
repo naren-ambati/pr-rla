@@ -9,7 +9,7 @@ import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
 
 /**
  * github-issues on recorded public timelines (FR4.7: every fixture here is `source: "recorded"`,
- * read-only, 2026-11-03, by scripts/record-ledger-fixtures.mjs). The timelines are mapped to
+ * read-only, 2026-11-03, re-recorded 2026-11-04 after the repo probe was added, by scripts/record-ledger-fixtures.mjs). The timelines are mapped to
  * verdict labels through the ledger's `labels` option, so a real reviewer's remove-and-re-add,
  * a GitHub App's label, a deleted issue and two label renames each meet the rules.
  */

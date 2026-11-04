@@ -109,14 +109,19 @@ export class GitLabIssuesLedger extends IssueTrackerLedger {
     return out;
   }
 
-  protected async lookupLabel(name: string): Promise<{ id: string } | null> {
-    const r = await this.http.get<{ id: number }>(`/labels/${encodeURIComponent(name)}`, [404]);
-    return r.status === 404 ? null : { id: String(r.data.id) };
+  protected async lookupLabel(name: string): Promise<{ id: string; name: string } | null> {
+    const r = await this.http.get<{ id: number; name?: string }>(`/labels/${encodeURIComponent(name)}`, [404]);
+    return r.status === 404 ? null : { id: String(r.data.id), name: r.data.name ?? name };
   }
 
-  protected async createLabel(name: string, role: Verdict | "draw"): Promise<{ id: string }> {
-    const r = await this.http.request<{ id: number }>("POST", "/labels", { body: { name, ...COLORS[role] } });
-    return { id: String(r.data.id) };
+  protected async canReadTracker(): Promise<boolean> {
+    const r = await this.http.get<unknown>(this.tracker, [401, 403, 404]);
+    return r.status >= 200 && r.status < 300;
+  }
+
+  protected async createLabel(name: string, role: Verdict | "draw"): Promise<{ id: string; name: string }> {
+    const r = await this.http.request<{ id: number; name?: string }>("POST", "/labels", { body: { name, ...COLORS[role] } });
+    return { id: String(r.data.id), name: r.data.name ?? name };
   }
 
   protected async listDrawIssues(drawLabel: string): Promise<ExistingDrawIssue[]> {
@@ -143,7 +148,7 @@ export class GitLabIssuesLedger extends IssueTrackerLedger {
       actor: gitlabActor(e.user),
       viaApp: null,
     }));
-    return { state: "ok", currentLabels: r.data.labels, events };
+    return { state: "ok", id: String(r.data.id), number: r.data.iid, body: r.data.description ?? null, currentLabels: r.data.labels, events };
   }
 
   protected async applyLabel(issue: IndexedIssue, label: string): Promise<void> {

@@ -3,7 +3,7 @@
  "source": "recorded",
  "tracker": "github",
  "case": "relabel-same",
- "recordedAt": "2026-11-04T00:23:32.000Z",
+ "recordedAt": "2026-11-04T03:40:02.000Z",
  "options": {
   "repo": "nodejs/node",
   "labels": {
@@ -42,7 +42,8 @@
     "createdAt": "2026-10-26T18:36:56Z"
    }
   ],
-  "repeats": []
+  "repeats": [],
+  "foreignIssues": true
  },
  "observed": {
   "verdicts": [

@@ -105,14 +105,22 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
     });
   }
 
-  protected async lookupLabel(name: string): Promise<{ id: string } | null> {
-    const r = await this.http.get<{ id: number }>(`/labels/${encodeURIComponent(name)}`, [404]);
-    return r.status === 404 ? null : { id: String(r.data.id) };
+  /** GitHub treats label names that differ only in case as one label (and a rename of only the case keeps the label, and its id). */
+  protected override readonly caseInsensitiveLabels = true;
+
+  protected async lookupLabel(name: string): Promise<{ id: string; name: string } | null> {
+    const r = await this.http.get<{ id: number; name?: string }>(`/labels/${encodeURIComponent(name)}`, [404]);
+    return r.status === 404 ? null : { id: String(r.data.id), name: r.data.name ?? name };
   }
 
-  protected async createLabel(name: string, role: Verdict | "draw"): Promise<{ id: string }> {
-    const r = await this.http.request<{ id: number }>("POST", "/labels", { body: { name, ...COLORS[role] } });
-    return { id: String(r.data.id) };
+  protected async canReadTracker(): Promise<boolean> {
+    const r = await this.http.get<unknown>(this.repoUrl, [401, 403, 404]);
+    return r.status >= 200 && r.status < 300;
+  }
+
+  protected async createLabel(name: string, role: Verdict | "draw"): Promise<{ id: string; name: string }> {
+    const r = await this.http.request<{ id: number; name?: string }>("POST", "/labels", { body: { name, ...COLORS[role] } });
+    return { id: String(r.data.id), name: r.data.name ?? name };
   }
 
   protected async listDrawIssues(drawLabel: string): Promise<ExistingDrawIssue[]> {
@@ -146,7 +154,7 @@ export class GitHubIssuesLedger extends IssueTrackerLedger {
       }
       url = nextLink(page.headers);
     }
-    return { state: "ok", currentLabels: r.data.labels.map((l) => (typeof l === "string" ? l : l.name)), events };
+    return { state: "ok", id: r.data.node_id, number: r.data.number, body: r.data.body ?? null, currentLabels: r.data.labels.map((l) => (typeof l === "string" ? l : l.name)), events };
   }
 
   protected async applyLabel(issue: IndexedIssue, label: string): Promise<void> {
