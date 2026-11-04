@@ -2746,9 +2746,14 @@ function pathFields(input) {
   return out;
 }
 
-/** The decision for one payload: { client, decision: "block" | "allow", reasons }. */
+/**
+ * The decision for one payload: { client, decision: "block" | "allow", reasons }. A payload that carries a
+ * client's own markers (Cursor's cursor_version, Codex's turn_id) is read as that client's, whatever --client
+ * says: Cursor can load Claude Code hook configurations, and must get its own answer form back.
+ */
 export function evaluate(payload, { client, env = process.env } = {}) {
-  const c = client ?? detectClient(payload);
+  const detected = detectClient(payload);
+  const c = detected !== "claude-code" ? detected : (client ?? detected);
   if (!payload || typeof payload !== "object") return { client: c, decision: "block", reasons: ["the hook input is not a JSON object; the guard blocks what it cannot read"] };
   let cwd = typeof payload.cwd === "string" && payload.cwd ? payload.cwd : Array.isArray(payload.workspace_roots) && typeof payload.workspace_roots[0] === "string" ? payload.workspace_roots[0] : process.cwd();
   const tool = String(payload.tool_name ?? "");
@@ -2864,7 +2869,7 @@ async function main(argv) {
       /* recording never changes the decision */
     }
   }
-  const result = evaluate(payload, { client: opt.client });
+  const result = evaluate(payload, opt.client ? { client: opt.client } : {});
   const out = render(result);
   if (out.stdout) process.stdout.write(out.stdout);
   if (out.stderr) process.stderr.write(out.stderr);

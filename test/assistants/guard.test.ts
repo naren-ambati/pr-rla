@@ -512,6 +512,16 @@ describe("guard.mjs: the hook protocol", () => {
     expect(guard.detectClient(null)).toBe("claude-code");
   });
 
+  it("a Cursor payload gets Cursor's answer form even under --client claude-code (Cursor loads Claude Code hooks)", async () => {
+    const m = cursor.shell("pr-rla record 5 pass")(w);
+    const r = await runHook(m.payload, "claude-code", w.env);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ permission: "deny" });
+    const ok = await runHook(cursor.shell("pr-rla status")(w).payload, "claude-code", w.env);
+    expect(ok.code).toBe(0);
+    expect(JSON.parse(ok.stdout)).toEqual({ permission: "allow" });
+  });
+
   it("--record saves the payload as received and does not change the decision", async () => {
     const dir = join(w.base, "recorded-payloads");
     const m = cc.bash("pr-rla record 5 pass")(w);

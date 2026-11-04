@@ -76,7 +76,7 @@ Only the first two are guarantees; the third is a speed bump.
    - **Registered reviewers.** `verdicts.reviewers` lists the accounts or signing keys whose verdicts count. Agent and bot accounts are never on it; a label event from an unlisted account is ignored, with a check-7 detail.
    - **App-applied labels.** On GitHub, an event with `performed_via_github_app` set is not counted by default.
    - **Presence attestation** (U9) is designed to be the tier that holds even then. In this release it is verified with software keys only, so pr-rla does not claim it proves a human touched a hardware key.
-3. **Client-side guards** (best effort): the assistant plugins' hooks (U6). Client permission rules and hook filters are not a security boundary.
+3. **Client-side guards** (best effort): the guard hook in the Claude Code plugin, and the same file in Codex and Cursor, with the `review-draw` skill's rules (U6, [`docs/assistants/guard.md`](assistants/guard.md)). As far as it can read a command or a tool call, the guard blocks verdict writes, verdict labels, signing, consent and edits to audit records from the assistant. Client permission rules and hooks are not a security boundary.
 
 ### Untrusted text from the change (FR3.9)
 
