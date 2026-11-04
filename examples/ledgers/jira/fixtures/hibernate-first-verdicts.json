@@ -3,7 +3,7 @@
  "source": "recorded",
  "tracker": "jira-cloud",
  "case": "first-label",
- "recordedAt": "2026-11-04T00:32:45.000Z",
+ "recordedAt": "2026-11-04T03:47:15.000Z",
  "options": {
   "base_url": "https://hibernate.atlassian.net",
   "project": "HHH",
@@ -20,6 +20,10 @@
   "window": "recorded",
   "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "field": "customfield_11702",
+  "options": {
+   "pass": "10202",
+   "fail": "10203"
+  },
   "issues": [
    {
     "draw": 1,

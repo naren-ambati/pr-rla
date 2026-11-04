@@ -19,6 +19,11 @@
 // host of options.base_url only (an https site; hostFromOption below). Without them the ledger reads
 // anonymously (public projects).
 //
+// The verdict is matched by the select options' ids, not by their display names: `publishDraws` reads
+// the field's allowed values from the first issue's edit metadata and keeps the two option ids in the
+// ledger index (`options: { pass, fail }`). A field renamed from "fail" to "Fail" still reads, and a
+// changelog entry that sets the field to any other option is a FAIL, never silently dropped.
+//
 // Jira deletes an issue's changelog with the issue, and admins can delete issues: run
 // `pr-rla checkpoint` after verdicts; checkpoints are not optional with Jira.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -53,23 +58,29 @@ export function jiraActor(a) {
 }
 
 /**
- * The verdict-field changes in one changelog page, as adds and removes. A single-select change from
- * A to B is a remove of A and an add of B at the same instant.
+ * The verdict-field changes in one changelog page, as adds and removes, matched by option id
+ * (`s.options`, from the ledger index). A single-select change from A to B is a remove of A and an
+ * add of B at the same instant. A change that sets the field to an option that is neither the pass
+ * nor the fail option comes back in `unrecognised`: the caller FAILs it, because dropping it would
+ * hide a verdict.
  */
 export function fieldEvents(histories, s) {
-  const out = [];
+  const events = [];
+  const unrecognised = [];
+  const verdictOf = (id) => (id === s.options.pass ? "pass" : id === s.options.fail ? "fail" : null);
   for (const h of histories) {
     h.items.forEach((it, n) => {
       if (it.fieldId !== s.field && !(it.fieldId === undefined && it.field === s.field)) return;
-      const verdictOf = (v) => (v === s.values.pass ? "pass" : v === s.values.fail ? "fail" : null);
       const base = { at: isoUtc(h.created), actor: jiraActor(h.author) };
-      const from = verdictOf(it.fromString);
-      const to = verdictOf(it.toString);
-      if (from) out.push({ ...base, id: `${h.id}:${n}:remove`, action: "remove", verdict: from });
-      if (to) out.push({ ...base, id: `${h.id}:${n}:add`, action: "add", verdict: to });
+      const from = verdictOf(it.from == null ? null : String(it.from));
+      const toId = it.to == null ? null : String(it.to);
+      const to = verdictOf(toId);
+      if (from) events.push({ ...base, id: `${h.id}:${n}:remove`, action: "remove", verdict: from });
+      if (to) events.push({ ...base, id: `${h.id}:${n}:add`, action: "add", verdict: to });
+      else if (toId !== null) unrecognised.push({ ...base, id: `${h.id}:${n}`, optionId: toId, value: it.toString ?? null });
     });
   }
-  return out;
+  return { events, unrecognised };
 }
 
 class JiraLedger {
@@ -118,6 +129,43 @@ class JiraLedger {
     renameSync(tmp, p);
   }
 
+  /** What is wrong with the index before any issue is read: its tracker, field and option ids, and duplicate draws, keys or ids. */
+  indexProblems(index) {
+    const out = [];
+    if (index.field !== this.s.field) out.push(`ledger index was written for field ${String(index.field)}, not ${this.s.field}`);
+    if (index.tracker !== `${this.s.base}/projects/${this.s.project}`) out.push(`ledger index was written for ${String(index.tracker)}, not ${this.s.base}/projects/${this.s.project}`);
+    const o = index.options;
+    if (!o || typeof o.pass !== "string" || typeof o.fail !== "string" || o.pass === o.fail) out.push(`ledger index records no distinct option ids for the pass and fail values (options: { pass, fail }); run "pr-rla sample" to learn them`);
+    if (!Array.isArray(index.issues)) out.push("ledger index has no issues list");
+    else
+      for (const [what, key] of [["draw", (i) => String(i.draw)], ["issue key", (i) => String(i.key)], ["issue id", (i) => String(i.id)], ["change", (i) => String(i.changeId)]]) {
+        const seen = new Map();
+        for (const i of index.issues) {
+          const k = key(i);
+          if (seen.has(k)) out.push(`ledger index gives draws #${seen.get(k)} and #${i.draw} the same ${what} ${k}`);
+          else seen.set(k, i.draw);
+        }
+      }
+    return out;
+  }
+
+  async canReadProject() {
+    const r = await this.request("GET", `/rest/api/3/project/${encodeURIComponent(this.s.project)}`, undefined, [401, 403, 404]);
+    return r.status >= 200 && r.status < 300;
+  }
+
+  /** The select options' ids for the two verdict values, from an issue's edit metadata (what the field offers now). */
+  async learnOptions(key) {
+    const meta = (await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(key)}/editmeta`)).data;
+    const allowed = meta.fields?.[this.s.field]?.allowedValues ?? [];
+    const id = (name) => {
+      const hit = allowed.filter((a) => a.value === name);
+      if (hit.length !== 1) throw new Error(`jira: field ${this.s.field} offers ${hit.length === 0 ? "no" : "several"} option named "${name}" on ${key} (it offers ${allowed.map((a) => a.value).join(", ") || "nothing"}); create the options or set options.values`);
+      return String(hit[0].id);
+    };
+    return { pass: id(this.s.values.pass), fail: id(this.s.values.fail) };
+  }
+
   // --- reads ---------------------------------------------------------------------
   async load() {
     this.snapshot ??= this.read().catch((e) => {
@@ -131,16 +179,29 @@ class JiraLedger {
     const s = { verdicts: [], history: [], failures: [], warnings: [], notes: [] };
     const index = await this.readIndex();
     if (!index) return s;
+    const problems = this.indexProblems(index);
+    if (problems.length) {
+      s.failures.push(...problems);
+      return s;
+    }
+    const sx = { ...this.s, options: index.options };
     const fields = (await this.request("GET", "/rest/api/3/field")).data;
     if (!fields.some((f) => f.id === this.s.field)) s.failures.push(`verdict field ${this.s.field} no longer exists on ${this.s.host}: the verdicts recorded in it cannot be checked`);
+    let readable = null;
     for (const i of index.issues) {
       const r = await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(i.key)}?fields=project`, undefined, [404]);
       if (r.status === 404) {
-        s.failures.push(`draw #${i.draw} issue ${i.key} deleted (HTTP 404): Jira deleted its changelog with it`);
+        readable ??= this.canReadProject();
+        if (await readable) s.failures.push(`draw #${i.draw} issue ${i.key} deleted (HTTP 404): Jira deleted its changelog with it`);
+        else s.failures.push(`draw #${i.draw} issue ${i.key} answered HTTP 404, and the token cannot read project ${this.s.project} either: the credentials have no access to it (Jira answers not-found to an issue it will not show), so this is not evidence that the issue was deleted`);
         continue;
       }
       if (r.data.key !== i.key || r.data.fields?.project?.key !== this.s.project) {
         s.failures.push(`draw #${i.draw} issue ${i.key} moved (now ${r.data.key}); its history left project ${this.s.project}`);
+        continue;
+      }
+      if (String(r.data.id) !== String(i.id)) {
+        s.failures.push(`draw #${i.draw}: ${this.s.host} answered issue ${r.data.key} with id ${r.data.id} for the index's id ${i.id}; the index does not describe this issue`);
         continue;
       }
       const histories = [];
@@ -150,7 +211,10 @@ class JiraLedger {
         startAt += page.values.length;
         if (page.isLast === true || page.values.length === 0 || (page.isLast === undefined && startAt >= page.total)) break;
       }
-      const events = fieldEvents(histories, this.s).map((e) => ({ ...e, reviewer: e.actor.login, provenance: { level: "account", source: "jira-field-change", actorId: e.actor.id, viaApp: null, eventId: e.id } }));
+      const parsed = fieldEvents(histories, sx);
+      for (const u of parsed.unrecognised)
+        s.failures.push(`draw #${i.draw}: the verdict field was set to ${u.value === null ? "an option" : `"${u.value}"`} (option id ${u.optionId}) at ${u.at}, which is neither the ${this.s.values.pass} option (${index.options.pass}) nor the ${this.s.values.fail} option (${index.options.fail}); a verdict set that way cannot be counted`);
+      const events = parsed.events.map((e) => ({ ...e, reviewer: e.actor.login, provenance: { level: "account", source: "jira-field-change", actorId: e.actor.id, viaApp: null, eventId: e.id } }));
       for (const e of events) {
         s.history.push({ id: e.id, at: e.at, actor: e.actor, action: e.action, label: this.s.values[e.verdict], draw: i.draw });
         if (e.action === "add") s.verdicts.push({ draw: i.draw, changeId: i.changeId, verdict: e.verdict, protocolSha256: index.protocolSha256, reviewer: e.reviewer, recordedAt: e.at, provenance: e.provenance });
@@ -231,6 +295,10 @@ class JiraLedger {
       }
       index.issues.push({ draw: d.draw, changeId: d.changeId, key: made.key, id: made.id, url: `${this.s.base}/browse/${made.key}`, createdAt: made.createdAt });
       await this.writeIndex(index);
+    }
+    if (!index.options && index.issues.length) {
+      index.options = await this.learnOptions(index.issues[0].key);
+      this.ctx.log(`jira: verdict options ${this.s.values.pass}=${index.options.pass}, ${this.s.values.fail}=${index.options.fail}`);
     }
     await this.writeIndex(index);
   }

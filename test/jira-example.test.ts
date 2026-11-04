@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendFileSync, cpSync, mkdtempSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -71,5 +71,104 @@ describe("external Jira example ledger, loaded from .pr-rla.yml through the regi
     expect(await registerCommand(s.ctx, { dryRun: true })).toBe(0);
     expect(s.out.join("\n")).toMatch(/ledger jira · verdict provenance account · reviewers 557058:alice/);
     expect(s.out.join("\n")).toMatch(/PROSPECTIVE/);
+  });
+});
+
+/**
+ * Finding 5 of the master review: the Jira example matched the changelog by display name, ignored
+ * its index fields and the issue id, and compared string ids. Run in-process on the synthetic Jira.
+ */
+describe("Jira example hardening (finding 5)", () => {
+  type JiraFake = FakeJira & { renameOption(which: "pass" | "fail", to: string): void; setOption(key: string, id: string, name: string): string; unauthorized: boolean; issues: Map<string, { id: string }> };
+  const open = async (windowDir: string, fake: JiraFake) => {
+    const mod = (await import(pathToFileURL(join(EX, "index.mjs")).href)) as { default: LedgerDefinition };
+    return mod.default.create(OPTIONS, { cwd: windowDir, windowDir, env: {}, log: () => {}, fetch: fake.fetch });
+  };
+  const setup = async () => {
+    const { draw, PUB } = await cases();
+    const fake = (await fakeJira()) as JiraFake;
+    const windowDir = mkdtempSync(join(tmpdir(), "prrla-jira-h-"));
+    await (await open(windowDir, fake)).publishDraws!([draw(1, 101), draw(2, 102), draw(3, 103)], PUB);
+    return { fake, windowDir, fresh: () => open(windowDir, fake) };
+  };
+  const readIndex = (dir: string) => JSON.parse(readFileSync(join(dir, "ledger-index.json"), "utf8")) as Record<string, any>;
+  const writeIndex = (dir: string, i: unknown) => writeFileSync(join(dir, "ledger-index.json"), JSON.stringify(i));
+
+  it("publish records the option ids; a FAIL set after the option was renamed is still a FAIL (it used to be dropped)", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    expect(readIndex(windowDir).options).toEqual({ pass: "10001", fail: "10002" });
+    fake.set("AUD-1", "pass");
+    fake.renameOption("fail", "Fail");
+    fake.set("AUD-2", "fail"); // the changelog entry now says "Fail"
+    const l = await fresh();
+    expect((await l.readVerdicts()).map((v) => [v.draw, v.verdict])).toEqual([[1, "pass"], [2, "fail"]]);
+    const r = await l.verifyIntegrity!();
+    expect(r.ok, r.findings.join("\n")).toBe(true);
+  });
+
+  it("an option the ledger does not know is a FAIL naming it, never a silent drop", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    fake.setOption("AUD-1", "10099", "Maybe");
+    void windowDir;
+    const r = await (await fresh()).verifyIntegrity!();
+    expect(r.ok).toBe(false);
+    expect(r.findings.join("\n")).toMatch(/draw #1: the verdict field was set to "Maybe" \(option id 10099\) at .*, which is neither the pass option \(10001\) nor the fail option \(10002\)/);
+  });
+
+  it("an index with other fields than the settings, or no option ids, fails before any issue is read", async () => {
+    const { fake, windowDir, fresh } = await setup();
+    const good = readIndex(windowDir);
+    for (const [edit, msg] of [
+      [(i: any) => (i.field = "customfield_99999"), /ledger index was written for field customfield_99999, not customfield_10050/],
+      [(i: any) => (i.tracker = "https://forged.example/projects/AUD"), /ledger index was written for https:\/\/forged\.example\/projects\/AUD/],
+      [(i: any) => delete i.options, /records no distinct option ids/],
+      [(i: any) => (i.issues[1].key = i.issues[0].key), /gives draws #1 and #2 the same issue key AUD-1/],
+      [(i: any) => (i.issues[1].id = i.issues[0].id), /the same issue id/],
+    ] as const) {
+      writeIndex(windowDir, structuredClone(good));
+      const i = readIndex(windowDir);
+      edit(i);
+      writeIndex(windowDir, i);
+      fake.requests.length = 0;
+      const r = await (await fresh()).verifyIntegrity!();
+      expect(r.ok).toBe(false);
+      expect(r.findings.join("\n")).toMatch(msg);
+      expect(fake.requests).toHaveLength(0);
+    }
+  });
+
+  it("the issue's id must be the one the index records", async () => {
+    const { windowDir, fresh } = await setup();
+    const i = readIndex(windowDir);
+    i.issues[2].id = "99999"; // the index says draw 3 is another Jira issue than the one at that key
+    writeIndex(windowDir, i);
+    const r = await (await fresh()).verifyIntegrity!();
+    expect(r.ok).toBe(false);
+    expect(r.findings.join("\n")).toMatch(/draw #3: acme\.atlassian\.net answered issue AUD-3 with id 10003 for the index's id 99999; the index does not describe this issue/);
+  });
+
+  it("history ids are compared as numbers: history 99 is before history 100 at the same second", async () => {
+    const { fake, fresh } = await setup();
+    const key = "AUD-1";
+    const pass = fake.set(key, "pass");
+    const failId = fake.set(key, "fail");
+    const issue = (fake as unknown as { issues: Map<string, { changelog: { id: string; created: string }[] }> }).issues.get(key)!;
+    const [p, f] = issue.changelog.slice(-2) as [{ id: string; created: string }, { id: string; created: string }];
+    p.id = "100";
+    f.id = "99";
+    f.created = p.created; // the same second; the lexically first id is "100", the numerically first is "99"
+    void pass;
+    void failId;
+    const v = await (await fresh()).readVerdicts();
+    expect(v.find((x) => x.draw === 1)?.verdict).toBe("fail");
+  });
+
+  it("a 404 from credentials that cannot see the project is reported as that, not as a deleted issue", async () => {
+    const { fake, fresh } = await setup();
+    fake.unauthorized = true;
+    const r = await (await fresh()).verifyIntegrity!();
+    expect(r.ok).toBe(false);
+    expect(r.findings.join("\n")).toMatch(/draw #1 issue AUD-1 answered HTTP 404, and the token cannot read project AUD either/);
+    expect(r.findings.join("\n")).not.toMatch(/deleted \(HTTP 404\)/);
   });
 });

@@ -17,6 +17,9 @@ import jira from "../index.mjs";
 const SITE = "https://hibernate.atlassian.net";
 const FIELD = "customfield_11702";
 const OPTIONS = { base_url: SITE, project: "HHH", field: FIELD, values: { pass: "Approved", fail: "Rejected" } };
+// The option ids the site's changelog gives these values (seen in the recorded entries: to/from "10202" with
+// toString "Approved", "10203" with "Rejected"); the ledger matches events by them, not by the names.
+const OPTION_IDS = { pass: "10202", fail: "10203" };
 const recordedAt = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 const pick = (o, keys) => (o == null ? o : Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]])));
@@ -46,7 +49,7 @@ async function record(file, kase, keys, why) {
     const r = await (await fetch(`${SITE}/rest/api/3/issue/${key}?fields=created`, { headers: { accept: "application/json" } })).json();
     issues.push({ draw: n + 1, changeId: `jira:hibernate#${key}`, key, id: r.id, url: `${SITE}/browse/${key}`, createdAt: r.fields.created });
   }
-  const index = { schema: "pr-rla-ledger-jira/index/v1", ledger: "jira", tracker: `${SITE}/projects/HHH`, window: "recorded", protocolSha256: "0".repeat(64), field: FIELD, issues, repeats: [] };
+  const index = { schema: "pr-rla-ledger-jira/index/v1", ledger: "jira", tracker: `${SITE}/projects/HHH`, window: "recorded", protocolSha256: "0".repeat(64), field: FIELD, options: OPTION_IDS, issues, repeats: [] };
   const windowDir = mkdtempSync(join(tmpdir(), "prrla-jira-"));
   writeFileSync(join(windowDir, "ledger-index.json"), JSON.stringify(index));
   const ledger = await jira.create(OPTIONS, { cwd: windowDir, windowDir, env: {}, log: () => {}, fetch: broker.bind("ledger:jira") });

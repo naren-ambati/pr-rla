@@ -11,6 +11,10 @@ export class FakeJira {
     this.issues = new Map();
     this.fields = [{ id: FIELD, name: "pr-rla verdict", custom: true, schema: { type: "option", custom: "com.atlassian.jira.plugin.system.customfieldtypes:select", customId: 10050 } }];
     this.options = { pass: "10001", fail: "10002" };
+    // The options' display names now; changelog entries keep the name as it was when the field was set.
+    this.optionNames = { pass: "pass", fail: "fail" };
+    /** The credentials cannot see the project: Jira answers 404 to its issues and to the project itself. */
+    this.unauthorized = false;
     this.requests = [];
     this.writer = { accountId: "557058:writer", accountType: "atlassian" };
     this.next = 1;
@@ -41,9 +45,21 @@ export class FakeJira {
     const i = this.issue(key);
     const id = String(this.historyId++);
     const opt = (v) => (v === "pass" ? this.options.pass : v === "fail" ? this.options.fail : null);
-    i.changelog.push({ id, created: this.tick(), author, items: [{ field: "pr-rla verdict", fieldtype: "custom", fieldId: FIELD, from: opt(i.value), fromString: i.value, to: opt(value), toString: value }] });
+    const name = (v) => (v === "pass" ? this.optionNames.pass : v === "fail" ? this.optionNames.fail : null);
+    i.changelog.push({ id, created: this.tick(), author, items: [{ field: "pr-rla verdict", fieldtype: "custom", fieldId: FIELD, from: opt(i.value), fromString: name(i.value), to: opt(value), toString: name(value) }] });
     i.value = value;
     return id;
+  }
+  /** Sets the field to an option the ledger does not know (id and name given), as an admin adding a third option would. */
+  setOption(key, optionId, optionName, author = this.writer) {
+    const i = this.issue(key);
+    const id = String(this.historyId++);
+    i.changelog.push({ id, created: this.tick(), author, items: [{ field: "pr-rla verdict", fieldtype: "custom", fieldId: FIELD, from: null, fromString: null, to: optionId, toString: optionName }] });
+    return id;
+  }
+  /** Renames an option in the field's configuration (past changelog entries keep the old name; ids never change). */
+  renameOption(which, to) {
+    this.optionNames[which] = to;
   }
   /** An unrelated field change (status), as real changelogs are full of. */
   touch(key) {
@@ -80,7 +96,9 @@ export class FakeJira {
     this.requests.push({ method, url: url.href, body, authorization: headers.get("authorization") });
     const p = url.pathname;
     let m;
+    if (this.unauthorized && (p.startsWith("/rest/api/3/issue/") || p.startsWith("/rest/api/3/project/"))) return json(404, { errorMessages: ["Issue does not exist or you do not have permission to see it."], errors: {} });
     if (p === "/rest/api/3/field" && method === "GET") return json(200, this.fields);
+    if ((m = /^\/rest\/api\/3\/project\/([^/]+)$/.exec(p)) && method === "GET") return decodeURIComponent(m[1]) === this.project ? json(200, { key: this.project }) : json(404, { errorMessages: ["No project could be found."], errors: {} });
     if (p === "/rest/api/3/search/jql" && method === "GET") {
       const all = [...this.issues.values()].filter((i) => !i.deleted && i.labels.includes("pr-rla-draw"));
       return json(200, { issues: all.map((i) => ({ id: i.id, key: i.key, fields: { summary: i.summary, created: i.created } })), isLast: true });
@@ -98,10 +116,12 @@ export class FakeJira {
       const rest = m[2] ?? "";
       if (rest === "" && method === "GET") return json(200, { id: i.id, key: i.movedTo ?? i.key, fields: { project: { key: i.movedTo ? i.movedTo.split("-")[0] : i.project } } });
       if (rest === "" && method === "PUT") {
-        const v = body.fields[FIELD]?.value ?? null;
-        this.set(i.key, v === "pass" || v === "fail" ? v : null);
+        const name = body.fields[FIELD]?.value ?? null;
+        const v = ["pass", "fail"].find((k) => this.optionNames[k] === name) ?? null;
+        this.set(i.key, v);
         return json(204, null);
       }
+      if (rest === "/editmeta" && method === "GET") return json(200, { fields: { [FIELD]: { allowedValues: [{ id: this.options.pass, value: this.optionNames.pass }, { id: this.options.fail, value: this.optionNames.fail }] } } });
       if (rest === "/changelog" && method === "GET") {
         const startAt = Number(url.searchParams.get("startAt") ?? 0);
         const max = Math.min(Number(url.searchParams.get("maxResults") ?? 50), this.pageSize);

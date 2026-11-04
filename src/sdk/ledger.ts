@@ -269,20 +269,28 @@ export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "pro
 /**
  * Orders two tracker event ids. Numeric ids (GitHub's, GitLab's) compare as integers, with BigInt
  * so ids past 2^53 stay exact; a lexical order would put "100" before "99" and so would count the
- * wrong one of two same-second verdicts. Ids that are not all digits (Jira's `10001:0:add`) sort
- * after every numeric id, in UTF-16 code-unit order among themselves, and equal numbers written
- * differently ("07" and "7") fall back to code-unit order, so the order is total and the same on
- * every machine. Documented in contracts.md §1.
+ * wrong one of two same-second verdicts. An id made of colon-separated parts (Jira's
+ * `<history id>:<item>:<action>`) compares part by part, each part by this rule, a shorter id
+ * before a longer one it begins. In a part, a number sorts before anything else, and anything else
+ * sorts by UTF-16 code unit; equal numbers written differently ("07" and "7") fall back to code
+ * units too. The order is total and the same on every machine. Documented in contracts.md §1.
  */
 export function compareEventIds(a: string, b: string): number {
-  const na = /^\d+$/.test(a);
-  const nb = /^\d+$/.test(b);
-  if (na && nb) {
-    const x = BigInt(a);
-    const y = BigInt(b);
+  const pa = a.split(":");
+  const pb = b.split(":");
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    const x = pa[i]!;
+    const y = pb[i]!;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) {
+      const bx = BigInt(x);
+      const by = BigInt(y);
+      if (bx !== by) return bx < by ? -1 : 1;
+    } else if (nx !== ny) return nx ? -1 : 1;
     if (x !== y) return x < y ? -1 : 1;
-  } else if (na !== nb) return na ? -1 : 1;
-  return a < b ? -1 : a > b ? 1 : 0;
+  }
+  return pa.length === pb.length ? 0 : pa.length < pb.length ? -1 : 1;
 }
 
 /** Server time, then event id (`compareEventIds`): the order in which "the first eligible event counts". */
