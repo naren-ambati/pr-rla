@@ -154,7 +154,7 @@ describe("allowed signers (FR9.3)", () => {
 describe("git commit signatures", () => {
   const raw = (headers: string, message = "verdict: draw #1\n") => new TextEncoder().encode(`${headers}\n${message}`);
   const sig = (k: ReturnType<typeof makeTestKey>, payload: string) => k.sign(payload).replace(/\n$/, "").split("\n").join("\n ");
-  const H = "tree 7a0e4965abc2bbc40ed031432ba39c31b52b6d44\nauthor a <user-1@example.invalid> 1 +0000\ncommitter a <user-1@example.invalid> 1 +0000\n";
+  const H = "tree 7a0e4965abc2bbc40ed031432ba39c31b52b6d44\nauthor a <user-1a1a1a1a@example.invalid> 1 +0000\ncommitter a <user-1a1a1a1a@example.invalid> 1 +0000\n";
 
   it("splits the gpgsig header out of the payload, exactly as git does", () => {
     const k = keys["ssh-ed25519"];
@@ -174,7 +174,7 @@ describe("git commit signatures", () => {
     const both = splitCommitSignature(raw(`${H}gpgsig ${sig(k, payload)}\ngpgsig-sha256 -----BEGIN SSH SIGNATURE-----\n abc\n -----END SSH SIGNATURE-----\n`));
     expect(new TextDecoder().decode(both.payload)).toBe(payload);
     expect(verifySshsig(both.signature!, both.payload, "git").ok).toBe(true);
-    const h256 = `tree ${"a".repeat(64)}\nauthor a <user-1@example.invalid> 1 +0000\ncommitter a <user-1@example.invalid> 1 +0000\n`;
+    const h256 = `tree ${"a".repeat(64)}\nauthor a <user-1a1a1a1a@example.invalid> 1 +0000\ncommitter a <user-1a1a1a1a@example.invalid> 1 +0000\n`;
     const p256 = `${h256}\nverdict: draw #1\n`;
     const s256 = splitCommitSignature(raw(`${h256}gpgsig-sha256 ${sig(k, p256)}\n`));
     expect(new TextDecoder().decode(s256.payload)).toBe(p256);
@@ -225,7 +225,7 @@ describe("the provenance of a verdict line (FR3.8, FR9.2, FR9.3)", () => {
   it("analyzeSignedVerdicts: a line's own claim never counts; a decreasing counter WARNs; an equal one does not", () => {
     const bob = keys["sk-ssh-ed25519@openssh.com"];
     const signers = [parseAllowedSigner(`bob ${bob.publicText}`)];
-    const H = (n: number) => `tree ${String(n).padStart(40, "0")}\nauthor a <user-1@example.invalid> ${n} +0000\ncommitter a <user-1@example.invalid> ${n} +0000\n`;
+    const H = (n: number) => `tree ${String(n).padStart(40, "0")}\nauthor a <user-1a1a1a1a@example.invalid> ${n} +0000\ncommitter a <user-1a1a1a1a@example.invalid> ${n} +0000\n`;
     const commit = (n: number, counter: number) => {
       const payload = `${H(n)}\nverdict ${n}\n`;
       return new TextEncoder().encode(`${H(n)}gpgsig ${bob.sign(payload, { counter }).replace(/\n$/, "").split("\n").join("\n ")}\n\nverdict ${n}\n`);
