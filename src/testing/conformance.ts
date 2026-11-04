@@ -131,7 +131,8 @@ const diff = (want: readonly string[], got: readonly string[]) => {
   return `missing ${missing.length} (${missing.slice(0, 3).join(", ")}), extra ${extra.length} (${extra.slice(0, 3).join(", ")})`;
 };
 
-interface Fault {
+/** A response injected by the harness (also used by the ledger kit). */
+export interface Fault {
   /** 1-based call number through the wrapped fetch. */
   call: number;
   response: () => Response;
@@ -140,7 +141,7 @@ interface Fault {
   label: string;
 }
 
-interface Harness extends ConformanceHarness {
+export interface Harness extends ConformanceHarness {
   /** Per call: the waits requested after it, and wall-clock time to the next call. */
   log: { url: string; method: string; sleptAfter: number; at: number }[];
 }
@@ -185,7 +186,7 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
   }
 }
 
-function makeHarness(faults: readonly Fault[] = []): Harness {
+export function makeHarness(faults: readonly Fault[] = []): Harness {
   const log: Harness["log"] = [];
   const h: Harness = {
     log,
