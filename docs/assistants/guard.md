@@ -66,12 +66,22 @@ On Windows (untested), PowerShell commands are read with the same parser: plain 
 
 ## Checking it by hand
 
-```sh
-node integrations/claude-code/hooks/guard.mjs --check-shell 'pr-rla record 5 pass' --cwd /path/to/audit-repo
-# blocked:
-#   - pr-rla record writes a verdict, and a verdict is the reviewer's: …
-node integrations/claude-code/hooks/guard.mjs --check-shell 'pr-rla status' --cwd /path/to/audit-repo
-# allowed
+`--check-shell '<command>' --cwd <dir>` prints what the guard decides for a shell command run in `<dir>`, without a client: `blocked:` and the reasons (exit 2), or `allowed` (exit 0). In a copy of the recorded audit (`test/fixtures/audits/gh-aw-q3-recorded`, an audit repo, so its records are protected), run 2026-11-04 (`npm run docs:outputs` regenerates it): <!-- docs-output: guard-check -->
+
+```output
+$ node integrations/claude-code/hooks/guard.mjs --check-shell 'pr-rla record 5 pass' --cwd .
+blocked:
+  - pr-rla record writes a verdict, and a verdict is the reviewer's: they run "pr-rla record …" themselves (a person's own command, in their own terminal), or apply the label in the tracker
+(exit 2)
+
+$ node integrations/claude-code/hooks/guard.mjs --check-shell 'echo pass >> audit/2026-q3/verdicts.jsonl' --cwd .
+blocked:
+  - a redirect writes audit/2026-q3/verdicts.jsonl, an audit record
+(exit 2)
+
+$ node integrations/claude-code/hooks/guard.mjs --check-shell 'pr-rla status --offline' --cwd .
+allowed
+(exit 0)
 ```
 
 To see the payloads a client really sends (the founder's manual runs, [manual-acceptance.md](manual-acceptance.md)), add `--record <dir>` to the hook's command or `args`: the guard then also saves each payload, unchanged, as `<dir>/<client>-<event>-<tool>-<time>-<pid>.json`. Recording never changes the decision. The payload holds the command or the file's new content, so keep the directory private and remove the flag afterwards.

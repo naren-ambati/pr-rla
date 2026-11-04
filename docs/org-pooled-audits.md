@@ -41,11 +41,7 @@ or an explicit list, `repos: [my-org/api, my-org/web]`.
 - **Gone repos.** A repo counts as gone only after one repo-level probe (`describeRepo`, by id) answers 404: a 404 on a commit or a page of a repo that exists is a failure, and a rate limit is never "gone". A registered repo found gone is recorded in `goneRepos` with the probe's status, message and time, and the freeze completes; `verify` then reports it as INCOMPLETE, and FAILs if it comes back holding window changes. A provider without `describeRepo` cannot tell, so a registered repo missing from the listing stops the freeze.
 - **Empty repos.** A repository with no commits holds nothing in any window: inside a pool it is listed with an empty default branch and no head. A single-repo audit of an empty repo stops with `<repo> has no default branch`, as before.
 - **Parallelism.** 4 repos at a time by default (`freeze.concurrency`). The broker's per-host budget is the real limiter; the concurrency only bounds memory and open connections. An external provider runs the same way inside the isolated plugin host.
-- **Stopping and resuming.** If the rate budget, a timeout or the service gives out after the broker's retries, freeze stops scheduling, lets the repos in flight finish, keeps every finished repo's checkpoint and exits 4 with the command that finishes the job:
-
-  ```
-  pr-rla: stopped after 17 of 40 repos: …. The 17 repos listed are checkpointed; no manifest was written. Continue with: pr-rla freeze --resume <runId>
-  ```
+- **Stopping and resuming.** If the rate budget, a timeout or the service gives out after the broker's retries, freeze stops scheduling, lets the repos in flight finish, keeps every finished repo's checkpoint and exits 4 with the command that finishes the job: the message says how many repos are checkpointed, that no manifest was written, and ends `Continue with: pr-rla freeze --resume <runId>` (`src/api/read/freeze-preview.ts`; `test/pooled-freeze.test.ts` stops and resumes a synthetic 40-repo org).
 
   The same holds when the process is killed: checkpoints are written atomically, one file per finished repo, so a repo that was mid-listing simply starts again. Checkpoints live in `.pr-rla/cache/<window>/<runId>/` of the audit directory (not committed; `verify` never reads them).
 - **The run id** is the SHA-256 of the registration, the resolved repo list (with ids), the registered repos found gone, the pr-rla version and the provider's identity, together with the run's start time and the listing it recorded then. `--resume <runId>` (a prefix of 8 or more digits is enough) refuses if any input differs, and says which, or if the run's header was edited. Running `freeze` again with the same inputs continues the newest such run too. `--force` starts over; `--force --resume <runId>` continues a stopped re-freeze.
@@ -61,9 +57,9 @@ or an explicit list, `repos: [my-org/api, my-org/web]`.
 pr-rla freeze --dry-run --estimate
 ```
 
-(`--estimate` implies `--dry-run`; it works before anything is registered.) Each repo is probed with the first page of what `listChanges` reads, and the provider extrapolates: for GitHub, the head, the newest page of closed PRs plus one from the middle of the list when it is longer, and one page of history. At most 200 repos are probed (every k-th, in repo order) and the rest are scaled. The predicted requests are then replayed through a fresh rate governor with the broker's budgets: the published-limit defaults, any `rate_limits:` override, and any limit the server reported while probing. Output from a real run on the public GitHub org `navikt` (a 223-repo subset, 2026-11-04):
+(`--estimate` implies `--dry-run`; it works before anything is registered.) Each repo is probed with the first page of what `listChanges` reads, and the provider extrapolates: for GitHub, the head, the newest page of closed PRs plus one from the middle of the list when it is longer, and one page of history. At most 200 repos are probed (every k-th, in repo order) and the rest are scaled. The predicted requests are then replayed through a fresh rate governor with the broker's budgets: the published-limit defaults, any `rate_limits:` override, and any limit the server reported while probing. The output of a real, read-only run on the public GitHub org `navikt` (a 223-repo subset), recorded 2026-11-04 (trimmed; BUILD-NOTES, "Bolt 9 (U8)"):
 
-```
+```output
 estimate: 223 repos (probed 200 of them, every 1.1th, and scaled)
   requests: ~1,102 = 33 listing + ~1,069 for the repos (~446 REST, ~623 GraphQL); the probes already spent 600
   wall time: ~3 min at 4 repos at a time (bound by request latency, 656 ms each: 3 min; the rate budget alone needs 0 s)

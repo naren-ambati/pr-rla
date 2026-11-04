@@ -2,7 +2,7 @@
 
 The plugin is [`integrations/claude-code/`](../../integrations/claude-code), listed in the repository's marketplace, [`.claude-plugin/marketplace.json`](../../.claude-plugin/marketplace.json):
 
-```
+```text
 integrations/claude-code/
   .claude-plugin/plugin.json    name pr-rla, version 0.1.0 (pr-rla's)
   .mcp.json                     the pr-rla MCP server: npx -y pr-rla-mcp@0.1.0 --root ${CLAUDE_PROJECT_DIR}
@@ -23,7 +23,7 @@ claude plugin install pr-rla@pr-rla
 
 Claude Code starts the plugin's MCP server in every session where the plugin is enabled. Open the audit repo, check `/mcp` (the server is `plugin:pr-rla:pr-rla`, with eight tools), and run the skill:
 
-```
+```text
 /pr-rla:review-draw            the draw that holds the audit back
 /pr-rla:review-draw 27         a draw you name
 ```

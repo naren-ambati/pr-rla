@@ -34,13 +34,30 @@ pr-rla runs in CI to keep a certificate honest between humans: on every verdict 
 
 What each integration needs, by SCM. Every row is **unverified against the live service**: the build exercises the integrations on mock servers only (D8).
 
-| SCM | `status` and `verify` (read) | `checkpoint` (write) | Comment on the audit issue |
-|---|---|---|---|
-| GitHub | `contents: read`; a token that can read the audit repository's issues (`issues: read`) | `contents: write`, and `allow-writes: true` | `issues: write` |
-| GitLab | A masked `GITLAB_TOKEN` with `read_api` | Not offered in the component | Not offered |
-| Bitbucket Cloud | An access token with Repositories: Read and Pull requests: Read, or an API token with `read:repository:bitbucket` and `read:pullrequest:bitbucket` | Not offered in the step | Not offered |
+| SCM | `status` and `verify` (read) | `checkpoint` (write) | Comment on the audit issue | Verified |
+|---|---|---|---|---|
+| GitHub | `contents: read`; a token that can read the audit repository's issues (`issues: read`) | `contents: write`, and `allow-writes: true` | `issues: write` | unverified: mock server only |
+| GitLab | A masked `GITLAB_TOKEN` with `read_api` | Not offered in the component | Not offered | unverified: mock server only |
+| Bitbucket Cloud | An access token with Repositories: Read and Pull requests: Read, or an API token with `read:repository:bitbucket` and `read:pullrequest:bitbucket` | Not offered in the step | Not offered | unverified: mock server only |
 
 Nothing here writes to a public service. The only writes are the Action's opt-in `checkpoint` and `sample`, and the Action's opt-in comment, each to the audit repository.
+
+## Rate limits
+
+pr-rla paces every request to a host with one shared budget whose defaults are the smallest limit the service publishes for the request's auth state; the limit a server reports in its rate-limit headers replaces a primary rule's default for the rest of the run (secondary rules, such as GitHub's per-minute points, always apply), and `rate_limits:` in `.pr-rla.yml` can raise or lower any rule. The defaults and their sources are in BUILD-NOTES, "Bolt 2 (U2a)" (GitLab's issue- and note-creation limits were added in "Bolt 3 (U4)") and `src/net/rate-limits.ts`. What a CI job meets:
+
+| SCM | Authenticated | Anonymous | Checked |
+|---|---|---|---|
+| GitHub | `GITHUB_TOKEN`: 1,000 REST requests an hour per repository, and 1,000 GraphQL points an hour; a personal token reports 5,000 and is paced to that. Secondary limits: 900 REST points a minute, 80 content-creating requests a minute and 500 an hour, 100 at once | 60 requests an hour | anonymous: live, from the response headers (2026-11-03); the `GITHUB_TOKEN` budgets from GitHub's documentation only (only Actions issues that token) |
+| GitLab.com | 2,000 requests a minute per user; issue creation 200 a minute and notes 60 a minute | 500 requests a minute per IP | anonymous: live, from the `RateLimit-*` headers (2026-11-03); the rest from GitLab's documentation |
+| Bitbucket Cloud | 1,000 requests an hour on `/2.0/repositories/*` | 60 an hour (seen at about 50 to 60, as HTTP 429 with no `Retry-After`) | from Atlassian's documentation; anonymous answers carry no rate-limit header (live, 2026-11-03), so the defaults bind for the whole run |
+| Bitbucket Data Center | the instance's token bucket, by default 60 at once refilled 5 a second | n/a | from Atlassian's documentation; unverified against a live server |
+
+So run `status` and `verify --offline` on events, and an online `verify` on a schedule with a token whose budget fits the population (the gh-aw Q3 audit needs thousands of requests).
+
+## Checkpoints in CI need an issue ledger
+
+`checkpoint --push` time-stamps a hash of the ledger's verdict-event history and pushes it, so a deleted issue or label shows up in `verify`. It needs a ledger that can return that history: `github-issues`, `gitlab-issues` or the Jira example. The `git-file` ledger cannot be checkpointed (`checkpoint` says `ledger git-file has no readHistory, so it cannot be checkpointed …` and exits 1): git history is its trail already, and `verify` walks it. Only the Action offers `command: checkpoint` (with `allow-writes: true`); in GitLab and Bitbucket, run `pr-rla checkpoint --push` from a clone with push rights.
 
 ## Platforms
 

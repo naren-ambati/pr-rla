@@ -255,7 +255,11 @@ Any other code (the binary missing, a signal) fails the job. The job prints the 
 
 ## Pinning
 
-`version` is exact and the script checks the installed `pr-rla --version` against it. Packages install with `--ignore-scripts`. There is no lockfile in a component, so transitive dependencies resolve on the day; a release that ships `npm-shrinkwrap.json` would pin them too (open for the release checklist).
+`version` is exact and the script checks the installed `pr-rla --version` against it. Packages install with `--ignore-scripts`. There is no lockfile in a component, so transitive dependencies resolve on the day; a release that ships `npm-shrinkwrap.json` would pin them too (the founder's decision: [`../release-checklist.md`](../release-checklist.md), step 4).
+
+## Budget
+
+GitLab.com allows an authenticated user 2,000 API requests a minute and an IP address 500 unauthenticated ones (the second seen live in the `RateLimit-*` headers, 2026-11-03); pr-rla paces to whatever the headers report. The `gitlab-issues` ledger needs a token even on a public project (`resource_label_events` answers 401 without one), so `GITLAB_TOKEN` with `read_api` is not optional for it. An online `verify` of a large window is a scheduled job, not a per-push one.
 
 ## What is not here
 

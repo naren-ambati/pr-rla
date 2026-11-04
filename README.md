@@ -2,7 +2,7 @@
 
 Risk-limiting audits for code changes that landed on a default branch with no recorded human review, such as agent PRs merged on a bare click or direct pushes. pr-rla freezes the list of changes for a window, draws a publicly seeded random sample that anyone can re-derive, and runs a sequential test on your deep-review verdicts. It then certifies a bounded defect-rate claim, says how many more reviews it needs, or tells you to review everything.
 
-Status: v0.1 (claim D only), plus phase 2: GitLab, Bitbucket Cloud and Bitbucket Data Center providers, GitHub Enterprise Server, and an external Gitea/Forgejo plugin. Phase 3, bolt 1: trusted time (RFC 3161 tokens from k-of-n timestamp authorities, record schema v2). Bolt 9: org-pooled audits (`repos:`, resumable `freeze`, `freeze --estimate`). The design is in [`docs/design/spec.md`](docs/design/spec.md); what was built, verified and assumed is in [`BUILD-NOTES.md`](BUILD-NOTES.md).
+Status: **0.1.0, not yet released.** All eleven units of the phase 3–4 design are built and tested, most of them on fixtures and mock servers; nothing is published ([`CHANGELOG.md`](CHANGELOG.md)). What has been verified against live services, and what only on fixtures, is in [`docs/compatibility.md`](docs/compatibility.md). Every document is listed in [`docs/README.md`](docs/README.md): start with [concepts](docs/concepts.md) and [the statistics](docs/statistics.md). The design is in [`docs/design/`](docs/design/spec.md); what was built, verified and assumed, round by round, is in [`BUILD-NOTES.md`](BUILD-NOTES.md). Licence: decided by the founder before release.
 
 ## Supported source-control systems
 
@@ -25,7 +25,7 @@ Every provider passes the same conformance kit (`pr-rla/testing`); the HTTP ones
 4. If it never does, they escalate to a full hand count.
 5. pr-rla does the same with merged changes as ballots and a deep review under a fixed protocol as the hand count.
 
-Claim D (the default): *"deep review under protocol P would flag ≤ p0 of this window's changes in the stratum, at risk α."* With p0 = 10%, p1 = 2% and α = 5%, it certifies after 36, 56 or 75 draws with 0, 1 or 2 failures. It escalates at 144 draws (4 × 36), or earlier once the target is out of reach. Claim D is about what reviewers detect, not the true defect rate; the latter needs measured recall (claim T, planned for v0.2).
+Claim D (the default): *"deep review under protocol P would flag ≤ p0 of this window's changes in the stratum, at risk α."* With p0 = 10%, p1 = 2% and α = 5%, it certifies after 36, 56 or 75 draws with 0, 1 or 2 failures. It escalates at 144 draws (4 × 36), or earlier once the target is out of reach. Claim D is about what reviewers detect, not the true defect rate; the latter needs measured recall (claim T, which is not built). [`docs/statistics.md`](docs/statistics.md) explains the test, its stopping points and the draws.
 
 ## Quickstart
 
@@ -63,7 +63,7 @@ On 2026-11-03 it printed `2,947 landed · 2,717 no recorded human review (merged
 | Step | What is fixed | How |
 |---|---|---|
 | `register` | the selector (stratum), window, p0/p1/α, cap, minimum N, the SHA-256 of `review-protocol.md` and the signing key itself | an ECDSA-signed record (schema v2) carrying RFC 3161 tokens over its SHA-256 from k = 2 of 4 timestamp authorities; optionally a Rekor entry |
-| `freeze` | the population: every change id + merge SHA, sorted, with review states as of freeze time | `audit/<window>.manifest.json` with its SHA-256, plus a signed, time-stamped commitment naming N and the seed round |
+| `freeze` | the population: every change id + merge SHA, sorted, with the reviews the SCM reports at freeze (a review counts only if it was submitted at or before the merge) | `audit/<window>.manifest.json` with its SHA-256, plus a signed, time-stamped commitment naming N and the seed round |
 | seed round R | derived, not chosen: the first drand quicknet round ≥ 24 h after the later of window close and registration | rounds publish at 1692803367 + 3·(R−1) s |
 | `sample` | draw *i* = SHA-256(randomness ‖ registration-hash ‖ uint64be(*i*)) mod N, over the change ids in canonical order: nothing chosen at freeze can move a draw (v1 audits keep the manifest's hash) | BLS signature checked with `drand-client` against the pinned quicknet key |
 | `status` | only the longest fully labelled prefix of draws counts; a change drawn twice reuses its first verdict | reviewers cannot label easy draws first |
@@ -109,7 +109,7 @@ All three pin the pr-rla version, run `--plugins builtin-only` unless you opt in
 
 ## Architecture: bring-your-own providers and ledgers
 
-```
+```text
             .pr-rla.yml  ── provider: github | json-file | ./my.mjs | some-package
                                   │
           registry (src/registry.ts) ── loads built-ins or import()s plugins, checks API versions
@@ -213,9 +213,9 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 
 ## For assistants: `draw-context` and the read-only MCP server
 
-`pr-rla draw-context <n>` shows what a reviewer reads for an issued draw: the change's files and patches with `linguist-generated` files dropped (when the registration's `exclude_generated` is on: only files the `.gitattributes` of both the change's base commit and its landed commit mark, by git's own rules, and none when the change edits a `.gitattributes`), its description, its CI results, the protocol's "FAILS if" checklist (with a FAIL, and no checklist, if the protocol's hash is not the registered one), the draw's verdict state, and how to record a verdict. Every built-in provider implements `describeChange` for it; a provider without it gets the manifest's fields and the URL. Text from the change, its SCM, the ledger or a plugin is fenced as untrusted data, with its control characters escaped:
+`pr-rla draw-context <n>` shows what a reviewer reads for an issued draw: the change's files and patches with `linguist-generated` files dropped (when the registration's `exclude_generated` is on: only files the `.gitattributes` of both the change's base commit and its landed commit mark, by git's own rules, and none when the change edits a `.gitattributes`), its description, its CI results, the protocol's "FAILS if" checklist (with a FAIL, and no checklist, if the protocol's hash is not the registered one), the draw's verdict state, and how to record a verdict. Every built-in provider implements `describeChange` for it; a provider without it gets the manifest's fields and the URL. Text from the change, its SCM, the ledger or a plugin is fenced as untrusted data, with its control characters escaped. The fence's shape ([`contracts.md` §4](docs/design/phase-3-4/contracts.md)):
 
-```
+```text
 <<<UNTRUSTED-CHANGE-CONTENT 7f3a9c…>>>
 … author, title, description, patches, CI check names, the verdict's reviewer and note …
 <<<END 7f3a9c…>>>
@@ -224,6 +224,10 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 with a fresh 128-bit id on every call. The fence lowers the risk of prompt injection; it cannot rule it out, which is one more reason the verdict stays with a person.
 
 [`packages/pr-rla-mcp`](packages/pr-rla-mcp) is a separate package: an MCP server over stdio with eight read-only tools, `audit_list`, `status`, `draws`, `draw_context`, `verify`, `simulate`, `freeze_preview` and `job_status`. It imports only `pr-rla/api/read`, whose read-only mode runs pr-rla's built-ins and isolated plugins only (a `trust: full` plugin is refused). So it records no verdict, issues no draw, submits to no log and writes no file, and its jobs and caches live in memory. Tools open only files under its `--root`s. A built-in gets only its default token variables, sent only to its default origin; a credential the audit repo's config or lock chooses is withheld until the operator consents. A call still running after 25 s returns `{ jobId }` for `job_status`. See its [README](packages/pr-rla-mcp/README.md) and [`docs/security-model.md`](docs/security-model.md) for what this does and does not guarantee.
+
+## Platforms
+
+Tested on macOS (Node 22.23.2, 24.20.0 and 26.8.2). **Linux is untested**: it is what the CI integrations target, but no suite has run on it yet. **Windows is untested**, and not supported until it is: pr-rla finds `git` and `ssh-keygen` by absolute paths on PATH, a checkout with `core.autocrlf=true` fails the git-file ledger's history check, and no part of pr-rla has been run there. Node 22.15 or later is required. Details, and every SCM's live and fixture status: [`docs/compatibility.md`](docs/compatibility.md).
 
 ## Limitations (v0.1)
 

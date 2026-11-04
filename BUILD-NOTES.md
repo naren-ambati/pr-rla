@@ -3469,6 +3469,98 @@ P2 reached `integrate/wave2` as merge 11 (`0bd6b92`, re-pinned in `0d3545b`), an
 
 The three fresh-clone runs are recorded in the next commit.
 
+## Bolt 11 (U10): docs and release engineering, with nothing published (2026-11-04)
+
+Branch `bolt/u10-docs-release`, from the integration tip `0d3545b` (every unit and fix round merged except P1, audit binding, and S1, integration seams, which were still running; P5 also merges after this bolt, and what it changes was not known here). Goal (delivery-plan.md, bolt 11): FR8.1–FR8.3, NFR18 and NFR19; the doc set, a doc check, release engineering without a publish, and the release checklist. The docs describe the code on this branch; where it differs from the design, the code and this file win, and the docs say so. Where P1 and S1 add behaviour, the docs carry bounded hooks (`<!-- pending P1: … -->` and `<!-- pending S1: … -->`, 12 in all; `npm run docs:check` lists them) for the final accuracy pass after both merge.
+
+### Definition of done, and the test that covers each item
+
+| Item | Covered by |
+|---|---|
+| FR8.1 the doc set exists | `test/docs.test.ts` › "FR8.1: the doc set": every listed document exists and `docs/README.md` links it; SECURITY.md's placeholder contact; the 0.1.0 changelog entry and CONTRIBUTING; T1–T18 each with a mitigation and a limit; the compatibility rows |
+| FR8.2 every output block is real output, with its date | `test/docs.test.ts` › "FR8.2: …": every fenced block has a language and every `output` block names its date; the check's negative control (untagged, undated, future-dated, output passed off as `sh`, unknown language); every generated block matches a fresh offline run; a drifted block is caught and rewritten with the run's date; masks hide only what the clock moves |
+| FR8.3 `npm pack --dry-run` lists only `dist/`, README, CHANGELOG and package.json | `test/release.test.ts` › "FR8.3: …" (root) and `packages/pr-rla-mcp/test/release.test.mjs` (the MCP package) |
+| FR8.3 the build starts from an empty `dist/` | the same files › "a stale file planted in dist/ does not reach the list: prepack rebuilds from an empty dist/" (with a control showing the plant ships without the build), "npm run build starts by emptying dist/", "clean-dist refuses to run outside a package root" |
+| FR8.3, NFR2 the secret grep over both tarballs is clean | `test/release.test.ts` › "FR8.3, NFR2: the secret grep over the tarball" (clean, reads every packed file, a planted token, key and address each found without being repeated whole, each pattern's shape, the tar reader); the MCP package's twin; `npm run secret-grep` |
+| FR8.3 a release checklist exists | `test/docs.test.ts` › "the release checklist is ordered, gives every step an owner, …" |
+| FR8.3, FR6.6, NFR18 no build step publishes; provenance named | `test/release.test.ts` › "no package script and no maintainer script publishes, tags, logs in or pushes", "the release checklist leaves every publish to the founder and names trusted publishing with provenance (NFR18)"; U7's pin tests for the integrations |
+| NFR19 the README's Windows statement | `test/docs.test.ts` › "NFR19: the README states the Windows status, and that Linux is untested here" |
+| Version consistency (0.1.0) | `test/release.test.ts` › "one release version everywhere": 15 sources (both package.json files, both version constants, the plugin, the three MCP pins, the guard, the Action's dependency and lockfile, the GitLab default, both CI snippets, both changelogs), the built CLI, the examples' peers |
+| The accuracy pass: commands and options, exit codes, links | `test/docs.test.ts` › "the accuracy pass": every `pr-rla` command and option the docs name exists (118 invocations, read from the CLI's own program, `buildProgram`), with a negative control; each command's `--help` lists what the check reads; NFR16 exit codes against `contracts.md` §7 and `src/cli/exit-codes.ts`, with a control; every relative link and anchor in every Markdown file resolves offline (228), with a control |
+| NFR1 a verified/unverified marker per CI scope row | `test/docs.test.ts` › "NFR1: every row of the CI scope table is marked verified or unverified" |
+| NFR8 the versioning rules | `test/docs.test.ts` › "NFR8: the compatibility table states each versioning rule" |
+| NFR13 the runtime declared | `test/release.test.ts` › "NFR13: the runtime both packages declare" (`>=22.15`) |
+| NFR21 the trust-bundle diff in the release checklist | `test/docs.test.ts` (the checklist test asserts the step and NFR21) |
+| NFR23, FR9.6's wording rule, in the new docs | the existing FR9.6 wording test, which reads every Markdown file |
+| No licence file or text; packages private and UNLICENSED | `test/release.test.ts` › "no licence: none chosen yet" (no licence file tracked; every package.json of ours private and UNLICENSED; no licence grant text; the docs say who decides) |
+| `checkpoint --push` in CI needs an issue ledger | `test/docs.test.ts` › "the CI docs say that checkpoint --push needs an issue ledger, because git-file cannot be checkpointed" |
+| Demo: `npm pack --dry-run` lists only `dist/`, README, CHANGELOG and package.json | the FR8.3 tests above; by hand in "Verified" below |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| New docs | `docs/README.md` (the index, with `pr-rla --help`), `docs/concepts.md`, `docs/statistics.md`, `docs/trusted-time.md`, `docs/writing-a-ledger.md`, `docs/compatibility.md`, `docs/release-checklist.md` (22 ordered steps, an owner each), `CHANGELOG.md` and `packages/pr-rla-mcp/CHANGELOG.md` (0.1.0, unreleased), `SECURITY.md` (placeholder contact, D10), `CONTRIBUTING.md` |
+| Changed docs | `README.md`, `docs/security-model.md` (the T1–T18 table), `docs/writing-a-provider.md` (section 8 moved to the ledger guide), `docs/ci/README.md`, `docs/ci/github.md`, `docs/ci/gitlab.md`, `docs/ci/bitbucket.md`, `docs/assistants/claude-code.md`, `docs/assistants/guard.md`, `docs/assistants/manual-acceptance.md`, `docs/gh-aw-prospective.md`, `docs/org-pooled-audits.md`, `packages/pr-rla-mcp/README.md` |
+| The doc check | `scripts/check-docs.mjs` (`npm run docs:check`), `scripts/docs-outputs.mjs` (`npm run docs:outputs`: nine generated outputs, each run on a temporary copy of its fixture with no credential, its own approvals file and the no-socket preload), `test/docs.test.ts` (24 tests) |
+| Release engineering | `scripts/clean-dist.mjs` (root and MCP), `"build"` and `"prepack"` in both package.json files, `CHANGELOG.md` in both `"files"`, `scripts/secret-grep.mjs` (`npm run secret-grep`), `test/release.test.ts` (19 tests), `packages/pr-rla-mcp/test/release.test.mjs` (4) |
+| A second implementation of the draw formula | `scripts/rederive-draws.mjs` (node:crypto only, no pr-rla code; v2 and v1 bindings), shown in `docs/statistics.md` |
+| CLI help | `src/cli.ts`: the `status --help` exit-code line (it named only "not registered" for exit 1, and nothing about unread verdicts for 6) and `record --force` (a later verdict shows as a relabel only when it differs) |
+| The Action's pin | re-taken twice with `node scripts/pack-action-tarball.mjs`: the tarball now carries `CHANGELOG.md`, this README and the CLI's help strings |
+
+### Corrected because the old text was wrong
+
+- README: the status line (it listed bolts 1 and 9 as the state of the project); "claim T, planned for v0.2" (no 0.2 is planned; claim T is not built); the freeze row's "review states as of freeze time" (a review counts only if submitted at or before the merge, since the ledger round).
+- `docs/security-model.md`: the introduction ("the other parts of the model are added as their units land"); "`verdicts.reviewers` lists the accounts or signing keys" (keys are in `verdicts.allowed_signers` since the U9 fix round).
+- `docs/writing-a-provider.md`: "`ProviderContext.sleep` was added in pr-rla 0.2" (it was phase 2, before any release).
+- `packages/pr-rla-mcp/README.md`: "`freeze_preview`'s `estimate` … is refused (`UNSUPPORTED`) until that lands" (merge 6 wired the estimator and removed the code).
+- `docs/assistants/manual-acceptance.md`: item 6's `pr-rla record 13` (P2 moved the flow to draw #27).
+- Hand-written output: `docs/gh-aw-prospective.md`'s "Expect:" block (with `<time>`), `docs/org-pooled-audits.md`'s stop message (with `…` and `<runId>`), and `docs/assistants/guard.md`'s `# blocked:` comments. Each is now dated real output (recorded, or generated) or prose quoting the code.
+- The docs CI guides' "open for the release checklist" on `npm-shrinkwrap.json`: now the checklist's step 4.
+- The design's NFR16 counts exit 4 among phase 1–2's codes; the phase-2 code had 0–3 (no exit 4 in `3a464f5`), and 4 and 5 arrived with `src/cli/exit-codes.ts` in bolt 1 (`6fa807a`). The compatibility table and the changelog follow the code.
+- An independent read-only review of the first draft against the code found 54 more points in the new docs (k is configurable; `record` needs `--reviewer` for git-file; simulate re-implements `evaluateSequence`'s rule; describeChange ran live for all 36 draws; the trust-bundle script cannot mark a trust-on-first-use plan independent; and so on). Each was checked against the source and fixed in `da21162`; the commit message lists them.
+
+### Found and fixed while verifying
+
+- The first counted fresh-clone run reported 16 pending hooks where there are 12: `pendingHooks` also counted the hook syntax quoted in inline code (this section, and the checklist's step 10). It now reads only comments in the text, outside code, and `test/docs.test.ts` has a control for it ("a hook is an HTML comment in the text").
+
+### Settled or recorded, with dates
+
+- **The npm names**: `npm view pr-rla`, `pr-rla-mcp`, `pr-rla-provider-gitea` and `pr-rla-ledger-jira` each answered E404 (`GET https://registry.npmjs.org/<name>`), 2026-11-04T11:39:54Z: all four unclaimed. Read-only.
+- **npm 10.9.8 (local, 2026-11-04)**: `CHANGELOG.md` is not packed unless `"files"` names it (npm 7 and later dropped it from the always-included list); `npm pack --dry-run` runs `prepack` and `--ignore-scripts` skips it; installing a package that links this checkout (`file:../..`, the MCP package and both examples) does not run the checkout's `prepack` (the root `dist/` mtime was unchanged).
+- **OpenSSL 3.6.4 (local, 2026-11-04)**: `openssl ts -verify` accepts the 2026-11-03 recorded DigiCert, GlobalSign and Sigstore responses, and their tokens extracted with `-token_out` and checked with `-token_in`, with the bundle's anchors; the by-hand recipe in `docs/trusted-time.md` ran end to end on a registration-shaped file made from them.
+- **Node 24.20.0 and 26.8.2 (2026-11-04T12:32Z–12:45Z, at `cb0953a` plus one test edit)**: the root suite, 95 files: 2,515 passed on Node 24, 2,506 passed on Node 26 (one block of the hostile-plugin tests is not added on 25 or later), none failed. An earlier Node 24 run during this bolt overlapped an edit to the docs and failed the wording test on a half-written sentence; it is not counted.
+- No other network use: no timestamp authority, drand relay, Rekor host, tracker or SCM was contacted. `npm ci` in the clones and `scripts/pack-action-tarball.mjs`'s `npm install --package-lock-only` read the npm registry.
+
+### Deviations from the design, and why
+
+1. **`docs/release-checklist.md`**, the brief's name, not the design's `docs/release.md`; 22 steps with owners, where the draft listed 7. It carries U7's seven re-pin steps word for word (step 19) and the founder's steps the brief lists, in an order the checklist explains.
+2. **Linux is untested.** NFR19 asks for macOS and Linux tested; only macOS ran here. The compatibility table, the README and the checklist (step 11) say so.
+3. **Node 22.15, not 22.13.** `engines` has been `>=22.15` since the plugin and broker round (`module.registerHooks`); the docs and `test/release.test.ts` follow it.
+4. **`docs/trusted-time.md`** is beyond FR8.1's list: the draft's doc set had it (05 §U10, kept by the refined design), with a by-hand token check.
+5. **The output-block convention.** An `output` fence whose caption line names `run YYYY-MM-DD` or `recorded YYYY-MM-DD`; a generated block also carries `<!-- docs-output: <id> -->`. Generated blocks are re-run and diffed in `npm test`; recorded ones (live runs that cannot be repeated offline) are dated and not re-run. The rules cover the docs a reader is pointed at; the design record, this file, `docs/build-notes/` and fixture data are only link-checked. A block whose lines have the shape of pr-rla's output must be marked `output`.
+6. **Two scripts, not one.** The design names `scripts/check-docs.mjs`; regeneration is `scripts/docs-outputs.mjs`, which the check imports.
+7. **The MCP package checks its own tarball.** The verification command runs the root suite before the MCP package is installed, so the root suite cannot build or pack it; `packages/pr-rla-mcp/test/release.test.mjs` does, with the same secret grep.
+8. **`npm-shrinkwrap.json` is the founder's call, recommended yes**, created at publish time from the committed lockfile (checklist step 4, with the reasons): the GitLab and Bitbucket installs have no lockfile, and the ASN.1 library's dependencies are not pinned in a consumer's install otherwise. Nothing in the repository creates one now.
+9. **`docs/writing-a-ledger.md` takes over `docs/writing-a-provider.md` §8**, which now points to it.
+10. **Two help strings in `src/cli.ts`** changed, for the accuracy pass; no behaviour changed.
+11. **Trust-on-first-use anchors need two steps** (checklist 5 and 6): the founder's confirmation, then a code and bundle change, because `scripts/update-trust-bundle.mjs` writes `independent: false` for every authority planned `tofu` and keeps existing entries on `--write`.
+
+### Not verified
+
+- Linux and Windows; Node 22.15–22.22 (the full suite ran on 22.23.2; the plugin host was checked on 22.15.0 in the plugin and broker round).
+- Anything the release checklist describes after step 12: no repository, tag, publish, trusted-publishing setup or catalog entry exists. npm's trusted-publishing prerequisites and the GitLab catalog's project layout (`templates/` at the root) are from their documentation as I know it, not checked live. The registry's file list for a published tarball.
+- Step 6's anchor procedure (it changes code); the checklist's trust-bundle diff (step 9) was not run live in this bolt.
+- The doc check's output-shape rule knows pr-rla's own printed shapes (verify's check lines, the status line, `[dry run]`, the simulate and estimate lines, the guard's answers, `(exit n)`); output of another program in an `sh` block is caught only if it has one of them.
+- The three founder's runs (FR3.6) are still pending, as U6 left them.
+
+### For the integration step, and the final accuracy pass after P1, S1 and P5
+
+- **Re-run after P1, S1 and P5 merge:** `npm run build && npm run docs:outputs` (the `status`, `verify` and `register --dry-run` outputs will change if P1's read-only contexts or check-7 gate change what they print), `node scripts/pack-action-tarball.mjs`, and `npm run docs:check`, which lists the 12 hooks to complete: P1 in `CHANGELOG.md`, `docs/concepts.md` (the ledger publication record), `docs/writing-a-ledger.md`, `docs/compatibility.md` (its schema), `docs/gh-aw-prospective.md` (commit `ledger-publication.json` after `sample`) and `docs/security-model.md` (T4, T5, T9, read-only contexts); S1 in both changelogs, `docs/security-model.md` (T6, T8), `docs/writing-a-ledger.md` §7, `docs/writing-a-provider.md` (estimates and retry hints) and `packages/pr-rla-mcp/README.md`.
+- **The doc check applies to every new or changed doc**: a fenced block without a language, or output that is not dated, fails `test/docs.test.ts`. A new `pr-rla` option named in a doc must exist in `src/cli.ts`; a new exit code must reach `src/cli/exit-codes.ts`, `contracts.md` §7 and `docs/compatibility.md` together.
+- **Files P1 and S1 may also change:** `README.md`, `docs/security-model.md` (the threat table is near the top; the sections below are unchanged except the tier-2 reviewers sentence), `docs/writing-a-provider.md`, `docs/ci/*.md`, `packages/pr-rla-mcp/README.md`, `src/cli.ts` (two help strings: `status`'s `addHelpText` and `record --force`), `package.json` (`files`, `build`, `prepack` and three scripts), `packages/pr-rla-mcp/package.json` (`files`, `build`, `prepack`), `integrations/github-action/package-lock.json` and `vendor/` (re-take rather than merge), and this file (this section is at the end).
+- **The pending-hook test** requires every hook to name the round that completes it (`P<n>` or `S<n>`), so P5 can add its own; at release there must be none (checklist step 10). Whatever P5 changes in the CLI, its outputs or its records, the doc check and `npm run docs:outputs` show where the docs no longer match.
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
@@ -3819,3 +3911,18 @@ Merged on top of `a8a145e` (merge 12) on the coordinator's instruction. P1 had a
   - `test/p1-publication.test.ts`: the cast of a `read.status` result to `{ ledgerGate }` goes through `unknown` (the result type gained S1's `untrusted?`); nothing asserted changed.
 - **Not changed:** the IPC v2 and plugin-host rules (S1's `reply()` never throws, the 2 KiB echoes, a whole-number request id, finite retry hints) were merged in merge 12 and P1 does not touch them. U6's option-level guard test and the wording allow-list pass: P1's `--key` and `--tsa-trust` were already classified.
 - **Verified from one fresh clone of `integrate/wave2` at `585f820`** (2026-11-04, Node v22.23.2, one run, as the owner asked to go easy): `npm ci` 0 vulnerabilities · build 0 · typecheck 0 · `npm test` 103 files, **2565 passed (2565)** · `npm pack` of the clone equals the vendored tarball byte for byte · the Action's `npm ci` 0 vulnerabilities, `pr-rla --version` 0.1.0 · `packages/pr-rla-mcp` **68 pass, 0 fail** · gitea 1 pass · jira 1 pass · every demo in `scripts/` and `packages/pr-rla-mcp/scripts/` exits 0 · both `claude plugin validate` runs pass. In the worktree before the clone, one full run failed two tests only because the Action's lockfile still held conflict markers; the re-pin fixed it. Merge 12's own run, 2508 tests, was at 98 files.
+
+### Merge 14: `bolt/u10-docs-release` (9fbfab7)
+
+Merged on top of `017f849` on the coordinator's instruction. U10 was cut from `0d3545b` (before P1 and S1), so its docs meet what those two rounds changed in the same files, and its 12 `<!-- pending P1|S1: … -->` hooks are completed here from the merged behaviour.
+
+- **Conflicts:**
+  - `docs/writing-a-provider.md`: U10 moved the ledger material to `docs/writing-a-ledger.md` and reworded the additive-changes bullet ("before the first release"). Kept U10's layout and wording, plus S1's `credentialKinds` sentence and its "What pr-rla holds your text to" bullet. P1's two ledger bullets (the index is pr-rla's to bind, `foreign_issues` is reserved for tests) moved into `writing-a-ledger.md` section 4.
+  - `packages/pr-rla-mcp/README.md`: S1's errors paragraph already says what the hook asked for, so the hook is gone. U10's `freeze_preview` estimate sentence is kept.
+  - `BUILD-NOTES.md`: U10's section moved above "Integration: wave 2" with the other units' sections.
+  - The Action's tarball and lockfile: re-pinned (`node scripts/pack-action-tarball.mjs`).
+- **The hooks, completed** (none left; P5's are added by P5's merge):
+  - P1 (7): `CHANGELOG.md` (identity enforcement at every command, read-only contexts, the publication record, the one check-7 gate, unknown review times), `docs/compatibility.md` (the schema `pr-rla/ledger-publication/v1`), `docs/concepts.md` (the publication record section: what `sample` writes, when check 7 FAILs or is INCOMPLETE, no-authority and git-file cases, `status` running the same `check7Gate`), `docs/gh-aw-prospective.md` (commit `ledger-publication.json`; exit 5 means publish again before labelling), `docs/writing-a-ledger.md` (what a publishing ledger must do), `docs/security-model.md` (T5 rewritten from WARN to FAIL on any difference, run by every command; T9 gains the publication record).
+  - S1 (5): `CHANGELOG.md`, `packages/pr-rla-mcp/CHANGELOG.md` (fencing, the process guard, scrubbing), `docs/writing-a-ledger.md` (what a ledger's text is held to), `docs/writing-a-provider.md` (the `estimateRequests` bound and the retry-hint rule), `docs/security-model.md` (T6: reply(), 2 KiB echoes, whole-number request ids, scrubbing; T8: the "S1 addresses" limit is replaced by what is left: identifiers shown as words, and unfenced MCP progress and log lines).
+  - `docs/release-checklist.md` §10 no longer names P1 and S1 as pending.
+- **Checks run in this worktree after the merge:** `npm run build && npm run docs:outputs` (every block matches a fresh run) · tarball re-pinned · `npm run docs:check` **0 problems, 250 relative links, 0 pending hooks** · typecheck 0 · `npm test` 105 files, **2609 passed (2609)**.
