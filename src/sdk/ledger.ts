@@ -266,14 +266,38 @@ export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "pro
   return null;
 }
 
+/**
+ * Orders two tracker event ids. Numeric ids (GitHub's, GitLab's) compare as integers, with BigInt
+ * so ids past 2^53 stay exact; a lexical order would put "100" before "99" and so would count the
+ * wrong one of two same-second verdicts. Ids that are not all digits (Jira's `10001:0:add`) sort
+ * after every numeric id, in UTF-16 code-unit order among themselves, and equal numbers written
+ * differently ("07" and "7") fall back to code-unit order, so the order is total and the same on
+ * every machine. Documented in contracts.md §1.
+ */
+export function compareEventIds(a: string, b: string): number {
+  const na = /^\d+$/.test(a);
+  const nb = /^\d+$/.test(b);
+  if (na && nb) {
+    const x = BigInt(a);
+    const y = BigInt(b);
+    if (x !== y) return x < y ? -1 : 1;
+  } else if (na !== nb) return na ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Server time, then event id (`compareEventIds`): the order in which "the first eligible event counts". */
+export function compareByTimeThenId(a: { at: string; id: string }, b: { at: string; id: string }): number {
+  return a.at < b.at ? -1 : a.at > b.at ? 1 : compareEventIds(a.id, b.id);
+}
+
 /** A history event as it is hashed into a checkpoint: no `raw`, keys fixed. */
 export type CanonicalHistoryEvent = Omit<LedgerHistoryEvent, "raw">;
 
-/** Sorts by time then id and drops `raw`: the list `eventsSha256` is computed over (canonical JSON). */
+/** Sorts by time then id (`compareByTimeThenId`) and drops `raw`: the list `eventsSha256` is computed over (canonical JSON). */
 export function canonicalHistory(events: readonly LedgerHistoryEvent[]): CanonicalHistoryEvent[] {
   return events
     .map((e) => ({ id: e.id, at: e.at, actor: { login: e.actor.login, kind: e.actor.kind, ...(e.actor.id !== undefined ? { id: e.actor.id } : {}) }, action: e.action, label: e.label, draw: e.draw }))
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort(compareByTimeThenId);
 }
 
 const sameEvent = (a: CanonicalHistoryEvent, b: CanonicalHistoryEvent) =>
@@ -338,7 +362,7 @@ export function analyzeDrawHistory(draw: number, events: readonly VerdictLabelEv
   const out: DrawHistoryAnalysis = { counted: null, warnings: [], failures: [], notes: [] };
   // At one instant a removal comes before an add: a select-field change or a scoped-label swap is one of each.
   const rank = (e: VerdictLabelEvent) => (e.action === "remove" ? 0 : 1);
-  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : rank(a) - rank(b) || compareEventIds(a.id, b.id)));
   const present = new Set<Verdict>();
   let lastRemoval: VerdictLabelEvent | null = null;
   for (const e of sorted) {

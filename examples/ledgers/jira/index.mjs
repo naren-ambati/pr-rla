@@ -23,7 +23,7 @@
 // `pr-rla checkpoint` after verdicts; checkpoints are not optional with Jira.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { analyzeDrawHistory, defineLedger } from "pr-rla/ledger";
+import { analyzeDrawHistory, compareByTimeThenId, defineLedger } from "pr-rla/ledger";
 
 const NAME = "jira";
 const INDEX = "ledger-index.json";
@@ -160,9 +160,8 @@ class JiraLedger {
       s.warnings.push(...a.warnings);
       s.notes.push(...a.notes);
     }
-    const order = (a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : 1);
-    s.verdicts.sort((a, b) => order({ at: a.recordedAt, id: a.provenance.eventId }, { at: b.recordedAt, id: b.provenance.eventId }));
-    s.history.sort(order);
+    s.verdicts.sort((a, b) => compareByTimeThenId({ at: a.recordedAt, id: a.provenance.eventId }, { at: b.recordedAt, id: b.provenance.eventId }));
+    s.history.sort(compareByTimeThenId);
     return s;
   }
 

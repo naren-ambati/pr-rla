@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import {
   LEDGER_API_VERSION,
   analyzeDrawHistory,
+  compareByTimeThenId,
   type DrawForLedger,
   type Ledger,
   type LedgerActor,
@@ -60,8 +61,6 @@ interface Snapshot {
   warnings: string[];
   notes: string[];
 }
-
-const byTimeThenId = (a: { at: string; id: string }, b: { at: string; id: string }) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export abstract class IssueTrackerLedger implements Ledger {
   readonly apiVersion = LEDGER_API_VERSION;
@@ -160,8 +159,8 @@ export abstract class IssueTrackerLedger implements Ledger {
         if (t.currentLabels.includes(index.labels[v].name) && !labelEvents.some((e) => e.action === "add" && e.verdict === v))
           s.warnings.push(`draw #${i.draw}: the issue carries ${index.labels[v].name} but its label history has no event adding it (label history incomplete); that verdict is not counted`);
     }
-    s.verdicts.sort((a, b) => byTimeThenId({ at: a.recordedAt, id: a.provenance?.eventId ?? "" }, { at: b.recordedAt, id: b.provenance?.eventId ?? "" }));
-    s.history.sort(byTimeThenId);
+    s.verdicts.sort((a, b) => compareByTimeThenId({ at: a.recordedAt, id: a.provenance?.eventId ?? "" }, { at: b.recordedAt, id: b.provenance?.eventId ?? "" }));
+    s.history.sort(compareByTimeThenId);
     return s;
   }
 
