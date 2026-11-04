@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readTextConfined } from "../io/confine.js";
 import { pathToFileURL } from "node:url";
 import type { AuditContext } from "../api/context.js";
-import { signalledFetch, signalledSleep } from "../net/abort.js";
+import { signalledFetch } from "../net/abort.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import { INDEX_FILE } from "../ledgers/issue-index.js";
 import type { PluginSpec } from "../registry.js";
@@ -29,6 +29,12 @@ import { guardFullTrust, placeholderEnv, readGrants, refuseFullTrust, refuseIfBu
  * an isolated one runs with its credentials withheld: no placeholder reaches it and the broker
  * swaps none (CREDENTIAL_NOT_APPROVED), so it works anonymously. One line names the command.
  */
+
+/**
+ * The wait a plugin host serves a plugin (wave-2 integration): it ends when the host cancels it (the calls ended,
+ * the host closed; the plugins round's finding 13) or when the call's own signal aborts (U5), whichever comes first.
+ */
+const hostSleep = (ctx: AuditContext, call?: AbortSignal) => (ms: number, signal?: AbortSignal) => ctx.sleep(ms, signal && call ? AbortSignal.any([signal, call]) : (signal ?? call));
 
 export function fullTrustLine(entry: LockEntry): string {
   return `PLUGIN TRUST: full (${entry.name}@${entry.version ?? "unversioned"} runs with your environment and files)`;
@@ -118,7 +124,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: brokerCredentials(spec.use, entry, consent !== null) });
   const host = await startLockedHost(ctx, "provider", spec, entry, plugin, consent !== null);
   try {
-    const p = await hostedProvider(host, spec.options, { cwd, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal), log: ctx.log, ...(o.signal ? { signal: o.signal } : {}) });
+    const p = await hostedProvider(host, spec.options, { cwd, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: hostSleep(ctx, o.signal), log: ctx.log, ...(o.signal ? { signal: o.signal } : {}) });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return p;
   } catch (e) {
@@ -173,7 +179,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: brokerCredentials(spec.use, entry, consent !== null) });
   const host = await startLockedHost(ctx, "ledger", spec, entry, plugin, consent !== null);
   try {
-    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: signalledFetch(ctx.broker.bind(id), opts.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, opts.signal), opts.signal), log: ctx.log, index, ...reviewers, ...(opts.signal ? { signal: opts.signal } : {}) });
+    const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: signalledFetch(ctx.broker.bind(id), opts.signal), sleep: hostSleep(ctx, opts.signal), log: ctx.log, index, ...reviewers, ...(opts.signal ? { signal: opts.signal } : {}) });
     ctx.log(isolationLine(host, entry.name, entry.version));
     return l;
   } catch (e) {

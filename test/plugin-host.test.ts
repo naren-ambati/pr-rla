@@ -557,7 +557,9 @@ describe("a plugin's sleep: capped, only during a call, cancelled on close (find
       const started = Date.now();
       const sleeping = sleep(600_000, c.signal);
       c.abort();
-      await sleeping;
+      // The host's own wait resolves; pr-rla's other waits reject with an AbortError (U5's cancellation, joined at the
+      // wave-2 integration), so a cancelled call stops. Either way the wait ends at once and its timer is cleared.
+      await sleeping.catch((e: Error) => expect(e.name).toBe("AbortError"));
       expect(Date.now() - started).toBeLessThan(1000);
     }
   });

@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -14,6 +15,24 @@ export const FIXTURE = join(REPO, "test", "fixtures", "audits", "gh-aw-q3-record
 export const RECORDING = join(REPO, "test", "fixtures", "github", "gh-aw-q3-draws-2026-11-04.json");
 export const BIN = join(PKG, "dist", "bin.js");
 export const GUARD = join(PKG, "test", "preload-guard.mjs");
+
+/**
+ * Local approvals (pr-rla's src/plugins/approvals.ts) live in a per-user file. Every test file, and every server it
+ * starts, uses a temp file through PR_RLA_APPROVALS_FILE, never ~/.config/pr-rla/approvals.json; the file fails if a
+ * test changed the real one (as the root's test/setup/approvals.ts does for vitest).
+ */
+const APPROVALS_DIR = mkdtempSync(join(tmpdir(), "prrla-mcp-approvals-"));
+export const APPROVALS_FILE = join(APPROVALS_DIR, "approvals.json");
+process.env.PR_RLA_APPROVALS_FILE = APPROVALS_FILE;
+delete process.env.PR_RLA_ACCEPT_LOCK_GRANTS;
+const xdg = process.env.XDG_CONFIG_HOME;
+const REAL_APPROVALS = join(xdg && isAbsolute(xdg) ? xdg : join(process.env.HOME ?? homedir(), ".config"), "pr-rla", "approvals.json");
+const realBefore = existsSync(REAL_APPROVALS) ? statSync(REAL_APPROVALS).mtimeMs : null;
+after(() => {
+  rmSync(APPROVALS_DIR, { recursive: true, force: true });
+  const now = existsSync(REAL_APPROVALS) ? statSync(REAL_APPROVALS).mtimeMs : null;
+  if (now !== realBefore) throw new Error(`a test changed the real approvals file ${REAL_APPROVALS}; tests must use PR_RLA_APPROVALS_FILE`);
+});
 
 /** A copy of the recorded gh-aw audit in a fresh git repository (git-file's tamper trail), with git's auto maintenance off. */
 export function copyAudit(edit) {
@@ -55,7 +74,7 @@ export async function startServer({ roots, args = [], env = {}, negotiation, per
   // Node 25 and later also deny the network under --permission; the guard still refuses every host but loopback.
   const net = Number(process.versions.node.split(".")[0]) >= 25 ? ["--allow-net"] : [];
   const node = [...(permission ? ["--permission", "--allow-fs-read=*", "--allow-child-process", ...net] : []), "--import", GUARD, BIN, ...roots.flatMap((r) => ["--root", r]), ...args];
-  const transport = new StdioClientTransport({ command: process.execPath, args: node, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...(allowNet ? { PRRLA_GUARD_NET: "allow" } : {}), ...env }, stderr: "pipe" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: node, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", PR_RLA_APPROVALS_FILE: APPROVALS_FILE, ...(allowNet ? { PRRLA_GUARD_NET: "allow" } : {}), ...env }, stderr: "pipe" });
   transport.stderr?.on("data", (d) => stderr.push(...String(d).split("\n").filter(Boolean)));
   const client = new Client({ name: "pr-rla-mcp-test", version: "0" }, { capabilities: { elicitation: {} }, ...(negotiation ? { versionNegotiation: { mode: negotiation } } : {}) });
   const elicitations = [];

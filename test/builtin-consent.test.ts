@@ -41,9 +41,9 @@ function github(restBase?: string) {
   return { fetch, seen };
 }
 
-function context(env: Record<string, string>, fetch: typeof globalThis.fetch, o: { acceptLockGrants?: boolean; file?: string } = {}) {
+function context(env: Record<string, string>, fetch: typeof globalThis.fetch, o: { acceptLockGrants?: boolean; file?: string; mode?: "read-only" | "read-write" } = {}) {
   const logs: string[] = [];
-  const ctx = createAuditContext({ mode: "read-only", env, fetch, log: (l) => logs.push(l), sleep: async () => {}, approvalsFile: o.file ?? machine(), ...(o.acceptLockGrants ? { acceptLockGrants: true } : {}) });
+  const ctx = createAuditContext({ mode: o.mode ?? "read-only", env, fetch, log: (l) => logs.push(l), sleep: async () => {}, approvalsFile: o.file ?? machine(), ...(o.acceptLockGrants ? { acceptLockGrants: true } : {}) });
   return { ctx, logs };
 }
 
@@ -110,12 +110,15 @@ describe("built-in providers: the repo's config cannot send your token elsewhere
     const real = BUILTIN_PROVIDERS.github!.create;
     (BUILTIN_PROVIDERS.github as { create: unknown }).create = (o: never, c: { env: Record<string, string | undefined> }) => (read.push({ ...c.env }), real(o, c as never));
     try {
-      const { ctx } = context({ AWS_SECRET_ACCESS_KEY: "AKIA_VERIFIER_SECRET", GITHUB_TOKEN: "ghp_MINE", PATH: "/usr/bin" }, github().fetch);
-      await openProvider(ctx, { use: "github", options: {} }, ".");
+      for (const mode of ["read-write", "read-only"] as const) {
+        const { ctx } = context({ AWS_SECRET_ACCESS_KEY: "AKIA_VERIFIER_SECRET", GITHUB_TOKEN: "ghp_MINE", PATH: "/usr/bin" }, github().fetch, { mode });
+        await openProvider(ctx, { use: "github", options: {} }, ".");
+      }
     } finally {
       (BUILTIN_PROVIDERS.github as { create: unknown }).create = real;
     }
-    expect(read).toEqual([{ GITHUB_TOKEN: "ghp_MINE" }]);
+    // The CLI's built-in gets the granted value; in read-only mode (U5, joined at the wave-2 integration) only its placeholder.
+    expect(read).toEqual([{ GITHUB_TOKEN: "ghp_MINE" }, { GITHUB_TOKEN: "prrla-cred:GITHUB_TOKEN" }]);
   });
 
   it("a graphql_url elsewhere withholds the token from both endpoints (one grant covers every origin it goes to)", async () => {
@@ -150,12 +153,17 @@ describe("built-in providers: the repo's config cannot send your token elsewhere
     expect(() => approveBuiltin(machine(), "GITHUB_TOKEN", "http://ghe.example.com", "x")).toThrow(/approved only for an https origin/);
   });
 
-  it("--accept-lock-grants takes the config's grant for the run, and says so", async () => {
+  it("--accept-lock-grants takes the config's grant for the run, and says so (the CLI's flag: a read-only call ignores it)", async () => {
     const ghe = github("https://ghe.example.com/api/v3");
-    const { ctx, logs } = context({ GITHUB_TOKEN: "ghp_MINE" }, ghe.fetch, { acceptLockGrants: true });
+    const { ctx, logs } = context({ GITHUB_TOKEN: "ghp_MINE" }, ghe.fetch, { acceptLockGrants: true, mode: "read-write" });
     await (await openProvider(ctx, { use: "github", options: { base_url: "https://ghe.example.com" } }, ".")).listChanges(REQ);
     expect(auths(ghe.seen)).toEqual(["Bearer ghp_MINE"]);
     expect(logs).toEqual(["provider github: accepting GITHUB_TOKEN -> https://ghe.example.com from .pr-rla.yml for this run, not approved on this machine; --accept-lock-grants is only for a repo you control"]);
+    // Read-only mode (pr-rla/api/read, the MCP server) takes only what is approved on this machine.
+    const ro = github("https://ghe.example.com/api/v3");
+    const r = context({ GITHUB_TOKEN: "ghp_MINE" }, ro.fetch, { acceptLockGrants: true });
+    await (await openProvider(r.ctx, { use: "github", options: { base_url: "https://ghe.example.com" } }, ".")).listChanges(REQ).catch(() => {});
+    expect(auths(ro.seen)).toEqual([null]);
   });
 
   it("GitLab and Bitbucket Cloud: their own public APIs are defaults; a self-managed host or another api_url needs approval", async () => {

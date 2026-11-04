@@ -27,7 +27,7 @@ describe("the network-deny harness (NFR11)", () => {
     // Resolved, so src/core/presence/keys.ts (U9's SSH keys, unrelated) is not mistaken for the log keys.
     const importsKeys = (f: string) => [...readFileSync(f, "utf8").matchAll(/from "(\.\.?\/[^"]+)\.js"/g)].some((m) => resolve(dirname(f), `${m[1]}.ts`) === keys);
     const importers = walk(join(__dirname, "..", "src")).filter(importsKeys).map((f) => f.split("/src/")[1]);
-    expect(importers.sort()).toEqual(["commands/translog.ts", "core/verify.ts"]); // read side only: logPublicKey and verify's key-source note
+    expect(importers.sort()).toEqual(["api/translog.ts", "core/verify.ts"]); // read side only: logPublicKey (moved to the API by U5) and verify's key-source note
   });
 });
 

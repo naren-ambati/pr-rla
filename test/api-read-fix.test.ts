@@ -183,7 +183,8 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
     await expect(p.http.rest("https://elsewhere.example/x")).rejects.toThrow(/credential GITHUB_TOKEN may be sent only to api\.github\.com/);
     expect(seen.every((x) => x.auth !== "Bearer ghp_default" || x.url.startsWith("https://api.github.com/"))).toBe(true);
     const broker = createBroker({ mode: "read-only", credentialsFor: () => new Map([["T", { value: "secret", hosts: new Set(["h.example"]) }]]) }, { fetch: transport });
-    await expect(broker.bind("plugin:x")("http://h.example/a", { headers: { authorization: "Bearer prrla-cred:T" } })).rejects.toThrow(/sent only over https/);
+    // The plugins round's origin-exact rule (every mode) supersedes U5's read-only https check: refused, nothing sent.
+    await expect(broker.bind("plugin:x")("http://h.example/a", { headers: { authorization: "Bearer prrla-cred:T" } })).rejects.toThrow(/may be sent only to h\.example over https, not http:\/\/h\.example; nothing was sent/);
   });
 
   it("Bitbucket's Basic auth is built by the broker from two placeholders; the issue ledgers get the same defaults", async () => {
@@ -214,7 +215,7 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
 });
 
 describe("an isolated plugin's locked credential grants are the audit repo's, not the operator's (read-only mode)", () => {
-  it("the CLI passes its placeholder; a read-only call passes none, and says so", async () => {
+  it("unapproved, neither a read-only call nor the CLI passes its credential, and both say so; approved on this machine, both pass the placeholder", async () => {
     const s = setupAuditRepo({ changes: makeChanges(30), provider: "{ use: ./plugins/cred/index.mjs, options: {} }" });
     mkdirSync(join(s.dir, "plugins", "cred"), { recursive: true });
     writeFileSync(join(s.dir, "plugins", "cred", "package.json"), JSON.stringify({ name: "cred", version: "0.0.1", type: "module" }));
@@ -229,13 +230,17 @@ export default defineProvider({ providerApiVersion: 1, name: "cred", credentials
     await lockPlugin(s.dir, "./plugins/cred/index.mjs");
     s.clock.now = T("2026-10-20T00:00:00Z");
     const notes: string[] = [];
-    const ro = await read.freezePreview({ dir: s.dir }, { nowMs: () => s.clock.now, fetch: noNet, env: { MY_TOKEN: "operator-secret" }, log: (l) => notes.push(l) });
-    expect(ro.limitations).toContain("MY_TOKEN: none");
-    expect(notes.join("\n")).toMatch(/plugin \.\/plugins\/cred\/index\.mjs gets no MY_TOKEN \(its lock entry's credential grants need the operator's consent/);
-    // The CLI (read-write) gives the plugin its placeholder, as before.
+    const ro = () => read.freezePreview({ dir: s.dir }, { nowMs: () => s.clock.now, fetch: noNet, env: { MY_TOKEN: "operator-secret" }, log: (l) => notes.push(l) });
+    expect((await ro()).limitations).toContain("MY_TOKEN: none");
+    // Joined at the wave-2 integration: one approvals store answers for read-only mode and the CLI.
+    expect(notes.join("\n")).toMatch(/plugin \.\/plugins\/cred\/index\.mjs: not approved on this machine, so its credentials are withheld \(MY_TOKEN -> https:\/\/api\.example\.com\) and it runs without them; to grant them: pr-rla plugin approve \.\/plugins\/cred\/index\.mjs/);
     const { freezePreview } = await import("../src/api/read/freeze-preview.js");
-    const rw = await freezePreview({ ...s.ctx, env: { MY_TOKEN: "operator-secret" } });
-    expect(rw.limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
+    const rw = () => freezePreview({ ...s.ctx, env: { MY_TOKEN: "operator-secret" } });
+    expect((await rw()).limitations).toContain("MY_TOKEN: none");
+    // Approved (as plugin add, lock and approve record it), both modes pass the placeholder; neither ever passes the secret.
+    await lockPlugin(s.dir, "./plugins/cred/index.mjs", { approve: true });
+    expect((await ro()).limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
+    expect((await rw()).limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
   }, 60_000);
 });
 

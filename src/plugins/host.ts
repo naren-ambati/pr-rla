@@ -491,10 +491,14 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         if (loading || pending.size === 0) return;
         const ctrl = new AbortController();
         sleeps.add(ctrl);
-        void (io?.sleep ?? realSleep)(Math.min(MAX_PLUGIN_SLEEP_MS, Math.max(0, Number(m.ms) || 0)), ctrl.signal).then(() => {
-          sleeps.delete(ctrl);
-          if (!ctrl.signal.aborted) post({ type: "slept", sid: m.sid });
-        });
+        // pr-rla's own waits reject when aborted (src/net/abort.ts, U5) and the host's resolve: either way a cancelled wait answers nothing.
+        void (io?.sleep ?? realSleep)(Math.min(MAX_PLUGIN_SLEEP_MS, Math.max(0, Number(m.ms) || 0)), ctrl.signal).then(
+          () => {
+            sleeps.delete(ctrl);
+            if (!ctrl.signal.aborted) post({ type: "slept", sid: m.sid });
+          },
+          () => sleeps.delete(ctrl),
+        );
         return;
       }
       case "acceptResult": {

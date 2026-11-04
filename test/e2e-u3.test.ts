@@ -155,9 +155,10 @@ export default {
     expect(reg.record.plugins.provider.populationOptionsSha256).not.toBe(optionsDigest({}));
     const { verifyAudit } = await import("../src/core/verify.js");
     const { pluginIdentity } = await import("../src/registry.js");
-    // A trust: full plugin is read only with local consent: the AuditContext carries it (approved in setup).
+    // A trust: full plugin is read only with local consent: the AuditContext carries it (approved in setup). The CLI's
+    // (read-write): read-only mode never runs trust: full, approved or not (U5, joined at the wave-2 integration).
     const { createAuditContext } = await import("../src/api/context.js");
-    const id = await pluginIdentity({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, "provider", s.dir, createAuditContext({ mode: "read-only" }));
+    const id = await pluginIdentity({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, "provider", s.dir, createAuditContext({ mode: "read-write" }));
     const old = { ...reg, record: { ...reg.record, plugins: { ...reg.record.plugins, provider: { ...reg.record.plugins.provider, populationOptionsSha256: optionsDigest({}) } } } };
     const { unsafeCreateProvider } = await import("../src/registry.js");
     const provider = await unsafeCreateProvider({ use: "./scoped.mjs", options: { scope: "all", page_size: 10 } }, { cwd: s.dir, env: {}, log: () => {}, fetch });

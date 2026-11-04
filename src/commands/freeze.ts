@@ -5,7 +5,7 @@ import { freeze, REFREEZE_COMMAND, type FreezeResult } from "../api/write/freeze
 import { rekorApi } from "../api/write/translog.js";
 import { fmt } from "../api/session.js";
 import { isoMs } from "../timestamp/verify.js";
-import { writeJson, type CommandContext } from "./context.js";
+import { CommandError, writeJson, type CommandContext } from "./context.js";
 import { reportTimestamps } from "./timestamps.js";
 import { confirmRekorV2 } from "./translog.js";
 
@@ -49,6 +49,8 @@ export function printPopulation(ctx: Pick<CommandContext, "out">, p: Omit<Freeze
 }
 
 export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): Promise<number> {
+  // A dry run or an estimate writes nothing, so it has no run to continue (U8).
+  if (opts.resume !== undefined && (opts.dryRun || opts.estimate)) throw new CommandError("--resume continues a pooled freeze of a registered repo list or rule; a dry run has nothing to resume");
   if (opts.estimate) {
     // --estimate implies --dry-run: it resolves and probes, and writes nothing (U8).
     rekorApi(opts.rekorApi);

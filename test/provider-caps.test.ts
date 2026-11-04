@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommandError, readManifest } from "../src/commands/context.js";
+import { AuditError } from "../src/api/errors.js";
+import { readManifest } from "../src/commands/context.js";
 import { buildPopulation } from "../src/core/population.js";
 import { applySelector, DEFAULT_SELECTOR, normalizeSelector, UNKNOWN_SIZE_STEP } from "../src/core/selector.js";
 import { BitbucketDataCenterProvider } from "../src/providers/bitbucket-data-center/index.js";
@@ -161,7 +162,8 @@ describe("the pinned head is a commit id and is escaped (finding 8's hardening, 
     const manifest = (headSha: unknown) => JSON.stringify({ schema: "pr-rla/manifest/v2", repos: [{ repo: REPO, repoId: null, defaultBranch: "main", headSha }] });
     const paths = { manifest: join(dir, "m.json") } as never;
     writeFileSync(join(dir, "m.json"), manifest("main&evil=1"));
-    expect(() => readManifest(paths)).toThrow(CommandError);
+    // U5 moved readManifest to src/api/session.ts, which throws the API's AuditError (CommandError's base).
+    expect(() => readManifest(paths)).toThrow(AuditError);
     writeFileSync(join(dir, "m.json"), manifest("a".repeat(40)));
     expect(() => readManifest(paths)).not.toThrow();
     writeFileSync(join(dir, "m.json"), manifest(null));

@@ -266,7 +266,8 @@ describe("after every call: nothing written, nothing but reads sent (FR3.2)", ()
       // The mock is a non-default origin: in read-only mode no credential was sent to it at all.
       assert.ok(echo.requests.length > 0);
       assert.deepEqual(echo.requests.filter((r) => r.auth !== null), []);
-      assert.match(t.stderr.join("\n"), /needs the operator's consent/);
+      // The approvals store (joined at the wave-2 integration) answers: an http: origin is never approvable, and the server says so.
+      assert.match(t.stderr.join("\n"), /GITHUB_TOKEN -> http:\/\/127\.0\.0\.1:\d+ \(not https\).* not approved on this machine, so withheld/);
     } finally {
       await t.close();
       await echo.close();
@@ -425,7 +426,9 @@ describe("read-only mode keeps the operator's secrets and the roots (review 2 fi
     try {
       const r = body(await t.call("verify", { dir: "clone" }));
       const c7 = r.checks.find((c) => c.n === 7);
-      assert.match(c7.details.join("\n"), /cannot be read: its object is not in this clone \(a partial or shallow clone\?\)/);
+      // U9's history walk refuses a partial clone before it reads anything (joined at the wave-2 integration).
+      assert.equal(c7.status, "FAIL");
+      assert.match(c7.details.join("\n"), /the repository is a partial clone .*objects it lacks would be fetched from its remote, so its history cannot be read here as it is; verify in a full clone/);
       assert.doesNotMatch(c7.details.join("\n"), /was deleted/);
       assert.equal(treeHash(clone), before);
       assert.deepEqual(t.writes(), []);

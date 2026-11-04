@@ -43,8 +43,9 @@ describe("pr-rla/api/read at run time: what it loads, writes and starts", () => 
     // The only processes: git, reading the git-file ledger's history, with the read-only environment.
     for (const s of t.spawns) {
       expect(s.file).toBe("git");
-      expect(s.args.slice(0, 4)).toEqual(["-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
-      expect(["rev-parse", "log", "show", "ls-tree"]).toContain(s.args[4]);
+      // The union of U5's and U9's guards (src/io/git-safe.ts, joined at the wave-2 integration); U9's history walk reads raw objects.
+      expect(s.args.slice(0, 9)).toEqual(["--no-replace-objects", "-c", "core.commitGraph=false", "-c", "core.fsmonitor=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
+      expect(["rev-parse", "rev-list", "config", "cat-file"]).toContain(s.args[9]);
       expect(s.env).toMatchObject({ GIT_NO_LAZY_FETCH: "1", GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" });
       expect(s.env!.GIT_CEILING_DIRECTORIES).toBeDefined();
     }

@@ -5,7 +5,6 @@ import { readConfined } from "../../io/confine.js";
 import type { Population } from "../../core/population.js";
 import { derivedRoundFor, isRegistrationV2, registeredRepos, registrationRepoSet, type AnyRegistration, type AuditParameters, type ManifestRepo, type RepoSet, type SignedRecord } from "../../core/records.js";
 import { repoSetLabel, RepoSetError, resolvePool } from "../../core/repo-set.js";
-import { EXIT } from "../../cli/exit-codes.js";
 import { TSA_RETRY_DEADLINE_MS } from "../../net/contract.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { estimateFreeze, type FreezeEstimate } from "../freeze-estimate.js";
@@ -186,6 +185,9 @@ async function freezeInputs(ctx: ApiContext, o: { dryRun: boolean; window?: stri
   return { config, paths, reg, selector, window, parameters, protocol, repo, repoSet, pooled, frozenAt, round, tooLate, tsaMs, provider };
 }
 
+/** Exit 4 (contracts.md §7): stopped before finishing; re-running the printed command finishes it. The read side imports nothing of src/cli. */
+const STOPPED = 4;
+
 /** The resume command a stopped pooled run prints; --force again when the run replaces an existing manifest. */
 export const resumeCommand = (runId: string, force = false) => `pr-rla freeze${force ? " --force" : ""} --resume ${runId}`;
 
@@ -224,7 +226,7 @@ export async function runPool(ctx: ApiContext, i: Pick<FreezeInputs, "config" | 
     return done;
   } catch (e) {
     if (e instanceof FreezeStopped)
-      throw new AuditError(e.runId ? `${e.message}. The ${e.done} repos listed are checkpointed; no manifest was written. Continue with: ${resumeCommand(e.runId, o.force)}` : `${e.message}. Nothing was checkpointed${o.dryRun ? " (a dry run writes nothing)" : ""}; no manifest was written. Run the same command again`, EXIT.STOPPED);
+      throw new AuditError(e.runId ? `${e.message}. The ${e.done} repos listed are checkpointed; no manifest was written. Continue with: ${resumeCommand(e.runId, o.force)}` : `${e.message}. Nothing was checkpointed${o.dryRun ? " (a dry run writes nothing)" : ""}; no manifest was written. Run the same command again`, STOPPED);
     if (e instanceof FreezeRepoFailed || e instanceof ResumeRefused || e instanceof RepoSetError) throw new AuditError(e.message);
     throw e;
   }

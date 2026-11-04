@@ -339,7 +339,8 @@ describe("finding 5: what the verifier's git could be told does not change what 
 describe("src/io/git-safe.ts: the one way the read paths run git", () => {
   it("drops every inherited GIT_* variable and adds the guards; --no-textconv where a command would apply a driver", () => {
     const env = gitSafeEnv("/srv/audit", { PATH: "/bin", GIT_DIR: "/x", git_object_directory: "/y", HOME: "/h" });
-    expect(env).toEqual({ PATH: "/bin", HOME: "/h", GIT_NO_LAZY_FETCH: "1", GIT_OPTIONAL_LOCKS: "0", GIT_CEILING_DIRECTORIES: "/srv" });
+    // With U5's guard joined in (wave-2 integration): git never prompts either.
+    expect(env).toEqual({ PATH: "/bin", HOME: "/h", GIT_NO_LAZY_FETCH: "1", GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", GIT_CEILING_DIRECTORIES: "/srv" });
     expect(gitSafeArgs(["log", "--format=%H"])).toEqual(["--no-replace-objects", "-c", "core.commitGraph=false", "-c", "core.fsmonitor=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "log", "--no-textconv", "--format=%H"]);
     expect(gitSafeArgs(["cat-file", "--batch"]).slice(-2)).toEqual(["cat-file", "--batch"]);
     // git accepts them all.
