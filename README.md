@@ -245,3 +245,12 @@ with a fresh 128-bit id on every call. The fence lowers the risk of prompt injec
 - **Windows is untested.** pr-rla runs `git` and `ssh-keygen` by the absolute path it finds on PATH, never one in the audit repository, but no part of pr-rla has been run on Windows.
 - **Verifying someone else's audit does not hand it your tokens.** Its plugins get no credential and do not run in your process until you approve them, and a built-in pointed at another host by its `.pr-rla.yml` (`base_url`, `token_env`) does not send your token there; public audits verify anonymously ([`docs/security-model.md`](docs/security-model.md), "If you verify someone else's audit").
 - **External plugins run isolated, not sandboxed.** On Node 22 and 24 an isolated plugin cannot read your tokens or files but can still open network connections and send out what it reads; Node 25 or later blocks that. The Node permission model is a seatbelt ([`docs/security-model.md`](docs/security-model.md)).
+
+## Assistant integrations: Claude Code, Codex and Cursor
+
+An assistant can help a person review a draw; the person records the verdict. Each client gets the read-only MCP server, the `review-draw` skill (the draw's diff without generated files, its CI results and the protocol's checklist, ending with the person's own `record` command or the label to apply) and a guard hook that blocks verdict writes, verdict labels, signing, consent and edits to audit records from the assistant:
+
+- **Claude Code:** the plugin in [`integrations/claude-code`](integrations/claude-code), listed in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json); `/pr-rla:review-draw`.
+- **Codex and Cursor:** configuration files to copy, in [`integrations/codex`](integrations/codex), [`integrations/cursor`](integrations/cursor) and [`integrations/agents`](integrations/agents).
+
+Setup for all three, the read-only token, running from a checkout before release, and the guard's rules and limits: [`docs/assistants/README.md`](docs/assistants/README.md). The guard is a speed bump, not a boundary; what makes an assistant's verdict not count is the ledger and `verify` ([`docs/security-model.md`](docs/security-model.md)). The founder's checks in the three clients are pending ([`docs/assistants/manual-acceptance.md`](docs/assistants/manual-acceptance.md)).

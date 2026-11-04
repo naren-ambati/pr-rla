@@ -1,0 +1,21 @@
+{
+  "fixture": {
+    "source": "synthetic",
+    "basis": "Cursor hooks documentation: preToolUse input (tool_name such as Shell, Read, Write, Delete, MCP:<tool>; tool_input; cwd), https://cursor.com/docs/hooks.md, read 2026-11-04",
+    "note": "Documented for Shell only: the fields of a Write or Delete tool_input are not documented, so the guard checks every path-like field (file_path, path, target_file, …). Unverified until the founder's manual run records one with guard.mjs --record."
+  },
+  "payload": {
+    "conversation_id": "conv-1",
+    "generation_id": "gen-1",
+    "model": "claude-opus-4-7-thinking-max",
+    "hook_event_name": "preToolUse",
+    "cursor_version": "1.7.2",
+    "workspace_roots": ["/home/user/audit-repo"],
+    "user_email": null,
+    "transcript_path": null,
+    "tool_name": "Write",
+    "tool_input": { "file_path": "/home/user/audit-repo/notes.md", "contents": "notes" },
+    "tool_use_id": "abc123",
+    "cwd": "/home/user/audit-repo"
+  }
+}

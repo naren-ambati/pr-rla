@@ -1,0 +1,15 @@
+# pr-rla's read-only MCP server for Codex (docs/assistants/codex.md).
+#
+# Put this in ~/.codex/config.toml (or a trusted project's .codex/config.toml, without a token in it).
+# Replace /ABSOLUTE/PATH/TO/AUDIT-REPO with the audit repo's absolute path.
+# Before pr-rla-mcp is published, use the local-checkout form in docs/assistants/codex.md instead.
+
+[mcp_servers.pr-rla]
+command = "npx"
+args = ["-y", "pr-rla-mcp@0.1.0", "--root", "/ABSOLUTE/PATH/TO/AUDIT-REPO"]
+# Start Codex with read-only tokens in these variables; Codex forwards only the variables listed here.
+env_vars = ["GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "BITBUCKET_TOKEN", "BITBUCKET_USERNAME"]
+# A cold `npx -y` start downloads the package (nfr-design.md §3).
+startup_timeout_sec = 60
+# Long calls hand off to a job at 25 s, inside this budget (contracts.md §4).
+tool_timeout_sec = 60
