@@ -79,18 +79,25 @@ export function indexBindingFindings(draws: DrawsFile, index: LedgerIndexDocumen
  * only thing that notices history deleted from the tracker, so one must have been taken, with
  * time-stamp tokens, at or after the last counted verdict; and a line with no tokens proves nothing
  * about when it was taken. `lastCountedAt` is the latest `recordedAt` among the counted verdicts, or
- * null when none is counted.
+ * null when none is counted. `timeStamped` says whether a checkpoint's tokens count: verify passes
+ * the trusted-time verdict (at least one verified token from an authority the registration names),
+ * so a line carrying only ignored or failing tokens does not cover the last verdict; without it, any
+ * token counts.
  */
-export function checkpointCoverage(checkpoints: readonly CheckpointArtifact[], opts: { checkpointable: boolean; lastCountedAt: string | null; ledgerIndexSha256: string | null; unchained: number }): AnchorFindings {
+export function checkpointCoverage(checkpoints: readonly CheckpointArtifact[], opts: { checkpointable: boolean; lastCountedAt: string | null; ledgerIndexSha256: string | null; unchained: number; timeStamped?: (cp: CheckpointArtifact) => boolean }): AnchorFindings {
   const out = empty();
   for (const cp of checkpoints)
     if (cp.line.timestamps.length === 0) out.warns.push(`checkpoint ${cp.line.takenAt} carries no time-stamp tokens: its time is the writer's clock, so it does not bound when the history existed`);
   if (opts.checkpointable && opts.lastCountedAt !== null) {
-    const covering = checkpoints.filter((c) => c.line.timestamps.length > 0 && Date.parse(c.line.takenAt) >= Date.parse(opts.lastCountedAt!));
+    const stamped = opts.timeStamped ?? ((c: CheckpointArtifact) => c.line.timestamps.length > 0);
+    const after = checkpoints.filter((c) => Date.parse(c.line.takenAt) >= Date.parse(opts.lastCountedAt!));
+    const covering = after.filter(stamped);
     if (covering.length === 0) {
       const latest = checkpoints.map((c) => c.line.takenAt).sort().at(-1);
+      const unstamped = after.filter((c) => c.line.timestamps.length > 0);
+      const why = unstamped.length ? ` (${unstamped.map((c) => c.line.takenAt).join(", ")} carr${unstamped.length === 1 ? "ies" : "y"} tokens, but none from a registered authority verified)` : "";
       out.warns.push(
-        `no time-stamped ledger checkpoint post-dates the last counted verdict (${opts.lastCountedAt}); ${latest ? `the latest checkpoint is ${latest}` : "there is none"}. Issue history deleted after the last checkpoint cannot be detected: run "pr-rla checkpoint" now that the verdicts are in`,
+        `no time-stamped ledger checkpoint post-dates the last counted verdict (${opts.lastCountedAt}); ${latest ? `the latest checkpoint is ${latest}` : "there is none"}${why}. Issue history deleted after the last checkpoint cannot be detected: run "pr-rla checkpoint" now that the verdicts are in`,
       );
     }
   }

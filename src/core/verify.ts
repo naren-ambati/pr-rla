@@ -448,6 +448,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       if (c7.status === "PASS") c7.status = "WARN";
     }
     const checkpoints = a.checkpoints ?? [];
+    const stampedBy = new Map<CheckpointArtifact, boolean>();
     for (const p of a.checkpointProblems ?? []) {
       c7.status = "FAIL";
       c7.details.push(`FAIL checkpoint file: ${p}`);
@@ -466,13 +467,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           }
           if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
           // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.
-          if (cp.line.timestamps.length && isRegistrationV2(reg))
-            await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7);
+          if (cp.line.timestamps.length && isRegistrationV2(reg)) {
+            const ts = await checkTimestamps({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, { integratedTime: null }, `checkpoint ${cp.line.takenAt}`, deps, c7);
+            // Coverage counts only what the trusted-time rules count: ignored (unregistered) or failing tokens time-stamp nothing.
+            stampedBy.set(cp, ts.counted.length > 0);
+          }
         }
       }
     }
     if (a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
-    addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0 }));
+    addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0, timeStamped: (cp) => stampedBy.get(cp) ?? cp.line.timestamps.length > 0 }));
     c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
   }
   checks.push(c7);

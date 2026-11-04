@@ -1571,3 +1571,31 @@ npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, d
   - `audit-scenario.ts` no longer writes `rekor.pub` or `public_key_file` into the audit repo. A test that needs a mock-logged entry verified passes `logKey: s.logKeyFile`.
   - `TestAuthority` has a new `rootKey` field, so a hand-built `TestAuthority` literal elsewhere needs it.
   - A test elsewhere that relies on a token from an unregistered authority counting toward k, or on verify trusting an audit-repo log key, will now fail by design.
+
+## Integration: wave 2
+
+Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
+
+### Merge 1: `fix/ledgers-selector` (51d2a37)
+
+- **Conflicts:** none. Master's only change since the branch point is `audits/gh-aw-prospective/review-protocol.md`, which the branch does not touch.
+- **Tests:** 552 passed + 1 skipped (553), the same as the branch.
+
+### Merge 2: `fix/trusted-time` (aa9be90)
+
+- **Conflicts:** `BUILD-NOTES.md` only: both rounds appended a section at the end. Both kept, the ledger round's first.
+- **Auto-merged, read through:** `src/core/verify.ts` keeps every hunk of both rounds (ledgers: `addAnchor`, the index binding in both branches of check 7, `lastCountedAt`, `recordedBeforeSeed`, the checkpoint coverage; trusted time: `checkLog`'s messages, the ignored and anchor lines in `checkTimestamps`, the absent-`timestamps` FAILs in checks 1 and 2, v1's `time unproven`). `src/core/records.ts` keeps `ledgerIndexSha256` on `DrawsFile` and `isSignedV2` / `effectiveTime`. `README.md` keeps both rounds' paragraphs.
+- **Tests:** 635 passed + 1 skipped (636) before the seam fix below: the 553 plus trusted time's 83.
+
+### Where the two meet: checkpoint tokens and the coverage rule
+
+The ledger round's checkpoint coverage (check 7 WARNs unless a time-stamped checkpoint post-dates the last counted verdict) decided "time-stamped" by the presence of tokens. Trusted time made only the registration's own authorities count (review finding 5). Merged as they were, a checkpoint whose only token came from an authority the registration does not name was reported `ignored (not registered)` and `TIMESTAMP NOT TAMPER-PROOF (0 of 2)`, yet it still counted as covering the last verdict, so the coverage WARN and its instruction to checkpoint again were lost. The same held for a checkpoint whose tokens all failed (check 7 FAILed, but coverage was satisfied).
+
+- **Fix (integration, not either round):** `checkpointCoverage` takes an optional `timeStamped` predicate. On a v2 audit, check 7 passes trusted time's result for each checkpoint it assessed: covered only if at least one token is counted (verified, from a registered authority). Unassessed lines (a v1 audit, or the tracker history unreadable) keep the presence rule, unchanged. The WARN names the post-dating lines whose tokens did not count.
+- **Left to the post-merge "audit binding" round:** pass-2 review #5 asks for coverage by *proven* (k-of-n) tokens. This merge does the smaller, seam-only step (counted tokens); the predicate is where `ts.proven` goes.
+- **Tests:** `test/wave2-integration.test.ts`, end to end over a fake GitHub tracker and mock authorities (synthetic):
+  - control: a checkpoint after the last verdict with both registered tokens PASSes check 7;
+  - a checkpoint whose only token is from a trusted but unregistered authority does not cover the last verdict (the coverage WARN, with the ignored and 0-of-2 lines);
+  - the index anchor is inside the time-stamped bytes: editing the newest line's `ledgerIndexSha256` FAILs both its tokens on rule 2 as well as giving the ledger round's "index changed since the latest checkpoint" WARN, and the edited line no longer covers the last verdict.
+
+  Against the merged tree without the fix, the second and third fail (on the coverage assertion only) and the control passes.
