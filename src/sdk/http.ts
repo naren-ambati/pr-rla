@@ -27,6 +27,17 @@ export interface RetryHints {
    * returns a reason to retry the parsed body (a transient GraphQL error), or null to accept it.
    */
   acceptJson?: (body: unknown) => string | null;
+  /**
+   * Optional (P3): a 403 or 429 whose body matches this pattern (a regular expression's source, matched without
+   * case) is a rate limit even with no header that says so. GitHub documents its secondary limits that way.
+   */
+  rateLimitBody?: string;
+  /**
+   * Optional (P3): the wait after a rate limit that names none (no Retry-After, no exhausted remaining count): this
+   * long the first time, doubling each time after, never more than MAX_WAIT_MS. These waits count against
+   * `maxBlindRateLimitRetries` only. Absent: such a rate limit gets the error backoff, as before.
+   */
+  blindRateLimitWaitMs?: number;
 }
 
 /** Phase-2 default: 6 retries, so 7 attempts (contracts.md §2: SCM, drand and Rekor allow at most 7). */
@@ -129,6 +140,27 @@ export function isRetryableStatus(res: Response): boolean {
 /** Exponential backoff with jitter. `attempt` is 1-based; `random` is in [0, 1). */
 export function backoffMs(attempt: number, random: number, capMs = MAX_BACKOFF_MS): number {
   return Math.min(capMs, 1000 * 2 ** (attempt - 1)) * (0.5 + random / 2);
+}
+
+/**
+ * Whether a response the status rules would not retry is a rate limit by its body (`RetryHints.rateLimitBody`, P3):
+ * the start of the body when it is (for the give-up message), else null. Reads a clone.
+ */
+export async function rateLimitedByBody(res: Response, hints: Pick<RetryHints, "rateLimitBody">): Promise<string | null> {
+  if (!hints.rateLimitBody || (res.status !== 403 && res.status !== 429)) return null;
+  let text: string;
+  try {
+    text = (await res.clone().text()).slice(0, 4000);
+  } catch {
+    return null;
+  }
+  return new RegExp(hints.rateLimitBody, "i").test(text) ? text.replace(/\s+/g, " ").trim().slice(0, 160) : null;
+}
+
+/** The wait after the `n`-th rate limit in a row that names no wait (1-based), or null when the caller set no `blindRateLimitWaitMs`. */
+export function blindRateLimitWaitMs(hints: Pick<RetryHints, "blindRateLimitWaitMs">, n: number): number | null {
+  if (hints.blindRateLimitWaitMs === undefined) return null;
+  return Math.min(MAX_WAIT_MS, hints.blindRateLimitWaitMs * 2 ** Math.max(0, n - 1));
 }
 
 /**

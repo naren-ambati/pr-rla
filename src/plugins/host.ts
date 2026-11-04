@@ -516,6 +516,7 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], req.signal) as never;
   if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], req.signal) as never;
   if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], signal) as never;
+  if (has.has("pushLog")) p.pushLog = ({ signal, ...req }) => host.call("pushLog", [req], signal) as never;
   for (const m of ["listRepos", "describeChange", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args);
   return p;
 }

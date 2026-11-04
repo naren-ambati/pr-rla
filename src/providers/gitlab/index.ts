@@ -1,4 +1,5 @@
 import {
+  NO_COMMIT,
   PROVIDER_API_VERSION,
   RepoEmptyError,
   RepoUnavailableError,
@@ -9,6 +10,9 @@ import {
   type ListChangesResult,
   type ProviderContext,
   type FirstParentCommit,
+  type PushLog,
+  type PushLogEvent,
+  type PushLogRequest,
   type RepoRef,
   type RepoSetRule,
   type RepoVisibility,
@@ -61,6 +65,19 @@ export const GITLAB_LIMITATIONS = [
 
 const enc = (s: string) => encodeURIComponent(s);
 const TRANSIENT_GRAPHQL = /timeout|timed out|internal server error|try again|too many requests|rate limit/i;
+
+/** One entry of `GET /projects/:id/events?action=pushed` (push events only carry `push_data`). */
+interface GlPushEvent {
+  id: number;
+  created_at: string;
+  push_data?: { action?: string; ref_type?: string; ref?: string | null; commit_from?: string | null; commit_to?: string | null; commit_count?: number } | null;
+}
+
+/** At most this many pages of a project's push events (100 each) are read for one push log. */
+export const MAX_EVENT_PAGES = 100;
+
+export const GITLAB_PUSH_LOG_LIMITATION =
+  "push log: GitLab's project push events (GET /projects/:id/events?action=pushed); GitLab removes project events older than three years, and does not say whether a push was forced. A bulk push (more refs at once than the instance's push event activities limit) is recorded without its refs and commits.";
 
 interface GlProject {
   id: number;
@@ -212,6 +229,7 @@ export class GitLabProvider implements ScmProvider {
     }
     let headSha = req.head?.toLowerCase();
     let viaMerge = false;
+    let unreachable: string[] | undefined;
     if (req.kinds.includes("direct_push")) {
       const walk = await this.directPushes(pid, req, branch, intoDefault);
       headSha = walk.head;
@@ -223,8 +241,67 @@ export class GitLabProvider implements ScmProvider {
         { label: "commits linked only through GitLab's commit->MR lookup", value: walk.linkedByLookup },
         { label: "direct pushes that are merge commits", value: walk.pushes.filter((c) => c.parent_ids.length > 1).length },
       );
+      // P3: an MR merged in the window whose landing commit the walk from the head did not reach.
+      if (req.kinds.includes("pull_request")) unreachable = await this.unreachableMrs(pid, walk.head, changes.filter((c) => c.kind === "pull_request" && !walk.visited.has(c.mergeSha)), req.signal);
     }
-    return { changes, defaultBranch: branch, limitations: viaMerge ? [...GITLAB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITLAB_LIMITATIONS, diagnostics, ...(headSha ? { headSha } : {}) };
+    return { changes, defaultBranch: branch, limitations: viaMerge ? [...GITLAB_LIMITATIONS, LANDED_VIA_LIMITATION] : GITLAB_LIMITATIONS, diagnostics, ...(headSha ? { headSha } : {}), ...(unreachable ? { unreachable } : {}) };
+  }
+
+  /**
+   * Of the MRs merged in the window whose landing commit the walk from `head` (every commit reachable from it dated in
+   * the window) did not visit, the ones GitLab confirms are not ancestors of `head` (P3, the stopgap):
+   * `GET /projects/:id/repository/merge_base?refs[]=<commit>&refs[]=<head>` is the commit itself when it is one. GitLab
+   * dates a merge or squash commit at its merge, so an unvisited one is rare (a fast-forward merge of commits dated
+   * before the window). At most 10 are asked; asking stops at the third unreachable one.
+   */
+  async unreachableMrs(pid: number, head: string, candidates: readonly ChangeRecord[], signal?: AbortSignal): Promise<string[]> {
+    const out: string[] = [];
+    for (const c of [...candidates].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 10)) {
+      let base: string;
+      try {
+        base = (await this.http.get<{ id: string }>(`/projects/${pid}/repository/merge_base?refs%5B%5D=${c.mergeSha}&refs%5B%5D=${head}`, signal)).data.id.toLowerCase();
+      } catch (e) {
+        if (e instanceof HttpError && (e.status === 400 || e.status === 404)) continue; // GitLab cannot say: unknown, so not reported
+        throw e;
+      }
+      if (base !== c.mergeSha) out.push(c.id);
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
+
+  /**
+   * The default branch's push log (P3): `GET /projects/:id/events?action=pushed`, newest first and paged, keeping the
+   * branch's own updates (`push_data.ref_type` branch, `push_data.ref`), until one at or before `since` (at most
+   * MAX_EVENT_PAGES pages). `push_data.action` is pushed, created or removed. GitLab does not say whether a push was
+   * forced, so a push is kind "unknown" (verify then shows the window-close tip is an ancestor another way). A bulk push
+   * event names no ref, so it is kept with no before or after: verify reads it as a gap.
+   */
+  async pushLog(req: PushLogRequest): Promise<PushLog> {
+    const since = Date.parse(req.since);
+    const events: PushLogEvent[] = [];
+    let pages = 0;
+    await this.paged<GlPushEvent>(`/projects/${enc(req.repo)}/events?action=pushed&sort=desc&per_page=${this.pageSize}`, req.signal, (page) => {
+      pages++;
+      let reached = false;
+      for (const e of page) {
+        const pd = e.push_data;
+        if (!pd) continue;
+        const bulk = pd.ref === null || pd.ref === undefined;
+        if (!bulk && (pd.ref_type !== "branch" || pd.ref !== req.branch)) continue;
+        const t = Date.parse(e.created_at);
+        events.push({
+          id: String(e.id),
+          before: bulk ? "" : (pd.commit_from ?? NO_COMMIT).toLowerCase(),
+          after: bulk ? "" : (pd.commit_to ?? NO_COMMIT).toLowerCase(),
+          at: Number.isFinite(t) ? new Date(t).toISOString().replace(".000Z", "Z") : String(e.created_at),
+          kind: pd.action === "created" ? "created" : pd.action === "removed" ? "deleted" : "unknown",
+        });
+        if (!bulk && Number.isFinite(t) && t <= since) reached = true;
+      }
+      return !reached && pages < MAX_EVENT_PAGES;
+    });
+    return { events, limitations: [GITLAB_PUSH_LOG_LIMITATION] };
   }
 
   /**
@@ -351,7 +428,7 @@ export class GitLabProvider implements ScmProvider {
       else pushes.push(c);
     }
     const landedVia = landedViaMerges(new Map(history.map((c) => [c.id, c.parent_ids])), pushes.map((c) => c.id));
-    return { pushes, inWindow: inWindow.length, linked: res.linked + linkedByLookup, linkedByLookup, head: headSha.toLowerCase(), landedVia };
+    return { pushes, inWindow: inWindow.length, linked: res.linked + linkedByLookup, linkedByLookup, head: headSha.toLowerCase(), landedVia, visited: new Set(history.map((c) => c.id.toLowerCase())) };
   }
 }
 

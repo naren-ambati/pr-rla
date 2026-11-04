@@ -144,6 +144,14 @@ export interface ListChangesResult {
    * when it honours one, else the head it resolved. Absent when the provider does not pin history.
    */
   headSha?: string;
+  /**
+   * Optional (P3, same API version): ids of `changes` of kind `pull_request` merged into the default branch whose
+   * merge commit (`mergeSha`) is not reachable from `headSha`. A provider that lists pull requests by merge time
+   * (not through history) reports it when it walked history from `headSha` and confirmed that the commit is not an
+   * ancestor; it reports nothing it could not confirm. Absent: not checked. `verify` FAILs check 5 when the frozen
+   * head's listing names any: a frozen head older than the window's merges hides its direct pushes too.
+   */
+  unreachable?: string[];
 }
 
 export interface ProviderContext {
@@ -215,7 +223,54 @@ export interface VisibilityProof {
 export interface ListingVisibility {
   identity: string | null;
   visibilities: Record<RepoVisibility, VisibilityProof>;
+  /**
+   * Optional (P3): the SCM's own count of the owner's repositories of these visibilities (GitHub's
+   * `total_private_repos`). The core holds the listing to it: a listing that shows fewer is not complete for those
+   * visibilities, whatever `visibilities` says (an OAuth App restriction can show a token only the public ones).
+   */
+  expected?: { visibilities: RepoVisibility[]; count: number; source: string }[];
 }
+
+/**
+ * Optional (P3): one update of a branch, as the SCM recorded it when it happened. The SCM sets `at`, not the pusher,
+ * which is what lets `verify` tell a commit pushed after freeze from one that a rewound frozen head hides.
+ */
+export interface PushLogEvent {
+  /** The SCM's id for the update. */
+  id: string;
+  /** The branch tip before and after (lowercase hex; 40 zeros where the branch did not exist, as git writes it). */
+  before: string;
+  after: string;
+  /** When the SCM recorded the update, ISO 8601 UTC. */
+  at: string;
+  /**
+   * fast-forward: `after` descends from `before` (an ordinary push, a pull request or merge-queue merge);
+   * forced: it does not (a force push); created and deleted: the branch was; unknown: the SCM does not say.
+   */
+  kind: "fast-forward" | "forced" | "created" | "deleted" | "unknown";
+}
+
+export interface PushLogRequest {
+  repo: string;
+  /** The branch whose updates to list (the default branch). */
+  branch: string;
+  /** List back to, and including, the newest update at or before this instant (ISO 8601 UTC). */
+  since: string;
+  signal?: AbortSignal;
+}
+
+export interface PushLog {
+  /**
+   * Newest first: every update of `branch` the SCM recorded, from now back to the newest one at or before
+   * `request.since` (included), or to the oldest the SCM keeps (or the provider reads) when that is later.
+   */
+  events: PushLogEvent[];
+  /** What a reader must know about how far back the SCM keeps the log. */
+  limitations?: string[];
+}
+
+/** The `before` (or `after`) of a push log update where the branch did not exist. */
+export const NO_COMMIT = "0".repeat(40);
 
 /** Optional (U8): one commit on the default branch's first-parent chain. */
 export interface FirstParentCommit {
@@ -327,10 +382,19 @@ export interface ScmProvider {
   listingVisibility?(set: RepoSetRule): Promise<ListingVisibility>;
   /**
    * Optional (U8): the default branch's first-parent commits from `head` back to, and not including, `base`, newest
-   * first; null when `base` is not on `head`'s first-parent chain. `verify` uses it to tell a commit dated in the window
-   * but merged after freeze (FR7.2: it is not in the population) from a window landing the frozen head left out.
+   * first; null when `base` is not on `head`'s first-parent chain. `verify` uses it (P3) as a cheap proof that the
+   * branch's tip when the window closed is an ancestor of the frozen head, when the push log shows an update it cannot
+   * call a fast-forward; it never reads the commits' dates, which the pusher sets.
    */
   firstParentPath?(request: { repo: string; base: string; head: string; signal?: AbortSignal }): Promise<FirstParentCommit[] | null>;
+  /**
+   * Optional (P3, same API version): the branch's push log, newest first, back to `request.since` (see `PushLog`).
+   * `freeze` records from it that each frozen head was the branch's tip during the freeze, and `verify` reads it
+   * again: it is the evidence that tells a commit pushed after freeze (FR7.2) from one a rewound frozen head hides.
+   * Throw, as any read does, when the log cannot be read; without the log, a window commit missing from the frozen
+   * head's rebuild is INCOMPLETE, never PASS.
+   */
+  pushLog?(request: PushLogRequest): Promise<PushLog>;
   /**
    * Optional: provider-native counts for a selector (e.g. a search-API figure)
    * printed next to pr-rla's own population so readers see the difference.

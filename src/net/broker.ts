@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { DEFAULT_MAX_RETRIES, backoffMs, checkJsonBody, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
+import { DEFAULT_MAX_RETRIES, backoffMs, blindRateLimitWaitMs, checkJsonBody, isRateLimited, isRetryableStatus, rateLimitedByBody, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   BrokerError,
   BrokerRetriesExhausted,
@@ -338,7 +338,11 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
 
   const callerAborted = (call: Call) => call.req.signal?.aborted === true;
 
-  /** Step 6 for scm, beacon and rekor: at most maxRetries + 1 attempts; header-imposed waits are the governor's and do not count. */
+  /**
+   * Step 6 for scm, beacon and rekor: at most maxRetries + 1 attempts; header-imposed waits are the governor's and do
+   * not count. A rate limit that names no wait (P3: GitHub's secondary limits, which may say so only in the body) waits
+   * the caller's `blindRateLimitWaitMs`, doubling, and gives up after `maxBlindRateLimitRetries` of them.
+   */
   async function withRetries(call: Call, hints: RetryHints): Promise<Response> {
     const max = hints.maxRetries ?? DEFAULT_MAX_RETRIES;
     const maxBlind = hints.maxBlindRateLimitRetries ?? max;
@@ -362,7 +366,11 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
           problem = why;
           status = res.status;
         } else if (!isRetryableStatus(res)) {
-          return res;
+          const body = await rateLimitedByBody(res, hints);
+          if (body === null) return res;
+          status = res.status;
+          problem = `HTTP ${res.status} (a rate limit, by its body: ${body})`;
+          rateLimited = true;
         } else {
           status = res.status;
           problem = `HTTP ${res.status}`;
@@ -377,7 +385,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         problem = e instanceof BrokerTimeout ? e.lastProblem : (e as Error).message;
       }
       let giveUp: boolean;
+      const blindWait = rateLimited && !told ? blindRateLimitWaitMs(hints, blind + 1) : null;
       if (told) giveUp = ++rateWaits > max;
+      else if (blindWait !== null) giveUp = ++blind > maxBlind;
       else {
         errors++;
         giveUp = errors > max || (rateLimited && ++blind > maxBlind);
@@ -386,7 +396,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         if (timeout) throw new BrokerTimeout(timeout.host, timeout.destination, timeout.ms, sends);
         throw new BrokerRetriesExhausted(call.url.host, sends, now() - start, problem, status, rateLimited);
       }
-      const wait = told ? 0 : backoffMs(errors, random());
+      const wait = told ? 0 : (blindWait ?? backoffMs(errors, random()));
       log(`${call.url.host}: ${problem} on ${call.req.method ?? "GET"} ${call.url.pathname}; retrying ${told ? "when the rate limit allows" : `in ${Math.round(wait / 1000)}s`}`);
       if (wait > 0) await sleep(wait);
     }

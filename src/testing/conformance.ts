@@ -1,5 +1,5 @@
 import { canonicalJson } from "../core/canonical.js";
-import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, waitFromHeaders, type RetryHints } from "../sdk/http.js";
+import { DEFAULT_MAX_RETRIES, RETRIES_EXHAUSTED, backoffMs, blindRateLimitWaitMs, checkJsonBody, isBrokerInit, isRateLimited, isRetryableStatus, rateLimitedByBody, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
   DEFAULT_REVIEW_GRANULARITY,
   REPO_UNAVAILABLE,
@@ -224,8 +224,13 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
         const checked = await checkJsonBody(res, hints.acceptJson);
         if (checked.problem === null) return checked.response;
         problem = checked.problem;
-      } else if (!isRetryableStatus(res)) return res;
-      else {
+      } else if (!isRetryableStatus(res)) {
+        // As the broker (P3): a 403 or 429 whose body the caller calls a rate limit.
+        const body = await rateLimitedByBody(res, hints);
+        if (body === null) return res;
+        problem = `HTTP ${res.status} (a rate limit, by its body: ${body})`;
+        rateLimited = true;
+      } else {
         problem = `HTTP ${res.status}`;
         rateLimited = isRateLimited(res);
         // As the broker: a non-idempotent request (a ledger write) is never retried after a 5xx, only on a rate limit.
@@ -237,9 +242,11 @@ async function brokerShaped(send: (input: string | URL | Request, init: RequestI
       if ((e as Error).name === "AbortError") throw e;
       problem = (e as Error).message;
     }
-    const giveUp = told !== null ? ++waits > max : ++errors > max || (rateLimited && ++blind > (hints.maxBlindRateLimitRetries ?? max));
+    const blindWait = rateLimited && told === null ? blindRateLimitWaitMs(hints, blind + 1) : null;
+    const maxBlind = hints.maxBlindRateLimitRetries ?? max;
+    const giveUp = told !== null ? ++waits > max : blindWait !== null ? ++blind > maxBlind : ++errors > max || (rateLimited && ++blind > maxBlind);
     if (giveUp) throw Object.assign(new Error(`conformance harness: gave up after ${attempt} attempts (${problem})`), { code: RETRIES_EXHAUSTED, attempts: attempt, lastProblem: problem, rateLimited });
-    await sleep(told ?? backoffMs(errors, 0.5));
+    await sleep(told ?? blindWait ?? backoffMs(errors, 0.5));
   }
 }
 
