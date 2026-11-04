@@ -154,6 +154,8 @@ export interface Broker {
 }
 
 const MAX_REDIRECTS = 10;
+/** The shortest secret read-only mode scrubs from responses: 8 characters, NIST SP 800-63B's minimum for a memorized secret. */
+const MIN_SCRUBBED_SECRET = 8;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 /** A request body, as RequestInit types it (lib "dom" is not loaded). */
 type Body = NonNullable<RequestInit["body"]>;
@@ -338,8 +340,13 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   /** The secret values the caller holds (its granted, approved credentials). */
   const callerSecrets = (call: Call): SecretValue[] => [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
 
-  /** A response with every form of `secrets` replaced by its placeholder: body, header values, status text. */
-  async function scrubResponse(res: Response, secrets: readonly SecretValue[]): Promise<Response> {
+  /**
+   * A response with every form of `secrets` replaced by its placeholder: body, header values, status text. A value
+   * shorter than MIN_SCRUBBED_SECRET is left alone: it occurs in ordinary responses (a one-letter value is in nearly
+   * every JSON key), so replacing it would corrupt them, and a credential that short is no secret.
+   */
+  async function scrubResponse(res: Response, all: readonly SecretValue[]): Promise<Response> {
+    const secrets = all.filter((x) => x.value.length >= MIN_SCRUBBED_SECRET);
     if (!secrets.some((x) => x.secret !== false && x.value)) return res;
     const pairs = scrubPairs(secrets);
     const body = NULL_BODY.has(res.status) ? null : scrubBytes(pairs, Buffer.from(await res.arrayBuffer()));

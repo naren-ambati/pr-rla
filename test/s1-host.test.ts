@@ -246,5 +246,8 @@ describe("item 8: in read-only mode a response reaches a built-in with the calle
         expect(seen).toContain("prrla-cred:GITHUB_TOKEN");
       } else expect(seen).toContain(SECRET);
     }
+    // A value shorter than 8 characters is no secret worth corrupting a response for: one letter is in every JSON key.
+    const short = createBroker({ mode: "read-only", credentialsFor: () => new Map([["T", { value: "t", hosts: new Set(["api.github.com"]) }]]) }, { fetch: (async () => new Response(JSON.stringify({ repository_url: "https://api.github.com/repos/o/r" }), { status: 200 })) as typeof fetch, sleep: async () => {}, log: () => {} });
+    expect(await (await short.bind("provider:github")("https://api.github.com/x", { headers: { authorization: "Bearer prrla-cred:T" } })).json()).toEqual({ repository_url: "https://api.github.com/repos/o/r" });
   });
 });
