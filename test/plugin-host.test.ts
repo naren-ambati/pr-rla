@@ -222,8 +222,9 @@ describe("the Gitea example passes the conformance kit through the host", () => 
       );
       expect(report.ok, formatConformanceReport(report)).toBe(true);
       expect(report.results.filter((r) => r.skipped)).toEqual([]);
-      // The 45 s wait ran on the kit's clock in the parent, not in real time in the child.
-      expect(Date.now() - started).toBeLessThan(30_000);
+      // The 45 s wait ran on the kit's clock in the parent, not in real time in the child: the whole run took less than
+      // the wait itself (30 s was the bound until two suites at load ~150 took 30.3 s, U8 fix round).
+      expect(Date.now() - started).toBeLessThan(45_000);
     } finally {
       hosts.forEach((h) => h.close());
     }
