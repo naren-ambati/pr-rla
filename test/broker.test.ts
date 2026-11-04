@@ -101,6 +101,64 @@ describe("FR10.3: the read-only guard", () => {
   });
 });
 
+describe("finding 6: a GraphQL document in the URL, and method overrides, are held to the read-only guard", () => {
+  const setup = (mode: "read-write" | "read-only" = "read-write") => {
+    const t = transport();
+    const b = createBroker({ mode, writePathsFor: (id) => (id === "ledger:tracker" ? new Set(["tracker.example/api/"]) : new Set()) }, { fetch: t.f });
+    return { t, provider: b.bind("provider:evil"), ledger: b.bind("ledger:tracker") };
+  };
+  const QUERY = gql("query { currentUser { id } }");
+
+  it("refuses a GraphQL POST carrying query, operationName or extensions in its URL, whatever its body says, and sends nothing", async () => {
+    const { t, provider } = setup();
+    for (const q of ["query=mutation%7BdestroyX%7D", "operationName=Destroy", "extensions=%7B%7D"])
+      await expect(provider(`https://gitlab.com/api/graphql?${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: QUERY })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION", message: expect.stringMatching(/a GraphQL POST with (query|operationName|extensions) in its URL/) });
+    // The same body without them is a read.
+    await provider("https://gitlab.com/api/graphql", { method: "POST", body: QUERY });
+    expect(t.seen.map((x) => x.url)).toEqual(["https://gitlab.com/api/graphql"]);
+  });
+
+  it("a GraphQL GET is a read only when its URL's document is a query (it used to pass a mutation as a GET)", async () => {
+    const { t, provider } = setup();
+    await expect(provider("https://gitlab.com/api/graphql?query=mutation%7BdestroyX%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider(`https://gitlab.com/api/graphql?extensions=${encodeURIComponent('{"persistedQuery":{"sha256Hash":"ab"}}')}`)).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await expect(provider("https://gitlab.com/api/graphql?query=not%20graphql%20%7D%7D")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await provider("https://gitlab.com/api/graphql?query=%7B%20viewer%20%7B%20login%20%7D%20%7D&operationName=V");
+    await provider("https://gitlab.com/api/v4/projects?query=mutation");
+    expect(t.seen.map((x) => new URL(x.url).pathname)).toEqual(["/api/graphql", "/api/v4/projects"]);
+  });
+
+  it("refuses X-HTTP-Method-Override, X-HTTP-Method, X-Method-Override and _method that turn a read into a write", async () => {
+    const { t, provider } = setup();
+    for (const [h, v] of [["x-http-method-override", "DELETE"], ["x-http-method", "PUT"], ["x-method-override", "patch"]] as const)
+      await expect(provider("https://gitlab.com/api/v4/projects/1", { headers: { [h]: v } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION", message: expect.stringMatching(/^read-only: GET \(as (DELETE|PUT|PATCH)\) gitlab\.com/) });
+    await expect(provider("https://gitlab.com/api/v4/projects/1?_method=DELETE")).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    await provider("https://gitlab.com/api/v4/projects/1", { headers: { "x-http-method-override": "GET" } });
+    expect(t.seen).toHaveLength(1);
+  });
+
+  it("a ledger's override must fall under its write paths too, and in read-only mode it is refused outright", async () => {
+    const { t, ledger } = setup();
+    await expect(ledger("https://tracker.example/admin/purge", { headers: { "x-http-method-override": "DELETE" } })).rejects.toMatchObject({ code: "WRITE_PATH_NOT_ALLOWED" });
+    await ledger("https://tracker.example/api/issues/1", { headers: { "x-http-method-override": "DELETE" } });
+    expect(t.seen.map((x) => x.url)).toEqual(["https://tracker.example/api/issues/1"]);
+    const ro = setup("read-only");
+    await expect(ro.ledger("https://tracker.example/api/issues/1", { headers: { "x-http-method-override": "DELETE" } })).rejects.toMatchObject({ code: "READ_ONLY_VIOLATION" });
+    expect(ro.t.seen).toEqual([]);
+  });
+});
+
+describe("finding 9: a write path matches on / segment boundaries", () => {
+  it("…/rest/api/3/issue covers /issue and /issue/AUD-1, not /issueLink or /issuetype (they used to pass)", async () => {
+    const t = transport(() => ok({}, {}, 201));
+    const ledger = createBroker({ writePathsFor: () => new Set(["corp.atlassian.net/rest/api/3/issue"]) }, { fetch: t.f }).bind("ledger:jira");
+    for (const path of ["/rest/api/3/issueLink", "/rest/api/3/issuetype", "/rest/api/3/issue-archive"]) await expect(ledger(`https://corp.atlassian.net${path}`, { method: "POST", body: "{}" }), path).rejects.toMatchObject({ code: "WRITE_PATH_NOT_ALLOWED" });
+    await ledger("https://corp.atlassian.net/rest/api/3/issue", { method: "POST", body: "{}" });
+    await ledger("https://corp.atlassian.net/rest/api/3/issue/AUD-1", { method: "PUT", body: "{}" });
+    expect(t.seen.map((x) => new URL(x.url).pathname)).toEqual(["/rest/api/3/issue", "/rest/api/3/issue/AUD-1"]);
+  });
+});
+
 describe("ledger writes only under declared writePaths", () => {
   const t = transport(() => ok({}, {}, 201));
   const b = createBroker({ writePathsFor: (id) => (id === "ledger:github-issues" ? new Set(["api.github.com/repos/acme/audit/"]) : new Set()) }, { fetch: t.f });

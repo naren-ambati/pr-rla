@@ -178,6 +178,53 @@ function bodyText(body: Body | null | undefined): string | null {
 
 const withUrl = (res: Response, url: string): Response => Object.defineProperty(res, "url", { value: url, enumerable: true });
 
+/** Whether a request reads, for the read-only guard (step 2) and the governor's cost. */
+interface Reading {
+  read: boolean;
+  graphql: boolean;
+  why: string;
+}
+
+/** The GraphQL-over-HTTP parameters a server may take from the URL (Rails merges them over the body). */
+const GRAPHQL_URL_PARAMS = ["query", "operationName", "extensions"] as const;
+/** Headers and the query parameter servers honour as the request's real method. */
+const METHOD_OVERRIDES = ["x-http-method-override", "x-http-method", "x-method-override"] as const;
+
+/**
+ * What a request with this method does (finding 6). GET and HEAD read, except on a GraphQL path
+ * whose URL carries a document: that is a read only when the document is a query (and carries no
+ * `extensions`, a persisted query pr-rla cannot see). A GraphQL POST reads when its body is a
+ * query and its URL carries none of query, operationName or extensions. Anything else writes.
+ */
+function reading(method: string, url: URL, text: string | null): Reading {
+  const graphql = isGraphqlPath(url.pathname);
+  const inUrl = graphql ? GRAPHQL_URL_PARAMS.filter((k) => url.searchParams.has(k)) : [];
+  if (method === "GET" || method === "HEAD") {
+    if (!inUrl.length) return { read: true, graphql: false, why: "" };
+    const q = url.searchParams.get("query");
+    const read = !url.searchParams.has("extensions") && q !== null && isQueryOnly(JSON.stringify({ query: q }));
+    return { read, graphql: true, why: "a GraphQL request whose URL carries a mutation, a subscription, a persisted query (extensions) or a document that is not a query" };
+  }
+  if (method === "POST" && graphql) {
+    if (inUrl.length) return { read: false, graphql: true, why: `a GraphQL POST with ${inUrl.join(", ")} in its URL (a server may run the URL's document instead of the body's)` };
+    return { read: text !== null && isQueryOnly(text), graphql: true, why: "a GraphQL mutation or subscription, or not a GraphQL query" };
+  }
+  return { read: false, graphql: false, why: `${method} is not a read` };
+}
+
+/** The method a server may take from an override header or `_method` (finding 6), when it differs. */
+function overriddenMethod(method: string, headers: Headers, url: URL): string | null {
+  for (const h of METHOD_OVERRIDES) {
+    const v = headers.get(h);
+    if (v && v.trim().toUpperCase() !== method) return v.trim().toUpperCase();
+  }
+  const q = url.searchParams.get("_method");
+  return q && q.toUpperCase() !== method ? q.toUpperCase() : null;
+}
+
+/** `prefix` covers `target` on a `/` segment boundary (finding 9): `…/issue` covers `…/issue/A-1`, not `…/issueLink`. */
+const underPrefix = (target: string, prefix: string) => target === prefix || (target.startsWith(prefix) && (prefix.endsWith("/") || target[prefix.length] === "/"));
+
 function isBeforeSend(e: unknown): boolean {
   const code = (e as { cause?: { code?: unknown } })?.cause?.code ?? (e as { code?: unknown })?.code;
   return typeof code === "string" && BEFORE_SEND.has(code);
@@ -218,16 +265,15 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
   }
 
   // Step 2.
-  function checkReadOnly(call: Call, url: URL, method: string, graphql: boolean, text: string | null): void {
-    if (method === "GET" || method === "HEAD" || (graphql && text !== null && isQueryOnly(text))) return;
-    const why = graphql ? "a GraphQL mutation or subscription, or not a GraphQL query" : `${method} is not a read`;
+  function checkReadOnly(call: Call, url: URL, method: string, r: Reading): void {
+    if (r.read) return;
     const role = roleOf(call.pluginId);
-    if (p.mode === "read-only") throw new ReadOnlyViolation(method, url.pathname, url.host, why);
-    if (role === "provider" || role === "plugin") throw new ReadOnlyViolation(method, url.pathname, url.host, `${why}; provider requests are always read-only`);
+    if (p.mode === "read-only") throw new ReadOnlyViolation(method, url.pathname, url.host, r.why);
+    if (role === "provider" || role === "plugin") throw new ReadOnlyViolation(method, url.pathname, url.host, `${r.why}; provider requests are always read-only`);
     if (role === "ledger") {
       const allowed = [...p.writePathsFor(call.pluginId)];
       const target = [`${url.host}${url.pathname}`, `${url.hostname}${url.pathname}`];
-      if (!allowed.some((prefix) => target.some((t) => t.startsWith(prefix)))) throw new WritePathNotAllowed(method, url.pathname, url.host, call.pluginId, allowed);
+      if (!allowed.some((prefix) => target.some((t) => underPrefix(t, prefix)))) throw new WritePathNotAllowed(method, url.pathname, url.host, call.pluginId, allowed);
     }
   }
 
@@ -304,8 +350,12 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
       if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
-      const graphql = method === "POST" && isGraphqlPath(url.pathname);
-      checkReadOnly(call, url, method, graphql, text);
+      // A method override must be allowed too: a server may run either method.
+      const r = reading(method, url, text);
+      checkReadOnly(call, url, method, r);
+      const override = overriddenMethod(method, original, url);
+      const ro = override ? reading(override, url, text) : null;
+      if (override && ro) checkReadOnly(call, url, `${method} (as ${override})`, ro);
       // After a redirect from https to http, no credential is swapped and no raw secret header is sent, to the end of the chain.
       const headers = swapCredentials(call, url, original, url.origin !== call.url.origin || downgraded, downgraded);
       const g: GovernedRequest = {
@@ -313,8 +363,9 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         path: url.pathname,
         method,
         authenticated: headers.has("authorization") || headers.has("private-token"),
-        graphql,
-        write: graphql ? !(text !== null && isQueryOnly(text)) : !["GET", "HEAD", "OPTIONS"].includes(method),
+        graphql: r.graphql,
+        // As before for the budgets: OPTIONS spends no write budget.
+        write: (!r.read && method !== "OPTIONS") || (override !== null && ro !== null && !ro.read && override !== "OPTIONS"),
       };
       const wait = governor.reserve(g);
       if (wait > 0) {
