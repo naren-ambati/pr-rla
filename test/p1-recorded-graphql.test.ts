@@ -10,7 +10,7 @@ import { recordedWalkClock, replayFetch, type Recording } from "./helpers/replay
  * updated when the ledger round's queries began selecting paging fields and GitLab's note tags, so the responses
  * lacked them and the new code never ran on recorded data. The GitLab responses now carry GitLab's own tags
  * (systemNoteMetadata) and the user pages' pageInfo, taken from one anonymous read-only GET of the same query per
- * recorded POST on 2026-11-04 (see each file's graphqlQueryNote); the GitHub one carries totalCount and pageInfo,
+ * recorded POST on 2026-11-04 (see each file's graphqlQueryNote; the October one is read on its walk clock); the GitHub one carries totalCount and pageInfo,
  * derived from its recorded node counts (each page held fewer nodes than it asked for). These tests show the providers
  * read those fields on the recordings: change one, and what the provider does changes.
  */
@@ -29,9 +29,9 @@ const gitlab = (name: string, walk = false) => {
 };
 
 describe("GitLab: the recorded responses carry GitLab's note tags and the user pages' pageInfo, and the provider reads them", () => {
-  for (const name of ["gitlab-org-cli-2026-11-02.json", "freedesktop-xserver-2026-10-05.json"]) {
+  for (const [name, walk] of [["gitlab-org-cli-2026-11-02.json", false], ["freedesktop-xserver-2026-10-05.json", false], ["gitlab-org-cli-2026-10.json", true]] as const) {
     it(`${name}: every note is tagged, and an approval read by its tag survives a body in another language`, async () => {
-      const g = gitlab(name);
+      const g = gitlab(name, walk);
       const notes = g.mrs(g.rec).flatMap((m) => m.notes?.nodes ?? []);
       expect(g.rec.graphqlQueryNote).toMatch(/\(P1\): every note in the recorded responses gained GitLab's own tag/);
       const untagged = notes.filter((n) => !("systemNoteMetadata" in n));
