@@ -164,6 +164,86 @@ export interface ScmProvider {
    * printed next to pr-rla's own population so readers see the difference.
    */
   nativeCounts?(request: ListChangesRequest, selector: Readonly<Record<string, unknown>>): Promise<{ label: string; value: number }[]>;
+  /**
+   * Optional (U5, same API version): what a reviewer of one drawn change reads: its title and
+   * description, its files with their patches, the `.gitattributes` at its landed commit (for
+   * `linguist-generated`), and its CI results (for a PR, at its head commit: what the merger saw).
+   * `pr-rla draw-context` and the MCP `draw_context` tool call it; without it they show the
+   * manifest's fields and the URL. Everything in it is written by the change's author: pr-rla
+   * fences it as untrusted text (FR3.9). Read-only, like every provider request.
+   */
+  describeChange?(change: ChangeRecord): Promise<ChangeDescription>;
+}
+
+export type ChangedFileStatus = "added" | "modified" | "removed" | "renamed";
+export const CHANGED_FILE_STATUSES: readonly ChangedFileStatus[] = ["added", "modified", "removed", "renamed"];
+export type CheckState = "success" | "failure" | "neutral" | "pending" | "skipped" | "unknown";
+export const CHECK_STATES: readonly CheckState[] = ["success", "failure", "neutral", "pending", "skipped", "unknown"];
+
+/** One file of a described change. */
+export interface ChangedFile {
+  /** The path after the change (repository-relative, `/`-separated). */
+  path: string;
+  /** For a rename: the path before it. */
+  previousPath?: string;
+  status: ChangedFileStatus;
+  additions: number;
+  deletions: number;
+  /** The unified-diff hunks for this file, or null when the SCM has none to give (binary, too large). */
+  patch: string | null;
+}
+
+/** A CI result for the change: a check run, a commit status or a pipeline. */
+export interface ChangeCheck {
+  name: string;
+  state: CheckState;
+  url: string | null;
+}
+
+/** What `describeChange` returns (contracts.md §1). */
+export interface ChangeDescription {
+  /** The described change's id (`ChangeRecord.id`). */
+  changeId: string;
+  title: string;
+  /** The description as written (a direct push: the commit message after its first line). */
+  body: string;
+  files: ChangedFile[];
+  /** `.gitattributes` at the change's landed commit (`mergeSha`), or null when there is none. */
+  gitattributes: string | null;
+  checks: ChangeCheck[];
+  /** The SCM listed fewer files than the change has (GitHub stops at 3,000), or the provider stopped early. */
+  truncated: boolean;
+}
+
+/** Returns a list of problems; empty means `value` is a well-formed description of change `changeId`. */
+export function changeDescriptionProblems(value: unknown, changeId: string): string[] {
+  if (!value || typeof value !== "object") return ["description must be an object"];
+  const d = value as Partial<ChangeDescription>;
+  const p: string[] = [];
+  if (d.changeId !== changeId) p.push(`changeId ${JSON.stringify(d.changeId)} is not the described change ${changeId}`);
+  if (typeof d.title !== "string") p.push("title must be a string");
+  if (typeof d.body !== "string") p.push("body must be a string");
+  if (d.gitattributes !== null && typeof d.gitattributes !== "string") p.push("gitattributes must be a string or null");
+  if (typeof d.truncated !== "boolean") p.push("truncated must be true or false");
+  if (!Array.isArray(d.files)) p.push("files must be an array");
+  else
+    d.files.forEach((f, i) => {
+      if (!f || typeof f !== "object") return void p.push(`files[${i}] must be an object`);
+      if (typeof f.path !== "string" || f.path.length === 0) p.push(`files[${i}].path must be a non-empty string`);
+      if (f.previousPath !== undefined && (typeof f.previousPath !== "string" || f.previousPath.length === 0)) p.push(`files[${i}].previousPath must be a non-empty string when present`);
+      if (!CHANGED_FILE_STATUSES.includes(f.status)) p.push(`files[${i}].status must be one of ${CHANGED_FILE_STATUSES.join(", ")}`);
+      for (const k of ["additions", "deletions"] as const) if (!Number.isInteger(f[k]) || f[k] < 0) p.push(`files[${i}].${k} must be a non-negative integer`);
+      if (f.patch !== null && typeof f.patch !== "string") p.push(`files[${i}].patch must be a string or null`);
+    });
+  if (!Array.isArray(d.checks)) p.push("checks must be an array");
+  else
+    d.checks.forEach((c, i) => {
+      if (!c || typeof c !== "object") return void p.push(`checks[${i}] must be an object`);
+      if (typeof c.name !== "string") p.push(`checks[${i}].name must be a string`);
+      if (!CHECK_STATES.includes(c.state)) p.push(`checks[${i}].state must be one of ${CHECK_STATES.join(", ")}`);
+      if (c.url !== null && typeof c.url !== "string") p.push(`checks[${i}].url must be a string or null`);
+    });
+  return p;
 }
 
 /** An environment variable a plugin may receive, and the hosts its value may be sent to. */

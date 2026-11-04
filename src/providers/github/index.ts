@@ -1,6 +1,7 @@
 import {
   PROVIDER_API_VERSION,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
@@ -8,6 +9,7 @@ import {
   type ScmProvider,
 } from "../../sdk/provider.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
+import { describeGitHubChange } from "./describe.js";
 import { classifyHistory, type HistoryNode } from "./history.js";
 import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
@@ -213,6 +215,11 @@ export class GitHubProvider implements ScmProvider {
       inWindow: result.inWindow,
       merges: result.directPushMerges.length,
     };
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
+    return describeGitHubChange(this.http, change);
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */

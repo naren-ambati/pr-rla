@@ -1,12 +1,14 @@
 import {
   PROVIDER_API_VERSION,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { describeBitbucketCloudChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, isoUtcSeconds } from "../http.js";
@@ -133,6 +135,11 @@ export class BitbucketCloudProvider implements ScmProvider {
       url = data.next;
     }
     return out;
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
+    return describeBitbucketCloudChange(this.http, change);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

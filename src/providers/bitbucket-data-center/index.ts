@@ -1,12 +1,14 @@
 import {
   PROVIDER_API_VERSION,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
   type ProviderContext,
   type ScmProvider,
 } from "../../sdk/provider.js";
+import { describeBitbucketDcChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError } from "../http.js";
@@ -100,6 +102,11 @@ export class BitbucketDataCenterProvider implements ScmProvider {
       if (!(e instanceof HttpError) || e.status !== 404) throw e;
       return (await this.http.get<{ id: string; displayId: string; latestCommit: string }>(`${path}/branches/default`, signal)).data; // before 7.6
     }
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord): Promise<ChangeDescription> {
+    return describeBitbucketDcChange(this.http, this.root, change);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

@@ -4,6 +4,7 @@ import {
   PROVIDER_API_VERSION,
   assertChangeRecord,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
@@ -23,6 +24,20 @@ export interface ChangesFile {
   defaultBranch?: string;
   limitations?: string[];
   changes: ChangeRecord[];
+  /**
+   * Optional (U5): what `describeChange` returns per change id, recorded from the SCM, so a
+   * draw context can be built with no network (`pr-rla draw-context`, the MCP `draw_context`).
+   */
+  descriptions?: Record<string, ChangeDescription>;
+}
+
+/** Thrown by the json-file provider's describeChange when the export recorded no description for the change. */
+export class NoRecordedDescription extends Error {
+  readonly code = "NO_DESCRIPTION";
+  constructor(file: string, id: string) {
+    super(`${file} records no description for ${id}`);
+    this.name = "NoRecordedDescription";
+  }
 }
 
 export const JSON_FILE_LIMITATIONS = [
@@ -51,6 +66,14 @@ export class JsonFileProvider implements ScmProvider {
       seen.add(c.id);
     });
     return { repo: env.repo ?? null, defaultBranch: env.defaultBranch ?? "main", limitations: env.limitations ?? [], changes: env.changes };
+  }
+
+  /** The description the export recorded for the change (U5), or NoRecordedDescription. */
+  async describeChange(change: ChangeRecord): Promise<ChangeDescription> {
+    const raw = JSON.parse(await readFile(this.file, "utf8")) as Partial<ChangesFile> | unknown[];
+    const d = Array.isArray(raw) ? undefined : raw.descriptions?.[change.id];
+    if (!d) throw new NoRecordedDescription(this.file, change.id);
+    return structuredClone(d);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {
