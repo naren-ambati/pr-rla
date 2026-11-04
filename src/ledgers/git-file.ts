@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { dirname, join, parse, relative } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
+import { extendsBytes, readFileHistory } from "./git-history.js";
+import { FULL_CLONE, gitSafeText, historyRefusal } from "../io/git-safe.js";
 import {
   LEDGER_API_VERSION,
   defineLedger,
@@ -24,14 +25,10 @@ export interface GitFileLedgerOptions {
   require_signed?: boolean;
 }
 
-// --no-replace-objects: a replace ref must not stand in for any object this ledger reads.
-const git = (args: string[], cwd: string): Buffer => execFileSync("git", ["--no-replace-objects", ...args], { cwd, stdio: ["pipe", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
-const gitText = (args: string[], cwd: string) => git(args, cwd).toString("utf8");
-
 /**
  * Verdicts appended, one JSON object per line, to `audit/<window>/verdicts.jsonl`.
  * Commit it after each verdict: git history is the tamper trail, and
- * `verifyIntegrity` checks that every committed version extends the previous one.
+ * `verifyIntegrity` checks that every committed version extends each of its parents' versions.
  * Works on any SCM that hosts a git repo.
  *
  * A line may carry its reviewer's per-verdict signature (`registrationSha256` and `sshsig`, U9);
@@ -76,57 +73,68 @@ export class GitFileLedger implements Ledger {
 
   /** The git toplevel and the file's path relative to it, or null outside a repository. */
   private repo(): { top: string; rel: string } | null {
-    const dir = dirname(this.file);
+    // The nearest directory that exists (the window directory, unless the ledger's was removed), never the process's cwd.
+    let dir = dirname(this.file);
+    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
     let top: string;
     try {
-      top = gitText(["rev-parse", "--show-toplevel"], existsSync(dir) ? dir : process.cwd()).trim();
+      // Discovery finds the audit repository's toplevel; every later call runs there, with git's ceiling at it.
+      top = gitSafeText(["rev-parse", "--show-toplevel"], { cwd: dir, root: parse(dir).root }).trim();
     } catch {
       return null;
     }
     // Resolve symlinks (e.g. macOS /var -> /private/var) so the path is relative to git's real toplevel.
-    const realFile = existsSync(dir) ? join(realpathSync(dir), basename(this.file)) : this.file;
+    const realFile = join(realpathSync(dir), relative(dir, this.file));
     return { top, rel: relative(realpathSync(top), realFile).split("\\").join("/") };
   }
 
+  /**
+   * The append-only check over the file's whole history (U9, after review): every version of the
+   * file, in every commit reachable from HEAD, must extend the version in each of that commit's
+   * parents, so a line removed or changed anywhere, on any branch merged in, is found. The history is
+   * read from hash-checked raw objects (src/ledgers/git-history.ts); a shallow or grafted repository
+   * is refused.
+   */
   async verifyIntegrity(): Promise<LedgerIntegrityReport> {
     const repo = this.repo();
     if (!repo) return { ok: true, tamperTrail: false, findings: ["verdicts are not in a git repository: there is no tamper trail"] };
     const { top, rel } = repo;
+    const refusal = historyRefusal(top);
+    if (refusal) return { ok: false, tamperTrail: false, findings: [`${rel}: ${refusal}`] };
+    const h = await readFileHistory(top, rel);
+    if (h.problems.length) return { ok: false, tamperTrail: false, findings: [...h.problems.map((p) => `${rel}: ${p}`), `${rel}: ${FULL_CLONE}`] };
     const findings: string[] = [];
     let ok = true;
-    let commits: string[] = [];
-    try {
-      commits = gitText(["log", "--format=%H", "--reverse", "--", rel], top).split("\n").filter(Boolean);
-    } catch {
-      commits = [];
-    }
-    let prev = "";
-    for (const sha of commits) {
-      let content: string;
-      try {
-        content = gitText(["show", `${sha}:${rel}`], top);
-      } catch {
+    for (const c of h.commits) {
+      const mine = h.versions.get(c) ?? null;
+      if (mine === "not-a-file") {
         ok = false;
-        findings.push(`${rel} was deleted in commit ${sha.slice(0, 10)}`);
-        prev = "";
+        findings.push(`${rel} is not a regular file in commit ${c.slice(0, 10)}`);
         continue;
       }
-      if (!content.startsWith(prev)) {
-        ok = false;
-        findings.push(`${rel} was rewritten (not appended) in commit ${sha.slice(0, 10)}`);
+      for (const p of h.parents.get(c) ?? []) {
+        const theirs = h.versions.get(p) ?? null;
+        if (!(theirs instanceof Buffer)) continue;
+        if (mine === null || !extendsBytes(mine, theirs)) {
+          ok = false;
+          findings.push(mine === null ? `${rel} was deleted in commit ${c.slice(0, 10)}` : `${rel} was rewritten (not appended) in commit ${c.slice(0, 10)}`);
+          break;
+        }
       }
-      prev = content;
     }
-    const current = existsSync(this.file) ? await readFile(this.file, "utf8") : "";
-    if (!current.startsWith(prev)) {
+    const committed = [...h.versions.values()].some((v) => v instanceof Buffer);
+    const atHead = h.head ? (h.versions.get(h.head) ?? null) : null;
+    const prev = atHead instanceof Buffer ? atHead : Buffer.alloc(0);
+    const current = existsSync(this.file) ? await readFile(this.file) : Buffer.alloc(0);
+    if (!extendsBytes(current, prev)) {
       ok = false;
       findings.push(`${rel} in the working tree rewrites its committed history`);
     } else {
-      const pending = current.slice(prev.length).split("\n").filter((l) => l.trim()).length;
+      const pending = current.subarray(prev.length).toString("utf8").split("\n").filter((l) => l.trim()).length;
       if (pending > 0) findings.push(`${pending} verdict line(s) not yet committed (no tamper trail for them until committed)`);
     }
-    if (commits.length === 0 && current.trim()) findings.push(`${rel} has never been committed`);
-    return { ok, tamperTrail: commits.length > 0, findings };
+    if (!committed && current.toString("utf8").trim()) findings.push(`${rel} has never been committed`);
+    return { ok, tamperTrail: committed, findings };
   }
 }
 

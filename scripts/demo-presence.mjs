@@ -7,8 +7,8 @@
 // and applies check 7's rules with min_provenance presence and require_signed. Where ssh-keygen is
 // installed it also shows what `ssh-keygen -Y verify` says.
 //   npm run build && node scripts/demo-presence.mjs
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import gitFile from "../dist/ledgers/git-file.js";
@@ -49,3 +49,20 @@ for (const f of a.findings) console.log(`  ${f}`);
 const counts = ["self-asserted", "account", "presence"].map((level) => ({ level, count: a.events.filter((v) => (v.provenance?.level ?? "self-asserted") === level).length })).filter((c) => c.count);
 console.log(`\n${provenanceLine(counts)}`);
 console.log(PRESENCE_LIMIT);
+
+// A cut history is refused: the same ledger committed line by line, then verified from a depth-1 clone.
+const repo = join(dir, "repo");
+const git = (cwd, ...args) => execFileSync("git", ["-c", "user.name=demo", "-c", "user.email=demo@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+mkdirSync(join(repo, "audit/w"), { recursive: true });
+git(repo, "init", "-q", "-b", "main");
+for (const s of fx.steps) {
+  appendFileSync(join(repo, "audit/w/verdicts.jsonl"), s.line);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", `verdict ${s.draw}`);
+}
+const shallow = join(dir, "shallow");
+execFileSync("git", ["clone", "-q", "--depth", "1", `file://${repo}`, shallow], { stdio: "ignore" });
+for (const [what, d] of [["full clone", repo], ["depth-1 clone", shallow]]) {
+  const r = await (await gitFile.create({}, { cwd: d, windowDir: join(d, "audit/w"), env: {}, log: () => {}, fetch })).verifyIntegrity();
+  console.log(`\nintegrity, ${what}: ${r.ok ? "PASS" : "FAIL"}${r.findings.length ? `\n  ${r.findings.join("\n  ")}` : ""}`);
+}
