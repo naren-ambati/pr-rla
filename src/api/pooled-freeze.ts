@@ -150,7 +150,7 @@ export async function freezeRepos(o: PooledFreezeOptions): Promise<PooledFreeze>
     startedAt = begun.header.startedAt;
     resumedRun = begun.resumed;
   }
-  const done = store ? store.done(resolved.map((r) => r.repo)) : 0;
+  const done = store ? store.present(resolved.map((r) => r.repo)) : 0;
   o.log(`freeze: ${describeRepoSet(o.set)} → ${n} repo${n === 1 ? "" : "s"}, ${Math.min(o.concurrency, n)} at a time${runId ? ` · run ${runId.slice(0, 12)}…${resumedRun ? ` resuming (${done} of ${n} repos already listed, as of ${startedAt})` : ""}` : ""}`);
 
   const results = new Array<ListChangesResult | undefined>(n);
@@ -179,7 +179,8 @@ export async function freezeRepos(o: PooledFreezeOptions): Promise<PooledFreeze>
         }
         results[i] = listed;
       } catch (e) {
-        if (isTransientFailure(e)) transient ??= e;
+        // A run that was aborted stops, whatever its in-flight listings threw on the way out.
+        if (o.signal?.aborted || isTransientFailure(e)) transient ??= e;
         else fatal ??= { repo, error: e };
         return;
       }

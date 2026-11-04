@@ -131,7 +131,10 @@ describe("the run stops or fails as a whole (FR5.4: all-or-nothing)", () => {
   it("an aborted run stops like a transient failure", async () => {
     const ctrl = new AbortController();
     const p = stub(async (req) => {
-      if (req.repo === "o/r1") ctrl.abort();
+      if (req.repo === "o/r1") {
+        ctrl.abort();
+        throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" }); // what an in-flight listing throws on the way out
+      }
       return ok(req.repo);
     });
     const err = await failure<FreezeStopped>(freezeRepos(base(p, ["o/r0", "o/r1", "o/r2", "o/r3"], { concurrency: 1, signal: ctrl.signal })));

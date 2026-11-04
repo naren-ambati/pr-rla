@@ -149,7 +149,12 @@ export class FreezeCheckpointStore {
     writeFileAtomic(this.markerPath(repo), `${JSON.stringify(marker)}\n`);
   }
 
-  /** How many of these repos already have a done-marker. */
+  /** How many of these repos have a done-marker file (not parsed: for a progress line over a large org). */
+  present(repos: readonly string[]): number {
+    return repos.filter((r) => existsSync(this.markerPath(r))).length;
+  }
+
+  /** How many of these repos already have a readable done-marker. */
   done(repos: readonly string[]): number {
     return repos.filter((r) => this.readRepo(r) !== null).length;
   }

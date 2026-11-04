@@ -82,6 +82,8 @@ Check 2 holds the manifest to the registered set without any network: the regist
 
 ## Limits
 
+- `verify` of a pool lists every repo again (4 at a time) and is not resumable: it takes about as long as the freeze did, and a rate limit that stops it means running it again.
+
 - The estimate and `--resume` are verified on a synthetic org and on one public org (`navikt`, a 223-repo subset, read-only); a full `freeze` of a real org, with timestamp tokens, has not been run.
 - `listRepos` for `bitbucket-data-center` is unverified against a live server, as that provider is. GitLab and Bitbucket Cloud `listRepos` are tested on hand-made responses only.
 - A repo list carries no repository ids: the SCM is not asked. Only a rule records them.

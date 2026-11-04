@@ -7,7 +7,8 @@ import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify } from "../src/commands/verify.js";
-import { manifestSha256, type ManifestV2 } from "../src/core/records.js";
+import { manifestSha256, type CommitmentRecordV2, type ManifestV2, type SignedRecord } from "../src/core/records.js";
+import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { fakeOrg, orgSpec, ORG, type FakeOrg } from "./helpers/fake-org.js";
 import { setupPoolAudit, type PoolScenario } from "./helpers/pool-scenario.js";
 
@@ -185,6 +186,23 @@ describe("the manifest is held to the registered repo set (check 2, and check 5 
     rewrite(s, (m) => ({ ...m, repos: m.repos.filter((r) => r.repo !== `${ORG}/svc-03`), changes: m.changes.filter((c) => c.repo !== `${ORG}/svc-03`), N: m.changes.filter((c) => c.repo !== `${ORG}/svc-03`).length }));
     const r = await runVerify(s.ctx, { offline: true });
     expect(r.checks.find((c) => c.n === 2)!.details.join("\n")).toMatch(/manifest repos differ from the registered list: 1 registered repo\(s\) missing \(e\.g\. acme-org\/svc-03\)/);
+  });
+});
+
+describe("a pooled commitment is signed after its manifest's as-of time, never before it (check 2)", () => {
+  it("a commitment dated before the manifest's as-of time FAILs, even correctly signed by the audit's own key", async () => {
+    const s = await frozen(org30());
+    const path = join(s.dir, "audit/2026-q3/manifest-commitment.json");
+    const cm = JSON.parse(readFileSync(path, "utf8")) as SignedRecord<CommitmentRecordV2>;
+    const m = readManifest(s);
+    expect(Date.parse(cm.record.frozenAt)).toBeGreaterThanOrEqual(Date.parse(m.frozenAt));
+    // The honest file passes the rule; one dated an hour before the as-of time (still after the window closed) does not.
+    expect((await check(s, 2)).check.details.join("\n")).not.toMatch(/before the manifest's as-of time/);
+    const earlier = new Date(Date.parse(m.frozenAt) - 3600_000).toISOString().replace(".000Z", "Z");
+    writeFileSync(path, JSON.stringify(signRecord({ ...cm.record, frozenAt: earlier }, loadOrCreateKey(join(s.dir, ".pr-rla/signing-key.pem"))), null, 2));
+    const c2 = (await check(s, 2)).check;
+    expect(c2.status).toBe("FAIL");
+    expect(c2.details.join("\n")).toContain(`commitment dated ${earlier}, before the manifest's as-of time ${m.frozenAt}`);
   });
 });
 
