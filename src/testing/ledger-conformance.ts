@@ -149,7 +149,7 @@ export interface LedgerConformanceOptions {
    * fixture covers; a case named here is reported as skipped with the reason instead (a run over
    * recorded public timelines, say, cannot show an unlisted reviewer).
    */
-  skipCases?: Partial<Record<LedgerCase, string>>;
+  skipCases?: Partial<Record<LedgerCase | "transient-write-faults", string>>;
 }
 
 /** The core's view of what the ledger returned: the verdicts it would count and ignore (`classifyVerdicts`, which `computeStatus` and check 7 run). */
@@ -172,7 +172,7 @@ export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: re
     }
 
     if (f.case === "idempotent-publish") {
-      results.push(...(await idempotentPublish(ledger, f)));
+      results.push(...(await idempotentPublish(ledger, f, options.skipCases?.["transient-write-faults"])));
       continue;
     }
 
@@ -320,12 +320,12 @@ export async function runLedgerConformance(ledger: LedgerUnderTest, fixtures: re
     if (why !== undefined) results.push({ fixture: "(case coverage)", check: c, ok: true, skipped: true, message: `not exercised by this run: ${why}` });
     else results.push({ fixture: "(case coverage)", check: c, ok: false, message: `no fixture exercises the case "${c}": add one, or name it in options.skipCases with the reason so the report says it was not run` });
   }
-  for (const c of Object.keys(options.skipCases ?? {})) if (!(LEDGER_CASES as readonly string[]).includes(c)) results.push({ fixture: "(case coverage)", check: "normalization", ok: false, message: `options.skipCases names "${c}", which is not a ledger case (${LEDGER_CASES.join(", ")})` });
+  for (const c of Object.keys(options.skipCases ?? {})) if (!(LEDGER_CASES as readonly string[]).includes(c) && c !== "transient-write-faults") results.push({ fixture: "(case coverage)", check: "normalization", ok: false, message: `options.skipCases names "${c}", which is not a ledger case (${LEDGER_CASES.join(", ")}) or transient-write-faults` });
   return { ok: results.every((r) => r.ok), results };
 }
 
 /** Publishes the fixture's draws three times: twice with the index, once after forgetting it. Runs 2 and 3 must write nothing. */
-async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture): Promise<ConformanceResult[]> {
+async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture, skipWriteFaults?: string): Promise<ConformanceResult[]> {
   const out: ConformanceResult[] = [];
   const res = (check: LedgerConformanceCheck, ok: boolean, message?: string) => out.push({ fixture: f.name, check, ok, ...(message && !ok ? { message } : {}) });
   const p: string[] = [];
@@ -359,7 +359,7 @@ async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture): Pro
   }
   res("idempotent-publish", p.length === 0, p.join("; "));
   // Faults on the write path (a publish and a record), on a tracker of their own, once the clean runs have shown what a publish writes.
-  if (!p.length && f.http) out.push(await transientWriteFaults(ledger, f, writes[0]!));
+  if (!p.length && f.http) out.push(await transientWriteFaults(ledger, f, writes[0]!, skipWriteFaults));
   return out;
 }
 
@@ -372,7 +372,7 @@ async function idempotentPublish(ledger: LedgerUnderTest, f: LedgerFixture): Pro
  * publish on the same tracker must finish the job. Then a `record` (appendVerdict) meets a 429 of its own.
  * The factory serves phase "publish-faults" on a fresh tracker and "publish-recover" on the one the faulted run left.
  */
-async function transientWriteFaults(ledger: LedgerUnderTest, f: LedgerFixture, cleanWrites: number): Promise<ConformanceResult> {
+async function transientWriteFaults(ledger: LedgerUnderTest, f: LedgerFixture, cleanWrites: number, skipped?: string): Promise<ConformanceResult> {
   const check = "transient-write-faults" as const;
   const done = (ok: boolean, message?: string, skipped = false): ConformanceResult => ({ fixture: f.name, check, ok, ...(skipped ? { skipped: true } : {}), ...(message && (!ok || skipped) ? { message } : {}) });
   if (cleanWrites < 2) return done(true, `a clean publish makes ${cleanWrites} write(s); two are needed to fault the second`, true);
@@ -396,7 +396,8 @@ async function transientWriteFaults(ledger: LedgerUnderTest, f: LedgerFixture, c
     return done(false, `opening the ledger for phase publish-faults threw: ${(e as Error).message}`);
   }
   const writeCalls = h.inner.log.filter((x) => x.method !== "GET" && x.method !== "HEAD");
-  if (writeCalls.length < 2) return done(true, `the faulted publish made ${writeCalls.length} write(s): serve a fresh tracker (no issues, no local index) for phase "publish-faults" so writes can be faulted`, true);
+  // P1 (pass-2 review): a factory that serves no fresh tracker leaves the write path unexercised: that FAILs, unless the caller says why.
+  if (writeCalls.length < 2) return skipped !== undefined ? done(true, `not exercised by this run: ${skipped}`, true) : done(false, `the faulted publish made ${writeCalls.length} write(s): serve a fresh tracker (no issues, no local index) for phase "publish-faults" so writes can be faulted, or name transient-write-faults in options.skipCases with the reason`);
   // The 429'd write must be repeated, after waiting as long as Retry-After says.
   const at = h.inner.log.indexOf(writeCalls[0]!);
   const first = h.inner.log[at]!;

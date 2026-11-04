@@ -205,7 +205,7 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
         pagesServed: () => last.served(),
         http: true,
       },
-    ], { definition: bitbucketCloud });
+    ], { definition: bitbucketCloud, skipChecks: { "review-state-mapping": "no review in the recorded window is spelled out in this fixture; the synthetic scenario run in this file exercises review states", "revoked-approval": "the recorded window has no withdrawn approval; the synthetic scenario run in this file exercises it" } });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -235,7 +235,7 @@ describe("Bitbucket Cloud provider on recorded responses: atlassian/bamboo-specs
     const report = await runProviderConformance(
       (_f, h) => new BitbucketCloudProvider(rec.options, { ...h.context({ fetch: (last = replayFetch(rec)) as typeof fetch }), now: () => Date.parse(rec.recordedAt) }),
       [{ name: "atlassian/bamboo-specs 2026-10-06", request: { repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] }, expect: { ids: [merge, ...release].map(push), directPushes: [merge, ...release].map(push), reviewGranularity: "first-comment-per-user", minPages: 30 }, pagesServed: () => last.served(), http: true }],
-      { definition: bitbucketCloud },
+      { definition: bitbucketCloud, skipChecks: { "merge-strategies": "the recorded release merge is pushed directly: no pull request to map", "review-state-mapping": "direct pushes carry no reviews", actors: "this fixture lists direct pushes only; the synthetic scenario run in this file exercises actors", "bot-detection": "this fixture lists direct pushes only; the synthetic scenario run in this file exercises bots", "revoked-approval": "direct pushes carry no approvals" } },
     );
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });

@@ -57,9 +57,12 @@ const fixture: ConformanceFixture = {
   rateLimitFault: { status: 403, headers: (now) => ({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now + 20) }), minWaitMs: 19_000 },
 };
 
+/** This file's fixture covers paging and faults only (P1: the kit then needs the reason for each check it does not exercise). */
+const ONLY_PAGING = { classification: "a paging and transient-faults fixture: conformance.test.ts runs the kit's other checks", "merge-strategies": "as for classification", "review-state-mapping": "as for classification", actors: "as for classification", "bot-detection": "as for classification", "revoked-approval": "as for classification" } as const;
+
 describe("conformance kit: the broker-shaped harness", () => {
   it("a provider that hands retries to the broker passes transient-faults through the harness's retries", async () => {
-    const r = await runProviderConformance((_f, h) => provider(h.context({ fetch: server }), true), [fixture]);
+    const r = await runProviderConformance((_f, h) => provider(h.context({ fetch: server }), true), [fixture], { skipChecks: ONLY_PAGING });
     expect(r.ok, formatConformanceReport(r)).toBe(true);
     expect(r.results.find((x) => x.check === "transient-faults")).toMatchObject({ ok: true });
   });

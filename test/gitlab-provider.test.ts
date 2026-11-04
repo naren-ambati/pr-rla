@@ -253,7 +253,7 @@ describe("GitLab provider on recorded self-managed responses: gitlab.freedesktop
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ], { definition: gitlab });
+    ], { definition: gitlab, skipChecks: { "revoked-approval": "the recorded window has no withdrawn approval; the synthetic scenario run in this file exercises it" } });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 
@@ -286,7 +286,7 @@ describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, Octo
         http: true,
         rateLimitFault: GITLAB_RATE_LIMIT,
       },
-    ], { definition: gitlab });
+    ], { definition: gitlab, skipChecks: { "merge-strategies": "this month-long recording lists ids, bots and humans; the synthetic scenario run in this file exercises merge strategies", "review-state-mapping": "as for merge-strategies", actors: "as for merge-strategies", "revoked-approval": "the recorded window has no withdrawn approval; the synthetic scenario run in this file exercises it" } });
     expect(report.ok, formatConformanceReport(report)).toBe(true);
   });
 

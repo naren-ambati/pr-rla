@@ -1,7 +1,7 @@
 {
  "description": "Real GitHub API responses for github/gh-aw, window 2026-11-02 (UTC), recorded read-only with page_size=30, batch_size=10, history_page_size=40. REST pull objects trimmed to the fields pr-rla reads.",
  "recordedAt": "2026-11-04T00:06:30.782Z",
- "graphqlQueryNote": "The GraphQL request bodies (bodySha256) were updated on 2026-11-04 to the queries pr-rla sends now, which select more fields (labels, parents and associatedPullRequests totalCount/pageInfo); the responses are the original recorded ones and lack those fields, which the provider reads as 'nothing more to page'. Not re-recorded: GraphQL queries are POSTs, and this round's live reads were GET-only.",
+ "graphqlQueryNote": "The GraphQL request bodies (bodySha256) were updated on 2026-11-04 to the queries pr-rla sends now, which select more fields (labels, parents and associatedPullRequests totalCount/pageInfo); the responses are the original recorded ones and lack those fields, which the provider reads as 'nothing more to page'. Not re-recorded: GraphQL queries are POSTs, and this round's live reads were GET-only. 2026-11-04 (P1): the responses now carry the fields the queries select, derived from the recorded nodes and nothing else: every PR's labels, every commit's parents and associatedPullRequests have fewer nodes than the page asked for (first: 50, first: 2 and first: 5), so totalCount is that count and hasNextPage is false; the provider's paging reads them.",
  "options": {
   "page_size": 30,
   "batch_size": 10,
@@ -2729,6 +2729,11 @@
         "oid": "bdabea1d893c3a2d685333d749facdfb1b71a331"
        },
        "labels": {
+        "totalCount": 4,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "smoke-claude"
@@ -3091,6 +3096,11 @@
         "oid": "644fcecd51089146aa19585ff0d5a72be6c674dc"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -3179,6 +3189,11 @@
         "oid": "a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -3294,6 +3309,11 @@
         "oid": "ff6cbd3245ff2876788231225aa1735f319f7e6b"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -3625,6 +3645,11 @@
         "oid": "19002c90d783beb3fbc0550a6617ced356fa9e7b"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -3722,6 +3747,11 @@
         "oid": "f37d3b9ab855215f70434caf4b7523e28466615f"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "smoke-claude"
@@ -4018,6 +4048,11 @@
         "oid": "d3bef2dbe3e33a5f2482d3dad14c6fb094f42997"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -4133,6 +4168,11 @@
         "oid": "0261414a7b8e8cc0b9211e94f7cfeee076474a5b"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "smoke-copilot-aoai-entra"
@@ -4225,6 +4265,11 @@
         "oid": "110ad53df63c11ea98c19d8e865c54fb942f2611"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -4385,6 +4430,11 @@
         "oid": "8085744e7cc097ec33e8230fddb7c5e6d278d1a9"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -4445,6 +4495,11 @@
         "oid": "31a36cf78da1fccec745d77e23fd18f2bd62264d"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "blog"
@@ -4482,6 +4537,11 @@
         "oid": "c0f5373763bac4939c9c909fa0a5dfcc34fe71c4"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -4642,6 +4702,11 @@
         "oid": "2780e87f4c2531370d73c7a33ef203d6063d744c"
        },
        "labels": {
+        "totalCount": 2,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "cookie"
@@ -4755,6 +4820,11 @@
         "oid": "655e64a43a90261e0ec8c499f8de6f921c7468e5"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "automation"
@@ -4907,6 +4977,11 @@
         "oid": "760fc4a5a4aff253db743ec9f0c89cae78937fa7"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "documentation"
@@ -4950,6 +5025,11 @@
         "oid": "ec964f2fd43a21eef50a26de156cb7bbe32572ca"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -4983,6 +5063,11 @@
         "oid": "0c5004a9b5cf1588baa8f15a70707c3de60916fd"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5066,6 +5151,11 @@
         "oid": "b6aafad0971cb7769c997cbf987e5b2d6c923a16"
        },
        "labels": {
+        "totalCount": 4,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "automation"
@@ -5131,6 +5221,11 @@
         "oid": "498afd074756d4437025ef3bbc00489197023bd9"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "documentation"
@@ -5174,6 +5269,11 @@
         "oid": "7ab58bf511be389742dfc5b99e440536241bdff2"
        },
        "labels": {
+        "totalCount": 4,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "documentation"
@@ -5247,6 +5347,11 @@
         "oid": "605cd86c930e7ca6d819ce2fd66c01c21aa75a39"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "automation"
@@ -5300,6 +5405,11 @@
         "oid": "90c3c8d96ab97f321ea09cbb69edce5808154ee4"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5347,6 +5457,11 @@
         "oid": "9756aeb917e6b40ebb5807b2183b131666454076"
        },
        "labels": {
+        "totalCount": 2,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "blog"
@@ -5397,6 +5512,11 @@
         "oid": "9d11ae4811b48d5c2def2a6e3061a2cc129cf1e1"
        },
        "labels": {
+        "totalCount": 4,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5462,6 +5582,11 @@
         "oid": "df9d5d6fb121976216ad1cade05ed8665c003006"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5509,6 +5634,11 @@
         "oid": "19a07585e0fe4ab9d89cbfed62dab1094d4a76b3"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5583,6 +5713,11 @@
         "oid": "a4cb2910dd589a9f646aa1ea2efc21eb97800679"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5666,6 +5801,11 @@
         "oid": "b9f0cc5dc87849fdddeee4a7dcb3f9cf5277f826"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5713,6 +5853,11 @@
         "oid": "eaa06c9108a2dad5c92c0c7053cb1127ac42ef30"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5796,6 +5941,11 @@
         "oid": "f4c1bff3853edf532d4519dde3b1ba6f298f7014"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5878,6 +6028,11 @@
         "oid": "76035c7d2cfa1faa5184803be1709430dbec0ff9"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -5970,6 +6125,11 @@
         "oid": "2fe73da432aeb415859dbae32bacace66b2bc5d5"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -6035,6 +6195,11 @@
         "oid": "d96c4d9b4181f11c759af99d1101cf4c3e42cab0"
        },
        "labels": {
+        "totalCount": 0,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": []
        },
        "reviews": {
@@ -6078,6 +6243,11 @@
         "oid": "e389756c6e283f6948e19c8c1c870d019dc9016f"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -6188,6 +6358,11 @@
         "oid": "ad97836570acbfd55fd415de427e0a034eaa69ad"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -6289,6 +6464,11 @@
         "oid": "8e5dee1062cad87f945153ca210f5f2f7cdd4eb0"
        },
        "labels": {
+        "totalCount": 1,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "needs-review"
@@ -6372,6 +6552,11 @@
         "oid": "9f45d04dbadc5138bbac134327a1fea15114788b"
        },
        "labels": {
+        "totalCount": 5,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "bug"
@@ -6431,6 +6616,11 @@
         "oid": "e40a29e37d79864c3123f0a3c03e878c9260abb5"
        },
        "labels": {
+        "totalCount": 3,
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
         "nodes": [
          {
           "name": "documentation"
@@ -6486,6 +6676,7 @@
           "additions": 131,
           "deletions": 17,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "f837ed0500d5355e93f0b49418c2f8067fa71317"
@@ -6501,6 +6692,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74567,
@@ -6517,6 +6713,7 @@
           "additions": 2,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "a68b0beea6928dde759efc620e88b8a7d50ffe8f"
@@ -6532,6 +6729,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74561,
@@ -6548,6 +6750,7 @@
           "additions": 315,
           "deletions": 116,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "593221704ce0086aed5c7c4d55cb5a67078ab6d0"
@@ -6563,6 +6766,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74562,
@@ -6579,6 +6787,7 @@
           "additions": 598,
           "deletions": 4,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "8393d3f1eb38bbb53bdec95f3657c5b655b10cea"
@@ -6594,6 +6803,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74634,
@@ -6610,6 +6824,7 @@
           "additions": 1019,
           "deletions": 13,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "846632ab6b93e14c5bea7b621aecd4b3514b6131"
@@ -6625,6 +6840,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74594,
@@ -6641,6 +6861,7 @@
           "additions": 72,
           "deletions": 41,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "c2865934860158b3b72b45b8841cf55b6a487d25"
@@ -6656,6 +6877,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74619,
@@ -6672,6 +6898,7 @@
           "additions": 7,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ee520c97edee4d3d6cc6ad2228e10ef49e3b9884"
@@ -6687,6 +6914,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74649,
@@ -6703,6 +6935,7 @@
           "additions": 104,
           "deletions": 59,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "a643d496edf8ee6e0d345625127466cccbb6887e"
@@ -6718,6 +6951,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74629,
@@ -6734,6 +6972,7 @@
           "additions": 103,
           "deletions": 56,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ada37d8eb32f0c7006d1d7c0452ab36803067be8"
@@ -6749,6 +6988,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74628,
@@ -6765,6 +7009,7 @@
           "additions": 4345,
           "deletions": 200,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "cfd5c6c36b90556675e48f13a2895343838dfc83"
@@ -6780,6 +7025,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74596,
@@ -6796,6 +7046,7 @@
           "additions": 103,
           "deletions": 55,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "0203c51ac171cc13462c9abfa3479bd07dd9ff42"
@@ -6811,6 +7062,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74627,
@@ -6827,6 +7083,7 @@
           "additions": 103,
           "deletions": 58,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "0700493f9a46da833249da3b1f86870ea478927d"
@@ -6842,6 +7099,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74626,
@@ -6858,6 +7120,7 @@
           "additions": 104,
           "deletions": 57,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "253112236af6eeb90b034b37f3617c2588bd19e0"
@@ -6873,6 +7136,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74620,
@@ -6889,6 +7157,7 @@
           "additions": 102,
           "deletions": 56,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "49dfdb8b2a63fba893c29e4080f915e04d04f18b"
@@ -6904,6 +7173,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74618,
@@ -6920,6 +7194,7 @@
           "additions": 105,
           "deletions": 58,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b1ac0c0af6adeb6a42de49caee0a672e3135d3fa"
@@ -6935,6 +7210,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74617,
@@ -6951,6 +7231,7 @@
           "additions": 24,
           "deletions": 24,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "c163ee66213c03afe8993114685f2d265f9311bc"
@@ -6966,6 +7247,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74616,
@@ -6982,6 +7268,7 @@
           "additions": 49,
           "deletions": 22,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "0fffa78f25bc88df9073822e99c7522e88371b41"
@@ -6997,6 +7284,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74615,
@@ -7013,6 +7305,7 @@
           "additions": 87,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "e03c0f17e120ab9f8213fbc9c005c4b54cdadeb0"
@@ -7028,6 +7321,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74597,
@@ -7044,6 +7342,7 @@
           "additions": 2736,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "5982f38c65c34d20142d72f2641e130dfef037a0"
@@ -7059,6 +7358,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74598,
@@ -7075,6 +7379,7 @@
           "additions": 940,
           "deletions": 19,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "dbee1e9a732a23f5aa892dbf70c13a4d9f27f590"
@@ -7090,6 +7395,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74599,
@@ -7106,6 +7416,7 @@
           "additions": 49,
           "deletions": 22,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "fa1c6b55c2622aca15ff29f728c8eae88debf2cd"
@@ -7121,6 +7432,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74595,
@@ -7137,6 +7453,7 @@
           "additions": 7165,
           "deletions": 7165,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b1fe1b4dbc2d9774ba124bb82858f95eaad65437"
@@ -7152,6 +7469,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74591,
@@ -7168,6 +7490,7 @@
           "additions": 130,
           "deletions": 38,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "8fa4ead9ad7307a790f5c98b250b6ea5ca4e8d1b"
@@ -7183,6 +7506,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74552,
@@ -7199,6 +7527,7 @@
           "additions": 30,
           "deletions": 30,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b03aa4bfd44afc73876dff056e7c712aff6ea5f5"
@@ -7214,6 +7543,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74586,
@@ -7230,6 +7564,7 @@
           "additions": 182,
           "deletions": 11,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "90763fb1cfc92cfb3105e95b66fc14300ec4d56e"
@@ -7245,6 +7580,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74389,
@@ -7261,6 +7601,7 @@
           "additions": 96,
           "deletions": 5,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "92b45a2b4b3ecca464602cb0e92bb675892a4fef"
@@ -7276,6 +7617,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74566,
@@ -7292,6 +7638,7 @@
           "additions": 51,
           "deletions": 29,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "968caa1d589c9a1872a1cfd6605c13f566d4b49f"
@@ -7307,6 +7654,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74559,
@@ -7323,6 +7675,7 @@
           "additions": 2,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "77fae0bd3653c79c7e303d757a45a20341f40775"
@@ -7338,6 +7691,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74556,
@@ -7354,6 +7712,7 @@
           "additions": 120,
           "deletions": 152,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "519a290af1c1cfd798e75792ca78e956d380aaee"
@@ -7369,6 +7728,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74557,
@@ -7385,6 +7749,7 @@
           "additions": 1226,
           "deletions": 1140,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ce165ca2c93261555d543c43455ede49e482dd74"
@@ -7400,6 +7765,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74364,
@@ -7416,6 +7786,7 @@
           "additions": 150,
           "deletions": 4,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "4f55248ba0c43e250147c7dc6a0988756a5fee53"
@@ -7431,6 +7802,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74422,
@@ -7447,6 +7823,7 @@
           "additions": 0,
           "deletions": 3,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "c02712f7fd59f1a7707ced12ba59165d3185a4f2"
@@ -7462,6 +7839,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74546,
@@ -7478,6 +7860,7 @@
           "additions": 28,
           "deletions": 5,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "982a97e72be1f8a3839dfa2a70496d23f3bcf440"
@@ -7493,6 +7876,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74544,
@@ -7509,6 +7897,7 @@
           "additions": 114,
           "deletions": 391,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "17c0d8629dac042e379cf79c7000e72b01176730"
@@ -7524,6 +7913,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74542,
@@ -7540,6 +7934,7 @@
           "additions": 12,
           "deletions": 12,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "5bb18f50159a12a55afd9ce6eea9435080920cd1"
@@ -7555,6 +7950,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74439,
@@ -7571,6 +7971,7 @@
           "additions": 187,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b67ec0d2dd186faa16f81bed135ad2ebd8cc6c69"
@@ -7586,6 +7987,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74359,
@@ -7602,6 +8008,7 @@
           "additions": 4,
           "deletions": 356,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "5442d92d123cc912ce7f8a2c1c4d2014527c0125"
@@ -7617,6 +8024,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74537,
@@ -7633,6 +8045,7 @@
           "additions": 248,
           "deletions": 40,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "9bc0c4d118599905b56da289365584a0309b70fe"
@@ -7648,6 +8061,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74366,
@@ -7664,6 +8082,7 @@
           "additions": 1078,
           "deletions": 115,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "e4e164aac16ddb8c5993e4d215ba2bf685ef0649"
@@ -7679,6 +8098,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74368,
@@ -7695,6 +8119,7 @@
           "additions": 6,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ab53c247f16a3d9218bfb2485b47b2462d9cb501"
@@ -7710,6 +8135,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74457,
@@ -7756,6 +8186,7 @@
           "additions": 9,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "6768635fc2c22405b0861999de7a4d3ff5c4f229"
@@ -7771,6 +8202,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74477,
@@ -7787,6 +8223,7 @@
           "additions": 2,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "581751a34c40edca8b4115e4e02ea3961d812171"
@@ -7802,6 +8239,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74499,
@@ -7818,6 +8260,7 @@
           "additions": 45,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ae9b4fbd75012e3d71669cc9165c969caa87e9d4"
@@ -7833,6 +8276,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74535,
@@ -7849,6 +8297,7 @@
           "additions": 1256,
           "deletions": 340,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "6663304c4b801dbb0c78c22e6239f4d525a0988a"
@@ -7864,6 +8313,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74365,
@@ -7880,6 +8334,7 @@
           "additions": 230,
           "deletions": 226,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "41bb19a8730548529a3435c76fe57f4c0ef352a6"
@@ -7895,6 +8350,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74360,
@@ -7911,6 +8371,7 @@
           "additions": 11,
           "deletions": 1,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "1a7689cc25c591d9c20896b9a8e7d9cfc449ec51"
@@ -7926,6 +8387,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74370,
@@ -7942,6 +8408,7 @@
           "additions": 27,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "932b514b5f80e04e16fc5c418fb43909815ffd3e"
@@ -7957,6 +8424,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74369,
@@ -7973,6 +8445,7 @@
           "additions": 256,
           "deletions": 256,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "031775f1faa09304b50f5a6bdc4bb900100f648a"
@@ -7988,6 +8461,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74418,
@@ -8004,6 +8482,7 @@
           "additions": 21,
           "deletions": 4,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ebd6e52b20a31cbc9cf541a40e00e4426f335166"
@@ -8019,6 +8498,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74382,
@@ -8035,6 +8519,7 @@
           "additions": 1378,
           "deletions": 1317,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "5ec4363a9a818f2dfbc5cd7bd8948bfec7e32e1e"
@@ -8050,6 +8535,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74362,
@@ -8066,6 +8556,7 @@
           "additions": 14,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "d8af611df1f40f0f2707090d6d067465e18e6675"
@@ -8081,6 +8572,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74375,
@@ -8097,6 +8593,7 @@
           "additions": 29,
           "deletions": 1,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "29fcf9147c0639b844194193283024053d050f2b"
@@ -8112,6 +8609,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74367,
@@ -8128,6 +8630,7 @@
           "additions": 47,
           "deletions": 3,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "98194ddb15b75c9c6d13da93dc78b50d9087d340"
@@ -8143,6 +8646,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74363,
@@ -8159,6 +8667,7 @@
           "additions": 13,
           "deletions": 14,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "aa028fa03bc3110aab88af3ffcbbff153c755fc8"
@@ -8174,6 +8683,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74358,
@@ -8190,6 +8704,7 @@
           "additions": 89,
           "deletions": 15,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b5b1bf7df7543e34e750b0e1891b66424cd7913b"
@@ -8205,6 +8720,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74355,
@@ -8221,6 +8741,7 @@
           "additions": 1,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "a7c8d2e7f07781d34360da3048eb690dd754624b"
@@ -8236,6 +8757,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74354,
@@ -8252,6 +8778,7 @@
           "additions": 11505,
           "deletions": 242,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "277934f08136ee1abb99fd9461e3d7b3cf7d4a14"
@@ -8267,6 +8794,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74350,
@@ -8283,6 +8815,7 @@
           "additions": 71,
           "deletions": 8,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "cdc56c4d33bc0503d3ca3204699a11bc015b1baa"
@@ -8298,6 +8831,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74277,
@@ -8314,6 +8852,7 @@
           "additions": 44,
           "deletions": 50,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "7a9edd0056557d8a5b184755e4b995407bf8f38b"
@@ -8329,6 +8868,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74336,
@@ -8345,6 +8889,7 @@
           "additions": 71,
           "deletions": 65,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "771a6b383fbc9233e056c7c9c4f931322d23d16a"
@@ -8360,6 +8905,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74261,
@@ -8376,6 +8926,7 @@
           "additions": 35,
           "deletions": 4,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "9560c04fb16a1662d8c5122f717296b8b7f58b9a"
@@ -8391,6 +8942,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74252,
@@ -8407,6 +8963,7 @@
           "additions": 368,
           "deletions": 3,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "eca7d298b40b6f829c983da37c4a79d888f6a01e"
@@ -8422,6 +8979,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74253,
@@ -8438,6 +9000,7 @@
           "additions": 241,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "51f30ef88584d26add6283245ea1529ba6eed62f"
@@ -8453,6 +9016,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74317,
@@ -8469,6 +9037,7 @@
           "additions": 167,
           "deletions": 144,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "e82ca31e76787eb68d5edaf3b44d3a6670790fee"
@@ -8484,6 +9053,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74304,
@@ -8500,6 +9074,7 @@
           "additions": 175,
           "deletions": 31,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "98679b2957d32f89dcd1d5663bc3d9802bb6b968"
@@ -8515,6 +9090,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74303,
@@ -8531,6 +9111,7 @@
           "additions": 104,
           "deletions": 57,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "aeecc7aa2f03ba0dfb442c31d23c57ac70c9f4dc"
@@ -8546,6 +9127,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74204,
@@ -8562,6 +9148,7 @@
           "additions": 150,
           "deletions": 117,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "76285d51571761d3b82772aa67647e7fb2603fae"
@@ -8577,6 +9164,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74242,
@@ -8593,6 +9185,7 @@
           "additions": 106,
           "deletions": 63,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "2382c2df4fab4e862a8e1ed7b7c55020d5ec6b65"
@@ -8608,6 +9201,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74205,
@@ -8624,6 +9222,7 @@
           "additions": 101,
           "deletions": 55,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "e40a29e37d79864c3123f0a3c03e878c9260abb5"
@@ -8639,6 +9238,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74202,
@@ -8655,6 +9259,7 @@
           "additions": 5,
           "deletions": 1,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "bdabea1d893c3a2d685333d749facdfb1b71a331"
@@ -8670,6 +9275,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74248,
@@ -8686,6 +9296,7 @@
           "additions": 28412,
           "deletions": 2638,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "9f45d04dbadc5138bbac134327a1fea15114788b"
@@ -8701,6 +9312,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73672,
@@ -8717,6 +9333,7 @@
           "additions": 4,
           "deletions": 4,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "8e5dee1062cad87f945153ca210f5f2f7cdd4eb0"
@@ -8732,6 +9349,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74231,
@@ -8748,6 +9370,7 @@
           "additions": 104,
           "deletions": 85,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ad97836570acbfd55fd415de427e0a034eaa69ad"
@@ -8763,6 +9386,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74201,
@@ -8779,6 +9407,7 @@
           "additions": 54,
           "deletions": 23,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "e389756c6e283f6948e19c8c1c870d019dc9016f"
@@ -8794,6 +9423,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74200,
@@ -8810,6 +9444,7 @@
           "additions": 99,
           "deletions": 85,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "76035c7d2cfa1faa5184803be1709430dbec0ff9"
@@ -8825,6 +9460,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74199,
@@ -8841,6 +9481,7 @@
           "additions": 41,
           "deletions": 6,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "d96c4d9b4181f11c759af99d1101cf4c3e42cab0"
@@ -8856,6 +9497,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74176,
@@ -8872,6 +9518,7 @@
           "additions": 80,
           "deletions": 15,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "2fe73da432aeb415859dbae32bacace66b2bc5d5"
@@ -8887,6 +9534,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74180,
@@ -8903,6 +9555,7 @@
           "additions": 42,
           "deletions": 33,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "f4c1bff3853edf532d4519dde3b1ba6f298f7014"
@@ -8918,6 +9571,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74177,
@@ -8934,6 +9592,7 @@
           "additions": 176,
           "deletions": 43,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "eaa06c9108a2dad5c92c0c7053cb1127ac42ef30"
@@ -8949,6 +9608,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74171,
@@ -8965,6 +9629,7 @@
           "additions": 3177,
           "deletions": 39,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "19a07585e0fe4ab9d89cbfed62dab1094d4a76b3"
@@ -8980,6 +9645,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74166,
@@ -9026,6 +9696,7 @@
           "additions": 217,
           "deletions": 145,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b9f0cc5dc87849fdddeee4a7dcb3f9cf5277f826"
@@ -9041,6 +9712,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74158,
@@ -9057,6 +9733,7 @@
           "additions": 8601,
           "deletions": 181,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "a4cb2910dd589a9f646aa1ea2efc21eb97800679"
@@ -9072,6 +9749,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74165,
@@ -9088,6 +9770,7 @@
           "additions": 3750,
           "deletions": 662,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "df9d5d6fb121976216ad1cade05ed8665c003006"
@@ -9103,6 +9786,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74159,
@@ -9119,6 +9807,7 @@
           "additions": 104,
           "deletions": 88,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "9d11ae4811b48d5c2def2a6e3061a2cc129cf1e1"
@@ -9134,6 +9823,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74151,
@@ -9150,6 +9844,7 @@
           "additions": 8,
           "deletions": 109,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "9756aeb917e6b40ebb5807b2183b131666454076"
@@ -9165,6 +9860,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74148,
@@ -9181,6 +9881,7 @@
           "additions": 47,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "605cd86c930e7ca6d819ce2fd66c01c21aa75a39"
@@ -9196,6 +9897,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74147,
@@ -9212,6 +9918,7 @@
           "additions": 5,
           "deletions": 5,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "2780e87f4c2531370d73c7a33ef203d6063d744c"
@@ -9227,6 +9934,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74092,
@@ -9243,6 +9955,7 @@
           "additions": 48,
           "deletions": 10,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "655e64a43a90261e0ec8c499f8de6f921c7468e5"
@@ -9258,6 +9971,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73982,
@@ -9274,6 +9992,7 @@
           "additions": 70,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ec964f2fd43a21eef50a26de156cb7bbe32572ca"
@@ -9289,6 +10008,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73986,
@@ -9305,6 +10029,7 @@
           "additions": 17,
           "deletions": 3,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b6aafad0971cb7769c997cbf987e5b2d6c923a16"
@@ -9320,6 +10045,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74054,
@@ -9336,6 +10066,7 @@
           "additions": 37,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "498afd074756d4437025ef3bbc00489197023bd9"
@@ -9351,6 +10082,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74061,
@@ -9367,6 +10103,7 @@
           "additions": 6,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "7ab58bf511be389742dfc5b99e440536241bdff2"
@@ -9382,6 +10119,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74087,
@@ -9398,6 +10140,7 @@
           "additions": 10,
           "deletions": 6,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "90c3c8d96ab97f321ea09cbb69edce5808154ee4"
@@ -9413,6 +10156,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74091,
@@ -9429,6 +10177,7 @@
           "additions": 6,
           "deletions": 5,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "0c5004a9b5cf1588baa8f15a70707c3de60916fd"
@@ -9444,6 +10193,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74143,
@@ -9460,6 +10214,7 @@
           "additions": 597,
           "deletions": 124,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "f37d3b9ab855215f70434caf4b7523e28466615f"
@@ -9475,6 +10230,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 74058,
@@ -9491,6 +10251,7 @@
           "additions": 2264,
           "deletions": 540,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "760fc4a5a4aff253db743ec9f0c89cae78937fa7"
@@ -9506,6 +10267,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73888,
@@ -9522,6 +10288,7 @@
           "additions": 181,
           "deletions": 2,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "ff6cbd3245ff2876788231225aa1735f319f7e6b"
@@ -9537,6 +10304,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73992,
@@ -9553,6 +10325,7 @@
           "additions": 50894,
           "deletions": 19345,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "c0f5373763bac4939c9c909fa0a5dfcc34fe71c4"
@@ -9568,6 +10341,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73885,
@@ -9584,6 +10362,7 @@
           "additions": 1095,
           "deletions": 80,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "31a36cf78da1fccec745d77e23fd18f2bd62264d"
@@ -9599,6 +10378,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73970,
@@ -9615,6 +10399,7 @@
           "additions": 48,
           "deletions": 0,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "110ad53df63c11ea98c19d8e865c54fb942f2611"
@@ -9630,6 +10415,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73967,
@@ -9646,6 +10436,7 @@
           "additions": 1246,
           "deletions": 34,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "0261414a7b8e8cc0b9211e94f7cfeee076474a5b"
@@ -9661,6 +10452,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73922,
@@ -9677,6 +10473,7 @@
           "additions": 5979,
           "deletions": 34197,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "8085744e7cc097ec33e8230fddb7c5e6d278d1a9"
@@ -9692,6 +10489,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73918,
@@ -9708,6 +10510,7 @@
           "additions": 9202,
           "deletions": 6694,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "d3bef2dbe3e33a5f2482d3dad14c6fb094f42997"
@@ -9723,6 +10526,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73925,
@@ -9739,6 +10547,7 @@
           "additions": 118,
           "deletions": 109,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "644fcecd51089146aa19585ff0d5a72be6c674dc"
@@ -9754,6 +10563,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73916,
@@ -9770,6 +10584,7 @@
           "additions": 421,
           "deletions": 13,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "19002c90d783beb3fbc0550a6617ced356fa9e7b"
@@ -9785,6 +10600,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73882,
@@ -9801,6 +10621,7 @@
           "additions": 1075,
           "deletions": 447,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "a1f805b04e2ff9328a8a578fab5f8ab0b7b7fcaf"
@@ -9816,6 +10637,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 1,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
              "number": 73887,
@@ -9832,6 +10658,7 @@
           "additions": 322,
           "deletions": 71,
           "parents": {
+           "totalCount": 1,
            "nodes": [
             {
              "oid": "b4a3f9ba3fc83a65fd32ba713ad50fe3ff8366d7"
@@ -9847,6 +10674,11 @@
            }
           },
           "associatedPullRequests": {
+           "totalCount": 0,
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": []
           }
          }
