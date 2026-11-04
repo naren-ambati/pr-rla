@@ -82,14 +82,17 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
     previewTtlMs: limits.ttlMs,
   });
 
-  /** MCP progress notifications for an open tools/call, when the client asked for them. */
+  /**
+   * MCP progress notifications for an open tools/call, when the client asked for them. `progress`
+   * counts the events (it must only increase); no `total`, since the number of steps is not known.
+   */
   const notifier = (ctx: ServerContext) => {
     const token = ctx.mcpReq._meta?.progressToken;
     if (token === undefined) return undefined;
     let n = 0;
     return (p: Progress) => {
       n++;
-      void ctx.mcpReq.notify({ method: "notifications/progress", params: { progressToken: token, progress: n, ...(p.total !== undefined ? { total: p.total } : {}), message: p.message } }).catch(() => {});
+      void ctx.mcpReq.notify({ method: "notifications/progress", params: { progressToken: token, progress: n, message: p.message } }).catch(() => {});
     };
   };
 
