@@ -1,4 +1,6 @@
+import { isRegistrationV2 } from "../core/records.js";
 import { loadLedgerDefinition } from "../registry.js";
+import { verdictIneligibility } from "../sdk/ledger.js";
 import { configFor, CommandError, isoNow, ledgerFor, readDraws, readRegistration, type CommandContext } from "./context.js";
 
 export async function recordCommand(ctx: CommandContext, drawArg: string, verdictArg: string, opts: { reviewer?: string; note?: string; force?: boolean }): Promise<number> {
@@ -14,7 +16,9 @@ export async function recordCommand(ctx: CommandContext, drawArg: string, verdic
   const d = draws.draws.find((x) => x.draw === draw);
   if (!d || draw > draws.issued) throw new CommandError(`draw #${draw} has not been issued (issued: ${draws.issued}; "pr-rla sample --through ${draw}" issues more)`);
   const ledger = await ledgerFor(ctx, config, paths);
-  const existing = (await ledger.readVerdicts()).find((v) => v.changeId === d.changeId && v.protocolSha256 === reg.record.protocolSha256);
+  // Only a verdict that counts blocks a new one: a bot's or an unregistered account's label does not.
+  const reviewers = isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null;
+  const existing = (await ledger.readVerdicts()).find((v) => v.changeId === d.changeId && v.protocolSha256 === reg.record.protocolSha256 && !verdictIneligibility(v, reviewers));
   if (existing && !opts.force)
     throw new CommandError(`${d.changeId} already has a ${existing.verdict} verdict (draw #${existing.draw}); a change drawn twice reuses its first verdict. --force appends anyway (it will show as a relabel; the first verdict still counts)`);
   await ledger.appendVerdict({
