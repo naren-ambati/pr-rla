@@ -298,7 +298,7 @@ One JSON line per checkpoint in `audit/<window>/ledger-checkpoints.jsonl`:
 
 `{ schema, plugins: { "<use>": { source, name, version, resolved, npmIntegrity, treeSha256, trust, hosts, writePaths, credentials } } }`, where each credential is `{ env, hosts, hostFromOption?, headers?, secret? }` (optional fields added within v1).
 
-Written only by `pr-rla plugin add` and `pr-rla plugin lock` (FR2.3). Its credential grants and `trust: full` take effect only with the local approval of whoever runs the command: `pr-rla/approvals/v1`, a per-user file outside every repo (`$PR_RLA_APPROVALS_FILE`, `$XDG_CONFIG_HOME/pr-rla/approvals.json` or `~/.config/pr-rla/approvals.json`), keyed by the plugin's use, `treeSha256`, trust and exact grants.
+Written only by `pr-rla plugin add` and `pr-rla plugin lock` (FR2.3). Its credential grants and `trust: full` take effect only with the local approval of whoever runs the command: `pr-rla/approvals/v1`, a per-user file outside every repo (`$PR_RLA_APPROVALS_FILE`, `$XDG_CONFIG_HOME/pr-rla/approvals.json` or `~/.config/pr-rla/approvals.json`), keyed by the plugin's use, `treeSha256`, trust, exact credential grants and write paths.
 
 ## 6. Checkpoint git transport
 

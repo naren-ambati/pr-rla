@@ -38,13 +38,15 @@ export interface CredentialGrant {
   secret?: false;
 }
 
-/** An external plugin, approved as locked: its use, its files, its trust and exactly these grants. */
+/** An external plugin, approved as locked: its use, its files, its trust, exactly these credential grants and these write paths. */
 export interface PluginApproval {
   kind: "plugin";
   use: string;
   treeSha256: string;
   trust: PluginTrust;
   credentials: CredentialGrant[];
+  /** The ledger write paths the lock grants: where the approved credentials may be used to write. */
+  writePaths: string[];
   approvedAt: string;
 }
 
@@ -122,8 +124,8 @@ export function grantsOf(credentials: readonly LockedCredential[]): CredentialGr
     .sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0));
 }
 
-const pluginKey = (a: { use: string; treeSha256: string; trust: PluginTrust; credentials: CredentialGrant[] }) => canonicalJson({ use: a.use, treeSha256: a.treeSha256, trust: a.trust, credentials: a.credentials });
-const keyOfEntry = (use: string, entry: LockEntry) => pluginKey({ use, treeSha256: entry.treeSha256, trust: entry.trust, credentials: grantsOf(entry.credentials) });
+const pluginKey = (a: { use: string; treeSha256: string; trust: PluginTrust; credentials: CredentialGrant[]; writePaths?: string[] }) => canonicalJson({ use: a.use, treeSha256: a.treeSha256, trust: a.trust, credentials: a.credentials, writePaths: [...new Set(a.writePaths ?? [])].sort() });
+const keyOfEntry = (use: string, entry: LockEntry) => pluginKey({ use, treeSha256: entry.treeSha256, trust: entry.trust, credentials: grantsOf(entry.credentials), writePaths: entry.writePaths });
 
 function problem(a: unknown): string | null {
   if (!a || typeof a !== "object") return "an approval must be an object";
@@ -161,7 +163,7 @@ function writeApprovals(path: string, f: ApprovalsFile): void {
 
 /** Records that `use`, locked as `entry`, is approved here. An identical approval is replaced (its time updated). */
 export function approvePlugin(path: string, use: string, entry: LockEntry, approvedAt: string): PluginApproval {
-  const a: PluginApproval = { kind: "plugin", use, treeSha256: entry.treeSha256, trust: entry.trust, credentials: grantsOf(entry.credentials), approvedAt };
+  const a: PluginApproval = { kind: "plugin", use, treeSha256: entry.treeSha256, trust: entry.trust, credentials: grantsOf(entry.credentials), writePaths: [...new Set(entry.writePaths)].sort(), approvedAt };
   const f = readApprovals(path);
   const key = pluginKey(a);
   writeApprovals(path, { ...f, approvals: [...f.approvals.filter((x) => x.kind !== "plugin" || pluginKey(x) !== key), a] });

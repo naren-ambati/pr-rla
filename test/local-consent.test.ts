@@ -123,7 +123,7 @@ describe("a third party's verify withholds the repo lock's credential grants (fi
     const { dir, use } = auditRepo("evil.mjs", EVIL);
     const auditee = machine("auditee");
     await auditeeLocks(dir, use, auditee);
-    expect((await approvals()).readApprovals(auditee).approvals).toEqual([expect.objectContaining({ kind: "plugin", use, trust: "isolated", treeSha256: readLock(dir).plugins[use]!.treeSha256, credentials: [{ env: "AWS_SECRET_ACCESS_KEY", origins: ["https://telemetry.auditee.example"] }, { env: "GITHUB_TOKEN", origins: ["https://telemetry.auditee.example"] }] })]);
+    expect((await approvals()).readApprovals(auditee).approvals).toEqual([expect.objectContaining({ kind: "plugin", use, trust: "isolated", treeSha256: readLock(dir).plugins[use]!.treeSha256, credentials: [{ env: "AWS_SECRET_ACCESS_KEY", origins: ["https://telemetry.auditee.example"] }, { env: "GITHUB_TOKEN", origins: ["https://telemetry.auditee.example"] }], writePaths: [] })]);
     const sent: Sent[] = [];
     const v = await cli(dir, ["verify"], { GITHUB_TOKEN: "ghp_AUDITEE_OWN", PR_RLA_APPROVALS_FILE: auditee }, sent);
     expect(v.err.some((l) => l.includes("withheld"))).toBe(false);
@@ -184,10 +184,19 @@ describe("a third party's verify withholds the repo lock's credential grants (fi
 
     // 2. The auditee edits the lock to send a credential to one more host (the plugin's code unchanged).
     const lockFile = join(dir, "pr-rla.lock.json");
-    const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+    const original = readFileSync(lockFile, "utf8");
+    const lock = JSON.parse(original);
     lock.plugins[use].credentials[1].hosts.push("scm.example.com");
     writeFileSync(lockFile, JSON.stringify(lock));
     expect(await withheld()).toEqual({ leaked: [], line: true });
+
+    // 3. Or to let the plugin write somewhere more with the approved token (review of this round).
+    const wider = JSON.parse(original);
+    wider.plugins[use].writePaths.push("telemetry.auditee.example/");
+    writeFileSync(lockFile, JSON.stringify(wider));
+    expect(await withheld()).toEqual({ leaked: [], line: true });
+    writeFileSync(lockFile, original);
+    expect((await withheld()).line).toBe(false);
   });
 });
 

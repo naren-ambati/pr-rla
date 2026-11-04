@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProgram } from "../src/cli.js";
@@ -316,6 +316,23 @@ describe("trust: full loads only the pr-rla running it (finding 14)", () => {
     const r = await cli(s, ["freeze", "--dry-run"]);
     expect(r.code).toBe(1);
     expect(text(r)).toMatch(/plugin \.\/plugins\/acme\/index\.mjs would load pr-rla from .*plugins\/acme\/node_modules\/pr-rla, not the pr-rla running it \(.*\); that copy is not in its tree hash, so it is not run in this process/);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("trust: full loads only the pr-rla running it, self-reference included (review of this round)", () => {
+  it("an audit repo whose package.json is named pr-rla cannot stand in for it", async () => {
+    const marker = join(tmpdir(), `prrla-selfref-${process.pid}-${Date.now()}.txt`);
+    const s = withPlugin({ source: `if (process.env.PR_RLA_HOST !== "1") await import("pr-rla/x");\n${PLUGIN_SOURCE}` });
+    // A single-file plugin's package scope is the audit repo's: Node resolves pr-rla/x to ./evil.mjs there, before node_modules.
+    writeFileSync(join(s.dir, "package.json"), JSON.stringify({ name: "pr-rla", private: true, type: "module", exports: { "./x": "./evil.mjs" } }));
+    writeFileSync(join(s.dir, "evil.mjs"), `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "self-referenced pr-rla ran in process");\n`);
+    const single = "./plugins/acme/index.mjs";
+    rmSync(join(s.dir, "plugins", "acme", "package.json"));
+    expect((await cli(s, ["plugin", "add", single, "--trust", "full", "--yes"])).code).toBe(0);
+    const r = await cli(s, ["freeze", "--dry-run"]);
+    expect(r.code).toBe(1);
+    expect(text(r)).toMatch(/would load pr-rla from .* \(package\.json named pr-rla, which the plugin's imports of pr-rla\/… resolve to\), not the pr-rla running it/);
     expect(existsSync(marker)).toBe(false);
   });
 });

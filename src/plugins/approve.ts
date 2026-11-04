@@ -30,6 +30,7 @@ export function entryApprovalLines(use: string, entry: LockEntry): string[] {
     `  trust         ${trustLine(entry.trust)}`,
     `  credentials   ${grants.length ? grants.map(grantText).join("; ") : "none"}`,
     `  hosts         ${entry.hosts.length ? entry.hosts.join(", ") : "none"} (contacted without credentials unless granted above)`,
+    ...(entry.writePaths.length ? [`  writePaths    ${entry.writePaths.join(", ")} (where a ledger may write, with the credentials above)`] : []),
   ];
 }
 

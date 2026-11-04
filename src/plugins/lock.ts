@@ -435,10 +435,22 @@ export const RUNNING_PR_RLA = realpathSync(fileURLToPath(new URL("../..", import
  * its child maps the SDK to the host's modules and cannot read another copy.
  */
 export function assertLinksRunningPrRla(p: ResolvedPlugin): void {
+  const refuse = (where: string) =>
+    new PluginError(`plugin ${p.use} would load pr-rla from ${where}, not the pr-rla running it (${RUNNING_PR_RLA}); that copy is not in its tree hash, so it is not run in this process`, "TREE_ESCAPE", `remove that pr-rla (the plugin links against the pr-rla that runs it), or run it isolated: pr-rla plugin lock ${p.use} --trust isolated`);
   for (const dir of [p.rootIsFile ? dirname(p.root) : p.root, ...p.deps.map((d) => d.dir)]) {
     const found = findPackage("pr-rla", dir);
-    if (found && found.dir !== RUNNING_PR_RLA)
-      throw new PluginError(`plugin ${p.use} would load pr-rla from ${found.dir}, not the pr-rla running it (${RUNNING_PR_RLA}); that copy is not in its tree hash, so it is not run in this process`, "TREE_ESCAPE", `remove pr-rla from the plugin's node_modules (it links against the pr-rla that runs it), or run it isolated: pr-rla plugin lock ${p.use} --trust isolated`);
+    if (found && found.dir !== RUNNING_PR_RLA) throw refuse(found.dir);
+    // Node resolves a package's own name before node_modules (self-reference): the nearest package.json counts too.
+    const scope = packageScope(dir);
+    if (scope && str(readPackageJson(scope)?.name) === "pr-rla" && realpathSync(scope) !== RUNNING_PR_RLA) throw refuse(`${scope} (package.json named pr-rla, which the plugin's imports of pr-rla/… resolve to)`);
+  }
+}
+
+/** The directory of the nearest package.json at or above `dir` (Node's package scope), or null. */
+function packageScope(dir: string): string | null {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, "package.json"))) return d;
+    if (dirname(d) === d) return null;
   }
 }
 
