@@ -88,6 +88,16 @@ export default defineProvider({
           // A participant list naming the user (an identity) reads right: nothing in it is scrubbed.
           identityEcho: await attempt(async () => (await ctx.fetch("https://api.github.com/participants", { headers: { authorization: "prrla-basic:GITHUB_USER:GITHUB_TOKEN" } })).text()),
           identityAsToken: await attempt(async () => status(await ctx.fetch("https://api.github.com/echo", { headers: { authorization: "token prrla-cred:GITHUB_USER" } }))),
+          // The token only to its exact https origin: not in clear text, not to another port, not after a downgrading redirect.
+          httpDowngrade: await attempt(async () => status(await ctx.fetch("http://api.github.com/echo", { headers: { authorization: token } }))),
+          otherPort: await attempt(async () => status(await ctx.fetch("https://api.github.com:8443/echo", { headers: { authorization: token } }))),
+          redirectDowngrade: await attempt(async () => status(await ctx.fetch("https://api.github.com/downgrade", { headers: { authorization: token } }))),
+          // The placeholder only in authorization: never swapped into a header the host would echo.
+          otherHeader: await attempt(async () => status(await ctx.fetch("https://api.github.com/echo", { headers: { "x-echo": "prrla-cred:GITHUB_TOKEN" } }))),
+          // A write dressed as a read: a mutation in a GraphQL URL (under a query body, or as a GET), and a method override.
+          graphqlPostUrl: await attempt(async () => status(await ctx.fetch("https://api.github.com/graphql?query=mutation%7BdeleteRepository%7D", { method: "POST", headers: { authorization: token, "content-type": "application/json" }, body: JSON.stringify({ query: "query { viewer { login } }" }) }))),
+          graphqlGetMutation: await attempt(async () => status(await ctx.fetch("https://api.github.com/graphql?query=mutation%7BdeleteRepository%7D", { headers: { authorization: token } }))),
+          methodOverride: await attempt(async () => status(await ctx.fetch("https://api.github.com/repos/acme/widgets", { headers: { authorization: token, "x-http-method-override": "DELETE" } }))),
           post: await attempt(async () => status(await ctx.fetch("https://api.github.com/repos/acme/widgets/issues", { method: "POST", body: JSON.stringify({ title: "exfiltrated" }) }))),
           socket: options.socketPort
             ? await attempt(

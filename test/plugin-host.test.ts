@@ -75,6 +75,8 @@ async function setupHostile() {
     // An echoing host (finding 5): the token comes back raw, encoded, in a header, the status text and a redirect's URL.
     if (url.pathname === "/echo-forms") return new Response(null, { status: 302, headers: { location: `/landing?t=${encodeURIComponent(token)}` } });
     if (url.pathname === "/landing") return new Response(JSON.stringify({ forms: tokenForms(token) }), { status: 200, statusText: `OK ${token}`, headers: { "content-type": "application/json", "x-echo": token } });
+    // A redirect from https to http on the same host (finding 4): the broker must not follow with the token.
+    if (url.pathname === "/downgrade") return new Response(null, { status: 302, headers: { location: "http://api.github.com/landing-in-clear-text" } });
     if (url.pathname === "/participants") return new Response(JSON.stringify({ values: [{ user: { name: SECRETS.GITHUB_USER } }, { user: { name: `${SECRETS.GITHUB_USER}a` } }, { user: { name: `b${SECRETS.GITHUB_USER}` } }] }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({ authorization: h.get("authorization") }), { status: 200, headers: { "content-type": "application/json", "x-echo": h.get("authorization") ?? "" } });
   }) as unknown as typeof fetch;
@@ -154,8 +156,21 @@ describe("the hostile fixture plugin, contained (functional-design.md §U2b; tes
         expect(seen.basicToUndeclaredHost).toMatchObject({ ok: false, code: "HOST_NOT_ALLOWED" });
         expect(seen.globalFetch).toMatchObject({ ok: false, code: "HOST_NOT_ALLOWED" });
         expect(seen.post).toMatchObject({ ok: false, code: "READ_ONLY_VIOLATION" });
-        expect(s.server.requests.map((r) => new URL(r.url).pathname)).toEqual(["/echo", "/echo", "/echo-forms", "/landing", "/participants"]);
+        expect(s.server.requests.map((r) => new URL(r.url).pathname)).toEqual(["/echo", "/echo", "/echo-forms", "/landing", "/participants", "/downgrade"]);
         expect(s.server.requests.every((r) => new URL(r.url).host === "api.github.com" && r.method === "GET")).toBe(true);
+      });
+
+      it("the token goes only to its exact https origin: not over http, not to another port, not after a downgrading redirect (finding 4)", () => {
+        for (const k of ["httpDowngrade", "otherPort", "redirectDowngrade"]) expect(seen[k], k).toMatchObject({ ok: false, code: "CREDENTIAL_HOST_MISMATCH" });
+        // The redirect's first hop was the granted origin; the http hop was never sent.
+        expect(s.server.requests.filter((r) => r.url.includes("downgrade") || r.url.includes("landing-in-clear-text")).map((r) => [r.url, r.authorization])).toEqual([["https://api.github.com/downgrade", `token ${SECRETS.GITHUB_TOKEN}`]]);
+        expect(s.server.requests.some((r) => r.url.startsWith("http:") || r.url.includes(":8443"))).toBe(false);
+      });
+
+      it("the placeholder is swapped only in authorization; GraphQL documents in the URL and method overrides are not reads (findings 5, 6)", () => {
+        expect(seen.otherHeader).toMatchObject({ ok: false, code: "CREDENTIAL_HEADER_NOT_ALLOWED" });
+        for (const k of ["graphqlPostUrl", "graphqlGetMutation", "methodOverride"]) expect(seen[k], k).toMatchObject({ ok: false, code: "READ_ONLY_VIOLATION" });
+        expect(s.server.requests.some((r) => r.url.includes("graphql") || r.url.includes("/repos/acme/widgets"))).toBe(false);
       });
 
       it("a token the host echoes back reaches it only as a placeholder, in every form: body, header, status text, redirect URL (finding 5)", () => {

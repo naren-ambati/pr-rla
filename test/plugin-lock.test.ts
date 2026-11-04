@@ -321,6 +321,9 @@ describe("trust: full loads only the pr-rla running it (finding 14)", () => {
 });
 
 describe("verify compares the provider it loads with the registered one (functional-design.md §U2b item 5)", () => {
+  // KNOWN GAP, left as it is on purpose: finding 2 of the plugin and broker review. A provider whose
+  // integrity differs from the registered one should make check 5 FAIL (and freeze refuse it); this
+  // test pins today's WARN. The identity round, after the other branches merge, fixes it and this test.
   it("a plugin re-locked after registration rebuilds the population with a WARN naming the difference", async () => {
     const s = withPlugin();
     expect((await cli(s, ["plugin", "add", USE, "--yes"])).code).toBe(0);
