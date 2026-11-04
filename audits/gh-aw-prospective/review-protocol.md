@@ -16,7 +16,9 @@ For every draw, the reviewer answers one question:
 ## What the reviewer reads
 
 1. **The diff**, without the generated files that gh-aw's `.gitattributes` marks `linguist-generated`. These include the compiled `*.lock.yml` workflows, `.changeset/*.md`, `pkg/workflow/js/*.cjs` and `actions/*/index.js`.
+   - Generated means marked in the `.gitattributes` of the commit the change was based on, not one the change itself supplies.
    - **Exception:** read a generated file if the change edits it with no matching edit to its source, or if the change touches only generated files.
+   - **Exception:** if the change edits any `.gitattributes` file, nothing is left out; read every file.
 2. **What the change claims to do.** For a pull request, that is its title, description and any linked or closed issue. For a direct push, it is the commit messages.
 3. **CI results** on the last commit before it landed.
 4. **The repository at the landing commit**, for whatever context the diff needs.
