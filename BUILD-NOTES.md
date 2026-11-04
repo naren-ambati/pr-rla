@@ -17,10 +17,11 @@ Working log for pr-rla v0.1: what is done, what is verified (with the command an
 | JSON-file provider | done, tested |
 | git-file ledger with append-only history check | done, tested |
 | Provider/ledger registry, SDK exports, conformance kit | done, tested |
-| github-issues ledger, GitHub Action, `review-draw` skill + `draw-context` | not started (day-3 items) |
+| GitHub Action, `review-draw` skill + `draw-context` | not started (day-3 items) |
 | Claim T, fixed plans, multi-repo freeze | not started (v0.2) |
 | Phase 3, bolt 1 (U1): RFC 3161 trusted time, k-of-n by operator, record schema v2, Rekor v2 client (mock-tested only) | done in bolt 1 (below) |
 | Phase 3, bolt 2 (U2a): the fetch broker (every outbound request), published-limit rate defaults, the `src/api` foundation | done in bolt 2 (below) |
+| Phase 3, bolt 3 (U4): `github-issues` and `gitlab-issues` ledgers, the ledger kit, the Jira example, ledger checkpoints and their git transport, `account` provenance | done in bolt 3 (below) |
 
 ## Architecture
 
@@ -701,3 +702,201 @@ npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, d
 - **The kit's harness retries requests that pass `destination`.** A ledger kit built on the same harness gets this for free.
 - **Recording public issue timelines:** route the recording fetch through `createBroker({}, { fetch: recordingFetch }).bind("ledger:github-issues")`, as the provider recorders now do, or use the broker's scrubbing `recorder`.
 - `test/helpers/fake-clock.ts` drives parallel waits; a test clock must advance on `sleep`.
+
+## Bolt 3 (U4): issue-tracker ledgers and ledger checkpoints (2026-11-03)
+
+Goal (delivery-plan.md, bolt 3): the built-in `github-issues` and `gitlab-issues` ledgers, verdicts read from label-event history, the ledger conformance kit, the external Jira example, TSA-stamped ledger checkpoints and their cross-clone git transport, `account` provenance with issue ledgers, and the gh-aw prospective audit ready for the founder's `register`. Settles RK-03 through read-only recordings of public issue timelines where they exist.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR4.1 `github-issues` and `gitlab-issues`; `publishDraws` opens one issue per draw, in draw order; verdicts are labels | met (one issue per drawn *change*: deviation 1) | `e2e-github-issues.test.ts › sample opens one issue per drawn change, in draw order`; `github-issues-ledger.test.ts › publishDraws (FR4.1)`; `gitlab-issues-ledger.test.ts › publishes at the self-managed base URL` |
+| FR4.2 verdicts from label-event history, the first eligible event counts, its actor and server time become `reviewer` and `recordedAt` | met | the kit's `first-label` check on every built-in fixture; `relabel-opposite` (a later opposite label still reports the first) |
+| FR4.3 every removal, re-add, swap, label edit, deletion, transfer and app-applied verdict reported; removal after counting FAILs; removal followed by a re-add WARNs | met (interpretation: deviation 4) | kit cases `relabel-same`, `relabel-opposite`, `removal`, `deletion` (deleted and transferred), `label-rename` (renamed, renamed and re-used, deleted), `app-applied`, `unlisted-reviewer`, on synthetic GitHub, GitLab and Jira and on six recorded GitHub timelines |
+| FR4.4 checkpoints from `status --checkpoint` and `checkpoint`; cross-clone appends through fetch, rebase, re-append, at most 3 attempts, never forced; identical lines read once | met | `git-transport.test.ts` (7, local bare repo); `e2e-github-issues.test.ts` (an erased event and a deleted issue show as `history rewritten after checkpoint`); `checkpoint.test.ts` (de-duplication) |
+| FR4.5 Jira as an external example, a single-select custom field read through the changelog API, passing the kit | met; in-process until bolt 4's host | `examples/ledgers/jira` (`npm test`: `# pass 1`); `jira-example.test.ts` |
+| FR4.6 `runLedgerConformance` in `pr-rla/testing`; both built-ins and the Jira example pass it | met | `github-issues-ledger.test.ts`, `github-issues-recorded.test.ts`, `gitlab-issues-ledger.test.ts`, the Jira package's test; `ledger-conformance.test.ts` shows each check failing on a broken ledger |
+| FR4.7 fixtures recorded read-only from public timelines where they exist, else synthetic; each marked | met | every JSON fixture has `"source": "recorded"`; every kit fixture declares `source`, and the kit refuses one that does not (Fixtures, below) |
+| FR4.8 GHES and GitLab self-managed base URLs: publish and read there | met (mock servers) | `› github-issues on GitHub Enterprise Server (FR4.8)`; `› publishes at the self-managed base URL` |
+| Ledger `writePaths()`; writes `idempotent: false` | met | `writePaths` on both built-ins and the Jira example; a write outside them is `WritePathNotAllowed` before it is sent (GHES test) |
+| GitLab issue-create (200/min) and note-create (60/min) in the defaults table, with the source | met | `src/net/rate-limits.ts`; two new rows in `broker.test.ts › NFR12` (source: https://docs.gitlab.com/user/gitlab_com/rate_limits/, re-read 2026-11-03) |
+| `account` provenance for issue ledgers, enforced | met | `register` defaults `verdicts.min_provenance` to the ledger's level (`account`); check 7 FAILs a counted verdict below the registered minimum (`e2e-github-issues.test.ts › FR3.8`) |
+| `audits/gh-aw-prospective/` passes `register`'s preflight | met; `register` not run | `gh-aw-prospective.test.ts` (a filled-in copy, `--dry-run` only) |
+| Demo: a recorded public timeline with a remove and re-add WARNs; a deleted-issue fixture FAILs | met, both on recorded data | `node scripts/demo-ledgers.mjs` (below) |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| Ledger SDK deltas, all optional within `ledgerApiVersion` 1: `VerdictEvent.provenance`, `Ledger.readHistory`, `LedgerHistoryEvent`, a publish context, `LedgerIntegrityReport.warnings`, `LedgerContext.sleep` / `reviewers`, `LedgerDefinition.provenance`; pure helpers `verdictIneligibility`, `analyzeDrawHistory`, `canonicalHistory`, `historyDiff` | `src/sdk/ledger.ts` |
+| The issue-tracker base (snapshot per command, verdicts, integrity, history, idempotent publish, record) and the draw → issue index | `src/ledgers/issue-ledger.ts`, `src/ledgers/issue-index.ts`, `src/ledgers/http.ts` |
+| `github-issues` (REST issue events; GHES through `base_url` or `api_url`) and `gitlab-issues` (`resource_label_events`; self-managed through `base_url`) | `src/ledgers/github-issues/`, `src/ledgers/gitlab-issues/` |
+| Eligibility and provenance in the core: bots, apps and unregistered reviewers ignored and reported; `VERDICT PROVENANCE` on status and verify; check 7 enforces `minProvenance`, FAILs on an unreadable ledger, WARNs on ledger warnings, compares checkpoints | `src/core/status.ts`, `src/core/verify.ts` |
+| The checkpoint record (pure), its files, the command, `status --checkpoint`, the git transport | `src/core/checkpoint.ts`, `src/api/checkpoint.ts`, `src/commands/checkpoint.ts`, `src/io/git-transport.ts` |
+| `verdicts:` in `.pr-rla.yml`, `register`'s ledger preflight, `base_url` inheritance, `sample` publishing with the protocol hash, `record` through an issue ledger | `src/config.ts`, `src/commands/{register,sample,record,status,verify}.ts` |
+| The ledger kit | `src/testing/ledger-conformance.ts` |
+| The Jira example, its recorder and its tests | `examples/ledgers/jira/` |
+| Recorder for public timelines (read-only broker) and the demo | `scripts/record-ledger-fixtures.mjs`, `scripts/demo-ledgers.mjs` |
+| Tests: 59 new | `e2e-github-issues` 14, `ledger-conformance` 10, `git-transport` 7, `checkpoint` 7, `github-issues-ledger` 6, `github-issues-recorded` 5, `gitlab-issues-ledger` 4, `jira-example` 3, `gh-aw-prospective` 3; helpers `fake-issue-trackers.ts`, `ledger-draws.ts` |
+
+### Fixtures (FR4.7)
+
+Recorded fixtures are read-only recordings of public trackers, trimmed to the fields pr-rla reads (no request headers, no names beyond public logins, no e-mail addresses). Synthetic ones are fake trackers built from the documented APIs and the recorded shapes.
+
+| Fixture | Source | What it shows |
+|---|---|---|
+| `test/fixtures/ledgers/github/relabel-same-nodejs-node-67038.json` | recorded | A maintainer applied `commit-queue-squash` (14:06:04Z), removed it (14:42:47Z) and applied it again (20:12:24Z). Mapped to pass: WARN `relabel (same verdict)`, the first event counts |
+| `…/first-label-microsoft-vscode-345779.json` | recorded | One human `bug` label: a clean first verdict, PASS |
+| `…/app-applied-microsoft-vscode-345652.json` | recorded | `unreleased` applied by the vs-code-engineering GitHub App: `actor.type: Bot`, `performed_via_github_app: null`; ignored by the bot rule |
+| `…/deleted-microsoft-vscode-345635.json` | recorded | A deleted issue: GitHub answers **404** (not 410). FAIL `deleted … its history is gone` |
+| `…/label-renamed-rust-lang-rust-30010.json` | recorded | `I-enhancement` (2015) since renamed `C-enhancement`: the old name 404s. FAIL |
+| `…/label-renamed-and-reused-rust-lang-rust-30003.json` | recorded | `T-libs` (id 211668062) renamed `T-libs-api`, and a new label (id 2011781731) took the name. The index's id catches it: FAIL |
+| `…/evidence-label-rename-rust-lang-rust.json` | recorded | REST events next to GraphQL timeline items for the same events (unverified item 2) |
+| `…/evidence-performed-via-app-github-gh-aw.json` | recorded | 300 repository issue events of github/gh-aw (unverified item 1) |
+| `test/fixtures/ledgers/gitlab/scoped-swap-gitlab-org-gitlab-633165.json` | recorded | GitLab's synthesized label notes for gitlab-org/gitlab#633165, including a human's scoped swap (unverified item 3) |
+| `examples/ledgers/jira/fixtures/hibernate-first-verdicts.json` | recorded | hibernate.atlassian.net HHH-17005 (single-select set to Approved: pass) and HHH-16971 (Rejected: fail) |
+| `examples/ledgers/jira/fixtures/hibernate-removal-HHH-14722.json` | recorded | Approved, then changed to Undecided 8 s later: FAIL, removal after counting |
+| Kit fixtures on `FakeGitHubIssues`, `FakeGitLabIssues`, `FakeJira` | synthetic | Every kit case, including all destructive ones (deleted and moved issues, deleted and renamed labels, an erased event), pagination past 100 events, idempotent publishing after a lost response and after a lost index, GHES and self-managed URLs |
+
+### Live reads (all read-only; 2026-11-03T23:40Z to 2026-11-04T00:51Z)
+
+- **GitHub REST, with the founder's `gh` token, GET only:** repository issue events (up to 30 pages each, and the final tally above) of microsoft/vscode, github/gh-aw, kubernetes/kubernetes, rust-lang/rust, dependabot/dependabot-core, home-assistant/core, nodejs/node, python/cpython, flutter/flutter, facebook/react, golang/go, microsoft/TypeScript and dotnet/runtime; per-issue events and label lookups on the recorded issues; microsoft/vscode issues 345600–345660 (to find a deleted one).
+- **GitHub GraphQL, queries only:** label timelines of rust-lang/rust #30000–#30040; microsoft/vscode #345635 and `hasDiscussionsEnabled`.
+- **GitLab.com, anonymous:** `resource_label_events` (HTTP 401), issue listings, GraphQL notes, and the web `discussions.json` of seven gitlab-org/gitlab issues and one gitlab-org/cli issue.
+- **Jira, anonymous:** hibernate.atlassian.net (Jira Cloud) REST v3 field list, `search/jql`, issue and changelog reads for about 50 HHH issues; one probe each to issues.apache.org (Data Center, 200), jira.mongodb.org (Data Center, 200) and bugs.openjdk.org (401).
+- **Pages read (WebFetch):** GitLab's "GitLab.com settings: rate limits" and "Rate limits on content creation".
+- The recorders (`scripts/record-ledger-fixtures.mjs`, `examples/ledgers/jira/scripts/record.mjs`, at 2026-11-04T00:23:32Z) send every request through the broker in **read-only** mode, so no write could leave. Nothing was written to any repo, project or tracker; no scratch repo was created; nothing was pushed.
+
+### Unverified items settled, and how
+
+1. **Whether GitHub fills `performed_via_github_app` on label events: settled, no.** A tally of the newest repository issue-event pages of eight repos (microsoft/vscode, github/gh-aw, kubernetes/kubernetes, rust-lang/rust, dependabot/dependabot-core, home-assistant/core, nodejs/node, python/cpython; about 2026-11-04T00:50Z) found 1,140 label events, 612 of them by `Bot` actors, and **none** with `performed_via_github_app` set. The apps seen include github-actions, dependabot, vs-code-engineering, kubernetes-prow, home-assistant, rust-bors and issue-triage-workflows. Apps show up as `actor.type: "Bot"`, so the bot rule is what ignores them. The field is filled on other events: `copilot_work_started` / `copilot_work_finished`, with a `User` actor and the app `copilot-swe-agent` or `copilot-pull-request-reviewer` (recorded in `evidence-performed-via-app-github-gh-aw.json`, asserted in `github-issues-recorded.test.ts`). The `viaApp` rule is kept, since it costs nothing. *Still unverified:* a label applied by an app through a user-to-server token (actor `User`); none was seen.
+2. **Whether GitHub REST keeps a label's original name after a rename: settled, yes.** rust-lang/rust #30003: the REST event of 2017-05-04T16:51:21Z says `T-libs`; GraphQL's `LabeledEvent` for the same time and actor says `T-libs-api`. #30010: REST `I-enhancement`, GraphQL `C-enhancement`. #30002: REST `A-traits`, GraphQL `A-trait-system`. **New finding:** after the rename a new label took the old name `T-libs` (id 2011781731; the original is 211668062). By name, the old events now look like the new label's. So the index records each verdict label's id at publish time, and a different id under the same name FAILs.
+3. **GitLab scoped-label swap events: partly settled.** GitLab's own label notes, synthesized from `resource_label_events` that share one user and one instant, show a swap as a single "added … label and removed … label" note. Example: gitlab-org/gitlab#633165, ifrenkel, 2026-10-09T17:42:45.113Z, added `workflow::in dev` and removed `workflow::refinement`; #632975 shows a `group::` swap. So the swap is one add and one remove at one instant. *Still unverified:* the REST `resource_label_events` JSON itself, which answers 401 without a token, even on public projects. The ledger reads a swap as a remove and an add, and the shared rules apply the removal first at one instant, which reports it as a relabel.
+4. **Jira Cloud's changelog format for a single-select field: settled.** The design expected only Data Center to be publicly readable, but hibernate.atlassian.net is Jira Cloud and serves `GET /rest/api/3/issue/{key}/changelog` anonymously. A select change is one item `{ field: "backportDecision", fieldtype: "custom", fieldId: "customfield_11702", from: "<option id>" | null, fromString: "<value>" | null, to: "<option id>", toString: "<value>" }`. `created` carries a local offset and milliseconds (`2023-07-28T03:43:22.045-0700`). Paging uses `startAt`, `maxResults`, `total` and `isLast`. The author is `{ accountId, accountType: "atlassian" | "app" }`.
+
+### Verified (command → output)
+
+From a fresh `git clone` of the repo at `c555eeb`, 2026-11-04T00:46Z, Node 22.23.2:
+
+```
+npm ci                                     → added 60 packages … found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 36 passed (36) · Tests 367 passed (367)
+npm --prefix examples/providers/gitea ci   → added 1 package … found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → added 1 package … found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1
+```
+
+- 367 tests = the 308 of bolt 2, unchanged except that `broker.test.ts › NFR12`'s table gained the two GitLab rows, plus 59 new (above). None skipped.
+- Every commit of the bolt was checked in a scratch worktree: typecheck clean and the suite passing at each (308, 308, 308, 324, 333, 333, 353, 353, 353, 356, 359, 359, 359, 359, 367).
+- `npm test` makes no network call: trackers are fakes or replayed recordings, the git transport uses a local bare repository, and mock authorities listen on 127.0.0.1, all under the network-deny harness.
+- No LICENSE file; `"private": true, "license": "UNLICENSED"` (also in the Jira example).
+
+**The demo** (`node scripts/demo-ledgers.mjs`, offline, in the clean clone):
+
+```
+nodejs/node#67038, commit-queue-squash mapped to pr-rla:pass  (source: recorded, recorded 2026-11-04T00:23:32.000Z)
+  event 35026589137  2026-11-03T14:06:04Z  labeled    commit-queue-squash  by RafaelGSS (User)
+  event 35030378986  2026-11-03T14:42:47Z  unlabeled  commit-queue-squash  by RafaelGSS (User)
+  event 35060730080  2026-11-03T20:12:24Z  labeled    commit-queue-squash  by RafaelGSS (User)
+  verdict: draw #1 pass by RafaelGSS at 2026-11-03T14:06:04Z (provenance account, event 35026589137)
+  verdict: draw #1 pass by RafaelGSS at 2026-11-03T20:12:24Z (provenance account, event 35060730080)
+  integrity: WARN
+    draw #1: commit-queue-squash removed and added again (relabel, same verdict); the first event (2026-11-03T14:06:04Z) counts
+
+microsoft/vscode#345635, deleted  (source: recorded, recorded 2026-11-04T00:23:32.000Z)
+  GET https://api.github.com/repos/microsoft/vscode/issues/345635 → HTTP 404
+  integrity: FAIL
+    draw #1 issue https://github.com/microsoft/vscode/issues/345635 deleted (HTTP 404); its history is gone
+
+Part 2: pr-rla verify, with an audit's ledger pointed at the recorded tracker (check 7)
+$ pr-rla verify     (ledger: relabel-same-nodejs-node-67038, recorded)
+  7. WARN labels: labels (prefix 1, 2 events)
+          VERDICT PROVENANCE: account (1) (registered minimum: self-asserted)
+          draw #1: commit-queue-squash removed and added again (relabel, same verdict); the first event (2026-11-03T14:06:04Z) counts
+  VERIFIED
+  (exit 0)
+$ pr-rla verify     (ledger: deleted-microsoft-vscode-345635, recorded)
+  7. FAIL labels: labels FAIL
+          VERDICT PROVENANCE: none counted (registered minimum: self-asserted)
+          draw #1 issue https://github.com/microsoft/vscode/issues/345635 deleted (HTTP 404); its history is gone
+  FAILED: check 7 (labels)
+  (exit 1)
+```
+
+Part 2 registers, freezes and samples a 200-change json-file audit offline (git-file ledger, so its minimum is `self-asserted`), then points its ledger at the recorded tracker, with the recorded issue standing for draw #1. The end-to-end test does the same on a synthetic GitHub with `github-issues` from registration on, and gets 7/7 PASS, `VERDICT PROVENANCE: account (35)` and a checkpoint with 2 of 2 tokens.
+
+### The gh-aw registration
+
+`audits/gh-aw-prospective/.pr-rla.yml` now uses the live `github-issues` ledger. Bolt 3 confirms the option names: `ledger.options.repo` and `verdicts: { min_provenance, reviewers }`. Four placeholders, marked `EDIT`, remain for the founder: `window.start`, `window.end`, `ledger.options.repo` (the audit repo, `owner/name`) and `verdicts.reviewers` (the founder's login). `register` refuses each placeholder by name. With all four filled in, `register --dry-run` prints `PROSPECTIVE`, `ledger github-issues · verdict provenance account · reviewers <login>` and the four default authorities with k = 2. `docs/gh-aw-prospective.md` has the steps. **`register` was not run.**
+
+### Deviations from the design, and why
+
+1. **One issue per drawn change, not per draw.** A change drawn twice reuses its first verdict, so a second issue would only invite a second verdict. Later draws of the change are listed in the index's `repeats` and point at its first issue; `record` on a repeat labels that issue.
+2. **The index keeps label ids,** and a verdict label whose name now belongs to another id FAILs. This follows from settled item 2: a rename can free the name for a new label.
+3. **Event lists are stored as `ledger-history/<takenAt, basic format>-<eventsSha256[0..12]>.json`,** not `<takenAt>.json`. Colons are refused on some file systems. Two clones checkpointing in the same second would otherwise collide, and with the hash in the name, the same name always means the same content.
+4. **FR4.3, as applied.** The counted verdict is the first eligible add. After it:
+   - the same label removed and added again is a WARN;
+   - the opposite label added (a swap, or both present) is a WARN;
+   - the counted verdict removed with **no verdict label left at the end** is a FAIL ("removal after counting").
+   At one instant a removal is applied before an add, so a select-field change or a scoped swap reads as a relabel. An event whose label the tracker erased (GitLab nulls deleted labels) is a FAIL. Integrity looks at every actor's events; counting looks only at eligible ones.
+5. **Eligibility lives in the core** (`computeStatus`), through the SDK's `verdictIneligibility`. `readVerdicts` returns every verdict-label add, including ineligible ones, so status and verify can report them as ignored, as the draft required. Bots are recognized by the SDK's `[bot]` suffix. Registered reviewers match a login or `id:<account id>` (the event's `provenance.actorId`), so U3's `Actor.id` is not needed.
+6. **FR9.4's enforcement is built now for the levels that exist.** Check 7 FAILs a counted verdict below `minProvenance`. `register` refuses a `min_provenance` the configured ledger cannot meet (`account` with `git-file`). U9 must relax that check when `git-file` gains signed commits.
+7. **`LedgerDefinition.provenance`** (new, optional) is where `register` gets the default minimum: `account` for the issue ledgers and the Jira example, otherwise `self-asserted`.
+8. **A credential declared with `hosts: []`** may be sent only to the hosts the ledger's `hosts(options)` declares. A definition's credential list is static, and a Jira site's host belongs to the user. The design named no mechanism for this.
+9. **`verify --offline` does not read a ledger that declares hosts.** Check 7 then SKIPs, saying which host it would need. The draft's offline status for issue ledgers was left to U5.
+10. **Draw issues carry a draw label** (`pr-rla:draw`, `pr-rla-draw`), which is how `publishDraws` lists them to find markers after a lost response or a lost index. On GitHub and GitLab the marker is an HTML comment in the body; in the Jira example it is the summary (Jira's search index can lag, so a lookup made immediately after a lost response may miss the issue).
+11. **`record` with an issue ledger applies the label as the token's account,** and `--reviewer` is optional for ledgers whose verdicts are `account`: the tracker records who applied it. `record` refuses only when a verdict that counts already exists.
+12. **The git transport:**
+    - untracked files do not count as a dirty tree;
+    - it rebases onto `FETCH_HEAD`, so `--remote/--branch` works without a tracking ref;
+    - a push that fails with "cannot lock ref" (a concurrent push) is retried like a non-fast-forward;
+    - a replayed commit that the union makes empty (the remote already holds the same checkpoint) is skipped;
+    - the re-run command after exit 4 is `pr-rla checkpoint --push`, which appends another checkpoint, since lines are only ever added.
+13. **A GitHub issue counts as moved when its `repository_url` is not the audit repo's.** This covers a transfer, whether or not the API redirects, and also a renamed audit repo; both FAIL, conservatively.
+14. **Ledger writes do not ask the broker for a JSON check.** They are never retried after a response, and Jira answers a PUT with 204, which `checkJsonBody` (`src/sdk/http.ts`) cannot rebuild (finding 4).
+15. **The Jira example notices a deleted verdict field,** but not a renamed option (that needs admin rights to read options). It matches values by name.
+16. **Checkpoint tokens in check 7:** a token failing rules 1–7 FAILs; too few tokens WARN with `TIMESTAMP NOT TAMPER-PROOF (n of k)`. `status --checkpoint` returns status's code, unless that is 0, in which case it returns the checkpoint's.
+
+### Findings
+
+1. **Verifying an issue ledger needs a token.** 36 draw issues take about 74 reads. Anonymous GitHub reads are paced at 60 per hour, so the e2e test's fake clock moved an hour before its token was set. Every verifier, not only the reviewer, needs some token.
+2. **GitHub answers 404 for a deleted issue** (vscode #345635), not the 410 the docs list. The ledger treats both as deleted.
+3. **Bots on user accounts apply labels** (`rustbot`, `nodejs-github-bot`, `rust-rfcbot`: `actor.type: "User"`). Only `verdicts.reviewers` stops them from counting, which is why the gh-aw configuration registers the founder's login.
+4. **`checkJsonBody` in `src/sdk/http.ts` throws on a 204** ("Invalid response status code 204"): it rebuilds the response with an empty-string body. Any broker request that passes `acceptJson` and gets a 204 hits it. It is avoided in the ledgers (deviation 14), not fixed: the file is U3's, and U3 is being built in parallel.
+5. **The Copilot coding agent's events carry a human actor with `performed_via_github_app` set** (`copilot_work_started` by a maintainer, via `copilot-swe-agent`). An assistant working through an app as a human is threat T7. Label events do not show it today, but the field is the signal to watch.
+6. **GitLab serves `resource_label_events` only to a token, even on public projects**, as phase 2 found for MR notes. Verifying `gitlab-issues` needs `read_api`.
+
+### Unverified
+
+- GitLab's REST `resource_label_events` JSON, including how a scoped swap and a deleted label (nulled on past events, per the draft) appear there. A token is needed; the fake follows the documented shape.
+- A GitHub label applied by an app through a user-to-server token.
+- Whether GitHub's REST API answers a transferred issue with 301 or 200 (both are handled).
+- Every write path on a real tracker: issue and label creation, label application, comments. They ran on mock servers only (D8). The same holds for GitHub's real secondary limits on 144 issue creations.
+- GHES and GitLab self-managed against real servers; Jira Data Center at all (the example targets Cloud); Jira's search-index lag for marker lookups; option renames in a Jira changelog.
+- The git transport against a real remote (authentication, network timeouts); only a local bare repository was used.
+- A checkpoint time-stamped by the real authorities (mock authorities only).
+
+### Notes for bolt 4 (U2b) and the merge
+
+- **A trial merge with `integrate/wave1` (in memory, nothing written) gives four textual conflicts:**
+  - `README.md`;
+  - `src/api/context.ts`: U2b split `openLedger` into `openBuiltinLedger` and `openExternalLedger`. Carry this bolt's additions into both paths: the `reviewers` option, `sleep` in the ledger context, `LEDGER_BUDGET_FAMILY` for built-ins, and host-less credentials resolved to the ledger's declared hosts;
+  - `src/commands/register.ts`: keep U2b's `pluginIdentity(…, auditContextFor(ctx).plugins)` and its trust lines, together with this bolt's `preflightLedger` and `verdicts`;
+  - `src/commands/verify.ts`: keep `const report = await verifyAudit(…)` and add this bolt's `checkpoints`, `checkpointProblems` and `ledgerSkipped`.
+  `config.ts`, `core/verify.ts`, `registry.ts`, `cli.ts`, `commands/status.ts`, `commands/context.ts` and `src/testing/*` merge cleanly.
+- **Four places load an external ledger's definition in-process.** Under the isolated host they must not:
+  - `register`'s `preflightLedger` calls `hosts`, `writePaths` and `create()`, with a fetch that refuses;
+  - `record` reads `provenance`;
+  - `verify` reads `hosts` for the offline skip.
+  For an isolated plugin, take `provenance`, `hosts` and `writePaths` from the lock entry, or from the child's `ready` message (adding `provenance` there is optional within `pr-rla/ipc/v1`). Run the preflight's `create()` in the child.
+- **The IPC `create` call must pass `LedgerContext.reviewers`.** The method list already has `readHistory`; `publishDraws` now takes a second argument (the publish context).
+- **The Jira example declares `credentials: [{ env, hosts: [] }]`.** The lock and the host must resolve an empty `hosts` the way `openLedger` does: to the hosts the ledger declares for its options. Its requests pass `destination`, `idempotent` and `retry` in the init; the IPC `fetch` message should carry them, or the broker should treat a child's requests as wired.
+- **`src/testing/conformance.ts` now exports `makeHarness` and `Fault`,** which the ledger kit uses. U3's kit changes merge cleanly with that.
+- **U3 owns `src/sdk/http.ts`:** please fix finding 4 (pass a `null` body for 204, 205 and 304 in `checkJsonBody`).
+- **For U9:** `register`'s refusal of `min_provenance: account` with `git-file` must give way once `require_signed` produces `account` and `presence` verdicts. Check 7 already compares levels by `provenanceRank`.
+- **For U7:** `command: checkpoint` maps to `pr-rla checkpoint --push`, with exit 1 (preconditions), 4 (stopped) and 5 (too few tokens). The transport needs a checkout with an upstream branch, or `--remote` and `--branch`.
