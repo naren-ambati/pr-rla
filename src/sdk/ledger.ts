@@ -15,9 +15,11 @@ export type Verdict = "pass" | "fail";
 
 /**
  * How much a verdict's `reviewer` and `recordedAt` can be trusted (contracts.md §1):
- * `self-asserted` (whatever the writer typed: git-file), `account` (an SCM or tracker account
- * did it, at a server-assigned time: issue ledgers), `presence` (U9: a signature with the
- * user-presence flag). Added in phase 3 within API version 1.
+ * `self-asserted` (whatever the writer typed: an unsigned git-file commit), `account` (an SCM or
+ * tracker account did it, at a server-assigned time: issue ledgers; or a git-file commit signed
+ * by the reviewer's registered SSH key), `presence` (U9: a git-file commit signed by the
+ * reviewer's registered FIDO security key, with the user-presence flag set; pr-rla does not check
+ * that the key is hardware-backed). Added in phase 3 within API version 1.
  */
 export type ProvenanceLevel = "self-asserted" | "account" | "presence";
 export const PROVENANCE_LEVELS: readonly ProvenanceLevel[] = ["self-asserted", "account", "presence"];
@@ -39,6 +41,10 @@ export interface VerdictProvenance {
   eventId?: string;
   /** Allowed-signers principal, for git-signed-commit (U9). */
   signer?: string;
+  /** git-signed-commit (U9): the signing key's `SHA256:` fingerprint, as `ssh-keygen -l` prints it. */
+  keyFingerprint?: string;
+  /** git-signed-commit with a FIDO security key (U9): the authenticator's signature counter. */
+  counter?: number;
 }
 
 export interface VerdictEvent {
@@ -247,8 +253,10 @@ const BOT_SUFFIX = "[bot]";
  * an account that is not on the list. Entries match as U3's selectors do (`actorMatches` in
  * src/core/selector.ts): `id:<account id>` matches the event's account id (`provenance.actorId`,
  * the `Actor.id` of the tracker's event) exactly, so it survives a renamed login; any other entry is
- * a login, matched case-insensitively, never an id. An ineligible event is ignored and reported, so
- * its draw stays unlabelled.
+ * a login, matched case-insensitively, never an id. An allowed-signers line (`principal keytype
+ * key`, U9: it has whitespace) registers its principals the same way; whether the verdict's commit
+ * is signed with that key is the ledger's provenance, not eligibility. An ineligible event is
+ * ignored and reported, so its draw stays unlabelled.
  */
 export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "provenance">, reviewers?: readonly string[] | null): string | null {
   const login = event.reviewer.trim().toLowerCase();
@@ -259,6 +267,7 @@ export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "pro
     const id = event.provenance?.actorId;
     const listed = reviewers.some((r) => {
       const entry = r.trim();
+      if (/\s/.test(entry)) return entry.split(/\s+/)[0]!.split(",").some((p) => p.toLowerCase() === login);
       return entry.startsWith("id:") ? id !== undefined && entry.slice(3) === id : entry.toLowerCase() === login;
     });
     if (!listed) return `${event.reviewer} is not a registered reviewer`;
