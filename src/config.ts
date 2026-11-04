@@ -7,6 +7,7 @@ import { validateParams } from "./core/sprt.js";
 import { resolveWindow, type ResolvedWindow } from "./core/window.js";
 import { parseRate, type RateLimitOverrides } from "./net/rate-limits.js";
 import { normalizePluginSpec, type PluginSpec } from "./registry.js";
+import { PROVENANCE_LEVELS, type ProvenanceLevel } from "./sdk/ledger.js";
 import { DEFAULT_AUTHORITIES, DEFAULT_MIN_TOKENS } from "./timestamp/bundle.js";
 
 export const CONFIG_FILE = ".pr-rla.yml";
@@ -30,6 +31,11 @@ export interface PrRlaConfig {
   timestamping: { authorities: string[]; minTokens: number };
   /** `rate_limits:` per host, replacing default budgets (NFR12): `{ "api.github.com": { rest: "5000/h", concurrency: 50 } }`. */
   rateLimits: RateLimitOverrides;
+  /**
+   * `verdicts:` (FR3.8): the minimum provenance a counted verdict needs (null: the ledger's own level,
+   * `account` for issue ledgers, else `self-asserted`) and the reviewers whose verdicts count (null: any non-bot account).
+   */
+  verdicts: { minProvenance: ProvenanceLevel | null; reviewers: string[] | null };
 }
 
 /** Issue ledgers that take their provider's self-hosted base_url when they set none (FR4.8). */
@@ -119,7 +125,27 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
     },
     timestamping: { authorities: authorities as string[], minTokens },
     rateLimits,
+    verdicts: parseVerdicts(raw.verdicts, configPath),
   };
+}
+
+/** `verdicts: { min_provenance: account, reviewers: [login, "id:<account id>"] }`. */
+function parseVerdicts(raw: unknown, configPath: string): PrRlaConfig["verdicts"] {
+  if (raw === undefined || raw === null) return { minProvenance: null, reviewers: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${configPath}: verdicts must be a mapping, e.g. verdicts: { min_provenance: account, reviewers: [alice] }`);
+  const v = raw as Record<string, unknown>;
+  for (const k of Object.keys(v)) if (k !== "min_provenance" && k !== "reviewers") throw new Error(`${configPath}: verdicts.${k} is not a setting (verdicts takes min_provenance and reviewers)`);
+  const min = v.min_provenance;
+  if (min !== undefined && min !== null && !PROVENANCE_LEVELS.includes(min as ProvenanceLevel)) throw new Error(`${configPath}: verdicts.min_provenance must be one of ${PROVENANCE_LEVELS.join(", ")}`);
+  let reviewers: string[] | null = null;
+  if (v.reviewers !== undefined && v.reviewers !== null) {
+    if (!Array.isArray(v.reviewers) || v.reviewers.some((r) => typeof r !== "string" || r.trim() === "")) throw new Error(`${configPath}: verdicts.reviewers must be a list of logins (or "id:<account id>")`);
+    const bad = (v.reviewers as string[]).find((r) => /[<>]/.test(r));
+    if (bad) throw new Error(`${configPath}: verdicts.reviewers: replace the placeholder ${JSON.stringify(bad)} with a login`);
+    if (v.reviewers.length === 0) throw new Error(`${configPath}: verdicts.reviewers is empty, so no verdict could count; list the reviewers, or leave it out to accept any account that is not a bot`);
+    reviewers = [...new Set((v.reviewers as string[]).map((r) => r.trim()))].sort();
+  }
+  return { minProvenance: (min ?? null) as ProvenanceLevel | null, reviewers };
 }
 
 /** `rate_limits:` checked for shape and rate syntax here; rule names are checked against the host's budget when it is used. */
