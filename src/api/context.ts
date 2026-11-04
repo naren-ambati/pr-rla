@@ -194,11 +194,13 @@ export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   const def = await loadLedgerDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
   const id = `ledger:${def.name}`;
+  const hosts = def.hosts?.(spec.options as never) ?? [];
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
-    hosts: def.hosts?.(spec.options as never) ?? [],
+    hosts,
     writePaths: def.writePaths?.(spec.options as never) ?? [],
-    credentials: def.credentials ?? [],
+    // A credential declared with no hosts goes only to the hosts the ledger declares for these options.
+    credentials: (def.credentials ?? []).map((c) => (c.hosts.length ? c : { ...c, hosts: [...hosts] })),
     ...(builtin && LEDGER_BUDGET_FAMILY[def.name] ? { budgetFamily: LEDGER_BUDGET_FAMILY[def.name] } : {}),
   });
   const ledger = await createLedger(spec, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });

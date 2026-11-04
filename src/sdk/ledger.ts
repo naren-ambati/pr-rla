@@ -139,7 +139,11 @@ export interface Ledger {
   readHistory?(): Promise<LedgerHistoryEvent[]>;
 }
 
-/** An environment variable a plugin may receive, and the hosts its value may be sent to. */
+/**
+ * An environment variable a plugin may receive, and the hosts its value may be sent to. An empty
+ * `hosts` (phase 3) means the hosts the ledger's `hosts(options)` declares, for trackers whose host
+ * is the user's own (a Jira site, a self-hosted server).
+ */
 export interface LedgerCredential {
   env: string;
   hosts: string[];
@@ -312,7 +316,9 @@ export interface DrawHistoryAnalysis {
  */
 export function analyzeDrawHistory(draw: number, events: readonly VerdictLabelEvent[], opts: { reviewers?: readonly string[] | null; labelOf: (v: Verdict) => string }): DrawHistoryAnalysis {
   const out: DrawHistoryAnalysis = { counted: null, warnings: [], failures: [], notes: [] };
-  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // At one instant a removal comes before an add: a select-field change or a scoped-label swap is one of each.
+  const rank = (e: VerdictLabelEvent) => (e.action === "remove" ? 0 : 1);
+  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
   const present = new Set<Verdict>();
   let lastRemoval: VerdictLabelEvent | null = null;
   for (const e of sorted) {
