@@ -299,9 +299,9 @@ describe("the accuracy pass", () => {
 });
 
 describe("hooks left for the rounds still running", () => {
-  it("every pending hook names the round that completes it, P1 (audit binding) or S1 (integration seams), and none may remain at release", () => {
+  it("every pending hook names the round that completes it (P1 audit binding, S1 integration seams, or a later P or S round), and none may remain at release", () => {
     const hooks = pendingHooks(markdownFiles(ROOT), ROOT) as { at: string; round: string }[];
-    expect(hooks.filter((h) => h.round !== "P1" && h.round !== "S1")).toEqual([]);
+    expect(hooks.filter((h) => !/^[PS]\d+$/.test(h.round))).toEqual([]);
     expect(all.pending).toEqual(hooks);
   });
 

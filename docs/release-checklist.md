@@ -92,7 +92,7 @@ If the answer is yes, the tarball holds `npm-shrinkwrap.json` beside `dist/`, `R
 
 ## 10. Resolve the pending hooks, regenerate the output blocks, run the doc check
 
-**Owner: maintainer** (FR8.2). The docs carry `<!-- pending P1: … -->` and `<!-- pending S1: … -->` hooks where the P1 (audit binding) and S1 (integration seams) rounds add behaviour; `npm run docs:check` lists them. Complete each section and remove its hook: there must be none at release. Then, after the last code change: `npm run build && npm run docs:outputs`, review the diff (every generated block and its date), commit it, and `npm run docs:check`. The check fails on an output block without its date, a block that no longer matches a fresh run, a broken relative link, a `pr-rla` command or option the CLI does not have, and an exit-code table that disagrees with `contracts.md` §7.
+**Owner: maintainer** (FR8.2). The docs carry `<!-- pending P1: … -->` and `<!-- pending S1: … -->` hooks where the P1 (audit binding) and S1 (integration seams) rounds add behaviour (and any later round may add its own); `npm run docs:check` lists them. Complete each section and remove its hook: there must be none at release. Then, after the last code change: `npm run build && npm run docs:outputs`, review the diff (every generated block and its date), commit it, and `npm run docs:check`. The check fails on an output block without its date, a block that no longer matches a fresh run, a broken relative link, a `pr-rla` command or option the CLI does not have, and an exit-code table that disagrees with `contracts.md` §7.
 
 ## 11. Verify from three fresh clones, on each platform you have
 
