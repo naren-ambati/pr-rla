@@ -96,7 +96,7 @@ describe("atomic writes (NFR15): a write killed part-way leaves the previous fil
       for (;;) writeFileAtomic(${JSON.stringify(target)}, big);
     `;
     for (const delayMs of [10, 25, 40, 70, 100, 150]) {
-      const p = spawn(process.execPath, ["--input-type=module", "-e", child], { stdio: ["ignore", "pipe", "inherit"] });
+      const p = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", child], { stdio: ["ignore", "pipe", "inherit"] });
       await new Promise<void>((r) => p.stdout!.once("data", () => r()));
       await new Promise((r) => setTimeout(r, delayMs));
       p.kill("SIGKILL");
