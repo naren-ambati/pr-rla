@@ -18,6 +18,7 @@ import {
   type ScmProvider,
 } from "../sdk/provider.js";
 import { bounded } from "../core/text.js";
+import { DESTINATION_TIMEOUT_MS } from "../net/contract.js";
 import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "../net/scrub.js";
 import { PluginError } from "./errors.js";
 import type { LockedCredential } from "./lock.js";
@@ -69,6 +70,17 @@ export const SDK_MODULES: Readonly<Record<string, string>> = {
   "pr-rla/ledger": resolveSibling("../sdk/ledger"),
   "pr-rla/http": resolveSibling("../sdk/http"),
 };
+
+/**
+ * How long a call may go without the host serving it anything (a fetch, a wait, an index read or write, an answer to
+ * its acceptJson question) before the host stops the child. Heartbeats do not count: a plugin that never returns
+ * heartbeats for ever, and the watchdog above, which they re-arm, would wait for ever too. Derived, not picked: the
+ * longest one request is served for (the slowest destination's timeout, DESTINATION_TIMEOUT_MS, times the attempts the
+ * broker allows, DEFAULT_MAX_RETRIES + 1) plus one heartbeat timeout as the margin for the plugin's own work between
+ * two requests (while a request or a wait is being served the host owns the time, and the broker and MAX_WAIT_MS bound
+ * it). A call that keeps asking for requests is bounded by the broker's budgets, not by this.
+ */
+export const CALL_IDLE_TIMEOUT_MS = Math.max(...Object.values(DESTINATION_TIMEOUT_MS)) * (DEFAULT_MAX_RETRIES + 1) + HEARTBEAT_TIMEOUT_MS;
 
 /** A wait that ends early, and clears its timer, when `signal` aborts. */
 export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -124,6 +136,8 @@ export interface HostOptions {
   heartbeatIntervalMs?: number;
   /** How long the child may take to start and report `ready` (default HEARTBEAT_TIMEOUT_MS). */
   loadTimeoutMs?: number;
+  /** How long a call may go without the host serving it anything, heartbeats aside (default CALL_IDLE_TIMEOUT_MS). */
+  callIdleTimeoutMs?: number;
   maxMessageBytes?: number;
   /** Arms the heartbeat watchdog (tests use a recording one). */
   setTimer?: (fire: () => void, ms: number) => () => void;
@@ -256,6 +270,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   const major = nodeMajor(execPath);
   const timeoutMs = o.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
   const loadMs = o.loadTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+  const idleMs = o.callIdleTimeoutMs ?? CALL_IDLE_TIMEOUT_MS;
   const maxBytes = o.maxMessageBytes ?? MAX_MESSAGE_BYTES;
   const setTimer = o.setTimer ?? realTimer;
   const scrub = scrubber(o.secrets ?? []);
@@ -331,6 +346,22 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   };
   /** The plugin's waits being served; each ends early when its controller aborts. */
   const sleeps = new Set<AbortController>();
+  // The call deadline: restarted by anything the host serves, suspended while it is serving a request, a wait or a question
+  // (the host owns that time), never restarted by a heartbeat or a log line (the child chooses those).
+  let disarmIdle: (() => void) | null = null;
+  let armedIdle = 0;
+  const armIdle = () => {
+    disarmIdle?.();
+    disarmIdle = null;
+    if (dead || closed || loading || pending.size === 0 || fetches.size > 0 || sleeps.size > 0 || accepts.size > 0) return;
+    const mine = ++armedIdle;
+    disarmIdle = realTimer(() => {
+      if (mine !== armedIdle || dead || closed) return;
+      const secs = idleMs < 10_000 ? String(idleMs / 1000) : String(Math.round(idleMs / 1000));
+      die(new PluginError(withTail(`plugin ${o.label} asked for no request, wait or index access for ${secs} s while a call was in flight, and was stopped (it kept sending heartbeats but never answered)`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a call that never returns; run the command again"));
+      child.kill("SIGKILL");
+    }, idleMs);
+  };
   /** The broker's questions to the plugin's acceptJson rule, by aid. */
   const accepts = new Map<number, { resolve: (problem: string | null) => void; reject: (e: unknown) => void }>();
   let nextAid = 1;
@@ -344,6 +375,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     // A wait is served only while a call is in flight (finding 13).
     if (!loading && pending.size === 0) stopSleeps();
     arm();
+    armIdle();
   };
 
   function die(e: PluginError): void {
@@ -351,6 +383,8 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     dead = e;
     disarm?.();
     disarm = null;
+    disarmIdle?.();
+    disarmIdle = null;
     stopSleeps();
     for (const a of accepts.values()) a.reject(e);
     accepts.clear();
@@ -545,15 +579,18 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         void (io?.sleep ?? realSleep)(Math.min(MAX_PLUGIN_SLEEP_MS, Math.max(0, Number(m.ms) || 0)), ctrl.signal).then(
           () => {
             sleeps.delete(ctrl);
+            armIdle();
             if (!ctrl.signal.aborted) reply({ type: "slept", sid: m.sid }, () => ({ type: "slept", sid: m.sid }));
           },
-          () => sleeps.delete(ctrl),
+          () => (sleeps.delete(ctrl), armIdle()),
         );
+        armIdle();
         return;
       }
       case "acceptResult": {
         const a = accepts.get((m as AcceptResultMessage).aid);
         accepts.delete((m as AcceptResultMessage).aid);
+        armIdle();
         if (!a) return;
         const r = m as AcceptResultMessage;
         if (typeof r.error === "string") a.reject(new Error(r.error));
@@ -564,6 +601,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
         io?.log(bounded(String(m.line)));
         return;
       case "index": {
+        armIdle();
         const store = io?.index;
         // The index is read and written whole (S1: one larger than a frame used to throw inside this handler, and the
         // child waited for an answer that never came). An answer that cannot be framed fails the child's index call.
@@ -628,6 +666,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
       if (closed) return;
       closed = true;
       disarm?.();
+      disarmIdle?.();
       live.delete(host);
       stopSleeps();
       for (const f of fetches.values()) f.abort();

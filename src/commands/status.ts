@@ -81,6 +81,12 @@ export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): 
   ctx.out(r.line);
   const refused = r.phase === "sampled" && r.verdictsRead && !!r.refusal;
   if (r.phase !== "unregistered" && !refused && r.timestampAnchors.length) ctx.out(`  timestamp anchors: ${r.timestampAnchors.join(" · ")}`);
+  // Verdicts not read: what verify's offline checks and check 7's local rules would FAIL still shows, and status exits 1 on it.
+  if (r.phase === "sampled" && !r.verdictsRead) {
+    for (const f of r.offlineFails) ctx.out(`  ${f}`);
+    for (const f of r.ledgerGate.fails) ctx.out(`  FAIL ${f}`);
+    return;
+  }
   if (r.phase !== "sampled" || !r.verdictsRead || r.refusal) return;
   for (const f of r.ledgerIntegrity?.fails ?? []) ctx.out(`  ledger integrity FAILs: ${f}`);
   for (const w of r.ledgerIntegrity?.warnings ?? []) ctx.out(`  WARN ${w}`);

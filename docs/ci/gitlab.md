@@ -20,8 +20,8 @@ Components work only from the same GitLab instance, so a self-managed instance m
 | Input | Default | Meaning |
 |---|---|---|
 | `version` | `0.1.0` | The exact pr-rla version to install. The input's regex rejects a range or a tag |
-| `integrity` | empty | Optional `sha512-…`; the job stops unless npm reports that integrity for `version` |
-| `command` | `status` | `status` or `verify` |
+| `integrity` | empty | The `sha512-…` integrity of `version`. **Set it**: empty means "not pinned by content". When set, the job installs into its own tool directory and stops unless the installed package has that integrity (read from `node_modules/.package-lock.json`, not from a registry query, and with no `.npmrc` of the project read) |
+| `command` | `status` | `status` or `verify`. `status` never reports CERTIFIED (it does not rebuild the population; a target reached exits 6, `CERTIFICATE WITHHELD`); only `verify` with `offline: "false"` can |
 | `dir` | `.` | The audit repository directory (where `.pr-rla.yml` is) |
 | `audit-path` | `audit/**/*` | A push that changes a file matching this starts the job |
 | `offline` | `"true"` | Pass `--offline`: no provider calls, no population rebuild |
@@ -55,8 +55,8 @@ pr-rla-status:
   image: node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
   variables:
     PRRLA_VERSION: "0.1.0"        # one exact version, never a range or a tag
-    PRRLA_INTEGRITY: ""           # optional: the sha512-... integrity npm reports for that version
-    PRRLA_COMMAND: "status"       # status or verify
+    PRRLA_INTEGRITY: ""           # the sha512-... integrity of that version. EMPTY = NOT PINNED by content: set it
+    PRRLA_COMMAND: "status"       # status or verify (only verify, with PRRLA_OFFLINE "false", can report CERTIFIED)
     PRRLA_DIR: "."
     PRRLA_OFFLINE: "true"
     PRRLA_FAIL_ON: "escalate,refusal,timestamps,incomplete"
@@ -159,13 +159,24 @@ pr-rla-status:
       export PR_RLA_APPROVALS_FILE="$prrla_tmp/pr-rla-approvals.json"
 
       # 3. Install the pinned version. PRRLA_BIN skips the install (an image that already has it); the version is checked either way.
+      #    Every npm call runs from the tool directory, with its own empty user and global npm config (the project's .npmrc and
+      #    the runner's are not read) and an explicit registry. The pin is compared with the integrity npm recorded for what it
+      #    installed (node_modules/.package-lock.json), never with what a registry query says. An empty PRRLA_INTEGRITY means "not
+      #    pinned": set it.
       if [ -z "${PRRLA_BIN:-}" ]; then
         PRRLA_HOME="${TMPDIR:-/tmp}/pr-rla-tool"
+        mkdir -p "$PRRLA_HOME"
+        : > "$PRRLA_HOME/npmrc-user"
+        : > "$PRRLA_HOME/npmrc-global"
+        (
+          cd "$PRRLA_HOME"
+          NPM_CONFIG_USERCONFIG="$PRRLA_HOME/npmrc-user" NPM_CONFIG_GLOBALCONFIG="$PRRLA_HOME/npmrc-global" \
+            npm install --prefix "$PRRLA_HOME" --registry https://registry.npmjs.org/ --ignore-scripts --no-audit --no-fund --no-package-lock "pr-rla@$PRRLA_VERSION"
+        )
         if [ -n "${PRRLA_INTEGRITY:-}" ]; then
-          prrla_seen=$(npm view "pr-rla@$PRRLA_VERSION" dist.integrity)
-          [ "$prrla_seen" = "$PRRLA_INTEGRITY" ] || { echo "pr-rla@$PRRLA_VERSION has integrity $prrla_seen, not the $PRRLA_INTEGRITY you pinned" >&2; exit 1; }
+          prrla_seen=$(cd "$PRRLA_HOME" && node -e 'try{const l=JSON.parse(require("node:fs").readFileSync("node_modules/.package-lock.json","utf8"));process.stdout.write(String(l.packages?.["node_modules/pr-rla"]?.integrity??""))}catch{}')
+          [ "$prrla_seen" = "$PRRLA_INTEGRITY" ] || { echo "pr-rla@$PRRLA_VERSION installed with integrity ${prrla_seen:-unknown}, not the $PRRLA_INTEGRITY you pinned" >&2; exit 1; }
         fi
-        npm install --prefix "$PRRLA_HOME" --ignore-scripts --no-audit --no-fund --no-package-lock "pr-rla@$PRRLA_VERSION"
         PRRLA_BIN="$PRRLA_HOME/node_modules/.bin/pr-rla"
       fi
       [ "$("$PRRLA_BIN" --version)" = "$PRRLA_VERSION" ] || { echo "the pr-rla at $PRRLA_BIN is not version $PRRLA_VERSION" >&2; exit 1; }

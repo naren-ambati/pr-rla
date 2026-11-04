@@ -49,7 +49,11 @@ export class LedgerHttp {
   }
 
   url(pathOrUrl: string): string {
-    return /^https?:\/\//.test(pathOrUrl) ? pathOrUrl : `${this.baseUrl}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    if (!/^https?:\/\//.test(pathOrUrl)) return `${this.baseUrl}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    // A rel="next" link is the server's word, and these headers carry the credential: another origin than the API root's is refused.
+    const root = new URL(this.baseUrl).origin;
+    if (new URL(pathOrUrl).origin !== root) throw new LedgerHttpError(`${this.o.ledger}: refusing ${pathOrUrl}: it is not on the API origin ${root}, and the request would carry the credential there`, 400, pathOrUrl);
+    return pathOrUrl;
   }
 
   /** One JSON request. Statuses in `accept` (e.g. 404, 410) come back to the caller; any other non-2xx throws. */

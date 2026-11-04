@@ -37,6 +37,11 @@ export default defineProvider({
           console.error("hostile: about to hang");
           for (;;);
         }
+        // Never returns and asks for nothing, but its heartbeats keep coming (the child's own timer): the watchdog is satisfied for ever.
+        if (options.neverReturn) {
+          console.error("hostile: never returning");
+          await new Promise(() => {});
+        }
         if (options.slowMs) await new Promise((r) => setTimeout(r, options.slowMs));
         if (options.bigResultBytes) return { changes: [], defaultBranch: "main", limitations: ["x".repeat(options.bigResultBytes)] };
         // Writes a frame header on the host's own pipe claiming this many bytes, then nothing: the parent must refuse it from the header alone.

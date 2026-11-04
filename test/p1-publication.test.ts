@@ -8,7 +8,7 @@ import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
-import { statusCommand } from "../src/commands/status.js";
+import { printStatus, statusCommand } from "../src/commands/status.js";
 import { runVerify } from "../src/commands/verify.js";
 import { check7Gate } from "../src/api/read/ledger-gate.js";
 import { configFor, trustFor } from "../src/api/session.js";
@@ -432,7 +432,8 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
   it("a certifying audit whose publication is short of tokens: status withholds the certificate as INCOMPLETE (exit 6), and verify's check 7 is INCOMPLETE", async () => {
     const { s } = await seamAudit({ allPass: true });
     const st0 = (await apiStatus(s.ctx, {})) as Extract<Awaited<ReturnType<typeof apiStatus>>, { verdictsRead: true }>;
-    expect(st0.certificate.state).toBe("CERTIFIED");
+    // The control: the target is reached and the only withholding is status's standing one (it never rebuilds the population).
+    expect(st0.certificate).toMatchObject({ state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] });
     // One of the publication's two tokens taken away (tokens are outside the signed record): it is short, nothing in it is false.
     const pubs = readJ<{ publications: { timestamps: { tsa: string }[] }[] }>(s, `${W}/ledger-publication.json`);
     pubs.publications[0]!.timestamps = pubs.publications[0]!.timestamps.filter((t) => t.tsa !== "test-b");
@@ -441,7 +442,7 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     expect(st.sequence.state).toBe("CERTIFIED");
     expect(st.ledgerGate.fails).toEqual([]);
     expect(st.ledgerGate.incompletes.length).toBeGreaterThan(0);
-    expect(st.certificate).toMatchObject({ state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "verify check 7 would be INCOMPLETE: the draw → issue mapping is not established (a publication short of tokens)" }] });
+    expect(st.certificate).toMatchObject({ state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "verify check 7 would be INCOMPLETE: the draw → issue mapping is not established (a publication short of tokens)" }, { verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] });
     expect(st.certified).toBe(false);
     expect(statusExitCode(st)).toBe(6);
     const v = await runVerify(s.ctx, {});
@@ -458,6 +459,30 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     const r = await read.status({ dir: s.dir }, { nowMs: () => s.clock.now });
     expect(r).toMatchObject({ phase: "sampled", verdictsRead: false });
     expect((r as unknown as { ledgerGate: { fails: string[] } }).ledgerGate.fails.join("\n")).toMatch(/the ledger index carries foreignIssues/);
+  });
+
+  // Final fix round, item 5: with the tracker not read, status used to skip the offline core and exit 0 whatever the gate said.
+  it("offline status exits 1 when check 7's local rules FAIL, and prints the FAIL", async () => {
+    const s = clone();
+    remap(s, { editBodies: false, foreign: true });
+    const r = await read.status({ dir: s.dir }, { nowMs: () => s.clock.now });
+    expect(r).toMatchObject({ phase: "sampled", verdictsRead: false });
+    expect(statusExitCode(r)).toBe(1);
+    const lines: string[] = [];
+    printStatus({ out: (l: string) => void lines.push(l) }, r);
+    expect(lines.join("\n")).toMatch(/ {2}FAIL the ledger index carries foreignIssues/);
+  });
+
+  it("offline status runs the offline core (checks 1, 2, 3, 4 and 6) and exits 1 on what verify FAILs, with no tracker read", async () => {
+    const s = clone();
+    // The review protocol changed since registration: verify's check 1 FAILs it, and so must offline status.
+    appendFileSync(join(s.dir, "review-protocol.md"), "\nA sentence added after registration.\n");
+    const r = (await read.status({ dir: s.dir }, { nowMs: () => s.clock.now })) as Extract<Awaited<ReturnType<typeof apiStatus>>, { verdictsRead: false }>;
+    expect(r.verdictsRead).toBe(false);
+    expect(r.offlineChecks.map((c) => c.n)).toEqual(expect.arrayContaining([1, 2, 3, 4, 6]));
+    expect(r.offlineFails.join("\n")).toMatch(/verify check 1 \(registration\) would FAIL/);
+    expect(statusExitCode(r)).toBe(1);
+    expect((await runVerify(s.ctx, { offline: true })).verdict).toBe("FAILED");
   });
 });
 

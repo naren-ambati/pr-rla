@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { createAuditContext, openLedger, openProvider, type AuditContext } from "../src/api/context.js";
 import { buildProgram } from "../src/cli.js";
 import { hostedProviderConformance, readRecordedFixture } from "../src/plugins/check.js";
-import { abortableSleep, closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, MAX_PLUGIN_FETCHES, MAX_PLUGIN_SLEEP_MS, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
+import { abortableSleep, CALL_IDLE_TIMEOUT_MS, closeAllPluginHosts, describePlugin, hostedProvider, isolationLine, MAX_PLUGIN_FETCHES, MAX_PLUGIN_SLEEP_MS, nodeMajor, startPluginHost, type HostOptions, type PluginHost } from "../src/plugins/host.js";
 import { placeholderEnv, readGrants, resolvePlugin, verifyLocked } from "../src/plugins/lock.js";
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS, IPC_PROTOCOL, MAX_MESSAGE_BYTES } from "../src/plugins/protocol.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
@@ -426,6 +426,27 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
     const started = Date.now();
     await expect(list(await hostedProvider(silent, { hang: true }, ctx))).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT", message: expect.stringMatching(/sent no heartbeat for 1\.5 s and was stopped/) });
     expect(Date.now() - started).toBeGreaterThanOrEqual(TIMEOUT - 50);
+  });
+
+  // Final fix round, item 7: heartbeats re-arm the watchdog, so a plugin that heartbeats and never returns hung the CLI for ever.
+  it("a call that never returns, heartbeats included, is stopped by the call deadline (derived from the broker's request limits)", async () => {
+    // 30 s (the slowest destination) x 7 attempts (the broker's cap) + one 60 s heartbeat timeout of margin.
+    expect(CALL_IDLE_TIMEOUT_MS).toBe(30_000 * 7 + 60_000);
+    const host = await hostileHost({ heartbeatIntervalMs: 50, callIdleTimeoutMs: 600 });
+    const started = Date.now();
+    await expect(list(await hostedProvider(host, { neverReturn: true }, ctx))).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT", message: expect.stringMatching(/asked for no request, wait or index access for 0\.6 s while a call was in flight, and was stopped[\s\S]*hostile: never returning/) });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(550);
+    expect(host.stats().heartbeats).toBeGreaterThanOrEqual(3); // the watchdog was satisfied the whole time
+  });
+
+  it("a call the host is serving (a wait longer than the deadline) is not stopped by it", async () => {
+    const host = await hostileHost({ heartbeatIntervalMs: 50, callIdleTimeoutMs: 400 });
+    try {
+      const p = await hostedProvider(host, { sleepMs: 1_200 }, ctx);
+      expect((await list(p)).limitations).toEqual(["slept"]);
+    } finally {
+      host.close();
+    }
   });
 
   it("the heartbeat timeout counts from ready: start-up has its own limit, loadTimeoutMs", async () => {

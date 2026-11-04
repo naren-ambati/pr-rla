@@ -132,7 +132,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
 
   program
     .command("status")
-    .description("longest fully labelled prefix, LLR vs target, and CERTIFIED / n more needed / ESCALATE")
+    .description("longest fully labelled prefix, LLR vs target, and n more needed / target reached (certificate withheld until verify) / ESCALATE")
     .option("--json", "machine-readable output")
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
     .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")

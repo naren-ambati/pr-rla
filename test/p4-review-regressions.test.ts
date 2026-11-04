@@ -264,7 +264,7 @@ describe("INFO: status never says CERTIFIED where verify FAILs check 7 (it walks
     expect(c7(after.r).status).toBe("FAIL");
     expect(certified(after.status), after.status).toBe(false);
     // The one certificate line (time round B): the target is reached, the certificate withheld, and the reason names check 7.
-    expect(after.status).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
+    expect(after.status).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs; population not verified: run `pr-rla verify`\)/);
     expect(after.status).toMatch(/ledger integrity FAILs: audit\/2026-q3\/verdicts\.jsonl was deleted in commit/);
     // --json says the same.
     const out: string[] = [];
@@ -274,7 +274,7 @@ describe("INFO: status never says CERTIFIED where verify FAILs check 7 (it walks
     // sequence.state is the SPRT's raw state; the claim is `certified` and `certificate`.
     expect(json.sequence.state).toBe("CERTIFIED");
     expect(json.certified).toBe(false);
-    expect(json.certificate).toEqual({ state: "WITHHELD", withheld: [{ verdict: "FAILED", reason: "verify check 7 would FAIL: the ledger's integrity check FAILs" }] });
+    expect(json.certificate).toEqual({ state: "WITHHELD", withheld: [{ verdict: "FAILED", reason: "verify check 7 would FAIL: the ledger's integrity check FAILs" }, { verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] });
     expect(json.certificateWithheld).toEqual(["the ledger's integrity check FAILs"]);
     expect(json.ledgerIntegrity.ok).toBe(false);
     expect(json.ledgerIntegrity.fails.join("\n")).toMatch(/was deleted in commit/);

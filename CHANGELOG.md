@@ -57,6 +57,16 @@ Nothing was released before 0.1.0, so no released audit is affected. Audits made
 - **One offline verify core.** `status` runs verify's checks 1, 2, 3, 4 and 6 (and the check-7 gate) on the same records, so it never shows CERTIFIED where `verify` would FAIL: each FAIL is a FAILED withholding (exit 1, `offlineFails` in `--json`). A schema-v1 audit's check 6 is INCOMPLETE, and a v2 registration without `publicKeyPem` FAILs check 1. A FAIL shown from local evidence (the ledger index, the checkpoint file, the registered identity) stays a FAIL when the ledger's reads were refused for want of a credential.
 - **`verify --registration <sha256>`, `status --registration` and `status --log-key`.** Pin the registration's SHA-256 you were handed before R published (prospective: before the window opened), and the transparency logs you trust; a status of a frozen audit below the minimum reports the refusal, exit 3.
 
+### Final fix round (changes to outputs)
+
+- **Only `verify` prints CERTIFIED.** `status`, `audit_list` and the MCP `status` tool never rebuild the population (check 5), so a target the sequential test has reached now reads `target reached · CERTIFICATE WITHHELD (population not verified: run \`pr-rla verify\`)`, `certified` is false, and `status` exits 6 (1 where a check would FAIL). The Action's `state` output is `WITHHELD` for it; `CERTIFIED` comes from an online `verify`.
+- **Check 3 compares the registration's proven time with R.** A registration whose tokens prove it existed only after round R was public now FAILs check 3, and the verifier holds its own clock tolerance and default accuracy (600 s and 60 s): a record that states other values FAILs checks 1 and 2, and a checkpoint or publication stamped under them is not proven.
+- **`status` with the tracker not read** (`audit_list`, the MCP default) runs the offline core too, carries `offlineChecks` and `offlineFails`, and exits 1 on what verify would FAIL.
+- **A next-page link on another origin is refused** by the GitHub, GitLab, Bitbucket and issue-ledger clients before anything is sent (the credential rides on every request they make).
+- **A plugin call that asks the host for nothing for `CALL_IDLE_TIMEOUT_MS` (270 s) while it keeps sending heartbeats is stopped** (`PLUGIN_HOST_TIMEOUT`).
+- **The CI install pins what was installed.** The GitLab component and snippet and the Bitbucket step install into their tool directory first, with their own empty npm config and an explicit `--registry`, then compare `PRRLA_INTEGRITY` with the integrity npm recorded for the installed package. An empty pin means "not pinned": set it.
+- **The Claude Code guard** blocks a glob that can match a protected file or the approvals file, whether or not the file exists yet (`verdicts.jso?l`, `appr?vals.json`, `~/.config/pr-r?a/approvals.json`, `~/.config/pr-rla/*`).
+
 ### Known limits
 
 The limits that ship with 0.1.0 are stated where they apply: [`docs/security-model.md`](docs/security-model.md) (each threat and its residual), [`docs/compatibility.md`](docs/compatibility.md) (what is verified live and what only on fixtures) and the README's Limitations.

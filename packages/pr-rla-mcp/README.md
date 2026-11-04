@@ -39,7 +39,7 @@ Every tool is annotated `readOnlyHint: true`. Every result is `structuredContent
 | Tool | Input | Output | `openWorldHint` |
 |---|---|---|---|
 | `audit_list` | `dir?` | `{ dir, windows: [{ name, phase, configured, mode, N?, drawsIssued?, certified?, line }] }` | false |
-| `status` | `dir?`, `window?`, `offline` (default `true`) | the status result of the window's phase, with its certificate line, `certified` and `certificate` (`sequence.state` is the SPRT's raw state, not the claim); never appends a checkpoint | true |
+| `status` | `dir?`, `window?`, `offline` (default `true`) | the status result of the window's phase, with its certificate line, `certified` and `certificate` (`sequence.state` is the SPRT's raw state, not the claim); never certifies (status does not rebuild the population, so a target reached reads `CERTIFICATE WITHHELD (population not verified: run pr-rla verify)` and `certified` is false: only `verify` certifies); never appends a checkpoint | true |
 | `draws` | `dir?`, `window?`, `from?`, `limit?` (≤ 200) | the issued draws with their verdict state, and the blocking draw | false |
 | `draw_context` | `dir?`, `window?`, `draw`, `maxPatchBytes?` (≤ 1 MiB, default 200 KiB) | the draw context: `untrusted` holds the change's own text, and `text` fences it | true |
 | `verify` | `dir?`, `window?`, `offline` (default `true`) | the seven checks (a check whose summary line stands for many repos carries each repo's line in `verbose`, as `pr-rla verify --verbose` prints them), the `verdict` (VERIFIED, FAILED, or INCOMPLETE: nothing failed but part could not be established or was skipped, so offline it is never VERIFIED), `certified` and the `exitCode` `pr-rla verify` gives (0, 1, 6) | true |

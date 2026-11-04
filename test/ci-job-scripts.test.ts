@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -124,12 +124,21 @@ describe.each(targets)("$name: the script", (t) => {
     expect(t.artifacts).toEqual(["pr-rla.json"]);
   });
 
-  it("CERTIFIED passes: the certificate line is in the log, pr-rla.json is the --json output, and the command is pinned and builtin-only", async () => {
+  it("status never certifies (final fix round): a reached target is WITHHELD, population not verified, exit 6, and the job fails unless fail-on leaves incomplete out", async () => {
     const j = await job(t, { dir: certified, trust: proven.tsaTrust });
+    expect(j.code).not.toBe(0);
+    expect(j.stdout).toMatch(/prefix 36\/36 · fails 0 .* target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
+    expect(j.stdout).not.toMatch(/CERTIFIED \(risk/);
+    expect(j.stdout).toContain("pr-rla: fail (exit 6: INCOMPLETE");
+    expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: false, certificate: { state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] } });
+  });
+
+  it("CERTIFIED passes, from an online verify: the certificate line is in the log, pr-rla.json is the --json output, and the command is pinned and builtin-only", async () => {
+    const j = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "false" } });
     expect(j.code, j.stderr).toBe(0);
     expect(j.stdout).toMatch(/prefix 36\/36 · fails 0 .* CERTIFIED \(risk 5%\)/);
     expect(j.stdout).toContain("pr-rla: pass (exit 0)");
-    expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
+    expect(j.json()).toMatchObject({ verdict: "VERIFIED", certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
     expect(j.denied).toEqual([]);
   });
 
@@ -212,33 +221,60 @@ describe.each(targets)("$name: the script", (t) => {
     });
 
     describe("the install", () => {
-      /** A fake npm first on PATH: `view` prints FAKE_NPM_INTEGRITY; `install --prefix P` puts the real CLI at P/node_modules/.bin. */
+      /**
+       * A fake npm first on PATH. `view` prints FAKE_NPM_VIEW (what a registry query, read through the project's .npmrc, could
+       * be made to say); `install --prefix P` logs its directory, its npm config variables and its arguments, puts the real CLI
+       * at P/node_modules/.bin and records FAKE_NPM_INTEGRITY in P/node_modules/.package-lock.json, as npm 7+ does.
+       */
       function fakeNpm(): { dir: string; log: () => string } {
         const dir = mkdtempSync(join(tmpdir(), "prrla-fake-npm-"));
         const logFile = join(dir, "npm.log");
-        writeBin(dir, "npm", `echo "$@" >> "${logFile}"\ncase "$1" in\n  view) echo "$FAKE_NPM_INTEGRITY" ;;\n  install)\n    prefix=""\n    while [ $# -gt 0 ]; do if [ "$1" = "--prefix" ]; then prefix=$2; fi; shift; done\n    mkdir -p "$prefix/node_modules/.bin"\n    cp "$FAKE_PRRLA" "$prefix/node_modules/.bin/pr-rla"\n    ;;\nesac`);
+        writeBin(
+          dir,
+          "npm",
+          `case "$1" in\n  view) echo "view $*" >> "${logFile}"; echo "$FAKE_NPM_VIEW" ;;\n  install)\n    echo "cwd=$(pwd -P) user=$NPM_CONFIG_USERCONFIG global=$NPM_CONFIG_GLOBALCONFIG $*" >> "${logFile}"\n    prefix=""\n    while [ $# -gt 0 ]; do if [ "$1" = "--prefix" ]; then prefix=$2; fi; shift; done\n    mkdir -p "$prefix/node_modules/.bin"\n    cp "$FAKE_PRRLA" "$prefix/node_modules/.bin/pr-rla"\n    printf '{"lockfileVersion":3,"packages":{"node_modules/pr-rla":{"version":"0.1.0","integrity":"%s"}}}' "$FAKE_NPM_INTEGRITY" > "$prefix/node_modules/.package-lock.json"\n    ;;\nesac`,
+        );
         return { dir, log: () => (existsSync(logFile) ? readFileSync(logFile, "utf8").trim() : "") };
       }
-      const install = (extra: Record<string, string>, npm: ReturnType<typeof fakeNpm>) => job(t, { dir: certified, trust: proven.tsaTrust, path: npm.dir, env: { PRRLA_BIN: "", FAKE_PRRLA: cliShim(mkdtempSync(join(tmpdir(), "prrla-real-"))), FAKE_NPM_INTEGRITY: "sha512-abc", ...extra } });
+      const install = (extra: Record<string, string>, npm: ReturnType<typeof fakeNpm>) => job(t, { dir: certified, trust: proven.tsaTrust, path: npm.dir, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "false" }, env: { PRRLA_BIN: "", FAKE_PRRLA: cliShim(mkdtempSync(join(tmpdir(), "prrla-real-"))), FAKE_NPM_INTEGRITY: "sha512-abc", FAKE_NPM_VIEW: "sha512-abc", ...extra } });
 
-      it("installs the exact version with --ignore-scripts into the temporary directory, then runs it", async () => {
+      it("installs the exact version with --ignore-scripts, from the tool directory, with its own npm config and an explicit registry", async () => {
         const npm = fakeNpm();
         const j = await install({}, npm);
         expect(j.code, j.stderr).toBe(0);
-        expect(npm.log()).toBe(`install --prefix ${j.home}/pr-rla-tool --ignore-scripts --no-audit --no-fund --no-package-lock pr-rla@0.1.0`);
+        const tool = join(j.home, "pr-rla-tool");
+        // The tool directory is where npm runs (a project .npmrc in the checkout is never read), and no `view` is made.
+        expect(npm.log()).toBe(`cwd=${realpathSync(tool)} user=${tool}/npmrc-user global=${tool}/npmrc-global install --prefix ${tool} --registry https://registry.npmjs.org/ --ignore-scripts --no-audit --no-fund --no-package-lock pr-rla@0.1.0`);
+        expect(readFileSync(join(tool, "npmrc-user"), "utf8")).toBe("");
         expect(existsSync(join(j.cwd, "node_modules"))).toBe(false);
       });
 
-      it("with an integrity pin, installs only when npm reports the same integrity", async () => {
+      it("with an integrity pin, runs only when what npm installed has that integrity", async () => {
         const good = fakeNpm();
         const ok = await install({ PRRLA_INTEGRITY: "sha512-abc" }, good);
         expect(ok.code, ok.stderr).toBe(0);
-        expect(good.log().split("\n")).toEqual(["view pr-rla@0.1.0 dist.integrity", `install --prefix ${ok.home}/pr-rla-tool --ignore-scripts --no-audit --no-fund --no-package-lock pr-rla@0.1.0`]);
+        expect(good.log().split("\n")).toHaveLength(1);
         const bad = fakeNpm();
         const refused = await install({ PRRLA_INTEGRITY: "sha512-other" }, bad);
         expect(refused.code).not.toBe(0);
-        expect(refused.stderr).toContain("pr-rla@0.1.0 has integrity sha512-abc, not the sha512-other you pinned");
-        expect(bad.log()).toBe("view pr-rla@0.1.0 dist.integrity");
+        expect(refused.stderr).toContain("pr-rla@0.1.0 installed with integrity sha512-abc, not the sha512-other you pinned");
+      });
+
+      it("a registry query that says the pinned integrity does not stand in for what was installed", async () => {
+        // The old check ran `npm view` first, from the project, so a .npmrc there could make it answer anything. The pin is
+        // now read from the installed tree: here `view` reports the pin and the install is something else.
+        const npm = fakeNpm();
+        const j = await install({ PRRLA_INTEGRITY: "sha512-pinned", FAKE_NPM_VIEW: "sha512-pinned", FAKE_NPM_INTEGRITY: "sha512-swapped" }, npm);
+        expect(j.code).not.toBe(0);
+        expect(j.stderr).toContain("installed with integrity sha512-swapped, not the sha512-pinned you pinned");
+        expect(j.argv()).toBe("");
+      });
+
+      it("an install that records no integrity fails a pinned job (never a silent pass)", async () => {
+        const npm = fakeNpm();
+        const j = await install({ PRRLA_INTEGRITY: "sha512-abc", FAKE_NPM_INTEGRITY: "" }, npm);
+        expect(j.code).not.toBe(0);
+        expect(j.stderr).toContain("installed with integrity unknown");
       });
     });
   });
@@ -247,7 +283,7 @@ describe.each(targets)("$name: the script", (t) => {
     const approvals = (home: string) => JSON.parse(readFileSync(join(home, "pr-rla-approvals.json"), "utf8")) as { approvals: { kind: string; env: string; origin: string }[] };
 
     it("approve-origins runs pr-rla plugin approve --yes for each entry, into the temporary directory and not the checkout", async () => {
-      const j = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_APPROVE_ORIGINS: "GITLAB_TOKEN=https://gitlab.example.com,BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990\nMY_TOKEN=https://git.example.org" } });
+      const j = await job(t, { dir: certified, trust: proven.tsaTrust, override: { PRRLA_COMMAND: "verify", PRRLA_OFFLINE: "false", PRRLA_APPROVE_ORIGINS: "GITLAB_TOKEN=https://gitlab.example.com,BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990\nMY_TOKEN=https://git.example.org" } });
       expect(j.code, j.stderr).toBe(0);
       expect(approvals(j.home).approvals.map((a) => `${a.env}=${a.origin}`).sort()).toEqual(["BITBUCKET_DC_TOKEN=https://bitbucket.example.com:7990", "GITLAB_TOKEN=https://gitlab.example.com", "MY_TOKEN=https://git.example.org"]);
       expect(existsSync(join(j.cwd, "pr-rla-approvals.json"))).toBe(false);
@@ -355,11 +391,11 @@ describe("the GitLab component (FR6.2)", () => {
     const comp = gitlabComponent();
     const handlers = (origin: string, fake: FakeGitLabIssues): Record<string, MockHandler> => ({ [origin]: fakeTracker(origin, fake) });
 
-    it("a push to audit/** (a certified audit): the job selects, reads with GITLAB_TOKEN, only reads, and leaves the status artifact", async () => {
+    it("a push to audit/** (a certified audit): the job selects, reads with GITLAB_TOKEN, only reads, and leaves the artifact; verify, not status, certifies", async () => {
       expect(ruleApplies(t.job.rules!, { CI_PIPELINE_SOURCE: "push" }, ["audit/2026-q3/draws.json"])).toBe(true);
-      const j = await job(comp, { dir: audit.dir, trust: audit.tsaTrust, handlers: handlers(GL, labelGitlab(audit, { pass: audit.firstDraws.length })), env: { GITLAB_TOKEN: "glpat-test" } });
+      const j = await job(gitlabComponent({ command: "verify", offline: "false" }), { dir: audit.dir, trust: audit.tsaTrust, handlers: handlers(GL, labelGitlab(audit, { pass: audit.firstDraws.length })), env: { GITLAB_TOKEN: "glpat-test" } });
       expect(j.code, j.stderr).toBe(0);
-      expect(j.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true });
+      expect(j.json()).toMatchObject({ verdict: "VERIFIED", certified: true });
       const seen = j.api!.to(GL);
       expect(seen.length).toBeGreaterThan(0);
       expect(seen.every((q) => q.method === "GET")).toBe(true);
@@ -387,7 +423,7 @@ describe("the GitLab component (FR6.2)", () => {
       expect(new Set(without.api!.to(SELF).map((q) => q.headers.authorization ?? "none"))).toEqual(new Set(["none"]));
       expect(without.stderr).toContain("GITLAB_TOKEN -> https://gitlab.example.com is not approved on this machine, so withheld");
 
-      const approved = gitlabComponent({ "approve-origins": `GITLAB_TOKEN=${SELF}` });
+      const approved = gitlabComponent({ "approve-origins": `GITLAB_TOKEN=${SELF}`, command: "verify", offline: "false" });
       // Time round B: a ledger that ran without its credential and had every read refused has not shown its verdicts.
       expect(without.code).not.toBe(0);
       expect(without.json()).toMatchObject({ certified: false, certificate: { state: "INCOMPLETE" } });
@@ -395,7 +431,7 @@ describe("the GitLab component (FR6.2)", () => {
       const withApproval = await job(approved, { dir: selfManaged.dir, trust: selfManaged.tsaTrust, handlers: { [SELF]: private404 }, env: { GITLAB_TOKEN: "glpat-test" } });
       expect(withApproval.code, withApproval.stderr).toBe(0);
       expect(new Set(withApproval.api!.to(SELF).map((q) => q.headers.authorization))).toEqual(new Set(["Bearer glpat-test"]));
-      expect(withApproval.json()).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true });
+      expect(withApproval.json()).toMatchObject({ verdict: "VERIFIED", certified: true });
     });
   });
 });

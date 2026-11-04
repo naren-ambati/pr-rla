@@ -287,6 +287,10 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     c.status = "FAIL";
     c.details.push(`FAIL ${what} ${ts.logProblem}`);
   }
+  if (ts.termsProblem) {
+    c.status = "FAIL";
+    c.details.push(`FAIL ${what}: ${ts.termsProblem}`);
+  }
   c.details.push(`${what} ${timestampsLine(ts)}${ts.ukMs !== null ? ` · existed by ${isoMs(ts.ukMs)} (U_k)` : ""}`);
   for (const l of anchorLines(ts)) c.details.push(`${what} ${l}`);
   if (!ts.proven) {
@@ -469,6 +473,9 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const c3: VerifyCheck = { n: 3, name: "seed round", status: "PASS", summary: "", details: [] };
   const named = [cm ? ["commitment", cm.record.seedRound] : null, a.draws ? ["draws", a.draws.round] : null].filter(Boolean) as [string, number][];
   for (const [where, r] of named) if (r !== derived.round) c3.details.push(`FAIL seed round ${n(r)} ≠ derived round ${n(derived.round)} (${where})`);
+  // The registration must be PROVEN to exist before round R was public, not only claimed to: R is derived from the claimed
+  // time, so a registration shown to exist only after R published could have been ground against the randomness.
+  if (v2 && regProven && regTs?.ukMs != null && regTs.ukMs >= derived.publishesAt * 1000) c3.details.push(`FAIL the registration was proven to exist only after round R was public (it existed by ${isoMs(regTs.ukMs)}; round ${n(derived.round)} was public at ${unixToIso(derived.publishesAt)}): its bytes could have been chosen after the randomness was known`);
   c3.status = c3.details.length ? "FAIL" : "PASS";
   c3.summary = c3.details.length ? dropPrefix(c3.details[0]!, "FAIL ") : `R = ${n(derived.round)}: first round ≥ 24 h after ${derived.base === "registration" ? "registration" : "window close"}`;
   if (!c3.details.length && !regProven) {

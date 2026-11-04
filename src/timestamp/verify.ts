@@ -2,7 +2,7 @@ import { X509Certificate, createHash, webcrypto } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import type { TimestampEvidence } from "../core/records.js";
-import type { TrustBundle } from "./bundle.js";
+import { DEFAULT_ACCURACY_SECONDS, TOLERANCE_SECONDS, type TrustBundle } from "./bundle.js";
 
 /**
  * Offline RFC 3161 token verification (functional-design.md §U1, rules 1–7).
@@ -567,6 +567,8 @@ export interface TimeEvidenceSummary {
   /** Tokens from registered authorities failing any of rules 1–7 (a verify FAIL). */
   failed: TokenCheck[];
   logProblem: string | null;
+  /** Set when the record states a tolerance or default accuracy other than this verifier's own: the record does not get to widen its own clock window. */
+  termsProblem: string | null;
 }
 
 export interface AssessInput {
@@ -585,7 +587,11 @@ export interface AssessInput {
  */
 export async function assessTimestamps(input: AssessInput): Promise<TimeEvidenceSummary> {
   const checks: TokenCheck[] = [];
-  for (const evidence of input.timestamps) checks.push(await checkToken({ evidence, data: input.data, digestHex: input.digestHex, signedTimeIso: input.signedTimeIso, toleranceSeconds: input.timestamping.toleranceSeconds, defaultAccuracySeconds: input.timestamping.defaultAccuracySeconds, bundle: input.bundle }));
+  // The verifier's own constants decide how far a token's time may sit from the signed time, never the record's: a record
+  // that states a wider tolerance (or accuracy) would let a token minted long after the signed time still agree with it.
+  const termsDiffer = input.timestamping.toleranceSeconds !== TOLERANCE_SECONDS || input.timestamping.defaultAccuracySeconds !== DEFAULT_ACCURACY_SECONDS;
+  const termsProblem = termsDiffer ? `the record states a clock tolerance of ${input.timestamping.toleranceSeconds} s and a default accuracy of ${input.timestamping.defaultAccuracySeconds} s; this verifier holds ${TOLERANCE_SECONDS} s and ${DEFAULT_ACCURACY_SECONDS} s, and a record does not set its own` : null;
+  for (const evidence of input.timestamps) checks.push(await checkToken({ evidence, data: input.data, digestHex: input.digestHex, signedTimeIso: input.signedTimeIso, toleranceSeconds: TOLERANCE_SECONDS, defaultAccuracySeconds: DEFAULT_ACCURACY_SECONDS, bundle: input.bundle }));
   const registered = (c: TokenCheck) => input.timestamping.authorities.includes(c.tsa);
   const counted = checks.filter((c) => registered(c) && c.accepted && c.operator !== null && c.upperBoundMs !== null);
   const byOperator = new Map<string, OperatorBound>();
@@ -598,7 +604,7 @@ export async function assessTimestamps(input: AssessInput): Promise<TimeEvidence
   let logProblem: string | null = null;
   if (input.log) {
     const diff = Math.abs(input.log.integratedTime * 1000 - Date.parse(input.signedTimeIso)) / 1000;
-    if (diff > input.timestamping.toleranceSeconds + 1) logProblem = `log integratedTime is ${diff} s from the signed time ${input.signedTimeIso} (limit ${input.timestamping.toleranceSeconds + 1} s)`;
+    if (diff > TOLERANCE_SECONDS + 1) logProblem = `log integratedTime is ${diff} s from the signed time ${input.signedTimeIso} (limit ${TOLERANCE_SECONDS + 1} s)`;
     else {
       add(input.log.operator, (input.log.integratedTime + 1) * 1000, "transparency log");
       logCounted = true;
@@ -607,7 +613,7 @@ export async function assessTimestamps(input: AssessInput): Promise<TimeEvidence
   const operators = [...byOperator.values()].sort((a, b) => a.upperBoundMs - b.upperBoundMs);
   const configured = [...input.timestamping.authorities];
   const k = input.timestamping.minTokens;
-  const proven = configured.length > 0 && k >= 1 && operators.length >= k;
+  const proven = termsProblem === null && configured.length > 0 && k >= 1 && operators.length >= k;
   return {
     configured,
     k,
@@ -621,6 +627,7 @@ export async function assessTimestamps(input: AssessInput): Promise<TimeEvidence
     ukMs: proven ? operators[k - 1]!.upperBoundMs : null,
     failed: checks.filter((c) => registered(c) && !c.accepted),
     logProblem,
+    termsProblem,
   };
 }
 

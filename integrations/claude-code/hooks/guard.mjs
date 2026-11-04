@@ -1086,6 +1086,67 @@ class Files {
     return RECORD_NAMES.has(n) || ALWAYS_NAMES.has(n) || n.endsWith(".manifest.json") || n === "ledger-history" || n === "approvals.json" || n.endsWith(".pem") || n === ".git" || this.customNames.has(n);
   }
 
+  /**
+   * Why a glob pattern may name a protected path, as "<pattern>, <what it is>", or null. It does not depend on what exists
+   * now: each segment becomes a regex, and the pattern is protected when its last segment can match a protected file
+   * name in a directory it can reach (`verdicts.json?l`, `regis[t]ration.json`, `*`), or the whole pattern can match the
+   * approvals file or its directory (`~/.config/pr-r?a/approvals.js[o]n`, `~/.config/pr-rla/*`).
+   */
+  protectedGlob(pattern, cwd) {
+    const absolute = pattern.startsWith("/");
+    const segs = pattern.split("/").filter((x, k) => x !== "" || k === 0);
+    const segRes = segs.map((sg) => (/(^|[^\\])[*?[]/.test(sg) ? globRegex(sg) : null));
+    const literal = (sg) => sg.replace(/\\(.)/g, "$1");
+    // 1. The approvals file, or the directory that holds it, matched segment by segment (the path need not exist).
+    for (const a of this.approvalsFiles()) {
+      for (const [target, what] of [[a, "the pr-rla approvals file, which holds your consent (only you give it)"], [dirname(a), "the directory of the pr-rla approvals file, which holds your consent (only you give it)"]]) {
+        const parts = target.split("/").filter((x, k) => x !== "" || k === 0);
+        const mine = absolute ? segs : resolve(cwd, pattern).split("/").filter((x, k) => x !== "" || k === 0);
+        const re = absolute ? segRes : mine.map((sg) => (/(^|[^\\])[*?[]/.test(sg) ? globRegex(sg) : null));
+        if (parts.length === mine.length && mine.every((sg, k) => (re[k] ? re[k].test(parts[k]) : literal(sg).toLowerCase() === parts[k].toLowerCase()))) return `${pattern}, ${what}`;
+      }
+    }
+    if (segs.length === 0) return null;
+    const last = segs.length - 1;
+    // 2. The directories the leading segments can reach (existing ones), then the last segment against protected names there.
+    let dirs = [absolute ? "/" : cwd];
+    for (let k = absolute ? 1 : 0; k < last; k++) {
+      const next = [];
+      for (const b of dirs) {
+        if (!segRes[k]) {
+          next.push(join(b, literal(segs[k])));
+          continue;
+        }
+        let names = [];
+        try {
+          names = readdirSync(b);
+        } catch {
+          continue;
+        }
+        for (const n of names) if (segRes[k].test(n) && (n[0] !== "." || segs[k][0] === ".")) next.push(join(b, n));
+        if (next.length > 2000) break;
+      }
+      dirs = next;
+      if (!dirs.length) return null;
+    }
+    const lastSeg = segs[last];
+    for (const d of dirs) {
+      const root = this.auditRootOf(d);
+      const cfg = root ? this.configOf(root) : null;
+      const names = new Set([...RECORD_NAMES, ...ALWAYS_NAMES, "approvals.json", "x.manifest.json", "x.pem", "x"]);
+      if (cfg) {
+        for (const f of cfg.files) names.add(f);
+        names.add(basename(cfg.signingKey));
+      }
+      const candidates = segRes[last] ? [...names].filter((n) => segRes[last].test(n)) : [literal(lastSeg)];
+      for (const n of candidates) {
+        const r = this.protectedReason(join(d, n));
+        if (r) return segRes[last] ? `${pattern}, which can match ${r}` : r;
+      }
+    }
+    return null;
+  }
+
   /** The first protected path inside a directory (a walk bounded for the whole evaluation), or null. */
   protectedInside(dir, budget = this.walkBudget) {
     let st;
@@ -1345,9 +1406,14 @@ class ShellCheck {
       return;
     }
     const paths = arg.glob ? globMatches(arg.pattern, scope.cwd) : [this.linked(this.abs(arg, scope))];
-    if (arg.glob && !paths.length) {
-      const base = basename(arg.s).toLowerCase();
-      if (!/[*?[]/.test(base) && (RECORD_NAMES.has(base) || ALWAYS_NAMES.has(base) || base.endsWith(".manifest.json"))) this.block(`${what} ${arg.s}, which names an audit record`);
+    if (arg.glob) {
+      // A glob is judged by what it CAN match, never only by what exists now: `verdicts.json?l`, `appr?vals.json`, `*`.
+      const g = this.ctx.files.protectedGlob(arg.pattern, scope.cwd);
+      if (g) this.block(`${what} ${g}`);
+      else if (!paths.length) {
+        const base = basename(arg.s).toLowerCase();
+        if (!/[*?[]/.test(base) && (RECORD_NAMES.has(base) || ALWAYS_NAMES.has(base) || base.endsWith(".manifest.json"))) this.block(`${what} ${arg.s}, which names an audit record`);
+      }
     }
     for (const p of paths) {
       const r = this.ctx.files.protectedReason(p);
@@ -1810,7 +1876,15 @@ class ShellCheck {
     for (const f of forms) {
       if (!f || (f === a.s && f.startsWith("-"))) continue;
       // Many programs expand a quoted glob themselves (prettier "audit/**/*.json").
-      const paths = (a.glob && f === a.s) || /[*?[]/.test(f) ? globMatches(a.glob && f === a.s ? a.pattern : f, scope.cwd) : [this.linked(resolve(scope.cwd, f))];
+      const globbed = (a.glob && f === a.s) || /[*?[]/.test(f);
+      if (globbed) {
+        const g = this.ctx.files.protectedGlob(a.glob && f === a.s ? a.pattern : f, scope.cwd);
+        if (g) {
+          this.block(`${prog} is given ${g}, and the guard does not know ${prog} to only read the files it is given`);
+          return;
+        }
+      }
+      const paths = globbed ? globMatches(a.glob && f === a.s ? a.pattern : f, scope.cwd) : [this.linked(resolve(scope.cwd, f))];
       for (const p of paths) {
         const r = this.ctx.files.protectedReason(p);
         if (r) {

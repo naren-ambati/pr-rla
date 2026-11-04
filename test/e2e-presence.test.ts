@@ -123,11 +123,12 @@ describe("a presence audit, end to end (git-file, require_signed, one signature 
     expect(JSON.parse(line)).toMatchObject({ reviewer: "bob", registrationSha256: regOf(honest).sha256, sshsig: expect.stringMatching(/^U1NIU0lH/) });
   });
 
-  it("status: CERTIFIED, every counted verdict presence, printed with its limit (FR3.8, FR9.6)", async () => {
+  it("status: target reached, every counted verdict presence, printed with its limit (FR3.8, FR9.6)", async () => {
     const s = cloneScenario(honest);
-    expect(await statusCommand(s.ctx, {})).toBe(0);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
     const out = s.out.join("\n");
-    expect(out).toMatch(/prefix 36\/36 · fails 0 .* CERTIFIED \(risk 5%\)/);
+    expect(out).toMatch(/prefix 36\/36 · fails 0 .* target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
+    expect(out).not.toMatch(/CERTIFIED \(risk/);
     expect(out).toMatch(new RegExp(`VERDICT PROVENANCE: ${UP} \\(\\d+\\) · registered minimum ${UP} · signed verdicts required \\(require_signed\\)`));
     expect(out).toContain(PRESENCE_LIMIT);
     expect(out).not.toMatch(/will FAIL/);

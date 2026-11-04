@@ -84,10 +84,10 @@ describe("end-to-end audit with the GitLab provider (fake self-managed instance,
     expect(m.limitations.join(" ")).toMatch(/GitLab's commit API does not link commits to accounts/);
   });
 
-  it("status: 36 passes certify claim D", async () => {
+  it("status: 36 passes reach the target for claim D, and the certificate is withheld until verify", async () => {
     const s = cloneScenario(honest);
-    expect(await statusCommand(s.ctx, {})).toBe(0);
-    expect(s.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .*LLR 3\.066 \/ target 2\.996 · CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D .*LLR 3\.066 \/ target 2\.996 · target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\) · RETROSPECTIVE$/);
   });
 
   it("verify: all seven checks pass; check 5 rebuilt the population from GitLab", async () => {

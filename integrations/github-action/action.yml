@@ -7,7 +7,7 @@ description: Runs pr-rla status, verify or checkpoint on an audit repository, wr
 
 inputs:
   command:
-    description: "status, verify, checkpoint or sample. checkpoint runs `pr-rla checkpoint --push` and sample runs `pr-rla sample` (never --submit); both write to the audit repository and need allow-writes: true."
+    description: "status, verify, checkpoint or sample. status never reports CERTIFIED (it does not rebuild the population: a target reached reads CERTIFICATE WITHHELD, exit 6); only verify can, and only online (offline: false). checkpoint runs `pr-rla checkpoint --push` and sample runs `pr-rla sample` (never --submit); both write to the audit repository and need allow-writes: true."
     required: false
     default: status
   dir:
@@ -57,7 +57,7 @@ inputs:
 
 outputs:
   state:
-    description: "The certificate's state (status and verify): CERTIFIED, WITHHELD (the target is reached but something withholds the certificate, such as an unproven time), NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE (the verdicts could not be read); empty for other commands."
+    description: "The certificate's state (status and verify): CERTIFIED (verify only), WITHHELD (the target is reached but something withholds the certificate, such as an unproven time), NOT_CERTIFIED, ESCALATE, REFUSED or INCOMPLETE (the verdicts could not be read); empty for other commands."
     value: ${{ steps.run.outputs.state }}
   prefix:
     description: "The longest fully labelled prefix as labelled/issued, for example 24/36."

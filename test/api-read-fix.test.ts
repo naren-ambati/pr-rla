@@ -185,8 +185,10 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
     const p = (await openProvider(actx, { use: "github", options: {} }, process.cwd())) as unknown as { http: { rest: (u: string) => Promise<unknown> } };
     await p.http.rest("/repos/a/b");
     expect(seen.at(-1)).toEqual({ url: "https://api.github.com/repos/a/b", auth: "Bearer ghp_default" });
-    // The provider holds a placeholder, not the secret; a request it made elsewhere would carry the placeholder, which the broker refuses to swap.
-    await expect(p.http.rest("https://elsewhere.example/x")).rejects.toThrow(/credential GITHUB_TOKEN may be sent only to api\.github\.com/);
+    // A next-page link on another origin is refused by the client before anything is sent (final fix round, item 6); behind it,
+    // the provider holds a placeholder, not the secret, and the broker would refuse to swap it for any host but api.github.com.
+    await expect(p.http.rest("https://elsewhere.example/x")).rejects.toThrow(/refusing it, it is not on the API origin https:\/\/api\.github\.com/);
+    expect(seen.some((x) => x.url.startsWith("https://elsewhere.example"))).toBe(false);
     expect(seen.every((x) => x.auth !== "Bearer ghp_default" || x.url.startsWith("https://api.github.com/"))).toBe(true);
     const broker = createBroker({ mode: "read-only", credentialsFor: () => new Map([["T", { value: "secret", hosts: new Set(["h.example"]) }]]) }, { fetch: transport });
     // The plugins round's origin-exact rule (every mode) supersedes U5's read-only https check: refused, nothing sent.

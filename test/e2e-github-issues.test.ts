@@ -86,13 +86,14 @@ describe("end-to-end audit with the github-issues ledger (fake GitHub, mock auth
     expect(honest.out.join("\n")).toMatch(/ledger github-issues: one issue per drawn change/);
   });
 
-  it("status reads the label events: CERTIFIED, account provenance, and asks for a checkpoint", async () => {
+  it("status reads the label events: target reached (certificate withheld until verify), account provenance, and asks for a checkpoint", async () => {
     honest.out.length = 0;
-    expect(await statusCommand(honest.ctx, {})).toBe(0);
+    expect(await statusCommand(honest.ctx, {})).toBe(6);
     const out = honest.out.join("\n");
-    expect(out).toMatch(/prefix 36\/36 · fails 0 .* CERTIFIED \(risk 5%\)/);
+    expect(out).toMatch(/prefix 36\/36 · fails 0 .* target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
+    expect(out).not.toMatch(/CERTIFIED \(risk/);
     expect(out).toMatch(/VERDICT PROVENANCE: account \(\d+\) · registered minimum account/);
-    expect(out).toMatch(/CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history/);
+    expect(out).toMatch(/target reached: run "pr-rla checkpoint" and commit it to anchor the verdict history/);
   });
 
   it("checkpoint hashes the history, time-stamps it with both authorities, and appends it; status stops asking", async () => {
@@ -221,7 +222,8 @@ describe("checkpoint shortfall and refusals", () => {
       delete tsa.behaviour["test-b"];
     }
     at(s, "2026-10-21T04:00:00Z");
-    expect(await statusCommand(s.ctx, { checkpoint: true })).toBe(0);
+    // status's own exit is 6 (the target is reached, the certificate withheld until verify); the checkpoint's is 0.
+    expect(await statusCommand(s.ctx, { checkpoint: true })).toBe(6);
     expect(readFileSync(join(s.dir, W, "ledger-checkpoints.jsonl"), "utf8").trim().split("\n")).toHaveLength(3);
   });
 

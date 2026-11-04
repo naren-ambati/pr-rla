@@ -86,7 +86,8 @@ Commands:
   record [options] <draw> <verdict>  append a pass/fail verdict for a draw to
                                      the ledger (git-file: commit it afterwards)
   status [options]                   longest fully labelled prefix, LLR vs
-                                     target, and CERTIFIED / n more needed /
+                                     target, and n more needed / target reached
+                                     (certificate withheld until verify) /
                                      ESCALATE
   checkpoint [options]               hash the ledger's verdict-event history,
                                      time-stamp it, and append it to

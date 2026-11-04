@@ -145,7 +145,7 @@ describe("time review #6: unproven means not certified, and a skipped check is n
     // status says the same offline, from the commitment's own tokens
     s.out.length = 0;
     expect(await statusCommand(s.ctx, { json: true })).toBe(6);
-    expect(JSON.parse(s.out.join("\n"))).toMatchObject({ certificate: { state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" }] } });
+    expect(JSON.parse(s.out.join("\n"))).toMatchObject({ certificate: { state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" }, { verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] } });
   });
 
   it("verify --offline before sample: checks 4–7 skip, so INCOMPLETE, exit 6 (was VERIFIED, exit 0)", async () => {
@@ -177,9 +177,11 @@ describe("time review #6: unproven means not certified, and a skipped check is n
     const on = await runVerify(s.ctx, {});
     expect(on).toMatchObject({ verdict: "VERIFIED", ok: true, exitCode: 0, certificate: { state: "CERTIFIED", withheld: [] } });
     expect(on.statusLine).toMatch(/· CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    // status never rebuilds the population, so the same audit, with nothing else withholding it, is not certified there (final fix round).
     s.out.length = 0;
-    expect(await statusCommand(s.ctx, {})).toBe(0);
-    expect(s.out[0]).toMatch(/· CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\) · RETROSPECTIVE$/);
+    expect(s.out[0]).not.toMatch(/CERTIFIED \(risk/);
   });
 });
 
@@ -430,11 +432,11 @@ describe("seam review: one display decision for CERTIFIED (status, verify's line
     expect(JSON.parse(s.out.join("\n"))).toMatchObject({ verdict: "FAILED", certified: false, certificate: { state: "WITHHELD" } });
   });
 
-  it("audit_list's certified is status's certified: false while withheld (unproven times), true when certified", async () => {
+  it("audit_list's certified is status's certified: false while the times are unproven AND when they are proven (status never rebuilds the population); only verify certifies", async () => {
     // Through the audit API with the scenario's context (it carries the mock authorities' trust, as --tsa-trust would).
     const { status } = await import("../src/api/read/status.js");
     const { auditList } = await import("../src/api/read/audit-list.js");
-    for (const [scenario, want] of [[setupAuditRepo({ changes: makeChanges(400) }), false], [proven(), true]] as const) {
+    for (const [scenario, timesProven] of [[setupAuditRepo({ changes: makeChanges(400) }), false], [proven(), true]] as const) {
       at(scenario, "2026-10-20T00:00:00Z");
       expect(await registerCommand(scenario.ctx, {})).toBe(0);
       at(scenario, "2026-10-20T12:00:00Z");
@@ -442,12 +444,18 @@ describe("seam review: one display decision for CERTIFIED (status, verify's line
       at(scenario, "2026-10-21T01:00:00Z");
       expect(await sampleCommand(scenario.ctx, {})).toBe(0);
       await passAll(scenario);
-      const st = (await status(scenario.ctx, { offline: true })) as { certified: boolean; sequence: { state: string }; certificate: { state: string } };
+      const st = (await status(scenario.ctx, { offline: true })) as { certified: boolean; sequence: { state: string }; certificate: { state: string; withheld: { reason: string }[] } };
       const al = await auditList(scenario.ctx);
       expect(st.sequence.state).toBe("CERTIFIED");
-      expect(st.certified).toBe(want);
-      expect(st.certificate.state).toBe(want ? "CERTIFIED" : "WITHHELD");
-      expect(al.windows[0]!.certified).toBe(want);
+      expect(st.certified).toBe(false);
+      expect(st.certificate.state).toBe("WITHHELD");
+      expect(st.certificate.withheld.map((w) => w.reason)).toContain("population not verified: run `pr-rla verify`");
+      // The times: proven only in the scenario that carries the authorities' trust, and then the standing reason is the only one.
+      expect(st.certificate.withheld).toHaveLength(timesProven ? 1 : 3);
+      expect(al.windows[0]!.certified).toBe(false);
+      // verify is where CERTIFIED comes from: online, with the times proven.
+      const v = await runVerify(scenario.ctx, {});
+      expect(v.certified).toBe(timesProven);
     }
   });
 });

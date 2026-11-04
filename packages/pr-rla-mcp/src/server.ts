@@ -141,7 +141,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
       "status",
       {
         title: "Audit status",
-        description: "Where a window stands: the certificate line (prefix, fails, LLR against the target, CERTIFIED / CERTIFICATE WITHHELD / n more needed / ESCALATE / INCOMPLETE), the blocking draw and verdict provenance. `certified` (and `certificate.state`, with `certificate.withheld` saying why) is the only claim to report; `sequence.state` is the SPRT's raw state and can be CERTIFIED while the certificate is withheld. Offline by default; offline: false also reads the SCM and the tracker. Never appends a checkpoint.",
+        description: "Where a window stands: the certificate line (prefix, fails, LLR against the target, CERTIFICATE WITHHELD / n more needed / ESCALATE / INCOMPLETE; never CERTIFIED: status does not rebuild the population, so only `verify` certifies), the blocking draw and verdict provenance. `certified` (and `certificate.state`, with `certificate.withheld` saying why) is the only claim to report; `sequence.state` is the SPRT's raw state and can be CERTIFIED while the certificate is withheld. Offline by default; offline: false also reads the SCM and the tracker. Never appends a checkpoint.",
         inputSchema: z.strictObject({ dir, window, offline }),
         outputSchema: z.looseObject({ phase: z.string().optional(), line: z.string().optional(), certified: z.boolean().optional(), ...handle }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },

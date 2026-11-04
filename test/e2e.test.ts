@@ -104,10 +104,10 @@ describe("an honest retrospective audit, end to end (json-file provider, mock ti
     expect(d.draws.map((x) => x.index)).toEqual(computeDraws(recordedBeacon(R).randomness, reg.sha256, 400, 144).map((x) => x.index));
   });
 
-  it("status: 36 passes certify claim D", async () => {
+  it("status: 36 passes reach the target for claim D, and the certificate is withheld until verify", async () => {
     const s = cloneScenario(honest);
-    expect(await statusCommand(s.ctx, {})).toBe(0);
-    expect(s.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D \(detected-defect rate ≤ 10%.*LLR 3\.066 \/ target 2\.996 · CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/^prefix 36\/36 · fails 0 · claim D \(detected-defect rate ≤ 10%.*LLR 3\.066 \/ target 2\.996 · target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\) · RETROSPECTIVE$/);
   });
 
   it("verify: all seven checks pass, timestamps are tamper-evident", async () => {
@@ -246,7 +246,7 @@ describe("local-only registration (no transparency log)", () => {
     // status says the same, and exits 6 with the reasons
     s.out.length = 0;
     expect(await statusCommand(s.ctx, {})).toBe(6);
-    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF\); population not verified: run `pr-rla verify`\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF$/);
     expect(s.out).toContain("  certificate withheld (INCOMPLETE): registration time unproven (TIMESTAMP NOT TAMPER-PROOF)");
   });
 });
@@ -357,8 +357,9 @@ describe("CLI wiring", () => {
     const s = cloneScenario(honest);
     let code = -1;
     await buildProgram(() => s.ctx, (c) => (code = c)).parseAsync(["node", "pr-rla", "status"]);
-    expect(code).toBe(0);
-    expect(s.out[0]).toMatch(/CERTIFIED/);
+    // The target is reached, and status never certifies: exit 6, CERTIFICATE WITHHELD.
+    expect(code).toBe(6);
+    expect(s.out[0]).toMatch(/CERTIFICATE WITHHELD/);
     await buildProgram(() => s.ctx, (c) => (code = c)).parseAsync(["node", "pr-rla", "record", "1", "maybe", "--reviewer", "x"]);
     expect(code).toBe(1);
     expect(s.out.at(-1)).toMatch(/verdict must be "pass" or "fail"/);

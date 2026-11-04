@@ -302,7 +302,12 @@ export class HttpClient {
   }
 
   url(pathOrUrl: string): string {
-    return /^https?:\/\//.test(pathOrUrl) ? pathOrUrl : `${this.baseUrl}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    if (!/^https?:\/\//.test(pathOrUrl)) return `${this.baseUrl}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    // An absolute URL (a rel="next" link, say) is the server's word, and this client's headers carry the credential: on any
+    // origin but the API root's, the request would hand the token to whoever the response named. Refused.
+    const root = new URL(this.baseUrl).origin;
+    if (new URL(pathOrUrl).origin !== root) throw new HttpError(`refusing ${pathOrUrl}: it is not on the API origin ${root}, and the request would carry the credential there`, 400, pathOrUrl);
+    return pathOrUrl;
   }
 
   /** One JSON request with retries; returns the parsed body and the response headers. */

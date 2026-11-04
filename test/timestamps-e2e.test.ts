@@ -254,8 +254,10 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     expect(r.timestamps.commitment!.proven).toBe(true);
     expect(r.versions).toEqual({ registered: "0.1.0", frozen: "0.1.0" });
     const s = cloneScenario(honest);
-    expect(await statusCommand(s.ctx, {})).toBe(0);
-    expect(s.out[0]).toMatch(/CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    // Both times proven, and no TIMESTAMP warning; the certificate is withheld only because status never rebuilds the population.
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\) · RETROSPECTIVE$/);
+    expect(s.out[0]).not.toMatch(/TIMESTAMP NOT TAMPER-PROOF/);
   });
 
   it("(1) an edited genTime: check 1 FAIL (rule 3), and only check 1", async () => {
@@ -329,7 +331,7 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     expect(s.out.join("\n")).not.toMatch(/CERTIFIED \(risk/);
     s.out.length = 0;
     expect(await statusCommand(s.ctx, {})).toBe(6);
-    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)\); population not verified: run `pr-rla verify`\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
   });
 
   // A log entry 5 min after the signed time: if it were the time, R would move from 33,245,812 to 33,245,912.
@@ -399,7 +401,7 @@ describe("FR1.6: a zero-token audit says TIMESTAMP NOT TAMPER-PROOF in status, v
     s.out.length = 0;
     // Time round B: the certificate is withheld while the times are unproven (status exit 6), and verify is INCOMPLETE.
     expect(await statusCommand(s.ctx, {})).toBe(6);
-    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\)\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)$/);
+    expect(s.out[0]).toMatch(/· target reached · CERTIFICATE WITHHELD \(registration time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\); manifest commitment time unproven \(TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)\); population not verified: run `pr-rla verify`\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(0 of 2\)$/);
     s.out.length = 0;
     expect(await verifyCommand(s.ctx, {})).toBe(6);
     const text = s.out.join("\n");

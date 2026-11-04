@@ -27,7 +27,7 @@ A window moves through four phases, `unregistered`, `registered`, `frozen` and `
 4. **The seed round R** is derived, never chosen: the first drand quicknet round published at least 24 hours after the later of the window's close and the registration.
 5. **`sample`**, once R has published, checks R's BLS signature and computes the **draws** (`draws.json`): each draw is one change of the manifest, from R's randomness and the registration's hash. With an issue ledger it opens one issue per drawn change, in draw order.
 6. **Review and record.** A reviewer reads a draw (`pr-rla draw-context <n>`: its diff without generated files, its description, CI results and the protocol's checklist) and records `pass` or `fail` in the **ledger**: `pr-rla record <n> pass|fail --reviewer <you>` (or `--sign <key>` for a signed verdict) for `git-file`, or the verdict label on the draw's issue for an issue ledger.
-7. **`status`** counts the **longest fully labelled prefix** of draws and runs the test: CERTIFIED, `n more passing draws needed`, or ESCALATE.
+7. **`status`** counts the **longest fully labelled prefix** of draws and runs the test: `n more passing draws needed`, `target reached` (the certificate is withheld until `verify` has rebuilt the population), or ESCALATE.
 8. **`verify`**, run by anyone with the audit repository, checks seven properties from the records and the SCM.
 
 ## What `verify` checks
@@ -46,12 +46,12 @@ Each check is PASS, WARN, FAIL, INCOMPLETE (not established: a time no k operato
 
 ## The certificate
 
-`status`, `verify`'s summary line and the MCP tools print **CERTIFIED** only when the test reached its target and nothing withholds it. The certificate's states:
+**CERTIFIED** is printed only by `verify`, and only when the test reached its target and every check passed. `status`, `audit_list` and the MCP `status` tool never print it: they do not rebuild the population from the source-control system (check 5), so a target they see reached carries a standing withholding, `population not verified: run \`pr-rla verify\``. The certificate's states:
 
 | State | Meaning |
 |---|---|
-| CERTIFIED | the test reached its target, and the times it rests on are proven |
-| WITHHELD | the test reached its target, but something withholds the certificate: `target reached · CERTIFICATE WITHHELD (why)`, for example a registration time not proven by k operators, or a ledger whose history check would FAIL |
+| CERTIFIED | the test reached its target, and `verify` established everything it rests on: the times, the population, the draws and the verdicts |
+| WITHHELD | the test reached its target, but something withholds the certificate: `target reached · CERTIFICATE WITHHELD (why)`. In `status` there is always a reason (`population not verified`); others are a registration time not proven by k operators, or a ledger whose history check would FAIL |
 | NOT CERTIFIED | the test needs more passing draws |
 | ESCALATE | the test cannot certify from this sample: review every change, or narrow the claim |
 | REFUSED | N is below the registered minimum: review all N instead |

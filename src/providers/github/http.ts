@@ -142,6 +142,9 @@ export class GitHubHttp {
   /** GET a REST path (or absolute URL). Returns parsed JSON, the rel="next" link if any, and the response headers. */
   async rest<T>(pathOrUrl: string, signal?: AbortSignal): Promise<{ data: T; next: string | null; headers: Headers }> {
     const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${this.apiUrl}${pathOrUrl}`;
+    // A rel="next" link is the server's word, and these headers carry the token: another origin than the API root's is refused.
+    const root = new URL(this.apiUrl).origin;
+    if (new URL(url).origin !== root) throw new GitHubHttpError(`GitHub GET ${url}: refusing it, it is not on the API origin ${root}, and the request would carry the token there`, 400);
     const { body, res } = await this.request<T>(url, { headers: this.headers(), ...(signal ? { signal } : {}) });
     const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get("link") ?? "")?.[1] ?? null;
     return { data: body, next, headers: res.headers };

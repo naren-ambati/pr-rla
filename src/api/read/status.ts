@@ -151,6 +151,10 @@ export type StatusResult =
       line: string;
       /** Check 7's local rules, without the tracker (P1): the index binding, its publication record, the checkpoint file. */
       ledgerGate: { fails: string[]; incompletes: string[]; warns: string[] };
+      /** verify's offline checks (1, 2, 3, 4 and 6) on the same records, as in the verdicts-read result. */
+      offlineChecks: { n: number; name: string; status: string; summary: string }[];
+      /** What of `offlineChecks` and check 7's local rules would FAIL in verify: status exits 1 on any. */
+      offlineFails: string[];
     } & TimeStanding);
 
 /**
@@ -187,6 +191,9 @@ export async function timeStanding(ctx: ApiContext, config: PrRlaConfig, paths: 
   return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short, anchors, withheld };
 }
 
+/** The standing withholding every status carries: check 5 (the population rebuilt from the SCM) is verify's alone. */
+export const POPULATION_NOT_VERIFIED: Withholding = { verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" };
+
 /**
  * The exit code of a status result (contracts.md §7): 1 not registered; 3 below the registered minimum population;
  * 2 ESCALATE; for a certificate the SPRT reached but something withholds, the exit code of the withholding's verdict
@@ -196,7 +203,9 @@ export function statusExitCode(r: StatusResult): number {
   if (r.phase === "unregistered") return 1;
   // P5 (finding 9): frozen below the registered minimum is the refusal sample gives (review all N), exit 3.
   if (r.phase === "frozen") return r.refusal ? 3 : 0;
-  if (r.phase !== "sampled" || !r.verdictsRead) return 0;
+  if (r.phase !== "sampled") return 0;
+  // Verdicts not read (the tracker is offline): the offline core and check 7's local rules still ran, and what verify would FAIL fails here.
+  if (!r.verdictsRead) return r.offlineFails.length || r.ledgerGate.fails.length ? 1 : 0;
   if (r.certificate.state === "REFUSED") return 3;
   // P5 (finding 6): a check verify would FAIL on these records fails status too, whatever the sequence's state.
   if (r.offlineFails.length) return 1;
@@ -331,7 +340,12 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
       const line = `${mode} · frozen N ${fmt(manifest.N)} · ${draws.issued} draw(s) issued · verdicts not read (${verdictsSkipped})${timestampNote}`;
       // Check 7's local rules still run (the index, its publication, the checkpoint file): what verify would FAIL without reading the tracker.
       const g = await check7Gate(paths, reg, { ...loaded, read: null }, trust);
-      return { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing, ledgerGate: { fails: g.fails.map(String), incompletes: g.incompletes.map(String), warns: g.warns.map(String) } };
+      // The offline core too (checks 1, 2, 3, 4 and 6), as the verdicts-read path runs it: a registration, manifest or
+      // draws file verify would FAIL must not exit 0 here because the tracker was not read.
+      const local7: CoreGate = { n: 7, name: "labels", reason: { fail: "verify check 7 would FAIL: ", incomplete: "verify check 7 would be INCOMPLETE: " }, run: async () => ({ fails: g.withheld, incompletes: g.unestablished }) };
+      const core = await statusCore(ctx, config, { registration: reg, manifest, commitment: existsSync(paths.commitment) ? readCommitment(paths) : null, draws }, { tsaTrust: opts.tsaTrust ?? [], logKey: opts.logKey ?? [], ...(pinned !== undefined ? { registrationSha256: pinned } : {}) }, [local7]);
+      const offlineFails = core.withholdings.filter((w) => w.verdict === "FAILED").map((w) => w.reason);
+      return renderResult<StatusResult>(callerOf(ctx) !== "person" ? "read-only" : "read-write", { phase: "sampled", window, verdictsRead: false, ledger: lt.name, verdictsSkipped, N: manifest.N, drawsIssued: draws.issued, line, ...standing, ledgerGate: { fails: g.fails.map(String), incompletes: g.incompletes.map(String), warns: g.warns.map(String) }, offlineChecks: core.checks.map((c) => ({ n: c.n, name: c.name, status: c.status, summary: c.summary })), offlineFails });
     }
   }
   const ledger = await ledgerFor(ctx, config, paths, { command: "status" });
@@ -414,7 +428,10 @@ export async function status(ctx: ApiContext, opts: StatusOptions = {}): Promise
   };
   const core = await statusCore(ctx, config, { registration: reg, manifest, commitment: existsSync(paths.commitment) ? readCommitment(paths) : null, draws }, { tsaTrust: opts.tsaTrust ?? [], logKey: opts.logKey ?? [], ...(pinned !== undefined ? { registrationSha256: pinned } : {}) }, [check7]);
   const offlineFails = core.withholdings.filter((w) => w.verdict === "FAILED").map((w) => w.reason);
-  const withholdings = [...timeWithheld, ...core.withholdings];
+  // Status never rebuilds the population (verify's check 5 does, from the SCM): a target the SPRT reached stands on a
+  // population nobody here has compared with the registered stratum, so only `pr-rla verify` can produce CERTIFIED.
+  // (A result that is INCOMPLETE already, for want of a read, is not CERTIFIED either way: the reason is not repeated there.)
+  const withholdings = [...timeWithheld, ...core.withholdings, ...(unread ? [] : [POPULATION_NOT_VERIFIED])];
   const certificate = certificateFor(report.sequence.state, report.refusal, withholdings, unread ? [unread] : []);
   const line =
     report.refusal ??

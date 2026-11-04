@@ -74,10 +74,11 @@ beforeAll(async () => {
 afterAll(async () => tsa.stop());
 
 describe("control: the verifier approved GITHUB_TOKEN for the tracker's origin", () => {
-  it("status certifies (exit 0) and verify is VERIFIED (exit 0)", async () => {
+  it("status reaches the target but withholds the certificate (exit 6: population not verified) and verify is VERIFIED (exit 0)", async () => {
     const s = as({ GITHUB_TOKEN: "verifier-token", PR_RLA_APPROVALS_FILE: approvals(true) });
-    expect(await statusCommand(s.ctx, {})).toBe(0);
-    expect(s.out[0]).toMatch(/· CERTIFIED \(risk 5%\) · RETROSPECTIVE$/);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
+    expect(s.out[0]).toMatch(/target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\) · RETROSPECTIVE$/);
+    expect(s.out[0]).not.toMatch(/CERTIFIED \(risk/);
     const r = await runVerify(s.ctx, {});
     expect(r).toMatchObject({ verdict: "VERIFIED", exitCode: 0, certificate: { state: "CERTIFIED" } });
   });

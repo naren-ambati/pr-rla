@@ -120,13 +120,24 @@ pipelines:
               export PR_RLA_APPROVALS_FILE="$prrla_tmp/pr-rla-approvals.json"
 
               # 3. Install the pinned version. PRRLA_BIN skips the install (an image that already has it); the version is checked either way.
+              #    Every npm call runs from the tool directory, with its own empty user and global npm config (the project's .npmrc and
+              #    the runner's are not read) and an explicit registry. The pin is compared with the integrity npm recorded for what it
+              #    installed (node_modules/.package-lock.json), never with what a registry query says. An empty PRRLA_INTEGRITY means "not
+              #    pinned": set it.
               if [ -z "${PRRLA_BIN:-}" ]; then
                 PRRLA_HOME="${TMPDIR:-/tmp}/pr-rla-tool"
+                mkdir -p "$PRRLA_HOME"
+                : > "$PRRLA_HOME/npmrc-user"
+                : > "$PRRLA_HOME/npmrc-global"
+                (
+                  cd "$PRRLA_HOME"
+                  NPM_CONFIG_USERCONFIG="$PRRLA_HOME/npmrc-user" NPM_CONFIG_GLOBALCONFIG="$PRRLA_HOME/npmrc-global" \
+                    npm install --prefix "$PRRLA_HOME" --registry https://registry.npmjs.org/ --ignore-scripts --no-audit --no-fund --no-package-lock "pr-rla@$PRRLA_VERSION"
+                )
                 if [ -n "${PRRLA_INTEGRITY:-}" ]; then
-                  prrla_seen=$(npm view "pr-rla@$PRRLA_VERSION" dist.integrity)
-                  [ "$prrla_seen" = "$PRRLA_INTEGRITY" ] || { echo "pr-rla@$PRRLA_VERSION has integrity $prrla_seen, not the $PRRLA_INTEGRITY you pinned" >&2; exit 1; }
+                  prrla_seen=$(cd "$PRRLA_HOME" && node -e 'try{const l=JSON.parse(require("node:fs").readFileSync("node_modules/.package-lock.json","utf8"));process.stdout.write(String(l.packages?.["node_modules/pr-rla"]?.integrity??""))}catch{}')
+                  [ "$prrla_seen" = "$PRRLA_INTEGRITY" ] || { echo "pr-rla@$PRRLA_VERSION installed with integrity ${prrla_seen:-unknown}, not the $PRRLA_INTEGRITY you pinned" >&2; exit 1; }
                 fi
-                npm install --prefix "$PRRLA_HOME" --ignore-scripts --no-audit --no-fund --no-package-lock "pr-rla@$PRRLA_VERSION"
                 PRRLA_BIN="$PRRLA_HOME/node_modules/.bin/pr-rla"
               fi
               [ "$("$PRRLA_BIN" --version)" = "$PRRLA_VERSION" ] || { echo "the pr-rla at $PRRLA_BIN is not version $PRRLA_VERSION" >&2; exit 1; }
@@ -196,7 +207,7 @@ pipelines:
             - pr-rla.json
 ```
 
-- **Pinned.** `PRRLA_VERSION` is one exact version. The script refuses a range or a tag, and refuses an installed `pr-rla` whose `--version` is not that exact version. `PRRLA_INTEGRITY` (the `sha512-…` that `npm view pr-rla@<version> dist.integrity` reports, copied from the release notes) makes the step stop unless npm reports the same value. Packages install with `--ignore-scripts`. Transitive dependencies are whatever npm resolves on the day, because there is no lockfile here: the Action has one, and a release that ships `npm-shrinkwrap.json` would close this gap (the founder's decision: [`../release-checklist.md`](../release-checklist.md), step 4).
+- **Pinned.** `PRRLA_VERSION` is one exact version. The script refuses a range or a tag, and refuses an installed `pr-rla` whose `--version` is not that exact version. `PRRLA_INTEGRITY` (the `sha512-…` integrity of that version, copied from the release notes) makes the step stop unless the package npm installed has that integrity, read from the tool directory's `node_modules/.package-lock.json`; an empty `PRRLA_INTEGRITY` means "not pinned by content", so set it. Every npm call runs from the tool directory with its own empty user and global npm config and an explicit `--registry`, so a project `.npmrc` cannot redirect the install or answer for it. Packages install with `--ignore-scripts`. Transitive dependencies are whatever npm resolves on the day, because there is no lockfile here: the Action has one, and a release that ships `npm-shrinkwrap.json` would close this gap (the founder's decision: [`../release-checklist.md`](../release-checklist.md), step 4).
 - **Built-ins only.** The step runs `pr-rla --plugins builtin-only …`. `PRRLA_PLUGINS=allow` is the opt-in.
 - **Image.** `node:24`, pinned by the digest of the tag on 2026-11-04. Re-pin it when you update Node.
 - **Artifact.** `pr-rla.json` is the command's `--json` output. The step prints the certificate line.

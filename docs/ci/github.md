@@ -1,6 +1,6 @@
 # pr-rla in GitHub Actions
 
-A composite action, `integrations/github-action/`. It installs the pr-rla version pinned by its own `package.json` and `package-lock.json`, runs `status` (or `verify`, or `checkpoint`), writes the job summary, and fails the job by the exit-code table below.
+A composite action, `integrations/github-action/`. It installs the pr-rla version pinned by its own `package.json` and `package-lock.json`, runs `status` (or `verify`, or `checkpoint`; only `verify` can report CERTIFIED, see below), writes the job summary, and fails the job by the exit-code table below.
 
 pr-rla is not published, and nothing here publishes it. The action's lockfile pins a tarball of this repository's build; [Re-pinning at release](#re-pinning-at-release) says what a release changes.
 
@@ -52,7 +52,7 @@ There is no `sample` by default: issuing draws and opening issues are writes. `c
 
 | Output | Meaning |
 |---|---|
-| `state` | The certificate's state: `CERTIFIED`, `WITHHELD` (the target is reached, but something withholds the certificate, such as a time not proven by enough timestamp authorities), `NOT_CERTIFIED`, `ESCALATE`, `REFUSED` or `INCOMPLETE` (the verdicts could not be read); empty for `checkpoint` and `sample`, and for an offline `verify` of a tracker ledger (it reads no verdicts). It is pr-rla's `certificate.state`, never the sequential test's raw `sequence.state` |
+| `state` | The certificate's state: `CERTIFIED` (only from `verify`: `status` never certifies), `WITHHELD` (the target is reached, but something withholds the certificate, such as a time not proven by enough timestamp authorities), `NOT_CERTIFIED`, `ESCALATE`, `REFUSED` or `INCOMPLETE` (the verdicts could not be read); empty for `checkpoint` and `sample`, and for an offline `verify` of a tracker ledger (it reads no verdicts). It is pr-rla's `certificate.state`, never the sequential test's raw `sequence.state` |
 | `prefix` | The longest fully labelled prefix as `labelled/issued`, for example `24/36` |
 | `llr` | The log-likelihood ratio, to three decimals |
 | `json` | Path to the command's `--json` output (`status` and `verify`) |

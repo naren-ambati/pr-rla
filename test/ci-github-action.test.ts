@@ -90,16 +90,30 @@ const json = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { sequence?: 
 const summaryOf = (x: Run) => x.r.summary;
 
 describe("FR6.1: status on fixtures gives the right job outcome", () => {
-  it("CERTIFIED: the job passes; state, prefix, llr and json are outputs; the summary carries the certificate line", async () => {
+  it("status never certifies (final fix round): a reached target is WITHHELD, population not verified, exit 6; the job fails unless fail-on leaves incomplete out", async () => {
     const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() } });
+    expect(x.r.conclusion).toBe("failure");
+    expect(x.r.outputs).toMatchObject({ state: "WITHHELD", prefix: "36/36", llr: "3.066", "exit-code": "6" });
+    expect(json(x.r.outputs.json!)).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: false, certificate: { state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] } });
+    expect(summaryOf(x)).toContain("### WITHHELD");
+    expect(summaryOf(x)).toMatch(/prefix 36\/36 · fails 0 · claim D .* LLR 3\.066 \/ target 2\.996 · target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
+    expect(summaryOf(x)).not.toMatch(/CERTIFIED \(risk/);
+    expect(x.r.step("run").stdout).toContain(`pr-rla --plugins builtin-only -C . status --json --offline --tsa-trust ${audit.tsaTrust} -> exit 6`);
+    const lenient = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { "fail-on": "escalate,refusal,timestamps" } });
+    expect(lenient.r.conclusion).toBe("success");
+    expect(lenient.r.outputs.state).toBe("WITHHELD");
+  });
+
+  it("CERTIFIED comes only from an online verify: the job passes; state, prefix, llr and json are outputs; the summary carries the certificate line", async () => {
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { command: "verify", offline: "false" } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.outputs).toMatchObject({ state: "CERTIFIED", prefix: "36/36", llr: "3.066", "exit-code": "0" });
-    expect(json(x.r.outputs.json!)).toMatchObject({ sequence: { state: "CERTIFIED" }, certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
-    expect(summaryOf(x)).toContain("### CERTIFIED");
+    expect(json(x.r.outputs.json!)).toMatchObject({ certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
+    expect(summaryOf(x)).toContain("### VERIFIED · CERTIFIED");
     expect(summaryOf(x)).toMatch(/prefix 36\/36 · fails 0 · claim D .* LLR 3\.066 \/ target 2\.996 · CERTIFIED \(risk 5%\)/);
     expect(summaryOf(x)).toContain("| LLR / target | 3.066 / 2.996 |");
     expect(summaryOf(x)).toContain("**Job result: PASS** (exit 0)");
-    expect(x.r.step("run").stdout).toContain(`pr-rla --plugins builtin-only -C . status --json --offline --tsa-trust ${audit.tsaTrust} -> exit 0`);
+    expect(x.r.step("run").stdout).toContain(`pr-rla --plugins builtin-only -C . verify --json --tsa-trust ${audit.tsaTrust} -> exit 0`);
     expect(x.denied).toEqual([]);
   });
 
@@ -212,12 +226,12 @@ describe("FR6.1: status on fixtures gives the right job outcome", () => {
   });
 
   it("dir: points the CLI at a subdirectory of the workspace", async () => {
-    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { dir: "audit-repo" }, edit: (dir) => {
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { dir: "audit-repo", command: "verify", offline: "false" }, edit: (dir) => {
       mkdirSync(join(dir, "audit-repo"));
       for (const f of readdirSync(dir)) if (f !== "audit-repo" && f !== ".git") renameSync(join(dir, f), join(dir, "audit-repo", f));
     } });
     expect(x.r.conclusion).toBe("success");
-    expect(x.r.step("run").stdout).toContain("-C audit-repo status");
+    expect(x.r.step("run").stdout).toContain("-C audit-repo verify");
     expect(x.r.outputs.state).toBe("CERTIFIED");
   });
 });
@@ -262,7 +276,7 @@ describe("credentials in CI follow the local-consent model", () => {
     expect(without.r.step("run").stderr).toContain("GITHUB_TOKEN -> https://ghe.example.com is not approved on this machine, so withheld");
     expect(without.r.summary).toContain("is not approved on this machine, so withheld");
 
-    const withApproval = await action({ dir: ghes.dir, trust: ghes.tsaTrust, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) }, inputs: { "approve-origins": `GITHUB_TOKEN=${GHES}` } });
+    const withApproval = await action({ dir: ghes.dir, trust: ghes.tsaTrust, handlers: { [origin]: private404(origin, labelGithub(ghes, { pass: all(ghes) })) }, inputs: { "approve-origins": `GITHUB_TOKEN=${GHES}`, command: "verify", offline: "false" } });
     expect(withApproval.r.conclusion).toBe("success");
     expect(withApproval.r.outputs.state).toBe("CERTIFIED");
     expect(authOf(withApproval, origin)).toEqual(new Set(["Bearer ghs_harness_token"]));
@@ -483,13 +497,13 @@ describe("the comment is best effort and the token stays on GitHub", () => {
 
   it("a 403 from the API is a warning; the job's outcome is the audit's", async () => {
     const read = fakeTracker(API, certified());
-    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, github: { event, event_name: "issues" }, inputs: { comment: "true" }, handlers: { [API]: (req) => (req.method === "POST" ? new Response("{}", { status: 403 }) : read(req)) } });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, github: { event, event_name: "issues" }, inputs: { comment: "true", command: "verify", offline: "false" }, handlers: { [API]: (req) => (req.method === "POST" ? new Response("{}", { status: 403 }) : read(req)) } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.step("comment").stdout).toContain("::warning title=pr-rla comment::GitHub answered 403 to the comment on acme/audit#7 (a comment needs issues: write)");
   });
 
   it("no issue number (a push event): a warning, no request", async () => {
-    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { comment: "true" } });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { comment: "true", command: "verify", offline: "false" } });
     expect(x.r.conclusion).toBe("success");
     expect(x.r.step("comment").stdout).toContain("comment: true needs an audit issue number");
     expect(x.api.to(API).some((q) => q.method === "POST")).toBe(false);
@@ -536,7 +550,30 @@ describe("the action is wired as designed (FR6.1, FR6.4, NFR18)", () => {
   });
 
   it("the installed binary is the one in the action path (a shim stands in for npm ci)", async () => {
-    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, bin: (d) => void cliShim(d) });
+    const x = await action({ dir: audit.dir, trust: audit.tsaTrust, trackers: { [API]: certified() }, inputs: { command: "verify", offline: "false" }, bin: (d) => void cliShim(d) });
     expect(x.r.conclusion).toBe("success");
+  });
+});
+
+describe("report.mjs never reports the sequential test's raw CERTIFIED as the claim (final fix round)", () => {
+  /** report.mjs on a hand-written `status --json` result (synthetic): the state output it writes. */
+  const stateFor = (result: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), "prrla-report-"));
+    const jsonPath = join(dir, "pr-rla.json");
+    writeFileSync(jsonPath, JSON.stringify(result));
+    const out = join(dir, "output");
+    writeFileSync(out, "");
+    const r = spawnSync(process.execPath, [join(ACTION, "scripts", "report.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", INPUT_COMMAND: "status", PRRLA_RC: "0", PRRLA_RESULT: "pass", PRRLA_JSON: jsonPath, GITHUB_OUTPUT: out } });
+    expect(r.status, r.stderr).toBe(0);
+    return /^state=(.*)$/m.exec(readFileSync(out, "utf8"))![1]!;
+  };
+  const sequence = { state: "CERTIFIED", llr: 3.066, target: 2.996, fails: 0 };
+
+  it("a result without a certificate whose sequence reached its target is WITHHELD, not CERTIFIED (it was CERTIFIED)", () => {
+    expect(stateFor({ sequence, line: "x", labelledPrefix: 36, drawsIssued: 36 })).toBe("WITHHELD");
+  });
+  it("a certificate is what decides: WITHHELD stays WITHHELD, and only a CERTIFIED certificate reports CERTIFIED", () => {
+    expect(stateFor({ sequence, certificate: { state: "WITHHELD", withheld: [] }, line: "x" })).toBe("WITHHELD");
+    expect(stateFor({ sequence, certificate: { state: "CERTIFIED", withheld: [] }, line: "x" })).toBe("CERTIFIED");
   });
 });

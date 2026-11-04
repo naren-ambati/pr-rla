@@ -132,6 +132,7 @@ export function publicationRequired(reg: SignedRecord<AnyRegistration>, ledger: 
 function tokenLines(what: string, ts: TimeEvidenceSummary, unprovenLevel: "warn" | "note"): Omit<GateLine, "rule">[] {
   const out: Omit<GateLine, "rule">[] = [];
   for (const f of ts.failed) out.push({ level: "fail", text: `FAIL ${what} token from ${f.tsa}: ${f.problems.join("; ")}` });
+  if (ts.termsProblem) out.push({ level: "fail", text: `FAIL ${what}: ${ts.termsProblem}` });
   for (const i of ts.ignored) out.push({ level: "note", text: `${what} token from ${i.tsa} ignored (not registered: the registration names ${ts.configured.join(", ") || "no authority"})` });
   out.push({ level: "note", text: `${what} ${timestampsLine(ts)}${ts.ukMs !== null ? ` · existed by ${isoMs(ts.ukMs)} (U_k)` : ""}` });
   for (const l of anchorLines(ts)) out.push({ level: "note", text: `${what} ${l}` });

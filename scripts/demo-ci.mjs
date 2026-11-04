@@ -1,5 +1,8 @@
 // The bolt 7 (U7) demo (delivery-plan.md): the GitHub Action's steps on a fixture ESCALATE audit fail the
-// job; on a CERTIFIED one they pass. Offline and local: the fixture is the recorded gh-aw Q3 audit
+// job. Only `verify` can certify (final fix round): `status` reaches the target and withholds the certificate,
+// because it never rebuilds the population. This recorded fixture registers no timestamp authority, so even
+// `verify` is INCOMPLETE here (its times are the signer's own clock); the test suite certifies on audits with
+// mock authorities (test/ci-github-action.test.ts, test/ci-job-scripts.test.ts). Offline and local: the fixture is the recorded gh-aw Q3 audit
 // (test/fixtures/audits/gh-aw-q3-recorded, git-file ledger) with synthetic verdicts written by
 // `pr-rla record`, and the steps are integrations/github-action/scripts/*, run with bash exactly as the
 // runner would, GITHUB_OUTPUT and GITHUB_STEP_SUMMARY on temporary files. The test suite does the same
@@ -30,13 +33,13 @@ function audit(name, verdict, n) {
   return dir;
 }
 
-function job(name, workspace) {
+function job(name, workspace, input = {}) {
   const temp = mkdtempSync(join(base, "runner-temp-"));
   const summary = join(temp, "summary.md");
   const out = join(temp, "output");
   writeFileSync(summary, "");
   writeFileSync(out, "");
-  const env = { PATH: process.env.PATH, HOME: temp, ACTION_PATH: actionPath, RUNNER_TEMP: temp, GITHUB_WORKSPACE: workspace, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, PR_RLA_APPROVALS_FILE: join(temp, "pr-rla-approvals.json"), INPUT_COMMAND: "status", INPUT_DIR: ".", INPUT_OFFLINE: "true", INPUT_COMMENT: "false", INPUT_COMMENT_ISSUE: "", INPUT_FAIL_ON: "escalate,refusal,timestamps,incomplete", INPUT_PLUGINS: "builtin-only", INPUT_APPROVE_ORIGINS: "", INPUT_ACCEPT_LOCK_GRANTS: "false", INPUT_ALLOW_WRITES: "false" };
+  const env = { PATH: process.env.PATH, HOME: temp, ACTION_PATH: actionPath, RUNNER_TEMP: temp, GITHUB_WORKSPACE: workspace, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, PR_RLA_APPROVALS_FILE: join(temp, "pr-rla-approvals.json"), INPUT_COMMAND: input.command ?? "status", INPUT_DIR: ".", INPUT_OFFLINE: input.offline ?? "true", INPUT_COMMENT: "false", INPUT_COMMENT_ISSUE: "", INPUT_FAIL_ON: "escalate,refusal,timestamps,incomplete", INPUT_PLUGINS: "builtin-only", INPUT_APPROVE_ORIGINS: "", INPUT_ACCEPT_LOCK_GRANTS: "false", INPUT_ALLOW_WRITES: "false" };
   console.log(`\n== ${name} ==`);
   for (const step of ["prepare.sh", "run.sh"]) {
     const r = run("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", join(actionPath, "scripts", step)], { cwd: workspace, env });
@@ -52,4 +55,6 @@ function job(name, workspace) {
 }
 
 job("fixture ESCALATE (6 fails of 6 labelled draws)", audit("escalate", "fail", 6));
-job("fixture CERTIFIED (36 passes)", audit("certified", "pass", 36));
+const certified = audit("certified", "pass", 36);
+job("fixture, 36 passes, status: the target is reached and the certificate is withheld (population not verified)", certified);
+job("the same fixture, verify online: INCOMPLETE (the fixture registers no timestamp authority)", certified, { command: "verify", offline: "false" });

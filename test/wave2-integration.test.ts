@@ -464,6 +464,8 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     at(s, "2026-10-21T04:00:00Z");
     const opts = { nowMs: () => s.clock.now, fetch: s.fetch, env: s.ctx.env };
 
+    // Status never rebuilds the population, so its standing withholding is in every result (final fix round).
+    const STANDING = { verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" };
     const UNPROVEN = [
       { verdict: "INCOMPLETE", reason: "registration time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" },
       { verdict: "INCOMPLETE", reason: "manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF (0 of 2))" },
@@ -477,11 +479,12 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     const honest = await read.status({ dir: s.dir }, opts);
     if (honest.phase !== "sampled" || !honest.verdictsRead) throw new Error("not sampled");
     expect(honest.sequence.state).toBe("CERTIFIED");
-    expect(honest).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: UNPROVEN }, certificateWithheld: [], ledgerIntegrity: { ok: true, fails: [] } });
+    expect(honest).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [...UNPROVEN, STANDING] }, certificateWithheld: [], ledgerIntegrity: { ok: true, fails: [] } });
     const honestCli = await cliStatus();
-    expect(honestCli.code).toBe(0);
-    expect(honestCli.json).toMatchObject({ certified: true, certificate: { state: "CERTIFIED", withheld: [] } });
-    expect(honestCli.json.line).toMatch(/· CERTIFIED \(risk /);
+    // The CLI's context trusts the authorities, so the times are proven and only the standing withholding is left: exit 6.
+    expect(honestCli.code).toBe(6);
+    expect(honestCli.json).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [STANDING] } });
+    expect(honestCli.json.line).toMatch(/target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
     // A context that trusts nothing beyond the shipped bundle proves the times only with the anchors given to status
     // as --tsa-trust, as verify's (the wave-2 integration added the option: a certificate needs its times proven).
     const trustFile = join(mkdtempSync(join(tmpdir(), "prrla-wave2-trust-")), "tsa-trust.json");
@@ -493,7 +496,8 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
       return { code, json: JSON.parse(s.out.slice(from).join("\n")) as { certified: boolean; certificate: { state: string } } };
     };
     expect(await bareStatus({})).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD" } } });
-    expect(await bareStatus({ tsaTrust: [trustFile] })).toMatchObject({ code: 0, json: { certified: true, certificate: { state: "CERTIFIED" } } });
+    // With the anchors given as --tsa-trust the times are proven: only the standing withholding is left.
+    expect(await bareStatus({ tsaTrust: [trustFile] })).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD", withheld: [STANDING] } } });
     // The anchors come only from the operator's flag (or context), never from the audited repo: the same trust file
     // committed in the repo and named by its .pr-rla.yml and its pr-rla.lock.json proves nothing.
     const yml = join(s.dir, ".pr-rla.yml");
@@ -506,7 +510,7 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     try {
       expect(await bareStatus({})).toMatchObject({ code: 6, json: { certified: false, certificate: { state: "WITHHELD" } } });
       // ... while the operator's flag naming that very file proves the times: it is the flag, not the file's place, that counts.
-      expect(await bareStatus({ tsaTrust: [join(s.dir, "tsa-trust.json")] })).toMatchObject({ code: 0, json: { certified: true } });
+      expect(await bareStatus({ tsaTrust: [join(s.dir, "tsa-trust.json")] })).toMatchObject({ code: 6, json: { certified: false, certificate: { withheld: [STANDING] } } });
     } finally {
       writeFileSync(yml, original);
       rmSync(lock, { force: true });
@@ -526,12 +530,12 @@ describe("check 7's git-file gate through pr-rla/api/read: status withholds CERT
     expect(r.ledgerIntegrity).toMatchObject({ ok: false, fails: [`${W}/verdicts.jsonl was rewritten (not appended) in commit ${rewrite.slice(0, 10)}`] });
     // P4's gate through time round B's one certificate: withheld as FAILED, the reason naming check 7, beside the times.
     const CHECK7 = { verdict: "FAILED", reason: "verify check 7 would FAIL: the ledger's integrity check FAILs" };
-    expect(r).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [...UNPROVEN, CHECK7] } });
-    expect(r.line).toMatch(/target reached · CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
+    expect(r).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [...UNPROVEN, CHECK7, STANDING] } });
+    expect(r.line).toMatch(/target reached · CERTIFICATE WITHHELD \(.*verify check 7 would FAIL: the ledger's integrity check FAILs/);
     const tamperedCli = await cliStatus();
     expect(tamperedCli.code).toBe(1); // a withholding a check would FAIL exits as verify would
-    expect(tamperedCli.json).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [CHECK7] } });
-    expect(tamperedCli.json.line).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs\)/);
+    expect(tamperedCli.json).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [CHECK7, STANDING] } });
+    expect(tamperedCli.json.line).toMatch(/target reached · CERTIFICATE WITHHELD \(verify check 7 would FAIL: the ledger's integrity check FAILs; population not verified: run `pr-rla verify`\)/);
 
     const v = await read.verify({ dir: s.dir, offline: true }, opts);
     expect(v).toMatchObject({ ok: false, verdict: "FAILED", exitCode: 1 });

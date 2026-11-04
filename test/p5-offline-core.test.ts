@@ -65,9 +65,11 @@ const check = (v: Awaited<ReturnType<typeof surfaces>>["v"], n: number) => v.che
 describe("the honest audit: status certifies, and verify finds nothing to fail", () => {
   it("control: exit 0, certified, no offline check fails", async () => {
     const r = await surfaces(cloneScenario(audit));
-    expect(r.text).toBe(0);
-    expect(r.json).toMatchObject({ certified: true, certificate: { state: "CERTIFIED", withheld: [] }, offlineFails: [] });
-    expect(r.list.windows[0]).toMatchObject({ certified: true });
+    // Status reaches the target and finds nothing to fail, but never rebuilds the population (check 5): it cannot certify (final fix round).
+    expect(r.text).toBe(6);
+    expect(r.json).toMatchObject({ certified: false, certificate: { state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "population not verified: run `pr-rla verify`" }] }, offlineFails: [] });
+    expect(r.textLines[0]).toMatch(/target reached · CERTIFICATE WITHHELD \(population not verified: run `pr-rla verify`\)/);
+    expect(r.list.windows[0]).toMatchObject({ certified: false });
     expect([1, 2, 3, 4, 6].map((n) => check(r.v, n).status)).not.toContain("FAIL");
   });
 });
@@ -196,9 +198,9 @@ describe("T14: the registration's full digest, and verify --registration", () =>
     s.out.length = 0;
     expect(await statusCommand(s.ctx, { json: true, registration: other })).toBe(1);
     expect(JSON.parse(s.out.join("\n"))).toMatchObject({ certified: false });
-    // The same status without the pin certifies: the pin is what withholds it.
+    // The same status without the pin exits 6, not 1: it still cannot certify (population not verified), but nothing FAILs; the pin is what makes it a FAIL.
     s.out.length = 0;
-    expect(await statusCommand(s.ctx, {})).toBe(0);
+    expect(await statusCommand(s.ctx, {})).toBe(6);
   });
   it("a malformed --registration is a usage error (exit 1), in verify and in status", async () => {
     const s = cloneScenario(audit);

@@ -14,7 +14,10 @@ export interface AuditWindowSummary {
   timestampTamperProof?: boolean;
   N?: number;
   drawsIssued?: number;
-  /** Set once the window is sampled and its verdicts could be read offline. */
+  /**
+   * Set once the window is sampled and its verdicts could be read offline. status never runs check 5 (the population
+   * rebuilt from the SCM), so this is false for every window here: only `verify` certifies (`pr-rla verify`).
+   */
   certified?: boolean;
   /** The status line. */
   line: string;
@@ -35,7 +38,7 @@ export async function auditList(ctx: ApiContext): Promise<{ dir: string; windows
     if (r.phase === "frozen" || r.phase === "sampled") s.N = r.N;
     if (r.phase === "sampled") {
       s.drawsIssued = r.drawsIssued;
-      // The certificate rule status prints (src/core/verdict.ts): not certified while something withholds it.
+      // The certificate rule status prints (src/core/verdict.ts): status carries a standing withholding, so never certified here.
       if (r.verdictsRead) s.certified = r.certified;
     }
     windows.push(s);

@@ -35,7 +35,9 @@ function stateOf(st, certificate) {
   if (!st || typeof st !== "object" || !st.sequence) return "NOT_CERTIFIED";
   if (st.refusal) return "REFUSED";
   if (st.sequence.state === "ESCALATE") return "ESCALATE";
-  if (st.sequence.state === "CERTIFIED") return "CERTIFIED";
+  // The SPRT's raw CERTIFIED is never the claim: only a result's `certificate` (pr-rla's one display decision, which only
+  // verify can make CERTIFIED) says so. Without one, a reached target is withheld, not certified.
+  if (st.sequence.state === "CERTIFIED") return "WITHHELD";
   return "NOT_CERTIFIED";
 }
 
