@@ -1,10 +1,12 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { gitCeilingDirectories } from "./confine.js";
 
 /**
- * The one way pr-rla's read paths run git (U9, after review; shared with U5's equivalent guard).
- * A verifier's git must show what the objects say, write nothing and reach no network:
+ * The one way pr-rla's read paths run git (U9, after review, joined at the wave-2 integration with
+ * U5's read-only guard, which was src/io/git-read.ts). A verifier's git must show what the objects
+ * say, write nothing and reach no network:
  *
  * - every inherited `GIT_*` variable is dropped (GIT_DIR, GIT_OBJECT_DIRECTORY, GIT_GRAFT_FILE,
  *   GIT_CONFIG_PARAMETERS, … cannot steer it);
@@ -14,9 +16,14 @@ import { dirname, join, resolve } from "node:path";
  *   automatic gc or maintenance writes under .git;
  * - `GIT_CEILING_DIRECTORIES` at the audit root: git looks for a repository from its cwd up to the
  *   root and never above it (git stops before climbing *into* a ceiling, so the ceiling is the root's parent);
+ *   in a confined call (the MCP server, src/io/confine.ts) the roots' parents are ceilings too;
+ * - `GIT_TERMINAL_PROMPT=0`: never ask for a password;
  * - `--no-replace-objects`, `-c core.commitGraph=false`, `-c core.fsmonitor=false`: no replace refs,
  *   no commit-graph parents, no fsmonitor hook;
  * - `--no-textconv` for the commands that would apply a textconv driver (diff, log, show, blame, grep).
+ *
+ * A `.git` file pointing outside the roots of a confined call is refused before git runs, by the
+ * caller that discovers the repository (the git-file ledger's `confineGitDir`).
  */
 
 const GLOBAL_ARGS = ["--no-replace-objects", "-c", "core.commitGraph=false", "-c", "core.fsmonitor=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false"];
@@ -36,7 +43,24 @@ export function gitSafeEnv(root: string, env: NodeJS.ProcessEnv = process.env): 
   for (const [k, v] of Object.entries(env)) if (!k.toUpperCase().startsWith("GIT_")) out[k] = v;
   out.GIT_NO_LAZY_FETCH = "1";
   out.GIT_OPTIONAL_LOCKS = "0";
-  out.GIT_CEILING_DIRECTORIES = dirname(resolve(root));
+  out.GIT_TERMINAL_PROMPT = "0";
+  out.GIT_CEILING_DIRECTORIES = [...new Set([dirname(resolve(root)), ...gitCeilingDirectories()])].join(delimiter);
+  return out;
+}
+
+/** Variables that point git at another repository, work tree, index or object store. */
+const REPOSITORY_ENV = new Set(["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"]);
+
+/**
+ * The environment for git's write side, the checkpoint push (src/io/git-transport.ts). It needs the
+ * user's own transport settings (GIT_SSH_COMMAND, GIT_ASKPASS, credential helpers), so it keeps
+ * them; what is safe to drop is dropped: any variable that would make git act on another repository
+ * than the audit's. It never prompts.
+ */
+export function gitWriteEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) if (!REPOSITORY_ENV.has(k.toUpperCase())) out[k] = v;
+  out.GIT_TERMINAL_PROMPT = "0";
   return out;
 }
 

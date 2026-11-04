@@ -1,50 +1,14 @@
-import { existsSync } from "node:fs";
-import { buildPopulation } from "../core/population.js";
-import { perRepoLines, perRepoRows } from "../core/pooled-report.js";
-import { auditMode, derivedRoundFor, isRegistrationV2, manifestRepos, registrationRepoSet, type AuditMode, type RegistrationRecordV2, type SignedRecord } from "../core/records.js";
-import { describeRepoSet } from "../core/repo-set.js";
-import { unixToIso } from "../core/seed.js";
-import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
-import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
-import { latestCheckpointAt } from "../api/checkpoint.js";
-import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
-import { builtinLedgerName } from "../registry.js";
-import { provenanceRank } from "../sdk/ledger.js";
-import { checkpointCommand } from "./checkpoint.js";
-import { windowDays } from "../core/window.js";
-import type { PrRlaConfig, WindowPaths } from "../config.js";
-import type { Selector } from "../core/selector.js";
-import { anchorLines, notTamperProof } from "../timestamp/verify.js";
-import { auditContextFor, configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
-import { assessRecord, logBound } from "./timestamps.js";
+import { AuditError } from "../api/errors.js";
+import { status, type StatusOptions as ApiStatusOptions, type StatusResult } from "../api/read/status.js";
+import { checkpoint } from "../api/write/checkpoint.js";
+import { perRepoLines } from "../core/pooled-report.js";
+import { provenanceLabel } from "../core/presence/index.js";
+import { provenanceLine } from "../core/status.js";
+import { checkpointCommand, checkpointExitCode } from "./checkpoint.js";
+import type { CommandContext } from "./context.js";
 
-/**
- * The audit mode and the honest-output note for status. v1: tamper-evident iff its log entries verify
- * under a pinned log key (an entry in any other log is unverified). v2: the stored tokens are checked
- * offline; the mode is proven by U_k when k operators agree, and the note says TIMESTAMP NOT TAMPER-PROOF
- * (n of k) when the registration or the commitment falls short. `anchors` names each counted authority's
- * anchor and its independence (NFR4), or is empty.
- */
-export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string }> {
-  if (!isRegistrationV2(reg)) {
-    const logged = (await logBound(ctx, config, reg)) !== null && (!existsSync(paths.commitment) || (await logBound(ctx, config, readCommitment(paths))) !== null);
-    return { mode: auditMode(reg), note: logged ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: logged, anchors: "" };
-  }
-  const v2 = reg as SignedRecord<RegistrationRecordV2>;
-  const bundle = trustFor(ctx);
-  const ts = v2.record.timestamping;
-  const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle);
-  let short = r.proven ? null : r;
-  const lines = anchorLines(r);
-  if (existsSync(paths.commitment)) {
-    const cm = readCommitment(paths);
-    const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle);
-    if (!c.proven && !short) short = c;
-    for (const l of anchorLines(c)) if (!lines.includes(l)) lines.push(l);
-  }
-  const mode: AuditMode = r.proven ? (r.ukMs! < Date.parse(v2.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE") : auditMode(reg);
-  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short, anchors: lines.length ? `  timestamp anchors: ${lines.join(" · ")}` : "" };
-}
+// The status logic moved to the audit API in U5 (src/api/read/status.ts); re-exported for callers.
+export { statusLine, stratumChoices, timeStanding } from "../api/read/status.js";
 
 export interface StatusOptions {
   json?: boolean;
@@ -53,117 +17,67 @@ export interface StatusOptions {
   checkpoint?: boolean;
 }
 
-/**
- * The registered U3 stratum choices, as the certificate names them: the bot list, and whether direct
- * pushes that arrived through a pushed merge are in the stratum (FR7.1, FR7.6). Empty for v1 records.
- */
-export function stratumChoices(sel: Partial<Pick<Selector, "kinds" | "bots" | "direct_push_via_merge">> | undefined): string {
-  if (!sel) return "";
-  const parts: string[] = [];
-  if (sel.bots && sel.bots.length > 0) parts.push(`registered bots ${sel.bots.join(", ")}`);
-  if (sel.direct_push_via_merge !== undefined && sel.kinds?.includes("direct_push")) parts.push(`direct pushes via a pushed merge ${sel.direct_push_via_merge === "exclude" ? "excluded" : "included"}`);
-  return parts.map((p) => `, ${p}`).join("");
-}
-
-export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector> }): string {
-  const s = r.sequence;
-  const stratum = `${info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : ""}${stratumChoices(info.selector)}`;
-  const head = `prefix ${r.labelledPrefix}/${r.drawsIssued} · fails ${s.fails} · claim D (detected-defect rate ≤ ${pct(info.p0)}, protocol ${info.protocol.slice(0, 4)}…${stratum}) · LLR ${s.llr.toFixed(3)} / target ${s.target.toFixed(3)}`;
-  let verdict: string;
-  if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
-  else if (s.state === "ESCALATE") verdict = `ESCALATE: review all ${fmt(r.N)} or narrow the claim`;
-  else verdict = `NOT CERTIFIED · ${s.morePassesNeeded} more passing draws needed (${s.draws + (s.morePassesNeeded ?? 0)} total)`;
-  return `${head} · ${verdict} · ${info.mode}`;
-}
-
 export async function statusCommand(ctx: CommandContext, opts: StatusOptions): Promise<number> {
+  if (opts.json && opts.checkpoint) return statusJsonWithCheckpoint(ctx, opts);
   const code = await statusOnly(ctx, opts);
   if (!opts.checkpoint) return code;
   const cp = await checkpointCommand(ctx, {});
   return code !== 0 ? code : cp;
 }
 
+/**
+ * `status --json --checkpoint`: one JSON document on stdout, always (contracts.md §7): the status
+ * result with the checkpoint's result as `checkpoint`, or `checkpoint: { error }` when it failed.
+ * The exit code is status's, else the checkpoint's; a failed checkpoint's own (as without --json).
+ */
+async function statusJsonWithCheckpoint(ctx: CommandContext, opts: StatusOptions): Promise<number> {
+  const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
+  const code = statusExitCode(r);
+  try {
+    const cp = await checkpoint(ctx, {});
+    ctx.out(JSON.stringify({ ...r, checkpoint: cp }, null, 2));
+    return code !== 0 ? code : checkpointExitCode(cp);
+  } catch (e) {
+    const { code: c, host, next } = e as { code?: unknown; host?: unknown; next?: unknown };
+    ctx.out(JSON.stringify({ ...r, checkpoint: { error: { code: typeof c === "string" ? c : "FAILED", message: (e as Error).message, ...(typeof host === "string" ? { host } : {}), ...(typeof next === "string" && next ? { next } : {}) } } }, null, 2));
+    // As without --json, a failed checkpoint decides the exit code.
+    return e instanceof AuditError ? e.exitCode : 1;
+  }
+}
+
+/** The exit code of a status result (contracts.md §7): 1 not registered, 2 ESCALATE, 3 below the minimum population. */
+export function statusExitCode(r: StatusResult): number {
+  if (r.phase === "unregistered") return 1;
+  if (r.phase !== "sampled" || !r.verdictsRead) return 0;
+  if (r.refusal) return 3;
+  return r.sequence.state === "ESCALATE" ? 2 : 0;
+}
+
 async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<number> {
-  const { config, paths } = configFor(ctx);
-  if (!existsSync(paths.registration)) {
-    ctx.out(`not registered: window ${config.window.name} (${config.window.start}..${config.window.end}). Run "pr-rla register".`);
-    return 1;
-  }
-  const reg = readRegistration(paths);
-  const { mode, note: tsNote, tamperProof, anchors } = await timeStanding(ctx, config, paths, reg);
-  const w = reg.record.window;
-  const now = Math.floor(ctx.nowMs() / 1000);
-  const { round, publishesAt } = derivedRoundFor(reg);
-  if (!existsSync(paths.manifest)) {
-    const opens = Date.parse(w.opensAt) / 1000;
-    const closes = Date.parse(w.closesAt) / 1000;
-    const phase = now < opens ? "window not yet open" : now < closes ? `window open, day ${Math.floor((now - opens) / 86400) + 1} of ${windowDays(w)}` : "window closed, not frozen";
-    let soFar = "";
-    const set = registrationRepoSet(reg);
-    if (!opts.offline && now >= opens && set.kind === "repo") {
-      const provider = await providerFor(ctx, config);
-      const pop = await buildPopulation(provider, { repo: set.repo, window: { opensAt: w.opensAt, closesAt: unixToIso(Math.min(now, closes)) }, selector: reg.record.selector, cutoffIso: isoNow(ctx) });
-      soFar = ` · N so far ${fmt(pop.entries.length)}`;
-    } else if (!opts.offline && now >= opens)
-      // A pool's N needs a listing of every repo (about what a freeze costs), so plain status does not spend it.
-      soFar = ` · N so far: not computed for a pool (${describeRepoSet(set)}): it lists every repo, about as many requests as the freeze; "pr-rla freeze --dry-run --estimate" predicts them and "pr-rla freeze --dry-run" counts N`;
-    ctx.out(`${mode} · ${phase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${tsNote}`);
-    if (anchors) ctx.out(anchors);
-    return 0;
-  }
-  const manifest = readManifest(paths);
-  if (!existsSync(paths.draws)) {
-    ctx.out(`${mode} · frozen N ${fmt(manifest.N)} · seed round ${round} ${now < publishesAt ? `publishes ${unixToIso(publishesAt)}` : `published ${unixToIso(publishesAt)}: run "pr-rla sample"`}${tsNote}`);
-    if (anchors) ctx.out(anchors);
-    return 0;
-  }
-  const draws = readDraws(paths);
-  const ledger = await ledgerFor(ctx, config, paths);
-  // U9: verdict signatures count only in the registered built-in git-file ledger; nothing counts above the registered ledger's ceiling.
-  const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-  const ceiling = registeredCeiling(registeredLedger, await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx)));
-  const verifiesSignatures = signaturesCountFor(registeredLedger) && builtinLedgerName(config.ledger.use) === "git-file";
-  const capped = countedVerdicts(await ledger.readVerdicts(), { registration: reg, verifiesSignatures, ceiling, ledger: ledger.name });
-  const report = computeStatus({
-    N: manifest.N,
-    minPopulation: reg.record.parameters.minPopulation,
-    draws: draws.draws,
-    drawsIssued: draws.issued,
-    verdicts: capped.verdicts,
-    protocolSha256: reg.record.protocolSha256,
-    params: reg.record.parameters,
-    reviewers: isRegistrationV2(reg) ? reg.record.verdicts.reviewers : null,
-  });
-  const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
-  const requireSigned = isRegistrationV2(reg) && reg.record.verdicts.require_signed === true;
-  const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
+  const r = await status(ctx, { offline: !!opts.offline } satisfies ApiStatusOptions);
   if (opts.json) {
-    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report, ...(perRepo ? { perRepo } : {}) }, null, 2));
-  } else if (report.refusal) {
-    ctx.out(report.refusal);
-    return 3;
-  } else {
-    ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }) + tsNote);
-    if (anchors) ctx.out(anchors);
-    if (report.blockingDraw) ctx.out(`  blocking draw: #${report.blockingDraw.draw} ${report.blockingDraw.changeId} ${report.blockingDraw.url}`);
-    ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
-    for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
-    for (const r of report.relabels) ctx.out(`  relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
-    ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${provenanceLabel(minProvenance)}${requireSigned ? " · signed verdicts required (require_signed)" : ""}`);
-    if (minProvenance === "presence" || report.provenance.some((p) => p.level === "presence")) ctx.out(`  ${PRESENCE_LIMIT}`);
-    for (const note of [...capped.notes, ...capped.warnings]) ctx.out(`  ${note}`);
-    const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
-    const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
-    if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${provenanceLabel(minProvenance)} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
-    const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length) : [];
-    if (unsigned.length) ctx.out(`  ${unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${unsigned.map((v) => `#${v.draw}`).join(", ")})`);
-    if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
-      const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");
-      const cp = latestCheckpointAt(paths.windowDir);
-      if (cp === null || Date.parse(cp) < Date.parse(lastVerdict)) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
-    }
-    if (perRepo) for (const l of perRepoLines(perRepo)) ctx.out(l);
-    ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
+    ctx.out(JSON.stringify(r, null, 2));
+    return statusExitCode(r);
   }
-  return report.sequence.state === "ESCALATE" ? 2 : 0;
+  printStatus(ctx, r);
+  return statusExitCode(r);
+}
+
+/** The text form of a status result. */
+export function printStatus(ctx: Pick<CommandContext, "out">, r: StatusResult): void {
+  ctx.out(r.line);
+  const refused = r.phase === "sampled" && r.verdictsRead && !!r.refusal;
+  if (r.phase !== "unregistered" && !refused && r.timestampAnchors.length) ctx.out(`  timestamp anchors: ${r.timestampAnchors.join(" · ")}`);
+  if (r.phase !== "sampled" || !r.verdictsRead || r.refusal) return;
+  if (r.blockingDraw) ctx.out(`  blocking draw: #${r.blockingDraw.draw} ${r.blockingDraw.changeId} ${r.blockingDraw.url}`);
+  ctx.out(`  distinct changes reviewed: ${r.distinctReviewed} · draws counted: ${r.sequence.draws}${r.beyondStop ? ` · ${r.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
+  for (const i of r.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
+  for (const x of r.relabels) ctx.out(`  relabel: ${x.changeId} first ${x.first.verdict} (counts), later ${x.later.verdict}`);
+  ctx.out(`  ${provenanceLine(r.provenance)} · registered minimum ${provenanceLabel(r.minProvenance)}${r.requireSigned ? " · signed verdicts required (require_signed)" : ""}`);
+  for (const note of r.verdictNotes) ctx.out(`  ${note}`);
+  if (r.belowMinimum.length) ctx.out(`  ${r.belowMinimum.length} counted verdict(s) are below the registered ${provenanceLabel(r.minProvenance)} provenance; verify check 7 will FAIL them (draws ${r.belowMinimum.map((d) => `#${d}`).join(", ")})`);
+  if (r.unsigned.length) ctx.out(`  ${r.unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${r.unsigned.map((d) => `#${d}`).join(", ")})`);
+  if (r.checkpointAdvised) ctx.out('  CERTIFIED: run "pr-rla checkpoint" and commit it to anchor the verdict history');
+  if (r.perRepo) for (const l of perRepoLines(r.perRepo)) ctx.out(l);
+  ctx.out("  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.");
 }

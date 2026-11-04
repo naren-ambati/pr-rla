@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { checkpointCommand } from "./commands/checkpoint.js";
-import { CommandError, nodeContext, type CommandContext } from "./commands/context.js";
+import { AuditError } from "./api/errors.js";
+import { nodeContext, type CommandContext } from "./commands/context.js";
+import { drawContextCommand } from "./commands/draw-context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
 import { pluginAddCommand, pluginApproveCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
@@ -31,7 +33,8 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .showHelpAfterError();
 
   const collect = (v: string, prev: string[] = []) => [...prev, v];
-  const run = (fn: (ctx: CommandContext) => Promise<number>) => async () => {
+  /** Runs a command; with `json` (its --json), an error prints as `{ "error": { code, message, host?, next? } }` on stdout (contracts.md §7). */
+  const run = (fn: (ctx: CommandContext) => Promise<number>, json = false) => async () => {
     const g = program.opts<{ dir?: string; config?: string; fromFile?: string; plugins?: string; acceptLockGrants?: boolean }>();
     const ctx = makeCtx(g);
     if (g.plugins !== undefined) ctx.plugins = g.plugins;
@@ -39,11 +42,14 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     try {
       setExit(await fn(ctx));
     } catch (e) {
-      ctx.err(`pr-rla: ${(e as Error).message}`);
       // Broker and API errors name the host and the next step (NFR17).
-      const next = (e as { next?: unknown }).next;
-      if (typeof next === "string" && next) ctx.err(`  next: ${next}`);
-      setExit(e instanceof CommandError ? e.exitCode : 1);
+      const { code, host, next } = e as { code?: unknown; host?: unknown; next?: unknown };
+      if (json) ctx.out(JSON.stringify({ error: { code: typeof code === "string" ? code : "FAILED", message: (e as Error).message, ...(typeof host === "string" ? { host } : {}), ...(typeof next === "string" && next ? { next } : {}) } }, null, 2));
+      else {
+        ctx.err(`pr-rla: ${(e as Error).message}`);
+        if (typeof next === "string" && next) ctx.err(`  next: ${next}`);
+      }
+      setExit(e instanceof AuditError ? e.exitCode : 1);
     } finally {
       closeAllPluginHosts();
     }
@@ -90,7 +96,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--json", "machine-readable output")
     .option("--out <file>", "with --dry-run: write the full listing and would-be manifest ids to <file>")
     .action(function (this: Command) {
-      return run((ctx) => freezeCommand(ctx, this.opts()))();
+      return run((ctx) => freezeCommand(ctx, this.opts()), !!this.opts().json)();
     });
 
   program
@@ -100,6 +106,15 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--beacon-file <path>", "use a recorded quicknet beacon (still BLS-verified) instead of fetching")
     .action(function (this: Command) {
       return run((ctx) => sampleCommand(ctx, this.opts()))();
+    });
+
+  program
+    .command("draw-context <draw>")
+    .description("what a reviewer reads for an issued draw: its diff (generated files dropped), description, CI results, protocol checklist and verdict state")
+    .option("--max-patch-bytes <n>", "bytes of patches to show in all (default 204800, at most 1048576)")
+    .option("--json", "machine-readable output")
+    .action(function (this: Command, draw: string) {
+      return run((ctx) => drawContextCommand(ctx, draw, this.opts()), !!this.opts().json)();
     });
 
   program
@@ -120,7 +135,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--offline", "do not call the provider (for 'N so far' while the window is open)")
     .option("--checkpoint", "also append a ledger checkpoint (as \"pr-rla checkpoint\" does; plain status never writes)")
     .action(function (this: Command) {
-      return run((ctx) => statusCommand(ctx, this.opts()))();
+      return run((ctx) => statusCommand(ctx, this.opts()), !!this.opts().json)();
     });
 
   program
@@ -144,7 +159,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--json", "machine-readable output")
     .addHelpText("after", "\nExit codes: 0 VERIFIED · 1 FAILED (a check failed) · 6 INCOMPLETE (nothing failed, but part of the population could not be rebuilt, or its completeness could not be established; --json has the verdict)")
     .action(function (this: Command) {
-      return run((ctx) => verifyCommand(ctx, this.opts()))();
+      return run((ctx) => verifyCommand(ctx, this.opts()), !!this.opts().json)();
     });
 
   const plugin = program.command("plugin").description("lock, re-lock and check external providers and ledgers (pr-rla.lock.json)");
@@ -196,7 +211,7 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--cap <n>", "draw cap (default 4x zero-failure stop)")
     .option("--json", "machine-readable output")
     .action(function (this: Command) {
-      return run((ctx) => simulateCommand(ctx, this.opts()))();
+      return run((ctx) => simulateCommand(ctx, this.opts()), !!this.opts().json)();
     });
 
   return program;

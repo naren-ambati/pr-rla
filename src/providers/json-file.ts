@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { readTextConfinedAsync } from "../io/confine.js";
 import { isAbsolute, resolve } from "node:path";
 import {
   PROVIDER_API_VERSION,
   assertChangeRecord,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
@@ -23,6 +24,29 @@ export interface ChangesFile {
   defaultBranch?: string;
   limitations?: string[];
   changes: ChangeRecord[];
+  /**
+   * Optional (U5): what `describeChange` returns per change id, recorded from the SCM, so a
+   * draw context can be built with no network (`pr-rla draw-context`, the MCP `draw_context`).
+   */
+  descriptions?: Record<string, ChangeDescription>;
+}
+
+/** JSON.parse of the export, with an error that never quotes the file. */
+function parseExport(text: string, file: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${file}: not valid JSON`);
+  }
+}
+
+/** Thrown by the json-file provider's describeChange when the export recorded no description for the change (pr-rla's own class: draw-context honours only it). */
+export class NoRecordedDescription extends Error {
+  readonly code = "NO_DESCRIPTION";
+  constructor(file: string, id: string) {
+    super(`${file} records no description for ${id}`);
+    this.name = "NoRecordedDescription";
+  }
 }
 
 export const JSON_FILE_LIMITATIONS = [
@@ -40,7 +64,7 @@ export class JsonFileProvider implements ScmProvider {
   constructor(private readonly file: string) {}
 
   async load(): Promise<{ repo: string | null; defaultBranch: string; limitations: string[]; changes: ChangeRecord[] }> {
-    const raw = JSON.parse(await readFile(this.file, "utf8")) as unknown;
+    const raw = parseExport(await readTextConfinedAsync(this.file, "the json-file provider's export"), this.file) as unknown;
     const env: Partial<ChangesFile> = Array.isArray(raw) ? { changes: raw as ChangeRecord[] } : (raw as Partial<ChangesFile>);
     if (!Array.isArray(env.changes)) throw new Error(`${this.file}: expected an array of changes or {"schema":"pr-rla/changes/v1","changes":[...]}`);
     if (env.schema !== undefined && env.schema !== "pr-rla/changes/v1") throw new Error(`${this.file}: unsupported schema ${String(env.schema)}`);
@@ -51,6 +75,14 @@ export class JsonFileProvider implements ScmProvider {
       seen.add(c.id);
     });
     return { repo: env.repo ?? null, defaultBranch: env.defaultBranch ?? "main", limitations: env.limitations ?? [], changes: env.changes };
+  }
+
+  /** The description the export recorded for the change (U5), or NoRecordedDescription. */
+  async describeChange(change: ChangeRecord): Promise<ChangeDescription> {
+    const raw = parseExport(await readTextConfinedAsync(this.file, "the json-file provider's export"), this.file) as Partial<ChangesFile> | unknown[];
+    const d = Array.isArray(raw) ? undefined : raw.descriptions?.[change.id];
+    if (!d) throw new NoRecordedDescription(this.file, change.id);
+    return structuredClone(d);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

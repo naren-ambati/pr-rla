@@ -1,9 +1,10 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, parse, relative } from "node:path";
+import { appendFile, mkdir } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, parse, relative, resolve } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
 import { extendsBytes, readFileHistory } from "./git-history.js";
 import { FULL_CLONE, gitSafeText, historyRefusal } from "../io/git-safe.js";
+import { confinedPath, currentConfinement, gitCeilingDirectories, readConfined, readTextConfinedAsync } from "../io/confine.js";
 import {
   LEDGER_API_VERSION,
   defineLedger,
@@ -24,6 +25,36 @@ export interface GitFileLedgerOptions {
    */
   require_signed?: boolean;
 }
+
+/**
+ * In a confined call (src/io/confine.ts), the repository git would find from `start` must be inside
+ * the roots: a `.git` file's gitdir, and a worktree's commondir, are checked before git reads them.
+ * With no confinement in force (the CLI) it does nothing.
+ */
+function confineGitDir(start: string): void {
+  if (!currentConfinement()) return;
+  // As git does with GIT_CEILING_DIRECTORIES: never look in a ceiling (a root's parent) or above it.
+  const ceilings = new Set(gitCeilingDirectories());
+  for (let d = realpathSync(resolve(start)); !ceilings.has(d); d = dirname(d)) {
+    const dotGit = join(d, ".git");
+    if (existsSync(dotGit)) {
+      let gitDir = dotGit;
+      if (statSync(dotGit).isFile()) {
+        const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf8"));
+        if (!m) return;
+        gitDir = resolve(d, m[1]!);
+      }
+      confinedPath(gitDir, "the git-file ledger's git directory");
+      const common = join(gitDir, "commondir");
+      if (existsSync(common)) confinedPath(resolve(gitDir, readFileSync(common, "utf8").trim()), "the git-file ledger's git directory");
+      return;
+    }
+    if (dirname(d) === d) return;
+  }
+}
+
+/** The file the git-file ledger reads and appends to: `file` (default verdicts.jsonl) joined to the window directory. */
+export const gitFilePath = (windowDir: string, options?: GitFileLedgerOptions) => join(windowDir, options?.file ?? "verdicts.jsonl");
 
 /**
  * Verdicts appended, one JSON object per line, to `audit/<window>/verdicts.jsonl`.
@@ -60,7 +91,7 @@ export class GitFileLedger implements Ledger {
   async readVerdicts(): Promise<VerdictEvent[]> {
     if (!existsSync(this.file)) return [];
     // A line's own claim about its provenance never counts: only its signature does, checked by the core.
-    return GitFileLedger.parse(await readFile(this.file, "utf8"), this.file).map(({ provenance: _claimed, ...v }) => v);
+    return GitFileLedger.parse(await readTextConfinedAsync(this.file, "the git-file ledger's file"), this.file).map(({ provenance: _claimed, ...v }) => v);
   }
 
   async appendVerdict(event: VerdictEvent): Promise<void> {
@@ -77,6 +108,8 @@ export class GitFileLedger implements Ledger {
     let dir = dirname(this.file);
     while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
     let top: string;
+    // A .git file can point anywhere ("gitdir: …"): in a confined call, the repository git would read is checked before git runs.
+    confineGitDir(dir);
     try {
       // Discovery finds the audit repository's toplevel; every later call runs there, with git's ceiling at it.
       top = gitSafeText(["rev-parse", "--show-toplevel"], { cwd: dir, root: parse(dir).root }).trim();
@@ -125,7 +158,7 @@ export class GitFileLedger implements Ledger {
     const committed = [...h.versions.values()].some((v) => v instanceof Buffer);
     const atHead = h.head ? (h.versions.get(h.head) ?? null) : null;
     const prev = atHead instanceof Buffer ? atHead : Buffer.alloc(0);
-    const current = existsSync(this.file) ? await readFile(this.file) : Buffer.alloc(0);
+    const current = existsSync(this.file) ? readConfined(this.file, "the git-file ledger's file") : Buffer.alloc(0);
     if (!extendsBytes(current, prev)) {
       ok = false;
       findings.push(`${rel} in the working tree rewrites its committed history`);
@@ -145,6 +178,6 @@ export default defineLedger<GitFileLedgerOptions>({
   create: (options: GitFileLedgerOptions, ctx: LedgerContext) => {
     if (options?.require_signed !== undefined && typeof options.require_signed !== "boolean") throw new Error("option require_signed must be true or false");
     if (options?.file !== undefined && typeof options.file !== "string") throw new Error("option file must be a file name");
-    return new GitFileLedger(join(ctx.windowDir, options?.file ?? "verdicts.jsonl"));
+    return new GitFileLedger(gitFilePath(ctx.windowDir, options));
   },
 });

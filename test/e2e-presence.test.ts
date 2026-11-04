@@ -40,7 +40,7 @@ let keysDir: string;
 const keys: Record<string, TestKey> = {};
 const keyPath = (name: string) => join(keysDir, name);
 const readJ = <X>(s: Scenario, p: string) => JSON.parse(readFileSync(join(s.dir, p), "utf8")) as X;
-const check = (r: Awaited<ReturnType<typeof runVerify>>, n: number) => r.checks.find((c) => c.n === n)!;
+const check = (r: Pick<Awaited<ReturnType<typeof runVerify>>, "checks">, n: number) => r.checks.find((c) => c.n === n)!;
 const at = (s: Scenario, iso: string) => {
   s.clock.now = T(iso);
   tsa.nowMs = T(iso);

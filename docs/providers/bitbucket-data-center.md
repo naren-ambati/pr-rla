@@ -68,3 +68,9 @@ Bitbucket Data Center's optional rate limiting answers 429; the client waits for
 - **Full PR listing.** There is no merged-after filter, so every merged PR into the branch is read.
 - **Truncated diffs** undercount `changedLines`.
 - **Cherry-picks** of a PR's commit pushed directly would be attributed to that PR by the rebase rule (same author, author time and message).
+
+## Draw context (`describeChange`)
+
+`pr-rla draw-context <n>` and the MCP `draw_context` tool read, with GETs only: the pull request, its `changes` (paginated; a `COPY` is an added file with its source as `previousPath`) and its `diff` (REST 1.0's JSON diff, turned into unified hunks; its `truncated` flag is passed on), the `.gitattributes` files at the PR's target commit (`toRef.latestCommit`) and at its landed commit (`raw/<dir>/.gitattributes?at=`, as text; 404 means none), and the build statuses at the PR's source commit (`/rest/build-status/1.0/commits/<sha>`, paginated). A direct push reads `commits/<sha>`, its `changes` and `diff`; its base is its first parent. A page that is not the last but gives no next start, a repeated one, or a 101st page stops the listing, reported as incomplete. **Unverified against a live server**, like the rest of this provider: built and tested from Atlassian's documented response shapes; `toRef.latestCommit` of a merged pull request in particular.
+
+Data Center is self-hosted, so it has no default origin: in read-only mode (the MCP server) its token needs the operator's consent, and is withheld for now.

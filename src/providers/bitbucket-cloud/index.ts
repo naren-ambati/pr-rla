@@ -3,6 +3,7 @@ import {
   RepoEmptyError,
   RepoUnavailableError,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type FirstParentCommit,
   type ListChangesRequest,
@@ -11,7 +12,9 @@ import {
   type RepoRef,
   type RepoSetRule,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
+import { describeBitbucketCloudChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
 import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
@@ -122,7 +125,9 @@ export class BitbucketCloudProvider implements ScmProvider {
   constructor(opts: BitbucketCloudOptions, private readonly ctx: ProviderContext & { now?: () => number }) {
     const token = ctx.env[opts.token_env ?? "BITBUCKET_TOKEN"];
     const user = ctx.env[opts.username_env ?? "BITBUCKET_USERNAME"];
-    const auth = token ? (user ? `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}` : `Bearer ${token}`) : undefined;
+    // In read-only mode both arrive as broker placeholders (src/api/credentials.ts): the broker builds the Basic header itself.
+    const placeholder = (v: string) => /^prrla-cred:[A-Za-z_][A-Za-z0-9_]*$/.test(v);
+    const auth = token ? (user ? (placeholder(user) && placeholder(token) ? `prrla-basic:${user.slice(11)}:${token.slice(11)}` : `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}`) : `Bearer ${token}`) : undefined;
     this.http = new HttpClient({
       provider: "bitbucket-cloud",
       baseUrl: opts.api_url ?? "https://api.bitbucket.org/2.0",
@@ -190,6 +195,11 @@ export class BitbucketCloudProvider implements ScmProvider {
     if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
     const commits = await this.paged<BbCommit>(`${this.split(req.repo)}/commits?include=${req.head}&exclude=${req.base}&pagelen=100&fields=next,values.hash,values.date,values.parents.hash`, req.signal);
     return firstParentChain(commits.map((c) => ({ sha: c.hash, parents: c.parents.map((x) => x.hash), committedAt: c.date })), req.base, req.head);
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeBitbucketCloudChange(this.http, change, opts);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

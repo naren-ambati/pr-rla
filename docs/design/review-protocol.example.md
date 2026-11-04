@@ -6,6 +6,9 @@ changing the protocol mid-audit is detectable. Fix it before `pr-rla register`.
 ## Scope
 Read the change's full diff (generated files excluded when `exclude_generated` is true),
 its description and its CI results.
+- Generated means marked `linguist-generated` by the `.gitattributes` of the commit the
+  change was based on, and still at the commit it landed as: not by one the change supplies.
+- If the change edits any `.gitattributes` file, nothing is left out: read every file.
 
 ## A change FAILS if any of these holds
 1. It introduces a bug a user or another developer would hit (wrong result, crash, data loss).

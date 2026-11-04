@@ -2,13 +2,14 @@ import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHECKPOINTS_FILE, HISTORY_DIR, unionCheckpointLines } from "../core/checkpoint.js";
+import { gitWriteEnv } from "./git-safe.js";
 
 /**
  * The checkpoint git transport (contracts.md §6; FR4.4): how a checkpoint appended in one
  * clone reaches the audit repo's remote while other clones (CI, a reviewer) append too.
  *
  * It runs outside the fetch broker (git speaks its own protocols with the user's own
- * credentials), with a 30 s timeout per git call. It refuses a dirty tree, a detached HEAD
+ * credentials), with a 30 s timeout per git call, in src/io/git-safe.ts's write-side environment. It refuses a dirty tree, a detached HEAD
  * and a branch with no upstream; commits on the current branch; then up to 3 times fetches,
  * rebases onto the remote branch (replaying every unpushed local commit, git-file verdict
  * commits included: nothing is reset or discarded), resolves a conflict only in the
@@ -30,7 +31,7 @@ export type GitRunner = (args: string[], env?: Record<string, string>) => Promis
 export function nodeGit(cwd: string, timeoutMs = GIT_TIMEOUT_MS): GitRunner {
   return (args, env = {}) =>
     new Promise((resolve) => {
-      execFile("git", args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } }, (error, stdout, stderr) => {
+      execFile("git", args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...gitWriteEnv(), ...env } }, (error, stdout, stderr) => {
         const e = error as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null;
         if (e?.killed) return resolve({ code: -1, stdout, stderr: `git ${args[0]} timed out after ${timeoutMs / 1000} s` });
         resolve({ code: e ? (typeof e.code === "number" ? e.code : 1) : 0, stdout, stderr });

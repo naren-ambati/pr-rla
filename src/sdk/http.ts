@@ -249,6 +249,11 @@ export interface RequestOptions {
   accept?: (body: unknown) => string | null;
   /** Retries for this request, when fewer than the client's. */
   maxRetries?: number;
+  /**
+   * Optional (U5, same HTTP_HELPER_VERSION): the body is not JSON. `data` is then the body text
+   * as sent (a raw file, a unified diff), never parsed or checked (see `getText`).
+   */
+  raw?: boolean;
 }
 
 export class HttpClient {
@@ -276,14 +281,14 @@ export class HttpClient {
     const own = this.o.maxRetries ?? DEFAULT_MAX_RETRIES;
     const max = Math.min(own, opts.maxRetries ?? own);
     const retry: RetryHints = {
-      acceptJson: (b) => opts.accept?.(b) ?? null,
+      ...(opts.raw ? {} : { acceptJson: (b: unknown) => opts.accept?.(b) ?? null }),
       ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
       ...(this.o.maxBlindRateLimitRetries !== undefined ? { maxBlindRateLimitRetries: this.o.maxBlindRateLimitRetries } : {}),
     };
     // The broker-contract fields are ignored by a plain fetch and read by pr-rla's fetch broker.
     const init: RequestInit & { destination: "scm"; retry: RetryHints } = {
       method,
-      headers: { accept: "application/json", "user-agent": "pr-rla/0.2", ...this.o.headers, ...opts.headers, ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
+      headers: { accept: opts.raw ? "*/*" : "application/json", "user-agent": "pr-rla/0.2", ...this.o.headers, ...opts.headers, ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
       ...(opts.body !== undefined ? { body: opts.body } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       destination: "scm",
@@ -307,13 +312,15 @@ export class HttpClient {
         const res = await this.o.fetch(url, init);
         if (res.ok) {
           const text = await res.text();
-          let body: unknown;
-          try {
-            body = text.length ? JSON.parse(text) : null;
-          } catch {
-            body = undefined;
+          let body: unknown = text;
+          if (!opts.raw) {
+            try {
+              body = text.length ? JSON.parse(text) : null;
+            } catch {
+              body = undefined;
+            }
           }
-          const why = body === undefined ? `truncated or non-JSON body (${text.length} bytes)` : (opts.accept?.(body) ?? null);
+          const why = opts.raw ? null : body === undefined ? `truncated or non-JSON body (${text.length} bytes)` : (opts.accept?.(body) ?? null);
           if (why === null) {
             const exhausted = waitFromHeaders(res.headers, Date.now(), { onlyIfExhausted: true });
             if (exhausted !== null && exhausted > 0) this.notBefore = Date.now() + exhausted;
@@ -352,6 +359,16 @@ export class HttpClient {
 
   get<T>(pathOrUrl: string, signal?: AbortSignal): Promise<{ data: T; headers: Headers }> {
     return this.request<T>(pathOrUrl, signal ? { signal } : {});
+  }
+
+  /** GET a body that is not JSON (a raw file, a diff), or null on 404. Optional addition (U5) within HTTP_HELPER_VERSION 1. */
+  async getText(pathOrUrl: string, signal?: AbortSignal): Promise<string | null> {
+    try {
+      return (await this.request<string>(pathOrUrl, { raw: true, ...(signal ? { signal } : {}) })).data;
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) return null;
+      throw e;
+    }
   }
 }
 

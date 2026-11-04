@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PluginError } from "./errors.js";
 import { definitionTraits, describePlugin, startPluginHost, type DefinitionTraits } from "./host.js";
-import { guardFullTrust, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type PluginRules, type ResolvedPlugin } from "./lock.js";
+import { guardFullTrust, policyOf, readGrants, refuseFullTrust, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type PluginPolicy, type PluginRules, type ResolvedPlugin } from "./lock.js";
 import { consentOf, refuseFullTrustUnapproved } from "./approvals.js";
 import { PROVENANCE_LEVELS, type ProvenanceLevel } from "../sdk/ledger.js";
 
@@ -26,6 +26,8 @@ const memo = new Map<string, { traits: DefinitionTraits; provenance: ProvenanceL
 export async function externalPluginInfo(use: string, kind: "provider" | "ledger", auditDir: string, rules: PluginPolicy | PluginRules, options: Record<string, unknown> = {}): Promise<ExternalPluginInfo> {
   refuseIfBuiltinOnly(rules, kind, use);
   const { entry, plugin } = verifyLocked(use, auditDir);
+  // Read-only mode (isolated-only) never runs a trust: full plugin, approved or not; elsewhere it needs this machine's approval.
+  refuseFullTrust(policyOf(rules), kind, use, entry);
   if (entry.trust === "full") refuseFullTrustUnapproved(use, entry, consentOf(rules, use, entry));
   const key = `${kind}\u0000${plugin.entry}\u0000${entry.treeSha256}\u0000${entry.trust}`;
   let known = memo.get(key);

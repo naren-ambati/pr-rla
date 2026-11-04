@@ -439,6 +439,31 @@ describe("heartbeats, silence and message size (contracts.md §3)", () => {
     await expect(start({ loadTimeoutMs: 300 })).rejects.toMatchObject({ code: "PLUGIN_HOST_TIMEOUT", message: expect.stringMatching(/^plugin slow-start did not finish loading within 0\.3 s and was stopped/) });
   });
 
+  it("a heartbeat that arrived while this process was busy counts (the watchdog decides after the poll phase reads it)", async () => {
+    const host = await hostileHost({ heartbeatTimeoutMs: 1_000, heartbeatIntervalMs: 50 });
+    try {
+      const p = await hostedProvider(host, { slowMs: 3_500, bigResultBytes: 10 }, ctx);
+      const call = p.listChanges({ repo: "a/b", window: WINDOW, kinds: ["pull_request"] });
+      // Let the call reach the child and its heartbeats start.
+      await new Promise((r) => setTimeout(r, 400));
+      // Block this process past the timeout from a check-phase callback, while the child goes on writing
+      // heartbeats into the pipe. The next loop turn runs the expired watchdog timer before the poll
+      // phase reads those heartbeats; a watchdog that decided in the timer itself stopped the child here.
+      await new Promise<void>((r) =>
+        setImmediate(() => {
+          const until = Date.now() + 1_500;
+          while (Date.now() < until) {
+            /* busy */
+          }
+          r();
+        }),
+      );
+      expect((await call).defaultBranch).toBe("main");
+    } finally {
+      host.close();
+    }
+  });
+
   it("a message over the limit (64 MiB by default) is refused by its length, before its body is buffered (finding 11)", async () => {
     expect(MAX_MESSAGE_BYTES).toBe(64 * 1024 * 1024);
     const host = await hostileHost({ maxMessageBytes: 1024 * 1024 });

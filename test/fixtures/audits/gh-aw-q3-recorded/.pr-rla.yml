@@ -1,0 +1,8 @@
+# A retrospective audit of github/gh-aw's Q3 2026 Copilot stratum, built offline from recorded data (see README.md).
+provider: { use: json-file, options: { path: changes.json } }
+repo: github/gh-aw
+window: { name: 2026-q3, start: 2026-07-01, end: 2026-09-30 }
+selector: { kinds: [pull_request, direct_push], authors: ["copilot-swe-agent[bot]"], unreviewed: no-human-review, max_changed_lines: 200, exclude_generated: true }
+audit: { p0: 0.10, p1: 0.02, alpha: 0.05 }
+ledger: git-file
+timestamping: { authorities: [] }

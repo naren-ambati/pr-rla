@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readTextConfined } from "../io/confine.js";
 import { join } from "node:path";
 import { canonicalJson, sha256Hex } from "../core/canonical.js";
 import { writeFileAtomic } from "../io/atomic.js";
@@ -58,7 +59,13 @@ export function indexPath(windowDir: string): string {
 export function readIndex(windowDir: string): LedgerIndex | null {
   const p = indexPath(windowDir);
   if (!existsSync(p)) return null;
-  const v = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
+  let v: LedgerIndex;
+  try {
+    v = JSON.parse(readTextConfined(p, "the ledger index")) as LedgerIndex;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new Error(`${p}: not valid JSON`);
+    throw e;
+  }
   if (v.schema !== "pr-rla/ledger-index/v1") throw new Error(`${p}: not a pr-rla ledger index (schema ${String(v.schema)})`);
   return v;
 }
@@ -81,12 +88,13 @@ export function ledgerIndexSha256(value: unknown): string {
 export function readIndexDocument(windowDir: string): { sha256: string; value: unknown; error?: string } | null {
   const p = indexPath(windowDir);
   if (!existsSync(p)) return null;
-  const text = readFileSync(p, "utf8");
+  // Confined in a read-only call (src/io/confine.ts); the parse error is not quoted, as it would carry the file's bytes.
+  const text = readTextConfined(p, "the ledger index");
   try {
     const value: unknown = JSON.parse(text);
     return { sha256: ledgerIndexSha256(value), value };
-  } catch (e) {
-    return { sha256: sha256Hex(text), value: null, error: `${INDEX_FILE} is not valid JSON: ${(e as Error).message}` };
+  } catch {
+    return { sha256: sha256Hex(text), value: null, error: `${INDEX_FILE} is not valid JSON` };
   }
 }
 

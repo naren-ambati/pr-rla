@@ -1,10 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, sha256Hex } from "../core/canonical.js";
-import type { GoneRepo, PluginIdentity, RepoListing } from "../core/records.js";
-import type { ResolvedRepo } from "../core/repo-set.js";
+import type { GoneRepo } from "../core/records.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import type { ListChangesResult } from "../sdk/provider.js";
+import { FREEZE_REPO_SCHEMA, FREEZE_RUN_SCHEMA, type FreezeRepoMarker, type FreezeRunHeader, type FreezeRunInputs, type RepoCheckpoint, type RunStores } from "./pool-list.js";
+
+// The run's record types and the inputs comparison live with the run (src/api/pool-list.ts), which never loads this module.
+export { differingInputs, FREEZE_REPO_SCHEMA, FREEZE_RUN_SCHEMA, type FreezeRepoMarker, type FreezeRunHeader, type FreezeRunInputs, type RepoCheckpoint } from "./pool-list.js";
 
 /**
  * The FreezeCheckpointStore (functional-design.md §U8; components.md): the resumable cache of a
@@ -24,38 +27,6 @@ import type { ListChangesResult } from "../sdk/provider.js";
  * reader is `freeze`, and a test keeps it that way.
  */
 
-export const FREEZE_RUN_SCHEMA = "pr-rla/freeze-run/v2";
-export const FREEZE_REPO_SCHEMA = "pr-rla/freeze-repo/v2";
-
-/** What decides whether two invocations are the same run (FR5.4): a resume refuses if any of it differs. */
-export interface FreezeRunInputs {
-  registrationSha256: string;
-  /** The pool the set resolved to at the start, sorted. */
-  repos: ResolvedRepo[];
-  /** The registered repos the resolution found gone, sorted. */
-  gone: { repo: string; repoId: string | null }[];
-  prRlaVersion: string;
-  provider: PluginIdentity;
-}
-
-export interface FreezeRunHeader {
-  schema: typeof FREEZE_RUN_SCHEMA;
-  runId: string;
-  inputs: FreezeRunInputs;
-  /** ISO 8601 UTC. The manifest's `frozenAt` and the cutoff reviews are read as of. */
-  startedAt: string;
-  /** A rule's owner listing at the start (null for a list); it is what the manifest records. */
-  listing: RepoListing | null;
-  /** The gone repos, with the probes' evidence, as found at the start. */
-  gone: GoneRepo[];
-}
-
-/** One repo's done-marker: its checked listing and the listing's digest, or the probe that found it gone. */
-export type FreezeRepoMarker = { schema: typeof FREEZE_REPO_SCHEMA; repo: string; listed: ListChangesResult; sha256: string } | { schema: typeof FREEZE_REPO_SCHEMA; repo: string; gone: GoneRepo };
-
-/** What a done-marker holds, once read and checked. */
-export type RepoCheckpoint = { listed: ListChangesResult } | { gone: GoneRepo };
-
 /**
  * runId = SHA-256 of (registration digest, resolved repo list, gone repos, pr-rla version, provider identity, start
  * time, the recorded listing and gone evidence). The start time and the recorded state are in it so that editing them
@@ -63,23 +34,6 @@ export type RepoCheckpoint = { listed: ListChangesResult } | { gone: GoneRepo };
  */
 export function freezeRunId(header: Pick<FreezeRunHeader, "inputs" | "startedAt" | "listing" | "gone">): string {
   return sha256Hex(canonicalJson({ inputs: header.inputs, startedAt: header.startedAt, listing: header.listing, gone: header.gone }));
-}
-
-/** Which of two runs' inputs differ, by name, for the refusal a `--resume` gives. */
-export function differingInputs(a: FreezeRunInputs, b: FreezeRunInputs): string[] {
-  const out: string[] = [];
-  if (a.registrationSha256 !== b.registrationSha256) out.push("the registration");
-  if (canonicalJson(a.repos) !== canonicalJson(b.repos)) {
-    const was = new Set(a.repos.map((r) => r.repo));
-    const now = new Set(b.repos.map((r) => r.repo));
-    const added = [...now].filter((r) => !was.has(r)).length;
-    const removed = [...was].filter((r) => !now.has(r)).length;
-    out.push(`the resolved repo list (${added} added, ${removed} removed since that run started)`);
-  }
-  if (canonicalJson(a.gone ?? []) !== canonicalJson(b.gone ?? [])) out.push("the registered repos found gone");
-  if (a.prRlaVersion !== b.prRlaVersion) out.push(`the pr-rla version (${a.prRlaVersion} then, ${b.prRlaVersion} now)`);
-  if (canonicalJson(a.provider) !== canonicalJson(b.provider)) out.push("the provider (its version, files or options)");
-  return out;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -197,3 +151,11 @@ export class FreezeCheckpointStore {
     return repos.filter((r) => this.readRepo(r) !== null).length;
   }
 }
+
+/** The store's entry points as a pooled run takes them (src/api/pool-list.ts): what a real freeze passes. */
+export const FREEZE_STORES: RunStores = {
+  find: (base, window, inputs) => FreezeCheckpointStore.find(base, window, inputs),
+  begin: (base, window, h, opts) => FreezeCheckpointStore.begin(base, window, h, opts),
+  runs: (base, window) => FreezeCheckpointStore.runs(base, window),
+  open: (base, window, runId) => new FreezeCheckpointStore(base, window, runId),
+};

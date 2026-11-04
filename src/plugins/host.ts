@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { Socket } from "node:net";
@@ -153,10 +154,29 @@ export interface PluginHost {
 }
 
 const live = new Set<PluginHost>();
+/** The hosts started inside a scope (withPluginHostScope), by async context. */
+const scoped = new AsyncLocalStorage<Set<PluginHost>>();
+
+/** How many plugin hosts are running in this process. */
+export const livePluginHosts = (): number => live.size;
 
 /** Stops every plugin host this process started (the CLI calls it when a command ends). */
 export function closeAllPluginHosts(): void {
   for (const h of [...live]) h.close();
+}
+
+/**
+ * Runs `fn` and then stops the plugin hosts started inside it, and only those: a long-running
+ * process (the MCP server, through pr-rla/api/read) keeps no child per call, and calls running at
+ * the same time do not stop each other's hosts.
+ */
+export async function withPluginHostScope<T>(fn: () => Promise<T>): Promise<T> {
+  const started = new Set<PluginHost>();
+  try {
+    return await scoped.run(started, fn);
+  } finally {
+    for (const h of started) h.close();
+  }
 }
 
 type Refable = { ref?: () => void; unref?: () => void };
@@ -284,6 +304,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
   const setRef = (on: boolean) => handles.forEach((h) => (on ? h?.ref?.() : h?.unref?.()));
 
   let disarm: (() => void) | null = null;
+  let armed = 0;
   const arm = () => {
     disarm?.();
     disarm = null;
@@ -291,11 +312,18 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     // Until `ready` the child is starting (a process, then the plugin's imports): that has its own limit.
     // The heartbeat timeout counts from `ready`, while a call is in flight.
     const starting = loading;
+    const mine = ++armed;
     disarm = setTimer(() => {
-      const secs = (ms: number) => (ms < 10_000 ? String(ms / 1000) : String(Math.round(ms / 1000)));
-      const why = starting ? `did not finish loading within ${secs(loadMs)} s` : `sent no heartbeat for ${secs(timeoutMs)} s`;
-      die(new PluginError(withTail(`plugin ${o.label} ${why} and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
-      child.kill("SIGKILL");
+      // When this process was not running for a while (a busy machine), the timer and the child's
+      // heartbeat are both ready: timers run before I/O is read, so decide only after the poll phase
+      // has read what arrived (setImmediate runs after it). A message re-arms, and this one stands down.
+      setImmediate(() => {
+        if (mine !== armed || dead || closed) return;
+        const secs = (ms: number) => (ms < 10_000 ? String(ms / 1000) : String(Math.round(ms / 1000)));
+        const why = starting ? `did not finish loading within ${secs(loadMs)} s` : `sent no heartbeat for ${secs(timeoutMs)} s`;
+        die(new PluginError(withTail(`plugin ${o.label} ${why} and was stopped`), "PLUGIN_HOST_TIMEOUT", "check the plugin for a hang or a busy loop; run the command again"));
+        child.kill("SIGKILL");
+      });
     }, starting ? loadMs : timeoutMs);
   };
   /** The plugin's waits being served; each ends early when its controller aborts. */
@@ -558,6 +586,7 @@ export async function startPluginHost(o: HostOptions): Promise<PluginHost> {
     stats: () => ({ heartbeats, maxBufferedBytes: reader.maxBuffered() }),
   };
   live.add(host);
+  scoped.getStore()?.add(host);
   busy();
   const readyMessage = await ready;
   validateReady(readyMessage, o);
@@ -654,8 +683,14 @@ const withoutSignal = (req: ListChangesRequest): Omit<ListChangesRequest, "signa
   return rest;
 };
 
-/** A ScmProvider whose methods run in the host. The context's fetch, sleep and log serve the child. */
-export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; log: (line: string) => void }): Promise<ScmProvider> {
+/** Both signals, when there are two (a request's and the call's). */
+const either = (a?: AbortSignal, b?: AbortSignal): AbortSignal | undefined => (a && b ? AbortSignal.any([a, b]) : (a ?? b));
+
+/**
+ * A ScmProvider whose methods run in the host. The context's fetch, sleep and log serve the child.
+ * `ctx.signal` (the call's, U5) cancels every method call, as a request's own signal does.
+ */
+export async function hostedProvider(host: PluginHost, options: unknown, ctx: { cwd: string; fetch: typeof fetch; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; log: (line: string) => void; signal?: AbortSignal }): Promise<ScmProvider> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log });
   const c = await createInstance(host, options, { cwd: ctx.cwd });
   if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(c.apiVersion as number)) throw new ProviderApiVersionError(String(host.ready.name), c.apiVersion);
@@ -664,24 +699,26 @@ export async function hostedProvider(host: PluginHost, options: unknown, ctx: { 
   const p: ScmProvider = {
     apiVersion: c.apiVersion as number,
     name: c.name as string,
-    listChanges: (req) => host.call("listChanges", [withoutSignal(req)], req.signal) as never,
+    listChanges: (req) => host.call("listChanges", [withoutSignal(req)], either(req.signal, ctx.signal)) as never,
   };
-  if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], req.signal) as never;
-  if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], req.signal) as never;
-  if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], signal) as never;
-  for (const m of ["listRepos", "describeChange", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args);
+  if (has.has("nativeCounts")) p.nativeCounts = (req, selector) => host.call("nativeCounts", [withoutSignal(req), selector], either(req.signal, ctx.signal)) as never;
+  if (has.has("estimateRequests")) p.estimateRequests = (req) => host.call("estimateRequests", [withoutSignal(req)], either(req.signal, ctx.signal)) as never;
+  if (has.has("firstParentPath")) p.firstParentPath = ({ signal, ...req }) => host.call("firstParentPath", [req], either(signal, ctx.signal)) as never;
+  for (const m of ["listRepos", "describeRepo", "listingVisibility"] as const) if (has.has(m)) (p as unknown as Record<string, unknown>)[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
+  // describeChange(change, { signal }): only the change crosses to the child; the signal stays here.
+  if (has.has("describeChange")) p.describeChange = (change, o) => host.call("describeChange", [change], either(o?.signal, ctx.signal)) as never;
   return p;
 }
 
 /** A Ledger whose methods run in the host. */
-export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore }): Promise<Ledger> {
+export async function hostedLedger(host: PluginHost, options: unknown, ctx: { cwd: string; windowDir: string; fetch: typeof fetch; log: (line: string) => void; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; reviewers?: readonly string[] | null; index?: LedgerIndexStore; signal?: AbortSignal }): Promise<Ledger> {
   host.attach({ fetch: ctx.fetch, sleep: ctx.sleep ?? realSleep, log: ctx.log, ...(ctx.index ? { index: ctx.index } : {}) });
   const c = await createInstance(host, options, { cwd: ctx.cwd, windowDir: ctx.windowDir, ...(ctx.reviewers !== undefined ? { reviewers: ctx.reviewers } : {}) });
   if (!SUPPORTED_LEDGER_API_VERSIONS.includes(c.apiVersion as number)) throw new LedgerApiVersionError(String(host.ready.name), c.apiVersion);
   const has = new Set(c.methods);
   for (const m of ["readVerdicts", "appendVerdict"]) if (!has.has(m)) throw new PluginError(`ledger "${host.label}" has no ${m}()`, "PLUGIN_INVALID");
   const l = { apiVersion: c.apiVersion as number, name: c.name as string } as Record<string, unknown>;
-  for (const m of ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const) if (has.has(m)) l[m] = (...args: unknown[]) => host.call(m, args);
+  for (const m of ["readVerdicts", "appendVerdict", "publishDraws", "verifyIntegrity", "readHistory"] as const) if (has.has(m)) l[m] = (...args: unknown[]) => host.call(m, args, ctx.signal);
   return l as unknown as Ledger;
 }
 

@@ -1,14 +1,15 @@
+import { signalledFetch, signalledSleep, sleepFor } from "../net/abort.js";
 import { createBroker, type Broker, type BrokerMode, type Credential, type RecordedExchange } from "../net/broker.js";
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
 import { httpsOrigin, localConsent, type LocalConsent } from "../plugins/approvals.js";
-import { abortableSleep } from "../plugins/host.js";
 import { builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
 import type { Ledger } from "../sdk/ledger.js";
 import type { PluginCredential, ScmProvider } from "../sdk/provider.js";
+import { AuditError } from "./errors.js";
 
 /**
  * The audit API foundation (functional-design.md §U2a; contracts.md §1a, §2).
@@ -54,7 +55,10 @@ export interface AuditContext {
   readonly log: (line: string) => void;
   /** Every outbound HTTP request of this context goes through this one broker, so all callers share its budgets. */
   readonly broker: Broker;
-  /** `builtin-only` refuses every external plugin before it is imported (U2b, FR2.6). */
+  /**
+   * `builtin-only` refuses every external plugin before it is imported (U2b, FR2.6). A read-only
+   * context is at least `isolated-only`: it never loads a `trust: full` plugin in process (U5 fix round).
+   */
   readonly plugins: PluginPolicy;
   /**
    * The local consent of the person running the command (src/plugins/approvals.ts): a repo's
@@ -98,18 +102,14 @@ export interface AuditContextOptions {
 const NO_HOSTS: ReadonlySet<string> = new Set(["(no hosts declared)"]);
 
 /** An API refusal, in the CLI error form (contracts.md §7) and the MCP error codes (§4). */
-export class AuditApiError extends Error {
-  constructor(
-    message: string,
-    readonly code: "READ_ONLY_VIOLATION",
-    readonly next: string,
-  ) {
-    super(message);
+export class AuditApiError extends AuditError {
+  declare readonly code: "READ_ONLY_VIOLATION";
+  declare readonly next: string;
+  constructor(message: string, code: "READ_ONLY_VIOLATION", next: string) {
+    super(message, 1, code, next);
     this.name = "AuditApiError";
   }
 }
-
-const realSleep = abortableSleep;
 
 interface Stored {
   trust: PluginGrant["trust"];
@@ -122,7 +122,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
   if (o.mode === "read-only" && o.recorder) throw new Error("an AuditContext in read-only mode cannot record (contracts.md §2 step 7)");
   const env = o.env ?? {};
   const nowMs = o.nowMs ?? Date.now;
-  const sleep = o.sleep ?? realSleep;
+  const sleep = o.sleep ?? sleepFor;
   const log = o.log ?? (() => {});
   const grants = new Map<string, Stored>();
   const budgets: Map<string, HostBudgetDefault> = defaultBudgets();
@@ -168,8 +168,8 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     sleep,
     log,
     broker,
-    plugins: o.plugins ?? pluginPolicy(undefined, env),
-    consent: localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) }),
+    plugins: readOnlyPolicy(o.mode, o.plugins ?? pluginPolicy(undefined, env)),
+    consent: approvedOnly(o.mode, localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
@@ -197,6 +197,28 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
   };
   if (o.rateLimits) ctx.setRateLimits(o.rateLimits);
   return ctx;
+}
+
+/**
+ * Read-only contexts (pr-rla/api/read, the MCP server) take only what is approved on this machine
+ * (`pr-rla plugin approve`) and the built-in defaults: never `--accept-lock-grants` or
+ * PR_RLA_ACCEPT_LOCK_GRANTS, which accept a repo's grants and are only for a repo you control.
+ */
+export function approvedOnly(mode: AuditMode, c: LocalConsent): LocalConsent {
+  if (mode !== "read-only") return c;
+  const stored = <T>(x: T | "accepted" | null): T | null => (x === "accepted" ? null : x);
+  return { file: c.file, acceptLockGrants: false, plugin: (use, entry) => stored(c.plugin(use, entry)), builtin: (env, origin) => stored(c.builtin(env, origin)) };
+}
+
+/** In read-only mode, a `locked` policy becomes `isolated-only`: no `trust: full` plugin runs in process there. */
+export function readOnlyPolicy(mode: AuditMode, policy: PluginPolicy): PluginPolicy {
+  return mode === "read-only" && policy === "locked" ? "isolated-only" : policy;
+}
+
+/** Options for opening a provider or a ledger for one call. */
+export interface OpenOptions {
+  /** The call's signal: it reaches every request, wait and plugin call the plugin makes (U5 fix round). */
+  signal?: AbortSignal;
 }
 
 /** Refuses a write operation in read-only mode, before it starts. */
@@ -235,21 +257,37 @@ export function builtinEnvironment(ctx: Pick<AuditContext, "env" | "consent" | "
 /** What a built-in may send, for the broker's grant (its recorder scrubs these values). */
 const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => granted.map((u) => ({ env: u.env, hosts: u.origins.map((o) => new URL(o).host), ...(u.secret ? {} : { secret: false }) }));
 
-/** Opens the configured provider with its fetch bound to the broker as `provider:<name>`. */
-export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: string): Promise<ScmProvider> {
-  if (!builtinProviderName(spec.use)) return openExternalProvider(ctx, spec, cwd);
+/**
+ * What a built-in gets from the environment, and the broker grant that goes with it. One decision for
+ * both modes: `builtinEnvironment` (the defaults and this machine's approvals). In read-only mode
+ * (pr-rla/api/read, the MCP server) the built-in holds placeholders, never the secrets: the broker
+ * swaps each only on the origin it was approved for (U5 fix round, joined to the approvals store).
+ */
+export function builtinEnv(ctx: AuditContext, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; credentials: PluginCredential[] } {
+  const { env, granted } = builtinEnvironment(ctx, kind, name, use, options);
+  const credentials = builtinGrantCredentials(granted);
+  if (ctx.mode !== "read-only") return { env, credentials };
+  return { env: Object.fromEntries(Object.keys(env).map((k) => [k, `prrla-cred:${k}`])), credentials };
+}
+
+/**
+ * Opens the configured provider with its fetch bound to the broker as `provider:<name>`. With a
+ * signal (one call's), every request and wait the provider makes for that call ends when it aborts.
+ */
+export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: string, o: OpenOptions = {}): Promise<ScmProvider> {
+  if (!builtinProviderName(spec.use)) return openExternalProvider(ctx, spec, cwd, o);
   const def = await loadProviderDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_PROVIDERS).includes(def as never);
   const id = `provider:${def.name}`;
-  const { env, granted } = builtinEnvironment(ctx, "provider", def.name, spec.use, spec.options);
+  const { env, credentials } = builtinEnv(ctx, "provider", def.name, spec.use, spec.options);
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
     hosts: def.hosts?.(spec.options as never) ?? [],
-    credentials: builtinGrantCredentials(granted),
+    credentials,
     ...(builtin && PROVIDER_BUDGET_FAMILY[def.name] ? { budgetFamily: PROVIDER_BUDGET_FAMILY[def.name] } : {}),
   });
   for (const host of ctx.pendingRateLimits()) ctx.log(`rate_limits: ${host} has no default budget (not a known public host or a host of provider ${def.name}); the override is not used`);
-  return createProvider(spec, { cwd, env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep });
+  return createProvider(spec, { cwd, env, log: ctx.log, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal) });
 }
 
 const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const;
@@ -259,7 +297,7 @@ const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const
  * ledger comes back with its read methods only; a write method refuses with READ_ONLY_VIOLATION.
  * `reviewers` (the registration's `verdicts.reviewers`) feeds the ledger's integrity analysis.
  */
-export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } = {}): Promise<Ledger> {
+export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } & OpenOptions = {}): Promise<Ledger> {
   const ledger = builtinLedgerName(spec.use) ? await openBuiltinLedger(ctx, spec, cwd, windowDir, opts) : await openExternalLedger(ctx, spec, cwd, windowDir, opts);
   if (ctx.mode === "read-write") return ledger;
   const refuse = (m: string) => async () => {
@@ -274,17 +312,17 @@ export async function openLedger(ctx: AuditContext, spec: PluginSpec, cwd: strin
   return view;
 }
 
-async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null }): Promise<Ledger> {
+async function openBuiltinLedger(ctx: AuditContext, spec: PluginSpec, cwd: string, windowDir: string, opts: { reviewers?: readonly string[] | null } & OpenOptions): Promise<Ledger> {
   const def = await loadLedgerDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_LEDGERS).includes(def as never);
   const id = `ledger:${def.name}`;
-  const { env, granted } = builtinEnvironment(ctx, "ledger", def.name, spec.use, spec.options);
+  const { env, credentials } = builtinEnv(ctx, "ledger", def.name, spec.use, spec.options);
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
     hosts: def.hosts?.(spec.options as never) ?? [],
     writePaths: def.writePaths?.(spec.options as never) ?? [],
-    credentials: builtinGrantCredentials(granted),
+    credentials,
     ...(builtin && LEDGER_BUDGET_FAMILY[def.name] ? { budgetFamily: LEDGER_BUDGET_FAMILY[def.name] } : {}),
   });
-  return createLedger(spec, { cwd, windowDir, env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep, ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });
+  return createLedger(spec, { cwd, windowDir, env, log: ctx.log, fetch: signalledFetch(ctx.broker.bind(id), opts.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, opts.signal), opts.signal), ...(opts.reviewers !== undefined ? { reviewers: opts.reviewers } : {}) });
 }

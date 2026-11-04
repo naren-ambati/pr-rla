@@ -2251,6 +2251,296 @@ All on macOS (Darwin 25.6.0, 10 cores), 2026-11-04.
 - Every commands-layer call that reads a `trust: full` plugin's identity must pass the AuditContext, not `.plugins`.
 - Finding 7: a verify still opens a read-write broker. With this round, a verifier's credentials are withheld unless approved, but an approved ledger can still write under its writePaths during verify.
 
+## Bolt 6 (U5): the audit API, draw-context and the MCP server (2026-11-04)
+
+Goal (delivery-plan.md, bolt 6): every command through `src/api`, with the CLI as a formatter; the read-only subpath `pr-rla/api/read` and its import-graph guard; `drawContext` and `pr-rla draw-context <n>` with the untrusted-content fence; `describeChange` on the built-in providers; the separate `pr-rla-mcp` package with eight read-only tools, jobs and memory bounds. FR3.1–FR3.6, FR3.9 and NFR10.
+
+Built on branch `bolt/u5-audit-api-mcp` from master at `a360348`, in parallel with U8 (org-pooled freeze) and U9 (presence-attested verdicts). The integration notes at the end list what moved where.
+
+### Definition of done
+
+| Item | State | Where it is shown |
+|---|---|---|
+| FR3.1 a stdio MCP server, a separate `pr-rla-mcp` package, exposes exactly the eight read-only tools; issuing draws stays CLI-only | met | `packages/pr-rla-mcp/test/mcp-readonly.test.mjs › the tool list › is exactly the eight read-only tools…` (names, `readOnlyHint`, `destructiveHint: false`, `openWorldHint` per tool, strict input schemas, output schemas; `record`, `sample`, `register`, `freeze`, `checkpoint` and `publish_draws` are not tools); `mcp-package.test.mjs › pins every dependency…` (pr-rla linked, released with the same version) |
+| FR3.2 the server writes nothing: no file, no ledger event, no non-read request; state in memory | met | `mcp-readonly.test.mjs › after every call: nothing written, nothing but reads sent` (tree hash of every audit directory, `.git` included, unchanged; no write attempt under the permission model with a preloaded write guard; the mock SCM saw only GETs and GraphQL queries; no socket beyond loopback); `test/api-read.test.ts › pr-rla/api/read reads only › every read function leaves the audit directory byte-identical`; `test/api-read-boundary.test.ts` (the import graph) |
+| FR3.3 no tool, prompt or skill records, edits or removes a verdict, issues draws or submits | met for the MCP surface (the skill is U6's) | the tool list above; `› the server never asked the client for input (no elicitation)`; `test/api-read.test.ts › write functions refuse a read-only context (READ_ONLY_VIOLATION)…` |
+| FR3.4 `draw_context` returns the diff with `linguist-generated` files dropped under `exclude_generated`, the description, CI results, the protocol checklist and the verdict state, and backs `pr-rla draw-context <n>` | met, on a recorded gh-aw draw | `test/draw-context.test.ts › drawContext on the recorded gh-aw audit › draw #7 (github/gh-aw#42597): the two lock files are dropped…` and `› draw #13 … 21 of 28 files are linguist-generated and dropped`; `› pr-rla draw-context 7 prints the core's text, and --json the same object as the API`; `mcp-readonly.test.mjs › draw_context: draw #7's lock files are gone…` |
+| FR3.5 long calls report progress and return within 30 s, or a job handle; `job_status` says unknown after a restart; a finished preview is cached in memory for 10 minutes | met (hand-off shortened in the tests) | `mcp-jobs.test.mjs › the hand-off…` (draw_context: a progress notification before the hand-off, then `{ jobId }`, `job_status` running then done; freeze_preview and online verify hand off too); `› after a restart, job_status answers unknown and says to run the tool again`; `› freeze_preview's cache…` and `test/api-read.test.ts › freezePreview: … a repeat within 600 s comes from the cache…` |
+| FR3.6 the same server in Claude Code, Codex and Cursor, checked by hand | **not in this bolt**: the founder's manual runs (U6) | the server speaks both the 2025 handshake and the 2026-07-28 revision: `mcp-readonly.test.mjs › both protocol eras` |
+| FR3.9 text from the SCM is marked untrusted wherever `draw_context` hands it to an assistant | met | `test/draw-context.test.ts › the draw context, as the core builds it › puts the author's title, body, patches and checks inside one fence…`, `› a hostile body that forges an end marker or instructions does not leave the fence`, `› each call draws a new 128-bit fence`; `mcp-readonly.test.mjs › a change whose text tries to steer the assistant stays inside the fence`, `› … the core's fence is passed through as is` |
+| Every command runs through `src/api`; write functions refuse read-only mode with `READ_ONLY_VIOLATION`; API functions return the `--json` objects | met | the command table below; `test/api-read.test.ts › API functions return the same objects as --json` (status in every phase, verify, freeze --dry-run, simulate) and `test/draw-context.test.ts` (draw-context); `› write functions refuse a read-only context…` (register, freeze, sample, record, checkpoint, init, plugin add, plugin lock; the tree is unchanged) |
+| `pr-rla/api/read` holds only the seven read functions, fixed to read-only; the import-graph guard passes | met | `test/api-read-boundary.test.ts` (6 tests: the exports at runtime; no `src/api/write/`, git transport, command or CLI module reachable; no writer imported by name; every module in the graph that can write a file is on a reasoned list; the write side is reachable from the CLI, so the guard is not vacuous). A planted `import { writeJson } from "../write/files.js"` in `src/api/read/draws.ts` failed three of the six |
+| `freeze_preview` read-only: never FreezeCheckpointStore or `.pr-rla/cache`, in-memory cache for 600 s by (window, registration digest, `estimate`) | met for what exists in this build (U8 brings the store and the estimate) | `test/api-read.test.ts › freezePreview › writes nothing: no manifest, no key, no cache file…`; the cache tests above |
+| `mcp-readonly.test.ts`: every tool with valid and hostile inputs; tree hash; no file opened for writing; zero non-read requests | met (`mcp-readonly.test.mjs`, node:test in the package) | 25 tests; hostile inputs: `..` paths, `/etc`, a directory outside the roots, a symlink out of a root, a config whose `protocol:` points outside, missing audits, path-like windows, draws 0, −1, 1.5, 37, 144, 145, 1e9, `maxPatchBytes` over 1 MiB and negative, limits over 200, a string draw with shell text, NUL bytes, extra keys, a 500-element argument, `runs` over 20,000, `defects` over `population`, `p1` above `p0`, an empty and an oversized `jobId` |
+| NFR10 on fixtures, offline: `status` < 1 s, `verify` < 2 s at N ≤ 10,000, `draw_context` < 2 s, MCP start < 2 s | met | `test/api-read.test.ts › NFR10 on fixtures…` (N = 10,000: status 21 ms, verify 140 ms in the clean clone); `test/draw-context.test.ts › is under 2 s offline on the recorded draws (NFR10), every one of the 36` (500 ms for all 36); `mcp-package.test.mjs › starts in under 2 s when installed (NFR10), under the permission model` (330 ms). Live GitHub, as an observation: 3.4 s (below) |
+| NFR20 at most 4 concurrent jobs; a result over 8 MiB refused; finished jobs dropped after 600 s | met | `mcp-jobs.test.mjs › at most four long calls at once`, `› a result over 8 MiB is refused` (returned directly, and as a job, which keeps no result), `› a finished job is dropped after 600 s; a running one is kept`, `› the default limit is 8 MiB` |
+| NFR15 atomic writes, NFR16 exit codes, NFR17 the error form (U5's rows in nfr-requirements.md) | met | `test/api-cli-contract.test.ts` (a writer SIGKILLed part-way through a large atomic write leaves the old or the new file, never a part, at least one kill landing mid-write; `init` writes atomically now; `draw-context` exit codes; errors as a sentence and `next:` on stderr, or `{ "error": { code, message, host?, next? } }` on stdout with `--json`) |
+| NFR2 no token in MCP results | met | `mcp-readonly.test.mjs › no result carried a token from the server's environment` |
+| The existing CLI suite passes unchanged in behaviour | met | the 467 tests of master pass; no existing test file changed. Two helpers changed: `test/helpers/audit-scenario.ts` runs git with `maintenance.auto=false` (finding 4), and `test/helpers/replay-fetch.ts` serves non-JSON bodies |
+| Demo: `draw_context` on a recorded gh-aw draw through a real MCP client session; the audit directory's hash unchanged | met | `node packages/pr-rla-mcp/scripts/demo-draw-context.mjs` (below) |
+
+### Done
+
+| Piece | Where |
+|---|---|
+| The audit API's context and readers (`ApiContext`, one AuditContext per call, `configFor` with a window and the `confine` hook, the record readers, `getBeacon`, `trustFor`), its error (`AuditError`, with an exit code, a code and `next`) | `src/api/session.ts`, `src/api/errors.ts` |
+| Read functions: `status`, `verify`, `planFreeze` / `freezePreview` / `freezePreviewKey`, `draws`, `drawContext`, `auditList`, `simulate`, the checkpoint readers | `src/api/read/` |
+| Write functions: `register`, `freeze`, `sample`, `record`, `checkpoint` (with `buildCheckpoint`, `appendCheckpoint`), `initAudit`, `preparePluginAdd` / `preparePluginLock` / `commitPluginLock`, `obtainTimestamps`, the Rekor submissions, `writeJson`; each refuses a read-only context first | `src/api/write/` |
+| `checkPlugin` (writes nothing, not a read-subpath function) | `src/api/plugin-check.ts` |
+| The read-only subpath: seven functions on read-only contexts, a caller session shares one broker per audit directory, a caller-held preview cache, each call's notes routed by AsyncLocalStorage, each call's plugin hosts stopped when it ends | `src/api/read/index.ts`, `package.json` (`./api/read`), `withPluginHostScope` in `src/plugins/host.ts` |
+| The CLI as formatters; `--json` prints the result object; errors print in the contract's JSON form with `--json` | `src/commands/*.ts`, `src/cli.ts` |
+| `describeChange` in the SDK (`ChangeDescription`, `changeDescriptionProblems`) and on GitHub, GitLab, Bitbucket Cloud, Data Center and json-file (`descriptions` in the export) | `src/sdk/provider.ts`, `src/providers/*/describe.ts`, `src/providers/diff.ts`, `src/providers/json-file.ts`; `HttpClient.getText` in `src/sdk/http.ts` |
+| `linguist-generated` from `.gitattributes` (gitattributes(5) patterns, macros, last line wins) | `src/core/generated.ts` |
+| The draw context and its fence, built by the core | `src/core/draw-context.ts`, `src/api/read/draw-context.ts`, `src/commands/draw-context.ts` |
+| `pr-rla-mcp`: the server, jobs, roots, errors, the bin; its README; tests; the demo | `packages/pr-rla-mcp/` |
+| The recorded gh-aw audit and its builder; recorders for describeChange | `test/fixtures/audits/gh-aw-q3-recorded/`, `scripts/build-gh-aw-recorded-audit.mjs`, `scripts/record-draw-descriptions.mjs`, `scripts/record-describe-change.mjs` |
+| Docs | `README.md` (quickstart line, the `pr-rla/api/read` export, a section for assistants), `docs/security-model.md` (the assistant section), `docs/writing-a-provider.md` (describeChange), `docs/providers/*.md` (each provider's draw context) |
+| Tests: 79 new at the root, 42 in the package | `api-read` 22, `describe-change` 19, `draw-context` 25, `api-read-boundary` 6, `api-cli-contract` 6, `draw-context-plugin` 1; `mcp-readonly` 25, `mcp-jobs` 11, `mcp-package` 6 |
+
+### Command files: where the logic went (for the integration)
+
+| Command file on master | Its logic is now in | What the command file keeps |
+|---|---|---|
+| `src/commands/context.ts` | `src/api/session.ts` (context, readers, `configFor`, `providerFor`, `ledgerFor`, `getBeacon`, `trustFor`, `fmt`, `isoNow`, `pct`), `src/api/write/files.ts` (`writeJson`), `src/api/errors.ts` | `CommandContext` (= `ApiContext` + `out`), `CommandError` (extends `AuditError`), `nodeContext`, and re-exports of the moved helpers |
+| `status.ts` | `src/api/read/status.ts` (`status`, `timeStanding`, `statusLine`, `stratumChoices`, `ledgerStatus`) | `statusCommand` (with `--checkpoint`), `printStatus`, `statusExitCode`; re-exports |
+| `verify.ts` | `src/api/read/verify.ts` (`verify`, the check-5 identity WARN) | `runVerify` (the API), `verifyCommand`, `printVerify` |
+| `freeze.ts` | `src/api/read/freeze-preview.ts` (`planFreeze`, the shared steps; `freezePreview`; `summarizeFunnel`, `summarizePopulation`), `src/api/write/freeze.ts` (`freeze`) | `freezeCommand` (dry run, `--out`, `--json`), `printPopulation`, `freezeExitCode`; re-exports |
+| `register.ts` | `src/api/write/register.ts` (`register`, `preflightLedger`, `REREGISTER_COMMAND`) | `registerCommand`, `printRegistrationPlan` |
+| `sample.ts` | `src/api/write/sample.ts` | `sampleCommand` (the lines and exit codes 2 and 3) |
+| `record.ts` | `src/api/write/record.ts` | `recordCommand` (the lines) |
+| `checkpoint.ts` | `src/api/write/checkpoint.ts` (`checkpoint`, `buildCheckpoint`, `appendCheckpoint`); readers in `src/api/read/checkpoints.ts`; `src/api/checkpoint.ts` is now a barrel of both, kept for U4's imports | `checkpointCommand` (the lines, exit 4 on a stopped push) |
+| `simulate.ts` | `src/api/read/simulate.ts` | argument parsing and the lines |
+| `init.ts` | `src/api/write/init.ts` | the lines |
+| `plugin.ts` | `src/api/write/plugin.ts` (add and lock, prepared then committed), `src/api/plugin-check.ts` | the trust text, the confirmation and the lines |
+| `timestamps.ts` | `src/api/timestamps.ts` (`assessRecord`, `timestampingFor`), `src/api/write/timestamps.ts` (`obtainTimestamps`) | `reportTimestamps` (the outcome table's lines and exit code); re-exports |
+| `translog.ts` | `src/api/translog.ts` (`logPublicKey`), `src/api/write/translog.ts` (`rekorApi`, `submitUrl`, `submitSigned`, `submitSignedV2`) | `confirmRekorV2` (the warning and the question); re-exports |
+| (new) `draw-context.ts` | `src/api/read/draw-context.ts`, `src/core/draw-context.ts` | the text or JSON output |
+
+The write functions that print part of their output before a side effect take a hook at that point, so the CLI prints the same lines in the same order as on master: `register(…, { onPlanned, confirmRekorV2 })`, `freeze(…, { onPopulation, confirmRekorV2 })`, `checkpoint(…, { onAppended })`.
+
+### Live reads (all read-only; 2026-11-04)
+
+| When (UTC) | What | Requests |
+|---|---|---|
+| about 01:40 | npm registry: `npm view` and `npm pack` of `@modelcontextprotocol/server`, `client`, `core` 2.4.0 (published 2026-10-23), `@modelcontextprotocol/sdk` 1.32.2 and `zod` (4.6.7), to read the SDK's types | registry GETs |
+| 02:20 | `gh api rate_limit`; `gh api repos/github/gh-aw/contents/.gitattributes` | 2 |
+| 02:21:27 to 02:22:27 | describeChange for the 36 issued draws of the recorded gh-aw audit (36 distinct PRs), GitHub REST with the founder's `gh` token, through pr-rla's broker in read-only mode (`scripts/record-draw-descriptions.mjs`) | 180 GETs; the recording keeps 20 of them (4 PRs), and all 36 descriptions are in the audit's `changes.json` |
+| 03:04:25 to 03:04:29 | the live demo: `draw_context` on draw #13 (github/gh-aw#49685) through pr-rla-mcp, built-in `github` provider | 5 GETs, 3,432 ms for the tool call |
+| 03:10 to 03:17:30 | anonymous probes of gitlab.com (gitlab-org/cli !4191, its diffs, pipelines) and api.bitbucket.org (atlassian/bamboo-specs pull requests, #745, a commit); then the recordings of describeChange on !4191 and #745 (`scripts/record-describe-change.mjs`) | 7 probe GETs; 4 + 7 recorded GETs |
+
+No write to any repo, tracker, registry or log; no scratch repo; nothing pushed. The token was used for GitHub reads only. E-mail addresses in recorded text are replaced by `user-<hash>@example.invalid` (none occurred).
+
+### Fixtures
+
+| Fixture | Source | What it is |
+|---|---|---|
+| `test/fixtures/audits/gh-aw-q3-recorded/` | recorded population and beacon; synthetic times, key and protocol | A retrospective audit of the gh-aw Q3 2026 Copilot stratum: the 1,589 changes the phase-1 read-only dry run selected (2026-11-03T14:27Z to 14:49Z), registered, frozen and sampled offline on a fake clock with the recorded drand round 33,245,812 (`scripts/build-gh-aw-recorded-audit.mjs`). No authority, no log, no verdicts. `changes.json` also holds the recorded descriptions of the 36 issued draws. Its README says which part is which |
+| `test/fixtures/github/gh-aw-q3-draws-2026-11-04.json` | recorded | GitHub's responses for describeChange on draws 5, 7, 13 and 31 (github/gh-aw #43382, #42597, #49685, #47149) |
+| `test/fixtures/gitlab/describe-gitlab-org-cli-4191-2026-11-04.json` | recorded (anonymous) | GitLab's responses for gitlab-org/cli !4191 |
+| `test/fixtures/bitbucket-cloud/describe-bamboo-specs-745-2026-11-04.json` | recorded (anonymous) | Bitbucket Cloud's responses for atlassian/bamboo-specs #745, two of them 302s |
+| Fakes in `test/describe-change.test.ts`, the mock GitHub Enterprise Server and the in-process recorded fetch in the package's tests | synthetic, from the documented shapes and the recordings | pagination, direct pushes, 404s, every status mapping, Data Center entirely |
+
+### Verified (command → output)
+
+From a fresh `git clone` of the branch at `761a1b2`, 2026-11-04T03:31:37Z, Node 22.23.2:
+
+```
+npm ci                                       → added 60 packages … found 0 vulnerabilities
+npm run build                                → exit 0
+npm run typecheck                            → exit 0
+npm test                                     → Test Files 48 passed (48) · Tests 546 passed | 1 skipped (547)
+npm --prefix packages/pr-rla-mcp ci          → added 19 packages … found 0 vulnerabilities
+npm --prefix packages/pr-rla-mcp test        → # tests 42 · # suites 12 · # pass 42 · # fail 0
+npm --prefix packages/pr-rla-mcp ci --offline (node_modules removed first) → added 19 packages … found 0 vulnerabilities
+npm --prefix examples/providers/gitea ci     → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test   → ok 1 - conformance on recorded Codeberg responses (forgejo/docs, 2026-10-01..07) · # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci        → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test      → ok 1 - the ledger kit: recorded hibernate.atlassian.net changelogs and a synthetic Jira Cloud · # pass 1 · # fail 0
+npm ls --prod --depth=0                      → asn1js 4.0.0, commander 15.0.0, drand-client 1.4.2, pkijs 4.0.1, yaml 2.9.1 (no new dependency)
+npm --prefix packages/pr-rla-mcp ls --prod   → @modelcontextprotocol/server 2.4.0, pr-rla 0.1.0 -> ./../.., zod 4.6.7
+```
+
+- 547 = the 468 of master (467 passed, 1 skipped: U2b's `UNVERIFIED` RK-02 placeholder, skipped because the RK-02 test ran on Node 26.8.2 found on PATH), unchanged, plus 79 new. The package's 42 are new.
+- The root suite also passes on Node 24.20.0 (546 passed, 1 skipped) and Node 26.8.2 (541 passed, 1 skipped: the second hostile block is not added on Node 25 or later, as in bolt 4). The package's 42 pass on Node 22.23.2, 24.20.0 and 26.8.2.
+- `npm test` makes no network call: the root suite runs under the network-deny harness; the package's server processes run with a guard that refuses every socket beyond loopback, and none was refused.
+- No LICENSE file; both `package.json` files are `"private": true, "license": "UNLICENSED"`.
+
+### The demo
+
+`node packages/pr-rla-mcp/scripts/demo-draw-context.mjs 13`, in the clean clone (offline; the fence and the patches trimmed here):
+
+```
+pr-rla-mcp 0.1.0 over stdio, started in 330 ms (node --permission, no fs-write grant)
+tools: audit_list (readOnly), status (readOnly), draws (readOnly), draw_context (readOnly), verify (readOnly), simulate (readOnly), freeze_preview (readOnly), job_status (readOnly)
+
+draw_context { draw: 13 }  recorded (json-file export) · 64 ms
+  github:github/gh-aw#49685 · https://github.com/github/gh-aw/pull/49685
+  files shown 7 (+49 −35) · linguist-generated dropped 21: .github/workflows/api-consumption-report.lock.yml, .github/workflows/audit-workflows.lock.yml, .github/workflows/copilot-pr-nlp-analysis.lock.yml, …
+  checks {"success":1} · protocol is the registered one · state unlabelled
+    | pr-rla draw-context · window 2026-q3 · draw #13 of 36 issued
+    | the change FAILS if any of these holds:
+    |   [ ] 1. It introduces a bug a user or another developer would hit (wrong result, crash, data loss).
+    | <<<UNTRUSTED-CHANGE-CONTENT 9669324c5bd0ff95dd706934511f13c5>>>
+    | title: fix: move Python venv out of agent artifact upload path to restore MC
+    | …
+    | <<<END 9669324c5bd0ff95dd706934511f13c5>>>
+    | record the verdict yourself: pr-rla record 13 pass|fail --reviewer <you> --note "<one line>", then commit audit/2026-q3/verdicts.jsonl
+
+audit directory …/test/fixtures/audits/gh-aw-q3-recorded
+  tree hash before b6af9c787e3b88a2e3d79cc071233aefafcdbcabafc6f582c75684646508d102
+  tree hash after  b6af9c787e3b88a2e3d79cc071233aefafcdbcabafc6f582c75684646508d102  (unchanged)
+  write attempts by the server: 0 · sockets beyond loopback refused: 0
+```
+
+With `--live` (2026-11-04T03:04:25Z, the founder's token, a copy of the audit on the built-in `github` provider) the same draw came from api.github.com in 3,432 ms with the same files, checks and dropped lock files, and the copy's tree hash was unchanged.
+
+### Deviations from the design, and why
+
+1. **`--json` prints the API's result object, and only that.** `status --json` printed JSON only once a window was sampled and a text line before that; it now prints the phase's result object in every phase, with the same exit code as the text form (the sampled-phase refusal now exits 3 there too; master exited 0 or 2 with `--json`, a path a real audit cannot reach because `sample` refuses first). `freeze --json` (not a dry run) printed the population as JSON and then the text lines; it now prints the freeze result alone. The `--json` dry run and `status --json` once sampled are supersets of master's objects (fields added: compatible under contracts.md §7). No test used `--json`.
+2. **Errors with `--json`** now print `{ "error": { code, message, host?, next? } }` on stdout (contracts.md §7, which U5 owns); without `--json` they are as before. `code` is pr-rla's (`NO_AUDIT`, `DRAW_OUT_OF_RANGE`, a broker or plugin code), `FAILED` when there is none.
+3. **`freeze_preview`'s `estimate` is refused with `UNSUPPORTED`**, a code contracts.md §4 does not list. The estimate is U8's (`--estimate`, built in parallel), and a full listing in its place could run for 22 minutes against the caller's budget. Remove the code when `freezePreview` calls U8's estimator.
+4. **Progress after the hand-off goes to `job_status`, not to notifications.** MCP allows a progress notification only while its request is open, and the hand-off ends the tool call. Before the hand-off, the API's progress and the providers' log lines go out as `notifications/progress` when the client sent a progress token.
+5. **`TOO_MANY_JOBS` counts long calls still in their tool call**, not only handed-off jobs: at most four network-capable calls run at once, so four calls cannot all hand off and make a fifth job. Offline calls (status, verify offline, draws, audit_list, simulate, job_status) are not counted.
+6. **Malformed arguments are the MCP SDK's own input errors** (`isError` with "Input validation error: …"), not one of the contract's codes, which have none for them: the strict schemas bound every number and string, refuse extra keys, and the server caps an argument payload at 64 elements.
+7. **`status` offline with a tracker ledger reports `verdictsRead: false`** and no verdict state, for the MCP tool (offline by default; the design's `openWorldHint` is false offline). The CLI's `status --offline` is unchanged: it skips only the provider and still reads the tracker. `draws` never reads a tracker (its `openWorldHint` is false) and gives `state: null` there; `draw_context` reads it.
+8. **`untrusted` holds everything from `describeChange`**: title, body, every file with its patch, the generated files' names and the CI checks, because file and check names come from the change too (FR3.9 says text from the SCM). The trusted part has pr-rla's counts (`summary`) and the manifest's fields. The text shows the protocol's checklist, not its full text (that is in `protocol.text`).
+9. **Patches within `maxPatchBytes` are whole**, in file order: a patch that does not fit the remaining budget is left out (`patchOmitted`, counted in `omittedBytes`), and later smaller ones may still fit. None is cut mid-hunk. The description is cut at 8 KiB of UTF-8 on a character boundary.
+10. **Only the root `.gitattributes`** at the landed commit is read (describeChange returns one), with gitattributes(5) patterns, macros and last-line-wins. Attribute files in subdirectories and Linguist's own heuristics (vendored, minified) are not applied.
+11. **The MCP SDK is v2, `@modelcontextprotocol/server` 2.4.0** (published 2026-10-23, as the draft's `05` §U5 chose), with `zod` 4.6.7, both pinned exactly. `serveStdio` serves the 2025 `initialize` handshake and the 2026-07-28 revision; both are tested. The package is TypeScript built with its own `typescript` 7.0.2 (exact) and tested with `node:test`, so it ships `dist/` and needs no test runner from the root.
+12. **pr-rla is linked with `file:../..`**: npm symlinks the repository's own package (it does not touch the root's `node_modules`), and `npm ci --offline` works once npm's cache holds the SDK and zod (checked in the clean clone). FR3.1's "pinned to an exact pr-rla version" holds at release, when U10 replaces the link with `"pr-rla": "0.1.0"`; until then a test requires the two versions to be equal.
+13. **Output schemas are loose objects**: each tool's result and its `{ jobId }` handle share one schema per tool, so a handle is never an output-validation error; the key fields are typed.
+14. **`--handoff-ms`** (1 to 25,000) exists for the tests; it cannot lengthen the hand-off past the design's 25 s.
+15. **Roots apply to the files an audit names, too.** `ApiContext.confine` is called for the config, `audit_dir`, the window directory, the protocol, a json-file export, a ledger `file` option and the transparency-log key. An external path plugin's own files are not confined: it must be locked, and it is in the audit repo by U2b's rule.
+16. **A caller session shares one broker per audit directory**, built from the session's first call's transport, clock and environment (the MCP server passes the same every time); per-call notes are routed with AsyncLocalStorage. Each read call stops the plugin hosts it started (`withPluginHostScope`, added to U2b's `src/plugins/host.ts`), because the server, unlike the CLI, never ends.
+17. **The checkpoint module is split** into readers (`src/api/read/checkpoints.ts`) and writers (`src/api/write/checkpoint.ts`); `src/api/checkpoint.ts` stays as a barrel of both, so U4's imports and tests are unchanged, and `pr-rla/api/read` never imports it.
+18. **`pr-rla/http`'s `HttpClient` gains `getText()`** and a `raw` request option (U3's file; optional additions within `HTTP_HELPER_VERSION` 1). A raw request asks the broker for no JSON check.
+19. **`init` now writes through the atomic writer** (NFR15). The `git-file` ledger still appends its line with `appendFile` (U9 edits that file in parallel); an interrupted append leaves the earlier lines whole and a partial last line that `verify` reports.
+20. **The fixture audit is 3.2 MB** (the 1,589 changes appear in both `changes.json` and the manifest), so it is stored as committed files rather than built at test time: built at test time, its draws would depend on the trust bundle's version and pr-rla's version (both are hashed into the registration), and the recorded descriptions would stop matching the draws.
+21. **`simulate`'s tool inputs are bounded** beyond the contract's `runs` ≤ 20,000: `population` and `defects` at most 10,000,000, `p0`, `p1`, `alpha` in (0, 1), `p1` below `p0`, `defects` at most `population`.
+
+### Findings
+
+1. **14 of the 36 issued gh-aw draws touch `linguist-generated` files** under gh-aw's own `.gitattributes`: draw #31 (#47149) changes 91 files of which 90 are lock files, draw #35 (#48733) 60 of which 57, draw #13 (#49685) 28 of which 21. The stratum's "≤ 200 changed lines" counts generated lines, so a reviewer without `exclude_generated` would read mostly compiled workflow files.
+2. **Bitbucket Cloud answers `pullrequests/{id}/diffstat` and `/diff` with a 302** to `diffstat/{spec}` and `diff/{spec}`. The broker follows them by hand, re-checking the host (recorded on #745).
+3. **gitlab-org/cli's pipeline at !4191's head commit has source `duo_workflow`**: the only CI result GitLab lists for that commit is an agent workflow's pipeline.
+4. **git can write under `.git` after a commit returns.** A commit may start git's detached auto maintenance, which takes a lock file under `.git/objects`. Under load it overlapped a tree-hash assertion once in the full suite; test repos now run git with `maintenance.auto=false`.
+5. **Node 25 or later also denies the network under `--permission`.** The MCP tests run the server under the permission model, so they add `--allow-net` there; the preloaded guard still refuses every host but loopback. Node 22 and 24 have no such flag.
+6. **The live `draw_context` on GitHub took 3.4 s** (5 GETs, a personal token): the 25 s hand-off is not near for one draw.
+7. **The v2 MCP SDK validates `structuredContent` against the output schema**: a draw context's `state` object failed a first schema that typed a job handle's `state` as a string; the handle's `state` is now untyped in the shared schema.
+
+### Unverified
+
+- **FR3.6**: the server in Claude Code, Codex and Cursor. The founder's manual runs (U6). How each client shows progress notifications, honours `readOnlyHint`, and polls `job_status` is unverified; only the SDK's own client was used.
+- **The 25 s hand-off against a slow real SCM**: tested with the hand-off shortened to 100–250 ms on a mock that delays its answers.
+- **`describeChange` against GitHub Enterprise Server, GitLab self-managed and Bitbucket Data Center**; Data Center is entirely synthetic, as the provider is. GitHub's 3,000-file cap (`truncated`) on a real PR. A GitLab diff marked `too_large` on a real MR.
+- **Linguist's own rules**: only `.gitattributes` is applied, so a generated file Linguist detects by heuristic (a minified file, `package-lock.json`) is shown.
+- **Windows and Linux** for the MCP server and its tests (macOS only); Node 22.13 to 22.14 (the plugin host needs 22.15, see bolt 4).
+- **The MCP server's memory under a 22-minute job**: the bound is four jobs and 8 MiB per result, not measured on a real long freeze preview.
+- **An independent review of the branch** was started at the end of the bolt and had not reported when this was written; nothing from it is in these commits.
+
+### For the integration with U8 and U9
+
+- **U8 (org-pooled freeze).** Move its call-through out of `src/commands/freeze.ts` into the API: the steps a dry run and a freeze share are `planFreeze` in `src/api/read/freeze-preview.ts` (read side; `pr-rla/api/read` reaches it), and the writing is `freeze` in `src/api/write/freeze.ts`. Keep FreezeCheckpointStore and `.pr-rla/cache` on the write side: the boundary test fails if a module that writes enters the read graph unlisted, and `freeze_preview` must keep its working data in memory. `freezePreview({ estimate: true })` refuses with `UNSUPPORTED` today; wire it to the estimator, drop the code from `src/api/errors.ts` and `packages/pr-rla-mcp/src/errors.ts`, and update the `freeze_preview` tool description and the package README. `printRegistrationPlan` (`src/commands/register.ts`) prints a `repos` other than `{ kind: "repo" }` as JSON: give it the pooled form. Both units add an optional method to `ScmProvider` in `src/sdk/provider.ts`, next to `nativeCounts` (`describeChange` here, `listRepos` there): adjacent lines.
+- **U9 (presence-attested verdicts).** Its edits to `src/commands/record.ts` and `src/commands/verify.ts` move into `src/api/write/record.ts` and `src/api/read/verify.ts`; the command files are formatters now (`recordCommand` prints from `RecordResult`, `printVerify` from `VerifyResult`). U5 did not touch `src/core/verify.ts`, `src/ledgers/git-file.ts` or `src/core/presence/`. The draw context reports a verdict's provenance level as the ledger gives it, so `presence` shows there with no change. Both bolts append a section to `docs/security-model.md`: this bolt's carries the tier-2 wording under D7 verbatim.
+- **Files the other bolts are likely to touch too**: `README.md` (this bolt adds a quickstart line, a bullet under the exports and a section before Limitations), `BUILD-NOTES.md` (this section, at the end), `package.json` (the `./api/read` export), `src/cli.ts` (the `draw-context` command; `run` takes the command's `--json` and catches `AuditError`), `src/sdk/provider.ts`, `src/sdk/http.ts`, `src/plugins/host.ts`, `vitest.config.ts` (an alias), `test/helpers/audit-scenario.ts` and `test/helpers/replay-fetch.ts`.
+- **The MCP package's lockfile records the root's dependencies** (the `../..` entry). A root dependency added or changed at the integration needs `npm install` in `packages/pr-rla-mcp` once, or its `npm ci` refuses the stale lock. A version bump must change both `package.json` files and `packages/pr-rla-mcp/src/version.ts` (a test checks them against each other).
+- **A new command** goes in two places: its logic in `src/api/read/` or `src/api/write/` (a write function calls `requireReadWrite` first), and a formatter in `src/commands/`. A new read function joins `pr-rla/api/read` only by an edit to `src/api/read/index.ts` and the guard test's list of seven.
+
+## U5 fix round (2026-11-04)
+
+Two independent reviews of `bolt/u5-audit-api-mcp` at `cf3a779` (review 1: 2 high, 6 medium, the lows and a list of tests that cannot fail; review 2: four new findings, confirming review 1's H1, H2, M1, M3, M4, M5 and M6, and five test gaps). Every finding below is fixed, with a regression test that fails on `cf3a779` and passes now, unless it says otherwise. Work on the same branch, from `cf3a779` to the commit this section is in.
+
+### The findings, their commits and their tests
+
+| Finding | Fixed in | Test (what fails on `cf3a779`) |
+|---|---|---|
+| **H1** one `simulate` call could hang or exhaust the server (each run filled two arrays of the cap's length; p0 = 1e-6: 13 million entries, 12.7 s a run; p0 = 1e-9: out of memory; synchronous in the request handler) | `e24c938` (core and API), `af2cae5` (the tool runs as a long call) | `test/simulate.test.ts` › *each run stops at the SPRT's decision* (a run's decision equals `evaluateSequence` on the same draws, 200 runs, both representations; p0 = 1e-6 with one run stays under 64 MB), › *simulate for read-only callers* (TOO_MUCH_WORK at once for the review's two inputs; the derivation pinned; the worst case at the budget in under 12.5 s of CPU; a timer fires while it runs; abort stops it; progress); `packages/pr-rla-mcp/test/mcp-jobs.test.mjs` › *simulate runs as a long call* |
+| **H2** a change decided which of its own files were dropped (`.gitattributes` read at its own landed commit) | `efc489d` (SDK, providers, core, recordings), `8616ec5` (the matcher), `e78bcc6` | `test/draw-context.test.ts` › *a change cannot decide which of its own files are dropped (H2)* (`* linguist-generated` plus `src/backdoor.ts` drops nothing, with the note outside the fence; nested, renamed and copied `.gitattributes`; base-only and head-only marks; a rename into a generated path; no base attributes; a truncated listing; a nested unset; an unread directory); `test/generated-git.test.ts` (against `git check-attr`); `test/describe-change.test.ts` › *base attributes…*; the recorded draws #7 and #13 still drop their lock files from the base commits' attributes |
+| **M1** root confinement covered directories, not the files read in them; JSON.parse put file bytes in errors; git walked above the root; the ledger-file check used another path than the one opened | `efc489d`, `a59f7d8` | `test/api-read-fix.test.ts` › *M1* (registration, draws, manifest, verdicts.jsonl, ledger-checkpoints and the ledger index linked out of the roots are ROOT_ESCAPE with no file content in any message; JSON and YAML errors without the file; an absolute ledger `file:` inside the root accepted; git not above the roots; a `.git` file pointing out refused); `mcp-readonly.test.mjs` › *record files linked out of the roots…* |
+| **M2** no cancellation or deadline; `Jobs.close()` stopped nothing; online status and verify sent no progress | `efc489d` (signals through the API, broker waits, plugin hosts), `af2cae5` (jobs), `a59f7d8`, `ba882bb` | `mcp-jobs.test.mjs` › *slots, deadlines, cancellation and close* (slots freed after a failed job and after a TIMEOUT; the request's cancellation stops the work; `close()` resolves with every request aborted; the process exits with a job running; `startedAt`); `test/api-read-fix.test.ts` › *cancellation reaches the work*, › *online verify reports its progress*, › *the per-job deadline is derived* |
+| **M3** SCM, ledger and plugin text outside the fence | `efc489d` | `test/draw-context.test.ts` › *reports the verdict state…*, › *the header fields from the SCM…*; `test/draw-context-plugin.test.ts` (a plugin's NO_DESCRIPTION is an error with its text in `untrusted`); `test/api-read-fix.test.ts` › *read calls throw pr-rla's errors*; `mcp-readonly.test.mjs` › *a config cannot send another environment secret…* (the echoing server's body is in `untrusted`) |
+| **M4** control characters printed raw | `efc489d` (the draw context's text), `d9ee0df` (every CLI line) | `test/draw-context.test.ts` › *escapes C0 controls…* (every field of the text); `test/api-cli-contract.test.ts` › *every line the CLI prints has its control characters escaped* (status text, stderr, `--json` read back exactly) |
+| **M5** `--json` stdout not one document | `d9ee0df` | `test/api-cli-contract.test.ts` › *--json: stdout carries exactly one JSON document, always* (status --checkpoint folded, the dry-run note and the Rekor v2 warning on stderr, `log: null`) |
+| **M6** finished jobs unbounded | `af2cae5` | `mcp-jobs.test.mjs` › *finished jobs are bounded by count and bytes* |
+| Read-only claim: `trust: full` plugins ran in the server; the whole environment reached plugins | `efc489d`, `ba882bb` | `test/api-read-fix.test.ts` › *a trust: full plugin is refused…*, › *an isolated plugin's locked credential grants…*; `mcp-readonly.test.mjs` › *a trust: full plugin is refused in read-only mode* |
+| **Review 2, 1 (HIGH)** a config under a root sent any environment secret to any host | `efc489d`, `ba882bb` | `test/api-read-fix.test.ts` › *the operator's credentials in read-only mode*; `mcp-readonly.test.mjs` › *a config cannot send another environment secret to its own host* (the review's `token_env: SOME_OTHER_SECRET` plus `base_url` config: the mock received no Authorization at all), › *no result carried a token… on the mock GitHub Enterprise Server* |
+| **Review 2, 2** ReDoS in `.gitattributes` patterns; `[z-a]` threw | `8616ec5` | `test/generated-git.test.ts` › *the matcher is linear*; `test/draw-context.test.ts` › *a ReDoS-shaped pattern…*; `mcp-readonly.test.mjs` › *a ReDoS-shaped .gitattributes is decided in moments, and the server keeps answering* |
+| **Review 2, 3** offline verify on a partial clone fetched lazily and wrote under `.git` | `efc489d` (`src/io/git-read.ts`), `a59f7d8` | `mcp-readonly.test.mjs` › *an audit in a partial clone…* (tree hash unchanged, the missing object reported as missing, not deleted); `test/api-read-runtime.test.ts` (every git call carries the read-only environment) |
+| **Review 2, 4** the preview cache ignored the provider | `efc489d` | `test/api-read-fix.test.ts` › *freeze_preview's cache key*; `mcp-readonly.test.mjs` › *freeze_preview's cache key includes the provider* |
+| `init`, `plugin add` and `plugin lock` failed under an invalid PR_RLA_PLUGINS | `d9ee0df` | `test/api-cli-contract.test.ts` › *init works under an invalid PR_RLA_PLUGINS…*; the differential's flow 3 with `PR_RLA_PLUGINS=bogus` is now identical to master's |
+| `plugin check` printed nothing before a kit error | `d9ee0df` | `test/api-cli-contract.test.ts` › *plugin check prints as it goes*; differential flows 7 and 8 identical |
+| Error-path output order (register, checkpoint) | `d9ee0df` | `test/cli-order.test.ts` (the failing steps mocked) |
+| `log` missing instead of `null` | `d9ee0df` | `test/api-cli-contract.test.ts` › *log is null, not missing…* |
+| pr-rla's refusals reported as PROVIDER_ERROR | `efc489d`, `af2cae5` | `test/api-read-fix.test.ts` › *pr-rla's own refusals keep their code and words*; `mcp-readonly.test.mjs` › *a trust: full plugin…* (FAILED) |
+| Roots: `..foo` refused; outside paths and the roots echoed | `af2cae5` | `mcp-readonly.test.mjs` › *a root's directory named ..foo…* |
+| `job_status` re-checked a wrapped result; `startedAt` was the hand-off | `af2cae5` | `mcp-jobs.test.mjs` › *a result that fits but whose job_status answer does not…*, › *startedAt is when the call started* |
+| A falsy `describeChange` skipped validation | `efc489d` | `test/draw-context-plugin.test.ts` (a plugin returning null is refused) |
+| Title, paths and check names unbounded | `efc489d` | `test/draw-context.test.ts` › *bounds the title, paths, names…* |
+| Paging loops without a repeat check or a page cap | `efc489d` | `test/describe-change.test.ts` › *a server that repeats its next page…*, › *the page cap…*, the Data Center and Bitbucket Cloud cases |
+| GitHub `copied` → renamed; Data Center COPY without its source | `efc489d` | `test/describe-change.test.ts` (synthetic GitHub listing; › *Data Center: a COPY is an added file…*) |
+| Provider-side truncation never reported | `efc489d` | `test/describe-change.test.ts` › *GitHub direct push…*, › *the combined status is paged…*, › *GitLab: a collapsed diff…*, › *Data Center…* |
+| Bitbucket Cloud git-quoted paths | `efc489d` | `test/describe-change.test.ts` › *Bitbucket Cloud: a git-quoted path…*, › *splitUnifiedDiff reads git-quoted paths…* |
+| Per-file patch budget all or nothing | `efc489d` | `test/draw-context.test.ts` › *fits whole patches first… an oversize one gets a prefix cut at a line end* |
+| A changed protocol's checklist printed in pr-rla's voice | `efc489d` | `test/draw-context.test.ts` › *FAILs the protocol… and withholds a changed protocol's checklist* |
+| Review 2, 1, found in this round: `verify` catches a ledger's failure (check 7) and the beacon relays' (check 4) and quoted their text, so up to 300 bytes of a tracker's HTTP error body reached a read-only caller in a check's line | `d03971f` | `test/api-read-fix.test.ts` › *verify's checks quote pr-rla…* (an isolated ledger whose error carries an instruction: check 7 says pr-rla's words and points to `untrusted.errors[0]`; a relay answering non-JSON: check 4 likewise; the CLI quotes in place as before) |
+| Found in this round's fresh-clone runs (2 of 5 red at load averages above 100, in master's own test *a slow call that keeps sending heartbeats is not stopped*): the plugin host's watchdog stopped a child whose heartbeats were waiting in the pipe, because timers run before the poll phase reads I/O | `69f0af7` | `test/plugin-host.test.ts` › *a heartbeat that arrived while this process was busy counts* (this process blocked from a check-phase callback past the timeout: fails 3 of 3 on the old watchdog); master's test keeps its 3× ratio with 1 s / 3 s instead of 0.5 s / 1.5 s |
+
+**Tests that could not fail, fixed:** the init atomic-write test (a hard link to the old file must keep its content, which an in-place write would change); the 8 KiB cut (`"a" + "é"…`, so the cut lands inside a character and the U+FFFD branch runs: the byte count is asserted); every "inside the fence" check (strictly after the open marker and before the close, never true for a missing string); the plugin-host count (the setup's hosts are stopped first, then each read call, failing or not, must leave none); the describeChange replays (now hand-written expectations from the raw recorded JSON for GitHub #42597, GitLab !4191 and Bitbucket #745; Data Center has no real recording, its synthetic raw JSON maps by hand as before); the huge-payload test (a known key with 500 elements: only the 64-element cap can refuse it); the token test (on the mock GitHub Enterprise Server, with tokens set); the boundary test (writers found by their `fs` and `child_process` imports, including `spawn`, `execFile` and async writes; namespace imports and `export … from` re-exports, with a planted negative control), plus `test/api-read-runtime.test.ts`, a fresh Node process that runs every read function under a load hook and an fs and child_process spy: no write-side module loads, nothing is written, the only processes are git with the read-only environment.
+
+### Measured and recorded (2026-11-04)
+
+- **simulate's budget.** Worst-case throughput at N = 10,000,000, both representations, Node 22.23.2, 24.20.0 and 26.8.2, on this machine (Apple M5) at 04:06 to 04:16 UTC while other work ran: the slowest rate was 2.81 million draws a second (Node 22 sparse, and Node 24 sparse with the largest Map), the fastest 3.7 × 10⁷. `SIMULATE_MAX_DRAWS` = 2.8 × 10⁶ × 25 s ÷ 8 = **8,750,000**: 8 = 4 (the at most four long calls the server runs share its one thread) × 2 (headroom for a slower machine, garbage collection and the measurement's own 2–3× spread). The default MCP simulate (20,000 runs × cap 144 = 2.88 million) fits; p0 = 1% (cap 1,492) fits up to 5,864 runs. The scripts are in the session's scratchpad, not the repo.
+- **Re-recorded describeChange**, read-only, through pr-rla's broker in read-only mode: GitHub, the 36 issued draws of the gh-aw audit, 04:50:30 to 04:51:53 UTC, 270 GETs with the founder's `gh` token (the recording keeps the 36 of draws 5, 7, 13 and 31); GitLab !4191 at 04:52:22 and Bitbucket Cloud #745 at 04:52:25, anonymously, 5 and 8 GETs. New in each: the base commit's `.gitattributes` and, for the 14 gh-aw draws with generated files, the directories above them (all 404). No write anywhere; e-mail addresses scrubbed as before.
+
+### Differential against master
+
+The review's master and branch CLIs, with the branch rebuilt at `ba882bb` and again at `d03971f` (`scratchpad/u5fix/diff`), on copies of the recorded fixture: the seventeen single commands and the eight flows plus flow 3 under `PR_RLA_PLUGINS=bogus`. Identical: status (plain, `--offline`), verify (offline, online), freeze `--force` and plain, `simulate` with bad input, flows 2, 7 and 8. Every other difference is explained: the additive `--json` fields and the JSON error form (U5's §7, as review 1 found), times and hashes of commands run seconds apart, `status --json --checkpoint` now one document with the checkpoint's error inside (M5), `draw-context` (master has none), and **simulate's numbers**: each run now stops at its decision, so the random stream advances less and a seed gives other runs (500 runs at the tolerance: 2.60% on master, 4.40% now, both under the 5% risk; the spec-table tests at 20,000 runs still hold). The refactor's two differential regressions (flow 3 under a bad PR_RLA_PLUGINS, flow 8's plugin check) are now identical to master. Between the two rebuilds the branch's own output changed only in seed rounds and hashes (the clock moved), the fence id (random per call), and flow 4's draw-context losing its "could not be decided" note for files no root marks (`e78bcc6`); the set of cases identical to master is the same.
+
+### Verified (command → output)
+
+From a fresh clone of the branch at `6fcfe33` into the session's scratchpad, three runs in a row (runs 9 to 11, 2026-11-04 06:43 to 06:50 UTC, Node v22.23.2, load averages 1.9 to 13), each: `npm ci && npm run build && npm run typecheck && npm test` at the root, `npm ci && npm test` in `packages/pr-rla-mcp`, `examples/providers/gitea` and `examples/ledgers/jira`.
+
+| Step | Each of the three runs |
+|---|---|
+| root `npm ci` | 60 packages, 0 vulnerabilities |
+| root `npm run build`, `npm run typecheck` | clean |
+| root `npm test` | 624 passed, 1 skipped, of 625 (52 files), 24 to 42 s |
+| `packages/pr-rla-mcp` | 19 packages, 0 vulnerabilities; 57 of 57 pass |
+| `examples/providers/gitea`, `examples/ledgers/jira` | 0 vulnerabilities; 1 of 1 pass each |
+
+Tests: at `cf3a779` 547 at the root (546 passed, 1 skipped) and 42 in the package; now 625 (624 passed, the same 1 skipped) and 57. The earlier runs of this round, for the record: run 0 on `e78bcc6`, at load averages above 100, failed master's heartbeat test, the Jira conformance test's 60 s, and NFR10's MCP start (best of five starts 2,268 ms against 2 s; every later run met it); of runs 1 to 5 on `21c6dec`, runs 2 and 5 failed the heartbeat test, again above 100 (`69f0af7`); of runs 6 to 8 on `9666d25`, run 6 timed out the Jira conformance test at a load average of 24 (`6fcfe33`). No other test failed in any run. NFR10's 2 s start is a requirement, so its test keeps the bound and stays sensitive to a starved machine.
+
+### Deviations from the design, and why
+
+1. **`ChangeDescription` gains `attributes` (base and head `.gitattributes` by directory) and `checksTruncated`; `describeChange` takes `{ signal }`.** Optional, within provider API version 1 (contracts.md §1 has `gitattributes` only). Without `attributes`, nothing is dropped.
+2. **The draw context's shape.** `author`, `mergedBy` and `labels` moved into `untrusted`, as did a verdict's `reviewer` and `note` (`untrusted.verdict`), a ledger's error (`untrusted.ledgerError`) and the tracker's issue and labels (`untrusted.record`); `state` keeps pr-rla's reading. New: `titleTruncated`, `patchCut`, `pathCut`. A changed protocol's `text` is null and its checklist empty. The `draws` and `status` results are unchanged (their ledger fields are JSON with no text rendering; FR3.9 is about `draw_context`).
+3. **MCP error codes beyond contracts.md §4:** `FAILED` (pr-rla refused, no other code names it), `TOO_MUCH_WORK` (simulate's budget), beside `UNSUPPORTED`; error bodies gain `untrusted`.
+4. **`pr-rla/api/read` exports two numbers** (`LONG_CALL_DEADLINE_MS`, `SIMULATE_MAX_DRAWS`) and its `simulate` returns a promise and takes `ReadOptions`; `ReadOptions` gains `roots`. The CLI's `simulate` stays synchronous and unbounded: a person's own command has no tool budget.
+5. **`simulate` is a long call** in the MCP server (counted toward the four, handed off at 25 s), so `TOO_MANY_JOBS` now counts it too.
+6. **Job limits beyond NFR20:** a per-job deadline (1 h 30 s, derived), at most 32 finished jobs and 32 MiB of them.
+7. **Read-only credentials** (review 2's decision): a built-in reads only its default token variables, as placeholders swapped on its default https origin; `token_env`, a non-default base URL and an isolated plugin's lock grants need consent, which this build cannot record (`operatorConsents` answers no), so they are withheld in read-only mode. GitHub Enterprise Server, GitLab self-managed and Bitbucket Data Center therefore run anonymously in the MCP server until integration. A new `PluginPolicy`, `isolated-only`, is what read-only contexts run under.
+8. **`status --json --checkpoint`** prints `{ …status, checkpoint }` (or `checkpoint: { error }`) as one document; the exit code is as without `--json`.
+9. **`verify`'s result gains `untrusted: { errors }`** in read-only mode, only when check 4 or 7 caught a failure; a clean verify is still the CLI's `--json` object (contracts.md §7). The CLI's checks quote the failure in place, as on master.
+
+### Declined or partly done, and why
+
+- **Nested `.gitattributes` are read only above files the root marks generated** (at both commits). A file only a nested file marks generated is shown: the safe side, and it saves a request per directory for every other file. Git's semantics are applied in full to whatever is read.
+- **Anonymous GETs to a config-chosen host** (a `base_url`, the transparency-log URL) still happen in read-only mode, with no credential: blocking non-default origins would make GitHub Enterprise Server and the other self-hosted SCMs unusable until the consent store lands. Responses reach the caller only as parsed fields or, in errors, as `untrusted`. Recorded in `docs/security-model.md`.
+- **A concurrent rename inside a root during a call** could race the realpath check (only the last component is pinned, by `O_NOFOLLOW`); whoever can do that already controls the audit.
+
+### Unverified
+
+- describeChange's base commits on GitHub Enterprise Server, GitLab self-managed and Bitbucket Data Center (DC entirely synthetic; `toRef.latestCommit` of a merged DC pull request in particular), GitHub's 3,000-file cap and GitLab's `collapsed` and `changes_count: "1000+"` on a real change.
+- The deadline, cancellation and `close()` against a real SCM's rate-limit waits (tested on mocks and fake waits).
+- Windows and Linux. The timing tests ran green on this machine under load averages up to about 40 (below); at 100 to 170 (other work on the machine) master's own heartbeat test failed, which `69f0af7` addresses for this process's side; a child starved for longer than a test's timeout still fails that test, by design. Master's Jira conformance test (`test/wave1-integration.test.ts`, about 13 s alone on master and on this branch) took over 60 s in one parallel run at a load average of 24 and now has a 180 s hang guard of its own.
+
+### For the integration
+
+- **Plugin and broker fix round:** join its approvals store at `operatorConsents` in `src/api/credentials.ts` (both the built-ins' `token_env`/base URL and the isolated plugins' lock grants route through it, the latter in `grantedCredentials`, `src/plugins/open.ts`). This round touched `src/plugins/open.ts`, `lock.ts` (`isolated-only`, `refuseFullTrust`), `identity.ts`, `host.ts` (hosted calls take the call's signal; the watchdog decides in a `setImmediate` after the poll phase, with a generation counter, `69f0af7`), `errors.ts` (`FULL_TRUST_REFUSED`), and the broker (`src/net/broker.ts`: abortable waits, no secret over `http:` in read-only mode; `governor.ts`: an abortable slot). Its origin-exact credential matching supersedes the read-only https check.
+- **U9 fix round:** `src/io/git-read.ts` is the one place for read-only git's environment and config (`gitReadEnv`, `GIT_READ_CONFIG`); add its stripped `GIT_*`, `--no-replace-objects`, `--no-textconv` and `core.commitGraph=false` there. `src/ledgers/git-file.ts` here: confined reads, `gitFilePath`, the `.git` file check, and "missing object" findings.
+- **U8:** `src/providers/github/http.ts` (`rest(url, signal)`; aborts pass through), `src/sdk/provider.ts` (`DescribeChangeOptions`, `ChangeAttributes`), `src/api/read/freeze-preview.ts` (the cache key).
+- New shared helpers: `src/net/abort.ts`, `src/io/confine.ts`, `src/core/text.ts`, `src/providers/paging.ts`, `src/providers/attributes.ts`, `src/api/read/errors.ts`.
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.

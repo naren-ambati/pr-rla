@@ -10,7 +10,9 @@ export interface RecordedExchange {
   variables?: Record<string, unknown>;
   status: number;
   headers: Record<string, string>;
-  response: unknown;
+  response?: unknown;
+  /** A body that is not JSON (a raw file, a diff, an empty redirect), served as recorded. */
+  responseText?: string;
 }
 
 export interface Recording {
@@ -37,7 +39,9 @@ export function replayFetch(rec: Recording): typeof fetch & { served: () => numb
     if (!hit) throw new Error(`replayFetch: unrecorded request ${method} ${url}${key ? ` body ${key.slice(0, 12)}` : ""}`);
     hit.used = true;
     served++;
-    return new Response(JSON.stringify(hit.e.response), { status: hit.e.status, headers: { "content-type": "application/json", ...hit.e.headers } });
+    const bodyless = [101, 103, 204, 205, 304].includes(hit.e.status);
+    if (hit.e.responseText !== undefined) return new Response(bodyless ? null : hit.e.responseText, { status: hit.e.status, headers: { "content-type": "text/plain", ...hit.e.headers } });
+    return new Response(bodyless ? null : JSON.stringify(hit.e.response), { status: hit.e.status, headers: { "content-type": "application/json", ...hit.e.headers } });
   }) as typeof fetch & { served: () => number; unused: () => RecordedExchange[] };
   f.served = () => served;
   f.unused = () => queue.filter((q) => !q.used).map((q) => q.e);

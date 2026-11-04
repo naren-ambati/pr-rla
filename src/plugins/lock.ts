@@ -487,7 +487,12 @@ export function installScripts(p: ResolvedPlugin): { pkg: string; scripts: strin
 // Load-time checks
 // ---------------------------------------------------------------------------
 
-export type PluginPolicy = "locked" | "builtin-only";
+/**
+ * `locked`: external plugins load once locked; `builtin-only`: none load (FR2.6); `isolated-only`:
+ * locked plugins load only in the isolated host, never `trust: full` in process. Read-only contexts
+ * (pr-rla/api/read, the MCP server) run under `isolated-only` at least (U5 fix round).
+ */
+export type PluginPolicy = "locked" | "builtin-only" | "isolated-only";
 
 /**
  * What decides whether an external plugin may load and what it may send: the policy, and the local
@@ -518,6 +523,12 @@ export function pluginPolicy(flag: string | undefined, env: Readonly<Record<stri
 export function refuseIfBuiltinOnly(policy: PluginPolicy | PluginRules, kind: "provider" | "ledger", use: string): void {
   if (policyOf(policy) === "builtin-only")
     throw new PluginError(`${kind} ${use} is an external plugin, and --plugins builtin-only (or PR_RLA_PLUGINS=builtin-only) refuses all external code`, "BUILTIN_ONLY", `use a built-in ${kind}, or run without builtin-only`);
+}
+
+/** Refuses a `trust: full` plugin under isolated-only (read-only mode), before it is imported. */
+export function refuseFullTrust(policy: PluginPolicy, kind: "provider" | "ledger", use: string, entry: Pick<LockEntry, "trust">): void {
+  if (policy === "isolated-only" && entry.trust === "full")
+    throw new PluginError(`${kind} ${use} is locked with trust: full, which would run it in this process with its environment and files; read-only mode (pr-rla/api/read, the MCP server) runs only isolated plugins`, "FULL_TRUST_REFUSED", `lock it isolated (pr-rla plugin lock ${use} --trust isolated), or run the command from the CLI`);
 }
 
 const short = (v: string | null) => (v === null ? "none" : v.length > 24 ? `${v.slice(0, 20)}…` : v);

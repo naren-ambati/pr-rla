@@ -4,6 +4,7 @@ import {
   RepoUnavailableError,
   defineProvider,
   type Actor,
+  type ChangeDescription,
   type ChangeRecord,
   type ListChangesRequest,
   type ListChangesResult,
@@ -13,8 +14,10 @@ import {
   type RepoSetRule,
   type RepoVisibility,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
 import { firstParentChain } from "../first-parent.js";
+import { describeGitLabChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { HttpClient, HttpError, isoUtcSeconds, nextLink } from "../http.js";
@@ -185,6 +188,11 @@ export class GitLabProvider implements ScmProvider {
     if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
     const commits = await this.paged<GlCommit>(`/projects/${enc(req.repo)}/repository/commits?ref_name=${enc(`${req.base}..${req.head}`)}&first_parent=true&per_page=${this.pageSize}`, req.signal);
     return firstParentChain(commits.map((c) => ({ sha: c.id, parents: c.parent_ids, committedAt: c.committed_date })), req.base, req.head);
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeGitLabChange(this.http, change, opts);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

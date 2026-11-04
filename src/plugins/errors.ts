@@ -7,7 +7,7 @@ export class PluginError extends Error {
   readonly exitCode = 1;
   constructor(
     message: string,
-    readonly code: "NOT_LOCKED" | "NOT_APPROVED" | "LOCK_MISMATCH" | "BUILTIN_ONLY" | "TREE_ESCAPE" | "PLUGIN_UNRESOLVED" | "PLUGIN_INVALID" | "PLUGIN_HOST_FAILED" | "PLUGIN_HOST_TIMEOUT" | "MESSAGE_TOO_LARGE",
+    readonly code: "NOT_LOCKED" | "NOT_APPROVED" | "LOCK_MISMATCH" | "BUILTIN_ONLY" | "TREE_ESCAPE" | "PLUGIN_UNRESOLVED" | "PLUGIN_INVALID" | "PLUGIN_HOST_FAILED" | "PLUGIN_HOST_TIMEOUT" | "MESSAGE_TOO_LARGE" | "FULL_TRUST_REFUSED",
     readonly next?: string,
   ) {
     super(message);

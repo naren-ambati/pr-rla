@@ -108,13 +108,28 @@ export class RateGovernor {
     return Math.ceil(Math.max(wait, Math.min(told, MAX_WAIT_MS)) - 1e-6);
   }
 
-  /** Waits for an in-flight slot when the host limits concurrency; returns the release. A released slot passes straight to the next waiter. */
-  async slot(host: string): Promise<() => void> {
+  /**
+   * Waits for an in-flight slot when the host limits concurrency; returns the release. A released slot
+   * passes straight to the next waiter. `signal` gives up the wait (and the place in the queue).
+   */
+  async slot(host: string, signal?: AbortSignal): Promise<() => void> {
     const limit = this.budget(host)?.concurrency?.limit;
     if (!limit) return () => {};
+    signal?.throwIfAborted();
     const n = this.inFlight.get(host) ?? 0;
     if (n < limit) this.inFlight.set(host, n + 1);
-    else await new Promise<void>((res) => (this.queued.get(host) ?? this.queued.set(host, []).get(host)!).push(res));
+    else
+      await new Promise<void>((res, rej) => {
+        const q = this.queued.get(host) ?? this.queued.set(host, []).get(host)!;
+        const onAbort = () => {
+          const i = q.indexOf(wake);
+          if (i >= 0) q.splice(i, 1);
+          rej(signal!.reason instanceof Error ? signal!.reason : Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+        };
+        const wake = () => (signal?.removeEventListener("abort", onAbort), res());
+        q.push(wake);
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
     let released = false;
     return () => {
       if (released) return;

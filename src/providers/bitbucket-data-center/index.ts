@@ -2,6 +2,7 @@ import {
   PROVIDER_API_VERSION,
   RepoUnavailableError,
   defineProvider,
+  type ChangeDescription,
   type ChangeRecord,
   type FirstParentCommit,
   type ListChangesRequest,
@@ -10,7 +11,9 @@ import {
   type RepoRef,
   type RepoSetRule,
   type ScmProvider,
+  type DescribeChangeOptions,
 } from "../../sdk/provider.js";
+import { describeBitbucketDcChange } from "./describe.js";
 import { attributeCommits } from "../attribution.js";
 import { firstParentChain } from "../first-parent.js";
 import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
@@ -150,6 +153,11 @@ export class BitbucketDataCenterProvider implements ScmProvider {
     if (req.base.toLowerCase() === req.head.toLowerCase()) return [];
     const commits = await this.paged<DcCommit>(`${this.split(req.repo).path}/commits?until=${req.head}&since=${req.base}`, req.signal);
     return firstParentChain(commits.map((c) => ({ sha: c.id, parents: c.parents.map((x) => x.id), committedAt: new Date(c.committerTimestamp).toISOString() })), req.base, req.head);
+  }
+
+  /** What a reviewer reads for one drawn change (U5): see ./describe.ts. */
+  describeChange(change: ChangeRecord, opts?: DescribeChangeOptions): Promise<ChangeDescription> {
+    return describeBitbucketDcChange(this.http, this.root, change, opts);
   }
 
   async listChanges(req: ListChangesRequest): Promise<ListChangesResult> {

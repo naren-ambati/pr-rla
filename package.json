@@ -28,6 +28,10 @@
     "./http": {
       "types": "./dist/sdk/http.d.ts",
       "default": "./dist/sdk/http.js"
+    },
+    "./api/read": {
+      "types": "./dist/api/read/index.d.ts",
+      "default": "./dist/api/read/index.js"
     }
   },
   "files": [

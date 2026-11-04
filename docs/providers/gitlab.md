@@ -95,3 +95,10 @@ Every request retries network errors, HTTP 5xx, 429 and truncated bodies with ex
 - `approvedBy` and `reviewers` are read 100 at a time and paged to the end, so no approver or reviewer is missing its bot flag.
 - `changedLines` is GraphQL `diffStatsSummary` (GitLab's own stat). Only when GraphQL has none are the REST `merge_requests/:iid/diffs` counted, and a file diff GitLab excluded (`too_large`: cannot be retrieved; `collapsed`: left out unless asked for) makes the MR's size unknown: the record carries `changedLinesUnknown: true`, a `max_changed_lines` stratum keeps it, and a diagnostic counts it.
 - The recorded fixtures keep their original responses; their GraphQL request hashes were updated to the current query (BUILD-NOTES, "Ledger, selector and provider fix round").
+
+
+## Draw context (`describeChange`)
+
+`pr-rla draw-context <n>` and the MCP `draw_context` tool read, with GETs only: the merge request and `merge_requests/:iid/diffs` (paginated; a diff GitLab marks `too_large` or `collapsed` has no patch and unknown line counts, so the description is `truncated`, as it is when the MR's `changes_count` is over the diffs listed, "1000+" included); the `.gitattributes` files at the MR's `diff_refs.base_sha` and at its landed commit (`repository/files/<dir>%2F.gitattributes/raw?ref=`, as text; 404 means none); and `pipelines?sha=<head commit>`, paginated, one check per pipeline. A direct push reads `repository/commits/:sha` and its `/diff` (truncated when the commit's `stats` count more lines than its diffs); its base is its first parent. Recorded anonymously from gitlab-org/cli !4191 on 2026-11-04, again at 04:52 UTC with the base commit's `.gitattributes` (`test/fixtures/gitlab/describe-gitlab-org-cli-4191-2026-11-04.json`); self-managed instances are unverified.
+
+In read-only mode (the MCP server) the provider gets `GITLAB_TOKEN` only as a placeholder, which the fetch broker swaps on `gitlab.com` alone; a `base_url` (self-managed) or a `token_env` in `.pr-rla.yml` needs the operator's consent, so that credential is withheld there for now.
