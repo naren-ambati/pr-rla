@@ -27,6 +27,8 @@ import bitbucketCloud from "./providers/bitbucket-cloud/index.js";
 import bitbucketDataCenter from "./providers/bitbucket-data-center/index.js";
 import jsonFile from "./providers/json-file.js";
 import gitFile from "./ledgers/git-file.js";
+import githubIssues from "./ledgers/github-issues/index.js";
+import gitlabIssues from "./ledgers/gitlab-issues/index.js";
 
 /**
  * The plugin registry: the only place that knows concrete providers/ledgers.
@@ -49,6 +51,8 @@ const PROVIDER_ALIASES: Record<string, string> = { json: "json-file", bitbucket:
 
 export const BUILTIN_LEDGERS: Readonly<Record<string, LedgerDefinition<never>>> = {
   "git-file": gitFile as LedgerDefinition<never>,
+  "github-issues": githubIssues as LedgerDefinition<never>,
+  "gitlab-issues": gitlabIssues as LedgerDefinition<never>,
 };
 
 export function normalizePluginSpec(raw: unknown, what: string, fallback: string): PluginSpec {

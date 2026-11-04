@@ -32,6 +32,9 @@ export interface PrRlaConfig {
   rateLimits: RateLimitOverrides;
 }
 
+/** Issue ledgers that take their provider's self-hosted base_url when they set none (FR4.8). */
+const LEDGER_BASE_URL_FROM: Readonly<Record<string, string>> = { "github-issues": "github", "gitlab-issues": "gitlab" };
+
 export interface WindowPaths {
   windowDir: string;
   manifest: string;
@@ -95,6 +98,9 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
   const rateLimits = parseRateLimits(raw.rate_limits, configPath);
   const minTokens = num(ts.min_tokens, "timestamping.min_tokens", DEFAULT_MIN_TOKENS);
   if (!Number.isInteger(minTokens) || minTokens < 1) throw new Error(`${configPath}: timestamping.min_tokens must be a whole number >= 1`);
+  const ledger = normalizePluginSpec(raw.ledger, "ledger", "git-file");
+  const inheritFrom = LEDGER_BASE_URL_FROM[ledger.use];
+  if (inheritFrom && provider.use === inheritFrom && ledger.options.base_url === undefined && provider.options.base_url !== undefined) ledger.options = { ...ledger.options, base_url: provider.options.base_url };
   return {
     configPath: resolve(configPath),
     dir,
@@ -104,7 +110,7 @@ export function parseConfig(text: string, configPath: string, overrides: { fromF
     selector: normalizeSelector(raw.selector as Record<string, unknown> | undefined),
     parameters,
     protocol: typeof raw.protocol === "string" ? raw.protocol : "review-protocol.md",
-    ledger: normalizePluginSpec(raw.ledger, "ledger", "git-file"),
+    ledger,
     auditDir: typeof raw.audit_dir === "string" ? raw.audit_dir : "audit",
     signingKey: typeof raw.signing_key === "string" ? raw.signing_key : ".pr-rla/signing-key.pem",
     transparencyLog: {
