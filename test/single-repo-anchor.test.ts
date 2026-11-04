@@ -49,6 +49,18 @@ it("dump", async () => {
     const report = async () => { const v = await runVerify(s.ctx, { offline: false }); return { ok: v.ok, mode: v.mode, checks: v.checks.map((c) => [c.n, c.status, c.summary, c.details.filter((d) => !/signature|by \d{4}-|written/.test(d))]) }; };
     s.clock.now = T("2026-10-20T00:00:00Z");
     await step("register", () => registerCommand(s.ctx, {}));
+    // P4: a branch registration signs the git-file ledger's path in (ledgerPath), which master's never did. Re-signed
+    // without it (same key), the registration and everything derived from it (manifest, draws) compare with master's.
+    const regFile = join(s.dir, "audit/2026-q3/registration.json");
+    if (existsSync(regFile)) {
+      const signed = JSON.parse(readFileSync(regFile, "utf8"));
+      if (signed.record.ledgerPath !== undefined) {
+        const { loadOrCreateKey, signRecord } = await import(R + "/src/core/signing.ts");
+        const { ledgerPath, ...record } = signed.record;
+        rec.ledgerPath = ledgerPath;
+        writeFileSync(regFile, JSON.stringify({ ...signed, ...signRecord(record, loadOrCreateKey(KEY)) }, null, 2) + "\n");
+      }
+    }
     s.clock.now = T("2026-10-20T06:00:00Z");
     await step("statusBeforeFreeze", () => statusCommand(s.ctx, {}));
     s.clock.now = T("2026-10-20T12:00:00Z");
@@ -120,7 +132,7 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       const before = dump(baseRoot, work, key, "master");
       const now = dump(ROOT, work, key, "branch");
 
-      // The intended single-repo changes of the U8 fix round, and nothing else:
+      // The intended single-repo changes of the U8 fix round and of P4, and nothing else:
       // 1. a single repo deleted after freeze: master's verify threw the provider's error; it is now INCOMPLETE (exit 6);
       const after = (now.github1!.steps as Record<string, { value?: { ok: boolean; checks: unknown[][] } }>).after!.value!;
       expect((before.github1!.steps as Record<string, { threw?: string }>).after!.threw).toMatch(/^GitHub POST \/graphql: HTTP 404/);
@@ -128,7 +140,27 @@ describe("single-repo audits behave as master does (a pool of one), against the 
       expect(after.checks.find((c) => c[0] === 5)!.slice(1, 3)).toEqual(["INCOMPLETE", "population 0/0 match · 104 changes in 1 repo(s) could not be rebuilt"]);
       delete (before.github1!.steps as Record<string, unknown>).after;
       delete (now.github1!.steps as Record<string, unknown>).after;
-      // 2. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
+      // 2. P4: register signs the git-file ledger's path in and prints it (so its first line's hash covers the path), and
+      //    status WARNs on the re-signed registration that lacks it (see DUMP). Each is checked, then set aside.
+      type Steps = Record<string, { out: string[] }>;
+      for (const name of Object.keys(now)) {
+        expect(now[name]!.ledgerPath, name).toBe("audit/2026-q3/verdicts.jsonl");
+        delete now[name]!.ledgerPath;
+        const reg = (now[name]!.steps as Steps).register!;
+        expect(reg.out, name).toContain("  ledger path audit/2026-q3/verdicts.jsonl (signed in: verify reads the ledger only there)");
+        reg.out = reg.out.filter((l) => !l.startsWith("  ledger path "));
+        for (const d of [now, before]) {
+          const r = (d[name]!.steps as Steps).register!;
+          r.out = r.out.map((l) => l.replace(/^registration [0-9a-f]{12}…/, "registration <sha256>…"));
+        }
+        const status = (now[name]!.steps as Steps).status;
+        const warn = /^ {2}WARN the registration does not record the git-file ledger's path/;
+        // Only the status of a sampled audit reads the ledger, and so prints the line.
+        if (status?.out.some((l) => /^prefix /.test(l))) expect(status.out, name).toContainEqual(expect.stringMatching(warn));
+        if (status) status.out = status.out.filter((l) => !warn.test(l));
+      }
+      expect(((now.json400!.steps as Steps).status!.out ?? []).length).toBeGreaterThan(0);
+      // 3. nothing else: commands, their stdout, the records and verify's results are byte for byte master's.
       expect(now).toEqual(before);
       // And the scenarios really ran: master's own outputs, checked here so that an empty dump cannot pass.
       const steps = (s: string) => now[s]!.steps as Record<string, { value?: unknown; threw?: string; out: string[] }>;

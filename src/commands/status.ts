@@ -6,6 +6,7 @@ import { describeRepoSet } from "../core/repo-set.js";
 import { unixToIso } from "../core/seed.js";
 import { computeStatus, provenanceLine, provenanceOf, type StatusReport } from "../core/status.js";
 import { PRESENCE_LIMIT, countedVerdicts, provenanceLabel, signaturesCountFor, verdictRuleFailures } from "../core/presence/index.js";
+import { certificateWithheld, gitFileLedgerGate } from "../core/ledger-path.js";
 import { latestCheckpointAt } from "../api/checkpoint.js";
 import { ledgerTraits, registeredCeiling } from "../ledger-traits.js";
 import { builtinLedgerName } from "../registry.js";
@@ -65,12 +66,14 @@ export function stratumChoices(sel: Partial<Pick<Selector, "kinds" | "bots" | "d
   return parts.map((p) => `, ${p}`).join("");
 }
 
-export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector> }): string {
+export function statusLine(r: StatusReport, info: { p0: number; alpha: number; protocol: string; maxLines: number | null; mode: string; selector?: Partial<Selector>; withheld?: readonly string[] }): string {
   const s = r.sequence;
   const stratum = `${info.maxLines !== null ? `, stratum ≤ ${info.maxLines} lines` : ""}${stratumChoices(info.selector)}`;
   const head = `prefix ${r.labelledPrefix}/${r.drawsIssued} · fails ${s.fails} · claim D (detected-defect rate ≤ ${pct(info.p0)}, protocol ${info.protocol.slice(0, 4)}…${stratum}) · LLR ${s.llr.toFixed(3)} / target ${s.target.toFixed(3)}`;
   let verdict: string;
-  if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
+  // P4: never CERTIFIED where verify would FAIL check 7.
+  if (s.state === "CERTIFIED" && info.withheld?.length) verdict = `NOT CERTIFIED: verify check 7 would FAIL (${info.withheld.join("; ")}); run "pr-rla verify"`;
+  else if (s.state === "CERTIFIED") verdict = `CERTIFIED (risk ${pct(info.alpha)})`;
   else if (s.state === "ESCALATE") verdict = `ESCALATE: review all ${fmt(r.N)} or narrow the claim`;
   else verdict = `NOT CERTIFIED · ${s.morePassesNeeded} more passing draws needed (${s.draws + (s.morePassesNeeded ?? 0)} total)`;
   return `${head} · ${verdict} · ${info.mode}`;
@@ -137,14 +140,23 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
   const minProvenance = isRegistrationV2(reg) ? reg.record.verdicts.minProvenance : "self-asserted";
   const requireSigned = isRegistrationV2(reg) && reg.record.verdicts.require_signed === true;
   const perRepo = manifestRepos(manifest).length > 1 ? perRepoRows(manifest, draws.draws.slice(0, report.sequence.draws), report.firstVerdicts) : null;
+  // P4: status runs check 7's git-file integrity walk and path rule (local), and withholds CERTIFIED where check 7 would FAIL.
+  const gate = builtinLedgerName(config.ledger.use) === "git-file" ? await gitFileLedgerGate(ledger, reg) : null;
+  const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
+  const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
+  const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length) : [];
+  const withheld = report.sequence.state === "CERTIFIED" ? certificateWithheld({ gate, below: below.length, unsigned: unsigned.length }) : [];
   if (opts.json) {
-    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report, ...(perRepo ? { perRepo } : {}) }, null, 2));
+    const ledgerIntegrity = gate ? { ok: !gate.fails.length, findings: gate.integrity?.findings ?? [], fails: gate.fails, warnings: gate.warns } : null;
+    ctx.out(JSON.stringify({ mode, timestampTamperProof: tamperProof, ...report, ...(perRepo ? { perRepo } : {}), ledgerIntegrity, certificateWithheld: withheld }, null, 2));
   } else if (report.refusal) {
     ctx.out(report.refusal);
     return 3;
   } else {
-    ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }) + tsNote);
+    ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector, withheld }) + tsNote);
     if (anchors) ctx.out(anchors);
+    for (const f of gate?.fails ?? []) ctx.out(`  ledger integrity FAILs: ${f}`);
+    for (const w of gate?.warns ?? []) ctx.out(`  WARN ${w}`);
     if (report.blockingDraw) ctx.out(`  blocking draw: #${report.blockingDraw.draw} ${report.blockingDraw.changeId} ${report.blockingDraw.url}`);
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
@@ -152,10 +164,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     ctx.out(`  ${provenanceLine(report.provenance)} · registered minimum ${provenanceLabel(minProvenance)}${requireSigned ? " · signed verdicts required (require_signed)" : ""}`);
     if (minProvenance === "presence" || report.provenance.some((p) => p.level === "presence")) ctx.out(`  ${PRESENCE_LIMIT}`);
     for (const note of [...capped.notes, ...capped.warnings]) ctx.out(`  ${note}`);
-    const counted = new Set(draws.draws.slice(0, report.sequence.draws).map((d) => d.changeId));
-    const below = report.firstVerdicts.filter((v) => counted.has(v.changeId) && provenanceRank(provenanceOf(v)) < provenanceRank(minProvenance));
     if (below.length) ctx.out(`  ${below.length} counted verdict(s) are below the registered ${provenanceLabel(minProvenance)} provenance; verify check 7 will FAIL them (draws ${below.map((v) => `#${v.draw}`).join(", ")})`);
-    const unsigned = requireSigned ? report.firstVerdicts.filter((v) => counted.has(v.changeId) && verdictRuleFailures(v, { minProvenance: "self-asserted", requireSigned }).length) : [];
     if (unsigned.length) ctx.out(`  ${unsigned.length} counted verdict(s) carry no valid signature by the registered key of the reviewer they name; verify check 7 will FAIL them under require_signed (draws ${unsigned.map((v) => `#${v.draw}`).join(", ")})`);
     if (report.sequence.state === "CERTIFIED" && ledger.readHistory) {
       const lastVerdict = report.firstVerdicts.filter((v) => counted.has(v.changeId)).reduce((m, v) => (v.recordedAt > m ? v.recordedAt : m), "");

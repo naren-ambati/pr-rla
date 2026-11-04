@@ -1,9 +1,10 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, parse, relative } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, join, parse, relative, resolve, sep } from "node:path";
 import { canonicalJson } from "../core/canonical.js";
-import { extendsBytes, readFileHistory } from "./git-history.js";
+import { describeMode, extendsBytes, fileAtHead, readFileHistory } from "./git-history.js";
 import { FULL_CLONE, gitSafeText, historyRefusal } from "../io/git-safe.js";
+import { ExecutableNotFound } from "../io/executables.js";
 import {
   LEDGER_API_VERSION,
   defineLedger,
@@ -25,6 +26,127 @@ export interface GitFileLedgerOptions {
   require_signed?: boolean;
 }
 
+/** The ledger file a git-file ledger with these options keeps in `windowDir`. */
+export const gitFileLedgerFile = (windowDir: string, options: GitFileLedgerOptions | undefined): string => join(windowDir, options?.file ?? "verdicts.jsonl");
+
+/** Where a git-file ledger is (P4): its repository, and its path there as the configuration spells it. */
+export interface GitFileLocation {
+  /** git's toplevel. */
+  top: string;
+  /** The file's path from the toplevel: lexical, normalised, "/"-separated, as the configuration names it (`audit_dir/window/file`). */
+  rel: string;
+  /** The window directory's path from the toplevel, the same way (where the registration sits beside the ledger). */
+  windowRel: string | null;
+  /** True when no directory on the file's path is the toplevel: a symbolic link leads out of the repository, and `rel` is only where it leads. */
+  outside: boolean;
+  /**
+   * Why the file on disk is not exactly at `rel`: a symbolic link on the way, a component that
+   * exists only under another spelling (a case-insensitive or normalising filesystem), a component
+   * that is not a directory. Empty: every component that exists is a real directory or file of
+   * exactly its name.
+   */
+  problems: string[];
+}
+
+const posix = (p: string) => p.split(sep).join("/");
+
+/**
+ * The repository and lexical path of a git-file ledger's `file` (P4, second-pass review findings 1
+ * and 3), or null outside a git repository. The path is computed from the toplevel as the file's
+ * own path spells it, never through `realpath` below the toplevel, and each component is checked
+ * on disk: not a symbolic link, and present under exactly its name in its directory's listing.
+ */
+export function gitFileLocation(file: string, windowDir?: string): GitFileLocation | null {
+  const abs = resolve(file);
+  // The nearest directory that exists (the window directory, unless the ledger's was removed), never the process's cwd.
+  let dir = dirname(abs);
+  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+  let top: string;
+  try {
+    // Discovery finds the audit repository's toplevel; every later call runs there, with git's ceiling at it.
+    top = gitSafeText(["rev-parse", "--show-toplevel"], { cwd: dir, root: parse(dir).root }).trim();
+  } catch (e) {
+    if (e instanceof ExecutableNotFound) throw e;
+    return null;
+  }
+  // The toplevel as the file's path spells it: the first ancestor that is the toplevel on disk. Symbolic
+  // links above it (macOS's /var -> /private/var) are the machine's, not the audit's, and are allowed.
+  const realTop = realpathSync.native(top);
+  let base: string | null = null;
+  for (let a = dirname(abs), chain: string[] = []; ; a = dirname(a)) {
+    chain.unshift(a);
+    if (dirname(a) === a) {
+      for (const c of chain) {
+        let real: string;
+        try {
+          real = realpathSync.native(c);
+        } catch {
+          break;
+        }
+        if (real === realTop) {
+          base = c;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  const problems: string[] = [];
+  if (base === null) {
+    const real = join(realpathSync.native(dir), relative(dir, abs));
+    return { top, rel: posix(relative(realTop, real)), windowRel: null, outside: true, problems: [`the ledger file ${abs} is not inside the repository git found for it (${top}): a symbolic link on its path leads elsewhere`] };
+  }
+  const rel = posix(relative(base, abs));
+  const parts = rel.split("/");
+  let parent = base;
+  for (let i = 0; i < parts.length; i++) {
+    const name = parts[i]!;
+    const here = parts.slice(0, i + 1).join("/");
+    const path = join(parent, name);
+    let names: string[];
+    try {
+      names = readdirSync(parent);
+    } catch {
+      break;
+    }
+    if (!names.includes(name)) {
+      // Absent, or found only through the filesystem folding case or Unicode form.
+      if (existsSync(path)) {
+        const fold = (s: string) => s.normalize("NFC").toLowerCase();
+        const other = names.find((n) => fold(n) === fold(name));
+        problems.push(`${here} exists on disk only as ${other ?? "another spelling"} (the filesystem folds case or Unicode form): the ledger must be at exactly its configured path`);
+      }
+      break;
+    }
+    const st = lstatSync(path);
+    if (st.isSymbolicLink()) {
+      problems.push(`${here} is a symbolic link: the ledger must be reached through real directories, at exactly its configured path`);
+      break;
+    }
+    if (i < parts.length - 1 && !st.isDirectory()) {
+      problems.push(`${here} is not a directory`);
+      break;
+    }
+    if (i === parts.length - 1 && !st.isFile()) problems.push(`${here} is not a regular file`);
+    parent = path;
+  }
+  const w = windowDir ? posix(relative(base, resolve(windowDir))) : null;
+  return { top, rel, windowRel: w === null || w.startsWith("..") ? null : w, outside: false, problems };
+}
+
+/**
+ * The path `register` records for a git-file ledger (P4): its lexical path from the audit
+ * repository's toplevel, which check 7 then requires the ledger to be read at. Throws when the path on
+ * disk is not exactly that path (a symbolic link, another spelling); outside a git repository the
+ * path is null, with the reason.
+ */
+export function gitFileRegisteredPath(windowDir: string, options: GitFileLedgerOptions | undefined): { path: string } | { path: null; why: string } {
+  const where = gitFileLocation(gitFileLedgerFile(windowDir, options), windowDir);
+  if (!where) return { path: null, why: "the git-file ledger is not in a git repository, so its path cannot be registered and it has no tamper trail; register from a clone of the audit repository" };
+  if (where.problems.length) throw new Error(`the git-file ledger's path cannot be registered: ${where.problems.join("; ")}`);
+  return { path: where.rel };
+}
+
 /**
  * Verdicts appended, one JSON object per line, to `audit/<window>/verdicts.jsonl`.
  * Commit it after each verdict: git history is the tamper trail, and
@@ -38,7 +160,12 @@ export interface GitFileLedgerOptions {
 export class GitFileLedger implements Ledger {
   readonly apiVersion = LEDGER_API_VERSION;
   readonly name = "git-file";
-  constructor(readonly file: string) {}
+  readonly file: string;
+  readonly windowDir: string | undefined;
+  constructor(file: string, windowDir?: string) {
+    this.file = file;
+    this.windowDir = windowDir;
+  }
 
   static parse(text: string, where: string): VerdictEvent[] {
     const out: VerdictEvent[] = [];
@@ -57,6 +184,11 @@ export class GitFileLedger implements Ledger {
     return out;
   }
 
+  /** The ledger's repository and lexical path (P4), or null outside a git repository. */
+  location(): GitFileLocation | null {
+    return gitFileLocation(this.file, this.windowDir);
+  }
+
   async readVerdicts(): Promise<VerdictEvent[]> {
     if (!existsSync(this.file)) return [];
     // A line's own claim about its provenance never counts: only its signature does, checked by the core.
@@ -66,26 +198,12 @@ export class GitFileLedger implements Ledger {
   async appendVerdict(event: VerdictEvent): Promise<void> {
     const p = verdictEventProblems(event);
     if (p.length) throw new Error(`invalid verdict: ${p.join("; ")}`);
+    // Never write through a symbolic link or into a file of another spelling (P4): verify reads only the configured path.
+    const where = this.location();
+    if (where?.problems.length) throw new Error(`the verdict was not recorded: ${where.problems.join("; ")}`);
     await mkdir(dirname(this.file), { recursive: true });
     const line = { schema: "pr-rla/verdict/v1", ...event };
     await appendFile(this.file, `${canonicalJson(line)}\n`);
-  }
-
-  /** The git toplevel and the file's path relative to it, or null outside a repository. */
-  private repo(): { top: string; rel: string } | null {
-    // The nearest directory that exists (the window directory, unless the ledger's was removed), never the process's cwd.
-    let dir = dirname(this.file);
-    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
-    let top: string;
-    try {
-      // Discovery finds the audit repository's toplevel; every later call runs there, with git's ceiling at it.
-      top = gitSafeText(["rev-parse", "--show-toplevel"], { cwd: dir, root: parse(dir).root }).trim();
-    } catch {
-      return null;
-    }
-    // Resolve symlinks (e.g. macOS /var -> /private/var) so the path is relative to git's real toplevel.
-    const realFile = join(realpathSync(dir), relative(dir, this.file));
-    return { top, rel: relative(realpathSync(top), realFile).split("\\").join("/") };
   }
 
   /**
@@ -94,36 +212,47 @@ export class GitFileLedger implements Ledger {
    * parents, so a line removed or changed anywhere, on any branch merged in, is found. The history is
    * read from hash-checked raw objects (src/ledgers/git-history.ts); a shallow or grafted repository
    * is refused.
+   *
+   * The path walked is the lexical one (P4): `location` in the report, which check 7 compares with
+   * the registered `ledgerPath`. A symbolic link or another spelling on the way FAILs.
    */
   async verifyIntegrity(): Promise<LedgerIntegrityReport> {
-    const repo = this.repo();
-    if (!repo) return { ok: true, tamperTrail: false, findings: ["verdicts are not in a git repository: there is no tamper trail"] };
-    const { top, rel } = repo;
+    const where = this.location();
+    if (!where) return { ok: true, tamperTrail: false, findings: ["verdicts are not in a git repository: there is no tamper trail"] };
+    const { top, rel } = where;
+    // The path on disk is not the one walked: FAIL, and still walk the history the configured path has in git.
+    const pathFindings = where.problems.map((p) => `ledger path: ${p}`);
+    if (where.outside) return { ok: false, tamperTrail: false, location: rel, findings: pathFindings };
     const refusal = historyRefusal(top);
-    if (refusal) return { ok: false, tamperTrail: false, findings: [`${rel}: ${refusal}`] };
+    if (refusal) return { ok: false, tamperTrail: false, location: rel, findings: [...pathFindings, `${rel}: ${refusal}`] };
     const h = await readFileHistory(top, rel);
-    if (h.problems.length) return { ok: false, tamperTrail: false, findings: [...h.problems.map((p) => `${rel}: ${p}`), `${rel}: ${FULL_CLONE}`] };
-    const findings: string[] = [];
-    let ok = true;
-    for (const c of h.commits) {
-      const mine = h.versions.get(c) ?? null;
+    if (h.problems.length) return { ok: false, tamperTrail: false, location: rel, findings: [...pathFindings, ...h.problems.map((p) => `${rel}: ${p}`), `${rel}: ${FULL_CLONE}`] };
+    const findings: string[] = [...pathFindings];
+    let ok = !pathFindings.length;
+    h.commits.forEach((c, i) => {
+      const mine = h.versions[i]!;
       if (mine === "not-a-file") {
         ok = false;
         findings.push(`${rel} is not a regular file in commit ${c.slice(0, 10)}`);
-        continue;
+        return;
       }
-      for (const p of h.parents.get(c) ?? []) {
-        const theirs = h.versions.get(p) ?? null;
+      for (const p of h.parents[i]!) {
+        const theirs = h.versions[p];
         if (!(theirs instanceof Buffer)) continue;
         if (mine === null || !extendsBytes(mine, theirs)) {
           ok = false;
-          findings.push(mine === null ? `${rel} was deleted in commit ${c.slice(0, 10)}` : `${rel} was rewritten (not appended) in commit ${c.slice(0, 10)}`);
+          const through = h.blocked.get(i);
+          findings.push(
+            mine === null
+              ? `${rel} was deleted in commit ${c.slice(0, 10)}${through ? ` (${through.path} is ${describeMode(through.mode)} there, not a directory)` : ""}`
+              : `${rel} was rewritten (not appended) in commit ${c.slice(0, 10)}`,
+          );
           break;
         }
       }
-    }
-    const committed = [...h.versions.values()].some((v) => v instanceof Buffer);
-    const atHead = h.head ? (h.versions.get(h.head) ?? null) : null;
+    });
+    const committed = h.versions.some((v) => v instanceof Buffer);
+    const atHead = h.head ? (h.versions[h.commits.length - 1] ?? null) : null;
     const prev = atHead instanceof Buffer ? atHead : Buffer.alloc(0);
     const current = existsSync(this.file) ? await readFile(this.file) : Buffer.alloc(0);
     if (!extendsBytes(current, prev)) {
@@ -133,8 +262,15 @@ export class GitFileLedger implements Ledger {
       const pending = current.subarray(prev.length).toString("utf8").split("\n").filter((l) => l.trim()).length;
       if (pending > 0) findings.push(`${pending} verdict line(s) not yet committed (no tamper trail for them until committed)`);
     }
-    if (!committed && current.toString("utf8").trim()) findings.push(`${rel} has never been committed`);
-    return { ok, tamperTrail: committed, findings };
+    if (!committed && current.toString("utf8").trim()) {
+      // Never committed under exactly this path, while the registration beside it is: the verdicts went somewhere else (P4).
+      const registration = h.head && where.windowRel !== null ? `${where.windowRel}/registration.json` : null;
+      if (registration && (await fileAtHead(top, registration)) instanceof Buffer) {
+        ok = false;
+        findings.push(`${rel} has never been committed, but the registration beside it is (${registration} in HEAD): verdicts recorded since have no tamper trail at the configured path; commit the ledger file there (git add ${rel})`);
+      } else findings.push(`${rel} has never been committed`);
+    }
+    return { ok, tamperTrail: committed, location: rel, findings };
   }
 }
 
@@ -145,6 +281,6 @@ export default defineLedger<GitFileLedgerOptions>({
   create: (options: GitFileLedgerOptions, ctx: LedgerContext) => {
     if (options?.require_signed !== undefined && typeof options.require_signed !== "boolean") throw new Error("option require_signed must be true or false");
     if (options?.file !== undefined && typeof options.file !== "string") throw new Error("option file must be a file name");
-    return new GitFileLedger(join(ctx.windowDir, options?.file ?? "verdicts.jsonl"));
+    return new GitFileLedger(gitFileLedgerFile(ctx.windowDir, options), ctx.windowDir);
   },
 });

@@ -121,6 +121,11 @@ export interface LedgerIntegrityReport {
   tamperTrail: boolean;
   /** Optional (phase 3): findings that make check 7 WARN (a relabel, a removal later replaced). */
   warnings?: string[];
+  /**
+   * Optional (P4): the ledger file's path from its git repository's toplevel, as the check walked
+   * it. Only the built-in git-file's counts: check 7 compares it with the registration's `ledgerPath`.
+   */
+  location?: string;
 }
 
 export interface LedgerContext {

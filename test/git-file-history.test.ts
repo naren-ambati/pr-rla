@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { gitSafeArgs, gitSafeEnv, gitSafeText } from "../src/io/git-safe.js";
+import { ExecutableNotFound, resolveExecutable } from "../src/io/executables.js";
 import { readFileHistory } from "../src/ledgers/git-history.js";
+import { GitFileLedger, gitFileLocation, gitFileRegisteredPath } from "../src/ledgers/git-file.js";
+import { ledgerPathFindings } from "../src/core/ledger-path.js";
 import { createLedger } from "../src/registry.js";
 import type { Ledger } from "../src/sdk/ledger.js";
 import { commitAll } from "./helpers/signed-commits.js";
@@ -27,6 +30,12 @@ const ledgerIn = (d: string, opts: Record<string, unknown> = {}): Promise<Ledger
 const append = (d: string, ...lines: string[]) => appendFileSync(join(d, REL), lines.join(""));
 const write = (d: string, ...lines: string[]) => writeFileSync(join(d, REL), lines.join(""));
 const integrity = async (d: string) => (await ledgerIn(d)).verifyIntegrity!();
+/** True where this machine's temp directory folds case (macOS's default APFS). */
+function caseInsensitive(): boolean {
+  const d = mkdtempSync(join(tmpdir(), "prrla-case-"));
+  writeFileSync(join(d, "a"), "");
+  return existsSync(join(d, "A"));
+}
 function newRepo(objectFormat?: string): string {
   const d = mkdtempSync(join(tmpdir(), "prrla-walk-"));
   mkdirSync(join(d, "audit/w"), { recursive: true });
@@ -69,7 +78,7 @@ describe("the append-only walk over the whole history", () => {
     append(dir, line(2), line(3));
     commitAll(dir, "draws 2 and 3", null);
     append(dir, line(4));
-    expect(await integrity(dir)).toEqual({ ok: true, tamperTrail: true, findings: ["1 verdict line(s) not yet committed (no tamper trail for them until committed)"] });
+    expect(await integrity(dir)).toEqual({ ok: true, tamperTrail: true, location: REL, findings: ["1 verdict line(s) not yet committed (no tamper trail for them until committed)"] });
   });
 
   it("a rewrite, a deletion, and a working tree that rewrites history all FAIL, naming the commit", async () => {
@@ -96,7 +105,7 @@ describe("the append-only walk over the whole history", () => {
     commitAll(dir, "draw 2 on a branch", null);
     git(dir, "checkout", "-q", "main");
     git(dir, "merge", "-q", "--no-ff", "-m", "merge", "side");
-    expect(await integrity(dir)).toEqual({ ok: true, tamperTrail: true, findings: [] });
+    expect(await integrity(dir)).toEqual({ ok: true, tamperTrail: true, location: REL, findings: [] });
   });
 
   it("finding 2: a removal on a branch merged in FAILs, even when the merge hides it from `git log -- path`", async () => {
@@ -156,7 +165,7 @@ describe("the append-only walk over the whole history", () => {
     expect(c1).toMatch(/^[0-9a-f]{64}$/);
     append(d, line(2));
     commitAll(d, "two", null);
-    expect(await integrity(d)).toEqual({ ok: true, tamperTrail: true, findings: [] });
+    expect(await integrity(d)).toEqual({ ok: true, tamperTrail: true, location: REL, findings: [] });
     write(d, line(2));
     const c3 = commitAll(d, "drop one", null);
     expect((await integrity(d)).findings).toEqual([`${REL} was rewritten (not appended) in commit ${c3.slice(0, 10)}`]);
@@ -280,6 +289,10 @@ describe("finding 5: what the verifier's git could be told does not change what 
     writeFileSync(f, b);
     expect(git(dir, "log", "--format=%s").split("\n")).toEqual(["draw 2 pass", "draw 1", "audit repo"]); // git believes it
     expect((await integrity(dir)).findings).toContain(`${REL} was rewritten (not appended) in commit ${removed.slice(0, 10)}`);
+    // P4 (second-pass review): the git calls the walk makes run under the guard, so the commit-graph is not read even
+    // for the rev-list hint; without `-c core.commitGraph=false` in git-safe.ts these two fail.
+    expect(gitSafeText(["rev-list", "HEAD"], { cwd: dir }).split("\n")).toContain(removed);
+    expect(gitSafeText(["log", "--format=%P", "-1", tip], { cwd: dir }).trim()).toBe(removed);
   });
 
   it("a replace ref that swaps the removing commit for an innocent one is ignored", async () => {
@@ -354,5 +367,146 @@ describe("src/io/git-safe.ts: the one way the read paths run git", () => {
     mkdirSync(inner, { recursive: true });
     expect(() => gitSafeText(["rev-parse", "--show-toplevel"], { cwd: inner, root: join(dir, "audit-root") })).toThrow();
     expect(gitSafeText(["rev-parse", "--show-toplevel"], { cwd: inner, root: dir }).trim()).toMatch(/prrla-walk-/);
+  });
+});
+
+describe("P4 (second-pass review finding 1, 3): the ledger is walked at its lexical path, through real directories spelled as configured", () => {
+  it("the walked path is reported as location, computed from the toplevel without following links", async () => {
+    append(dir, line(1));
+    commitAll(dir, "draw 1", null);
+    expect((await integrity(dir)).location).toBe(REL);
+    expect(gitFileLocation(join(dir, REL), join(dir, "audit/w"))).toMatchObject({ rel: REL, windowRel: "audit/w", outside: false, problems: [] });
+  });
+
+  it("E1: a window directory moved and replaced by a symbolic link to it FAILs, and the walk still reads the lexical path's history", async () => {
+    append(dir, line(1), line(2, "fail"));
+    commitAll(dir, "draws 1 and 2", null);
+    git(dir, "mv", "audit/w", "audit/real");
+    symlinkSync("real", join(dir, "audit/w"));
+    writeFileSync(join(dir, "audit/real/verdicts.jsonl"), line(1));
+    const moved = commitAll(dir, "tidy", null);
+    expect(git(dir, "ls-tree", "HEAD", "audit/w")).toMatch(/^120000 /);
+    const r = await integrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.findings).toContain("ledger path: audit/w is a symbolic link: the ledger must be reached through real directories, at exactly its configured path");
+    expect(r.findings).toContain(`${REL} was deleted in commit ${moved.slice(0, 10)} (audit/w is a symbolic link there, not a directory)`);
+    // record refuses to write through it.
+    await expect(new GitFileLedger(join(dir, REL), join(dir, "audit/w")).appendVerdict(JSON.parse(line(3)))).rejects.toThrow(/the verdict was not recorded: audit\/w is a symbolic link/);
+  });
+
+  it("a symbolic link as the ledger file itself, or as a directory above the window, FAILs", async () => {
+    mkdirSync(join(dir, "store"), { recursive: true });
+    writeFileSync(join(dir, "store/v.jsonl"), line(1));
+    symlinkSync("../../store/v.jsonl", join(dir, REL));
+    commitAll(dir, "link", null);
+    expect((await integrity(dir)).findings).toContain(`ledger path: ${REL} is a symbolic link: the ledger must be reached through real directories, at exactly its configured path`);
+    const d = newRepo();
+    renameSync(join(d, "audit"), join(d, "elsewhere"));
+    symlinkSync("elsewhere", join(d, "audit"));
+    append(d, line(1));
+    commitAll(d, "via a link", null);
+    expect((await integrity(d)).findings).toContain("ledger path: audit is a symbolic link: the ledger must be reached through real directories, at exactly its configured path");
+  });
+
+  it("a window directory linked into another repository is outside this one: FAIL, nothing walked", async () => {
+    const other = newRepo();
+    append(other, line(1));
+    commitAll(other, "other", null);
+    const d = newRepo();
+    rmSync(join(d, "audit/w"), { recursive: true, force: true });
+    symlinkSync(join(other, "audit/w"), join(d, "audit/w"));
+    const r = await integrity(d);
+    expect(r.ok).toBe(false);
+    expect(r.findings).toEqual([expect.stringMatching(/^ledger path: the ledger file .* is not inside the repository git found for it \(.*\): a symbolic link on its path leads elsewhere$/)]);
+  });
+
+  it.runIf(caseInsensitive())("E2: on a case-insensitive filesystem, a ledger that exists only as Verdicts.jsonl FAILs, and record will not write into it", async () => {
+    writeFileSync(join(dir, "audit/w/Verdicts.jsonl"), line(1));
+    commitAll(dir, "another spelling", null);
+    const r = await integrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.findings[0]).toBe("ledger path: audit/w/verdicts.jsonl exists on disk only as Verdicts.jsonl (the filesystem folds case or Unicode form): the ledger must be at exactly its configured path");
+    await expect((await ledgerIn(dir)).appendVerdict(JSON.parse(line(2)))).rejects.toThrow(/exists on disk only as Verdicts\.jsonl/);
+    expect(() => gitFileRegisteredPath(join(dir, "audit/w"), {})).toThrow(/the git-file ledger's path cannot be registered: audit\/w\/verdicts\.jsonl exists on disk only as Verdicts\.jsonl/);
+  });
+
+  it("a ledger with verdicts never committed at its path FAILs when HEAD has the registration beside it; without it, it is only noted", async () => {
+    append(dir, line(1));
+    expect((await integrity(dir)).findings).toEqual(["1 verdict line(s) not yet committed (no tamper trail for them until committed)", `${REL} has never been committed`]);
+    writeFileSync(join(dir, "audit/w/registration.json"), "{}\n");
+    git(dir, "add", "audit/w/registration.json");
+    git(dir, "commit", "-qm", "registration");
+    const r = await integrity(dir);
+    expect(r.ok).toBe(false);
+    expect(r.findings).toContain(`${REL} has never been committed, but the registration beside it is (audit/w/registration.json in HEAD): verdicts recorded since have no tamper trail at the configured path; commit the ledger file there (git add ${REL})`);
+  });
+
+  it("check 7's path rule: the registered path or FAIL, a registration without it WARNs, other ledgers and phase-1 registrations are not judged", () => {
+    const reg = (ledgerPath?: string, name = "git-file") => ({ sha256: "a".repeat(64), record: { schema: "pr-rla/registration/v2", plugins: { ledger: { name, source: "builtin" } }, ...(ledgerPath ? { ledgerPath } : {}) } }) as never;
+    expect(ledgerPathFindings(reg(REL), REL)).toEqual({ fails: [], warns: [], notes: [] });
+    expect(ledgerPathFindings(reg(REL), "audit2/w/verdicts.jsonl").fails).toEqual([`the ledger read is audit2/w/verdicts.jsonl, but the registration places it at ${REL}: verify with the registered audit_dir, window and file, in the repository the audit was registered in`]);
+    expect(ledgerPathFindings(reg(REL), undefined).fails).toEqual([`the registration places the git-file ledger at ${REL} in a git repository, but the ledger read is in none: verify in a clone of the audit repository`]);
+    expect(ledgerPathFindings(reg(), REL).warns).toEqual([expect.stringMatching(/^the registration does not record the git-file ledger's path/)]);
+    expect(ledgerPathFindings(reg(REL, "github-issues"), "x")).toEqual({ fails: [], warns: [], notes: [] });
+    expect(ledgerPathFindings({ sha256: "a".repeat(64), record: { schema: "pr-rla/registration/v1" } } as never, "x")).toEqual({ fails: [], warns: [], notes: [] });
+  });
+
+  it("register records the lexical path, refuses one through a link, and has none outside a repository", () => {
+    expect(gitFileRegisteredPath(join(dir, "audit/w"), {})).toEqual({ path: REL });
+    expect(gitFileRegisteredPath(join(dir, "audit/w"), { file: "../x/../w/v.jsonl" })).toEqual({ path: "audit/w/v.jsonl" });
+    const bare = mkdtempSync(join(tmpdir(), "prrla-nogit-"));
+    expect(gitFileRegisteredPath(join(bare, "audit/w"), {})).toMatchObject({ path: null, why: expect.stringMatching(/not in a git repository/) });
+    renameSync(join(dir, "audit/w"), join(dir, "audit/real"));
+    symlinkSync("real", join(dir, "audit/w"));
+    expect(() => gitFileRegisteredPath(join(dir, "audit/w"), {})).toThrow(/audit\/w is a symbolic link/);
+  });
+});
+
+describe("P4 (second-pass review finding 4): the walk streams", () => {
+  /** `commits` commits, each changing one of `files` files in one root tree, through git fast-import. */
+  function bigTreeRepo(commits: number, files: number): string {
+    const d = mkdtempSync(join(tmpdir(), "prrla-bigtree-"));
+    git(d, "init", "-q", "-b", "main");
+    const parts = ["blob\nmark :1\ndata 2\nx\n"];
+    for (let c = 1; c <= commits; c++) {
+      parts.push(`commit refs/heads/main\nmark :${c + 1}\ncommitter t <t@example.invalid> ${1792551600 + c} +0000\ndata 2\nc\n`);
+      if (c > 1) parts.push(`from :${c}\n`);
+      if (c === 1) for (let f = 0; f < files; f++) parts.push(`M 100644 :1 f${String(f).padStart(5, "0")}\n`);
+      parts.push(`M 100644 inline f${String(c % files).padStart(5, "0")}\ndata ${String(c).length + 1}\n${c}\n\n`);
+    }
+    execFileSync("git", ["fast-import", "--quiet"], { cwd: d, input: parts.join("") });
+    git(d, "checkout", "-q", "main");
+    return d;
+  }
+
+  it("4,000 commits with a 61 KB root tree each (245 MB of trees) are walked holding well under 120 MB: no commit or tree is kept whole", async () => {
+    const d = bigTreeRepo(4000, 1800);
+    expect(Number(git(d, "cat-file", "-s", "HEAD^{tree}"))).toBeGreaterThan(60_000);
+    const base = process.memoryUsage();
+    let peak = 0;
+    const timer = setInterval(() => {
+      const m = process.memoryUsage();
+      peak = Math.max(peak, m.heapUsed + m.arrayBuffers - base.heapUsed - base.arrayBuffers);
+    }, 2);
+    const h = await readFileHistory(d, REL);
+    clearInterval(timer);
+    expect(h.commits).toHaveLength(4000);
+    expect(h.problems).toEqual([]);
+    // The walk before P4 held every root tree at once: 277 MB on this repository (BUILD-NOTES, P4).
+    expect(peak / 1e6).toBeLessThan(120);
+  }, 120_000);
+});
+
+describe("P4 (second-pass review finding 6): programs are found on PATH's absolute entries only", () => {
+  it("relative and empty PATH entries are skipped; Windows looks for .exe and .com; a missing program is named", () => {
+    const bin = mkdtempSync(join(tmpdir(), "prrla-bin-"));
+    writeFileSync(join(bin, "tool"), "#!/bin/sh\n");
+    chmodSync(join(bin, "tool"), 0o755);
+    writeFileSync(join(bin, "notexec"), "x");
+    expect(resolveExecutable("tool", `.::bin:${bin}`, "linux")).toBe(join(bin, "tool"));
+    expect(() => resolveExecutable("tool", ".:bin", "linux")).toThrow(ExecutableNotFound);
+    expect(() => resolveExecutable("notexec", bin, "linux")).toThrow(/notexec was not found on PATH \(only absolute PATH entries are searched/);
+    writeFileSync(join(bin, "git.exe"), "MZ");
+    expect(resolveExecutable("git", `.;${bin}`, "win32")).toBe(join(bin, "git.exe"));
   });
 });

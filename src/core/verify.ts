@@ -1,6 +1,7 @@
 import { recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
+import { ledgerPathFindings } from "./ledger-path.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -538,6 +539,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         c7.details.push(...integ.findings, ...(integ.warnings ?? []));
         if (!integ.ok) c7.status = "FAIL";
         else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
+        // P4: the git-file ledger walked must be at the path the registration records.
+        if (ledger.name === "git-file") addAnchor(c7, ledgerPathFindings(reg, integ.location));
       }
     } else {
       c7.details.push(`ledger ${ledger.name} has no integrity check`);

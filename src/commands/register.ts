@@ -10,6 +10,7 @@ import { preflightExternalLedger } from "../plugins/open.js";
 import { builtinLedgerName, loadLedgerDefinition, pluginIdentity } from "../registry.js";
 import type { ProvenanceLevel } from "../sdk/ledger.js";
 import { maxProvenanceOf, SIGNATURE_LEDGERS } from "../ledger-traits.js";
+import { gitFileRegisteredPath } from "../ledgers/git-file.js";
 import { PRESENCE_LIMIT, presenceReachable, registeredVerdicts, verdictRuleWarnings, verdictsSummary, type RegisteredVerdicts } from "../core/presence/index.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { isoMs } from "../timestamp/verify.js";
@@ -80,6 +81,14 @@ export async function preflightLedger(ctx: CommandContext, config: PrRlaConfig, 
   }
 }
 
+function registeredLedgerPath(windowDir: string, options: Record<string, unknown>): ReturnType<typeof gitFileRegisteredPath> {
+  try {
+    return gitFileRegisteredPath(windowDir, options);
+  } catch (e) {
+    throw new CommandError((e as Error).message);
+  }
+}
+
 /**
  * A pooled registration (a repo list or a rule) is checked before it is signed (FR5.1, FR5.6): one provider per
  * pool, a provider that can list repos for a rule, and a rule that matches something now (a dry resolve, reads
@@ -104,6 +113,8 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   const timestamping = timestampingFor(config, bundle);
   const api = rekorApi(opts.rekorApi);
   const verdicts = await preflightLedger(ctx, config, paths);
+  // P4: the built-in git-file ledger's path from the repository's toplevel is signed in; verify reads it only there.
+  const ledgerPath = builtinLedgerName(config.ledger.use) === "git-file" ? registeredLedgerPath(paths.windowDir, config.ledger.options) : null;
   const pool = await preflightRepoSet(ctx, config);
   const record: RegistrationRecordV2 = {
     schema: "pr-rla/registration/v2",
@@ -117,6 +128,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     registeredAt: isoNow(ctx),
     timestamping,
     plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins), ledger: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins) },
+    ...(ledgerPath?.path ? { ledgerPath: ledgerPath.path } : {}),
     // FR3.8: `account` by default with an issue ledger, `self-asserted` with git-file.
     verdicts,
     prRlaVersion: PR_RLA_VERSION,
@@ -140,6 +152,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   }
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · ${verdictsSummary(record.verdicts)}`);
+  if (ledgerPath) ctx.out("why" in ledgerPath ? `  warning: ${ledgerPath.why}` : `  ledger path ${ledgerPath.path} (signed in: verify reads the ledger only there)`);
   if (presenceReachable(record.verdicts.allowed_signers)) ctx.out(`  ${PRESENCE_LIMIT}`);
   for (const id of [record.plugins.provider, record.plugins.ledger]) {
     if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);

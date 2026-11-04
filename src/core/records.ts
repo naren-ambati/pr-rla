@@ -160,6 +160,13 @@ export interface RegistrationRecordV2 {
   timestamping: TimestampingParams;
   plugins: { provider: PluginIdentity; ledger: PluginIdentity };
   /**
+   * The built-in git-file ledger only (P4): the ledger file's path from the audit repository's
+   * toplevel, lexical and normalised (`<audit_dir>/<window>/<file>`). Check 7 FAILs when the ledger
+   * verify walks is anywhere else. Absent for other ledgers, and in registrations written before P4
+   * (check 7 then WARNs that the location is not bound).
+   */
+  ledgerPath?: string;
+  /**
    * `allowed_signers` (U9): the reviewers' SSH keys, OpenSSH allowed-signers lines; present only
    * when keys are registered, so other registrations keep their shape. `require_signed` only when true.
    */
