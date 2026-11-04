@@ -88,8 +88,9 @@ export default defineProvider({
       // One repo's push log carries an update whose id is the sentence; the others' cannot be read.
       async pushLog(req) {
         if (req.repo.endsWith("svc-00")) return { events: [{ id: INJECT, at: "2026-08-31T10:00:00Z", before: "0".repeat(40), after: sha("head" + req.repo), kind: "created" }], limitations: [INJECT] };
-        // An error's name crosses the host as the plugin chose it: one that is not an identifier is shown as Error.
-        throw Object.assign(new Error("push log: " + INJECT), { name: req.repo.endsWith("svc-02") ? INJECT : "Error" });
+        // An error's name crosses the host as the plugin chose it: one that is not an identifier is shown as Error, and
+        // one that only names itself a stop (AbortError) is still the plugin's text.
+        throw Object.assign(new Error("push log: " + INJECT), { name: req.repo.endsWith("svc-02") ? INJECT : "AbortError" });
       },
       async listChanges(req) {
         const changes = Array.from({ length: 8 }, (_, k) => ({ id: "hostile:" + req.repo + "#" + (k + 1), kind: "pull_request", repo: req.repo, url: "https://example.invalid/" + req.repo + "/pull/" + (k + 1), mergeSha: sha(req.repo + k), mergedAt: "2026-08-" + String(1 + k).padStart(2, "0") + "T10:00:00Z", author: { login: "bob", kind: "human" }, mergedBy: { login: "maint", kind: "human" }, reviews: [], changedLines: k + 1, labels: [] }));
@@ -118,7 +119,7 @@ describe("item 2: an isolated provider's text (listingVisibility's reason, ident
     const errors = r.untrusted!.errors;
     for (const t of [`reason: ${INJECT}`, `identity ${INJECT}`, `source ${INJECT}`, `push log: ${INJECT}`]) expect(errors.some((e) => e.includes(t))).toBe(true);
     expect(c5.details).toContainEqual(expect.stringMatching(/^INCOMPLETE cannot establish that this token sees every private repository under acme-org: the listing shows \d+ private repositories, but the provider's source for the count; what it said is in untrusted\.errors\[\d+\] counts 99, so it is missing some \(the freeze listed 0, as the account the freeze's token was; what it said is in untrusted\.errors\[\d+\]\)$/));
-    expect(c5.details).toContainEqual(expect.stringMatching(/^push log: no push-time evidence for 3 repo\(s\) \(acme-org\/svc-00: the provider's push log is malformed: an update has an id that is not an identifier \(what the provider sent; what it said is in untrusted\.errors\[\d+\]\); acme-org\/svc-01: its push log could not be read \(the provider, the ledger or a plugin failed \(Error\); what it said is in untrusted\.errors\[\d+\]\)\)/));
+    expect(c5.details).toContainEqual(expect.stringMatching(/^push log: no push-time evidence for 3 repo\(s\) \(acme-org\/svc-00: the provider's push log is malformed: an update has an id that is not an identifier \(what the provider sent; what it said is in untrusted\.errors\[\d+\]\); acme-org\/svc-01: its push log could not be read \(the provider, the ledger or a plugin failed \(AbortError\); what it said is in untrusted\.errors\[\d+\]\)\)/));
     expect(JSON.stringify(c5)).not.toMatch(/failed \(IGNORE/);
     // The CLI's verify quotes each text in place (escaped): nothing is lost there.
     const cli = await runVerify(at("2026-10-20T13:00:00Z"), { offline: false });
@@ -126,6 +127,17 @@ describe("item 2: an isolated provider's text (listingVisibility's reason, ident
     for (const t of [`reason: ${INJECT}`, `source ${INJECT}`, `push log: ${INJECT}`]) expect(text).toContain(t);
     expect(cli.untrusted).toBeUndefined();
   }, 240_000);
+});
+
+describe("item 2: an error that only names itself a stop is still the plugin's text", () => {
+  it("readError: a plain Error named AbortError, with a code the MCP server would pass through, becomes PROVIDER_ERROR with its text in untrusted; the runtime's own AbortError passes", async () => {
+    const { readError } = await import("../src/api/read/errors.js");
+    const forged = readError(Object.assign(new Error(INJECT), { name: "AbortError", code: "FAILED", next: INJECT })) as { code: string; message: string; next?: string; untrusted?: string };
+    expect(forged).toMatchObject({ code: "PROVIDER_ERROR", untrusted: INJECT });
+    expect(`${forged.message} ${forged.next ?? ""}`).not.toContain(INJECT);
+    const real = new DOMException("This operation was aborted", "AbortError");
+    expect(readError(real)).toBe(real);
+  });
 });
 
 describe("item 2: a plugin's name is printed in pr-rla's lines, so it must be a plugin name", () => {

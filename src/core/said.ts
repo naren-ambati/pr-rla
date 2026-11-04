@@ -26,24 +26,21 @@ export class PrRlaError extends Error {
   }
 }
 
-/** At most this many bytes of one foreign text are kept in `untrusted` (and quoted by the CLI). */
+/** At most this many bytes of one foreign text are kept in `untrusted`. */
 export const MAX_UNTRUSTED_BYTES = 2048;
 
 /** Foreign text as `untrusted` keeps it: control characters escaped, cut to MAX_UNTRUSTED_BYTES with an ellipsis. */
 export function untrustedText(s: string): string {
   const b = Buffer.from(escapeControls(s), "utf8");
-  return b.length <= MAX_UNTRUSTED_BYTES ? b.toString("utf8") : `${b.subarray(0, MAX_UNTRUSTED_BYTES).toString("utf8").replace(/�$/, "")}…`;
+  return b.length <= MAX_UNTRUSTED_BYTES ? b.toString("utf8") : `${b.subarray(0, MAX_UNTRUSTED_BYTES).toString("utf8").replace(/\uFFFD$/, "")}…`;
 }
 
 /** One piece of text from outside pr-rla, with pr-rla's words for it. */
 export class Foreign {
-  readonly foreign: string;
   constructor(
     readonly words: string,
-    foreign: string,
-  ) {
-    this.foreign = foreign;
-  }
+    readonly foreign: string,
+  ) {}
   /** pr-rla's words: an unrendered piece never speaks the foreign text. */
   toString(): string {
     return this.words;
@@ -121,7 +118,8 @@ export const BROKER_REFUSALS: ReadonlySet<string> = new Set(["HOST_NOT_ALLOWED",
  * Whose words an error's message is (the one classification; pr-rla/api/read's readError builds on it). Classes
  * decide, never a `code` or a `name`: an isolated plugin's error crosses the IPC as a plain Error with any of both.
  * - pr-rla's: its own errors (PrRlaError, AuditError among them), the broker's refusals and timeouts, the plugin
- *   host's refusals, and a stopped call (an AbortError or TimeoutError: the caller knows why);
+ *   host's refusals, and a stopped call (the runtime's own AbortError or TimeoutError, a DOMException: the caller
+ *   knows why; an error that only names itself so, as one from across the plugin host can, is foreign);
  * - foreign, with pr-rla's words for it: anything else, as an SCM's HTTP error with its body, a provider's or a
  *   ledger's exception, a plugin's message, the broker giving up with the service's last answer.
  */
@@ -129,7 +127,7 @@ export function errorWords(e: unknown): { own: string } | { words: string; forei
   const err = e as { name?: unknown; message?: unknown } | null;
   const message = typeof err?.message === "string" ? err.message : String(e);
   if (e instanceof PrRlaError) return e.said();
-  if (err?.name === "AbortError" || err?.name === "TimeoutError") return { own: message };
+  if ((err?.name === "AbortError" || err?.name === "TimeoutError") && e instanceof DOMException) return { own: message };
   return { words: `the provider, the ledger or a plugin failed (${errorLabel(e)})`, foreign: message };
 }
 

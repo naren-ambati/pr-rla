@@ -19,8 +19,9 @@ const cut = untrustedText;
 export function readError(e: unknown): unknown {
   if (e instanceof AuditError) return e;
   const err = e as { name?: unknown; message?: unknown; status?: unknown };
-  // A stopped call (its signal aborted): the caller knows why, and says so.
-  if (err?.name === "AbortError" || err?.name === "TimeoutError") return e;
+  // A stopped call (its signal aborted): the caller knows why, and says so. Only the runtime's own (a DOMException):
+  // an error from across the plugin host can name itself AbortError, with any message and code (S1).
+  if ((err?.name === "AbortError" || err?.name === "TimeoutError") && e instanceof DOMException) return e;
   if (e instanceof BrokerError) {
     if (e.code === "READ_ONLY_VIOLATION") return new AuditError(e.message, 1, "READ_ONLY_VIOLATION", e.next);
     if (e.code === "BROKER_TIMEOUT") return new AuditError(e.message, 1, "TIMEOUT", e.next);
