@@ -1,0 +1,287 @@
+{
+ "source": "synthetic",
+ "made": "2026-11-04T02:08:02Z",
+ "note": "Verdict commits signed with `git commit -S` (gpg.format=ssh) by ssh-keygen with software keys; the -sk keys live in OpenSSH's sk-dummy test middleware (a software-emulated authenticator), never a hardware key (D7). Public keys only. Made by scripts/make-presence-fixtures.mjs.",
+ "tools": {
+  "git": "git version 2.55.0",
+  "sshKeygen": "OpenSSH_10.3p1, LibreSSL 3.3.6",
+  "skDummy": "OpenSSH 10.3p1 regress/misc/sk-dummy, built from https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.3p1.tar.gz (sha256 56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4) against Homebrew openssl@3"
+ },
+ "allowedSigners": [
+  "alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIDttBit8jmgF77mlztY9WZqEoFzlB/Y+qHjWtSAV+xx",
+  "bob sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIPzfBiNgWubCUyqZfznN5H7TLnen89u1kAWR9IfteHcPAAAABHNzaDo=",
+  "carol sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBOWJxMdYvte0U6YeNdxCx5kq373307S6o3gPcflwe/EthK1Oe6cgBnDPDtHKdo7hXTDan+QuHrIymm/sM8DwVBMAAAAEc3NoOg==",
+  "dave sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAICzpAFGQzGFlCXKgBpQPnAuSGeaWq+jSrS0aqVa2h2hvAAAABHNzaDo=",
+  "erin sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBNvM1ulkFmOgl7tJmxeOZS5Y0rf9RX5q8ZOibpV/apW+tmrM4uqkEKBAr+FeIO1EdgEDjqebEjgRDeDRgqR06vwAAAAEc3NoOg==",
+  "frank ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBJIJOvzhgaU05bvMpP4kbgcYCKaJ1dOyuMhtO+1QNbKPPCtI2az/GgcSus/IRg7FpbDl8MpSngb1yoJ4KcPMYdg=",
+  "grace ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDJD+iTpPTXz93csRSG1gCcmuXt5XWOxbEbKCcLgQSVt7UhGE4JLlGlVt1NUsQDT/bio2puLBgwuoq1SywDER7cryXSjNMQSP6YKKxebwfVb1ZzioY6UjudwJxqCV7mcRaYAsTn5YAWRCwUIZaS7JiheJMlX8byvEWnclBzqOGa92fuE+Xbi+/Jh4nptFIHq1VoQMRUeaF9A0U41PuIL+mKUMp46jxOehwlPVOTSYxEgiZ5yxeEovnGWdGuN788n/wRw2j7xesNhl7CmWyD0w6shaWWZXkRfa/oBRL+AktTIdfW/5yp1SEPMmIi6MCJnMWBnxvvHKI1E/WLr+F2fdKu5vEOjBmk+MMiK8tFGNbpLImndo0bxbvveZ+GdZDVz1+DHRAOIYL+l531SHx46Ozlngd/W0zXkY9M9loxApp0FAR4ffyK1NaNHxrvcPhCs5Hn8z1th1lDYhDpHlSR7HbhOYutBQzZ49NDDQqTjhQ1ObuS8FAVyJtkje55yNDZ550=",
+  "heidi ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBMXVmoCawn411pH0b10fC1+yjuM0l5Xg7FxrwuD+JVykEoS9K8l3F6FHR95yEt2k/8IMNppYXQyD4om1QKmx73GVBFFKTMbDSMUjONUpllMCNPXbh2UBd2n4W4h7hC8Ehg==",
+  "ivan ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAFJglnvx3edmkmo5R50Mm55pC/c0wEVBgU/Nq00yM40MA0UyrIdecuEPEGnj4KCFA4x7R0o/bYLj3zwxEe22pTsegDgeBgRz57BNYYFdgufozu8fcvX8Z7sy0JlCjqj+AD3LHv3WCgSSumU4hhzbet0UzwEUjaCiEomfEyKsJCos9CqAQ=="
+ ],
+ "unlisted": {
+  "mallory": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJFziO/zM6eSU39KXJSPXJcruYKIspsuW8jlURae91+v"
+ },
+ "protocolSha256": "abababababababababababababababababababababababababababababababab",
+ "steps": [
+  {
+   "draw": 1,
+   "reviewer": "alice",
+   "signer": "alice",
+   "expect": {
+    "level": "account",
+    "why": "a software ed25519 key"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "d6d5bc6a993e52f4043954fd212ba14645a7ba19",
+   "commit": "9252e94cc9cca302d09275be0b4414fab47b9cf3",
+   "raw": "tree d6d5bc6a993e52f4043954fd212ba14645a7ba19\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792551600 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792551600 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAggO20GK3yOaAXvuaXO1j1ZmoSgX\n OUH9j6oeNa1IBX7HEAAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5\n AAAAQFWTfvKetKNB4doare2VNsdylwYv8xvJXbsf1Cud9cqMyWI0rZ1kXOqk+0Xa3uIY4K\n 1Z1oyr602dOYBnS2USPQw=\n -----END SSH SIGNATURE-----\n\nverdict: draw #1\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for alice with ED25519 key SHA256:MmNYRkxdCiLc3mwW5IwNp/YWUtPCg3xJJAUC45e5+mI"
+    }
+   }
+  },
+  {
+   "draw": 2,
+   "reviewer": "bob",
+   "signer": "bob",
+   "expect": {
+    "level": "presence",
+    "why": "an ed25519-sk key, UP set"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "7a0e4965abc2bbc40ed031432ba39c31b52b6d44",
+   "commit": "c8778ccc32f5d91fdf9333be72fd0fd27d66438a",
+   "raw": "tree 7a0e4965abc2bbc40ed031432ba39c31b52b6d44\nparent 9252e94cc9cca302d09275be0b4414fab47b9cf3\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792552200 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792552200 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAEoAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAAAg/N8GI2\n Ba5sJTKpl/Oc3kftMud6fz27WQBZH0h+14dw8AAAAEc3NoOgAAAANnaXQAAAAAAAAABnNo\n YTUxMgAAAGcAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAABA3r+pk+x7cCoVsW\n MYVHLKQMjO0t+AURLI21PLx7SdhaAfwDcyH74tByh2aqWBxw9s82kIIXdFPd0q/kC5MFU6\n DAESNFZ4\n -----END SSH SIGNATURE-----\n\nverdict: draw #2\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for bob with ED25519-SK key SHA256:GZn8eT4wSV9+OYitjLMQAwazU0OeB/e1X0YLnpKgUK4"
+    },
+    "sshKeygenSignatureDetails": {
+     "counter": 305419896,
+     "flags": 1
+    }
+   }
+  },
+  {
+   "draw": 3,
+   "reviewer": "carol",
+   "signer": "carol",
+   "expect": {
+    "level": "presence",
+    "why": "an ecdsa-sk key, UP set"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "d27ce9904db18392bff747debbec169bf3c24c59",
+   "commit": "5b663b356322d42cf924e87ff70607fd535edf10",
+   "raw": "tree d27ce9904db18392bff747debbec169bf3c24c59\nparent c8778ccc32f5d91fdf9333be72fd0fd27d66438a\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792552800 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792552800 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAH8AAAAic2stZWNkc2Etc2hhMi1uaXN0cDI1NkBvcGVuc3NoLmNvbQ\n AAAAhuaXN0cDI1NgAAAEEE5YnEx1i+17RTph413ELHmSrfvffTtLqjeA9x+XB78S2ErU57\n pyAGcM8O0cp2juFdMNqf5C4esjKab+wzwPBUEwAAAARzc2g6AAAAA2dpdAAAAAAAAAAGc2\n hhNTEyAAAAeQAAACJzay1lY2RzYS1zaGEyLW5pc3RwMjU2QG9wZW5zc2guY29tAAAASgAA\n ACEA3+VR9JOqDXh76F8N9B/HaeDji0CJ9divyBCZwJJLPkQAAAAhAOgWWXuVBLLgj7muW8\n IKAVvKZpbbKZQ0inMPJ3gqddC6ARI0Vng=\n -----END SSH SIGNATURE-----\n\nverdict: draw #3\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for carol with ECDSA-SK key SHA256:xQ8TqoQa4Y+ETA1jX375VDkH4aoCe49kKAisF9PpYek"
+    },
+    "sshKeygenSignatureDetails": {
+     "counter": 305419896,
+     "flags": 1
+    }
+   }
+  },
+  {
+   "draw": 4,
+   "reviewer": "dave",
+   "signer": "dave",
+   "expect": {
+    "level": "account",
+    "why": "an ed25519-sk key made with no-touch-required: UP clear"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "dd13adf1f5ccdf9a05e70da813e68d2218e9c3f6",
+   "commit": "4e62d9033a89199a65649d6f7807a1436db031d3",
+   "raw": "tree dd13adf1f5ccdf9a05e70da813e68d2218e9c3f6\nparent 5b663b356322d42cf924e87ff70607fd535edf10\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792553400 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792553400 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAEoAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAAAgLOkAUZ\n DMYWUJcqAGlA+cC5IZ5par6NKtLRqpVraHaG8AAAAEc3NoOgAAAANnaXQAAAAAAAAABnNo\n YTUxMgAAAGcAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAABAY59kSmVplYorFz\n tBhxrsywOHkbc88SK/BVJqMuw/84K6W0gZc/vpnifEKyBwXhP0i1z+BQ4d8CzL4Sz6AvmO\n AAASNFZ4\n -----END SSH SIGNATURE-----\n\nverdict: draw #4\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for dave with ED25519-SK key SHA256:9qr9+XMx1YB6LDWrBGHn4Hdk5zdVhn/nIZNu6jbpP90"
+    },
+    "sshKeygenSignatureDetails": {
+     "counter": 305419896,
+     "flags": 0
+    }
+   }
+  },
+  {
+   "draw": 5,
+   "reviewer": "erin",
+   "signer": "erin",
+   "expect": {
+    "level": "account",
+    "why": "an ecdsa-sk key made with no-touch-required: UP clear"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "8e6df73d0ca05853aa234659fa209c33b6e9ae7a",
+   "commit": "148c207ca1c3a10cae2e4db20bbc187429f5b1cf",
+   "raw": "tree 8e6df73d0ca05853aa234659fa209c33b6e9ae7a\nparent 4e62d9033a89199a65649d6f7807a1436db031d3\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792554000 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792554000 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAH8AAAAic2stZWNkc2Etc2hhMi1uaXN0cDI1NkBvcGVuc3NoLmNvbQ\n AAAAhuaXN0cDI1NgAAAEEE28zW6WQWY6CXu0mbF45lLljSt/1Ffmrxk6JulX9qlb62aszi\n 6qQQoECv4V4g7UR2AQOOp5sSOBEN4NGCpHTq/AAAAARzc2g6AAAAA2dpdAAAAAAAAAAGc2\n hhNTEyAAAAdwAAACJzay1lY2RzYS1zaGEyLW5pc3RwMjU2QG9wZW5zc2guY29tAAAASAAA\n ACA6BFns+mgL+xD5ZZ960hMnxRL33Il4iCJ9fD0iCAkStQAAACABSQ5BYMi3pFRTQa84gc\n pw9+OyANUNfKjgEaa/ljD1+QASNFZ4\n -----END SSH SIGNATURE-----\n\nverdict: draw #5\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for erin with ECDSA-SK key SHA256:zBKePyKkpWJ6d8bpbWSy/ipt0U0uWPHeqRk3+JBgSZw"
+    },
+    "sshKeygenSignatureDetails": {
+     "counter": 305419896,
+     "flags": 0
+    }
+   }
+  },
+  {
+   "draw": 6,
+   "reviewer": "mallory",
+   "signer": "mallory",
+   "expect": {
+    "level": "self-asserted",
+    "why": "signed by a key nobody registered"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "ebc0ade47ac243e89e8e9af7094f455eafbfbba9",
+   "commit": "59a19dca985bfe395058421c1af1809210e29354",
+   "raw": "tree ebc0ade47ac243e89e8e9af7094f455eafbfbba9\nparent 148c207ca1c3a10cae2e4db20bbc187429f5b1cf\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792554600 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792554600 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgkXOI7/Mzp5JTf0pclI9clyu5go\n iymy5byOVRFp73X68AAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5\n AAAAQAJgJGW6Vm/Zq3MBAy4Tu9+nlK6OkDuENuQUwMwyRI3af+JPYDWDQHyQ1wWSDhhwjH\n on2fOLpJuDEZheT6+57A4=\n -----END SSH SIGNATURE-----\n\nverdict: draw #6\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 1,
+     "output": "Good \"git\" signature with ED25519 key SHA256:hlcWUEWN1hZ9u3OaFQNEQO0u6DSjfUJVicjp7K2klA8"
+    }
+   }
+  },
+  {
+   "draw": 7,
+   "reviewer": "alice",
+   "signer": null,
+   "expect": {
+    "level": "self-asserted",
+    "why": "an unsigned commit"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "a933b72d54a2c373ec3ca7a478c9f080233ab879",
+   "commit": "3e5bcef72e5c8f3ab0c38a5c4ac3c129830fe4fd",
+   "raw": "tree a933b72d54a2c373ec3ca7a478c9f080233ab879\nparent 59a19dca985bfe395058421c1af1809210e29354\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792555200 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792555200 +0000\n\nverdict: draw #7\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 1,
+     "output": ""
+    }
+   }
+  },
+  {
+   "draw": 8,
+   "reviewer": "alice",
+   "signer": "bob",
+   "expect": {
+    "level": "self-asserted",
+    "why": "names alice but bob signed it"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#108\",\"draw\":8,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:10:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "c2170f9c483351a4fcebe8ab481d67e7e001d926",
+   "commit": "5089dd43a3970a0786d6cb07913c92e64c9116e2",
+   "raw": "tree c2170f9c483351a4fcebe8ab481d67e7e001d926\nparent 3e5bcef72e5c8f3ab0c38a5c4ac3c129830fe4fd\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792555800 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792555800 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAEoAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAAAg/N8GI2\n Ba5sJTKpl/Oc3kftMud6fz27WQBZH0h+14dw8AAAAEc3NoOgAAAANnaXQAAAAAAAAABnNo\n YTUxMgAAAGcAAAAac2stc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAABAL7CYxs8PjILw2P\n fIWje7UGUMwBHB409gvKSoO+vIvXZuAv3wVYN9tUCRDfDrmqen6FMlP24qWkLvxCRL8/at\n DgESNFZ4\n -----END SSH SIGNATURE-----\n\nverdict: draw #8\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for bob with ED25519-SK key SHA256:GZn8eT4wSV9+OYitjLMQAwazU0OeB/e1X0YLnpKgUK4"
+    },
+    "sshKeygenSignatureDetails": {
+     "counter": 305419896,
+     "flags": 1
+    }
+   }
+  },
+  {
+   "draw": 9,
+   "reviewer": "frank",
+   "signer": "frank",
+   "expect": {
+    "level": "account",
+    "why": "a software ecdsa-sha2-nistp256 key"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#108\",\"draw\":8,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:10:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#109\",\"draw\":9,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:20:00Z\",\"reviewer\":\"frank\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "1019e57e3de72452a6e74ddbd207697ac79fe402",
+   "commit": "783ee72ec4d135d84f7422b20e5c45d994f243b8",
+   "raw": "tree 1019e57e3de72452a6e74ddbd207697ac79fe402\nparent 5089dd43a3970a0786d6cb07913c92e64c9116e2\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792556400 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792556400 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\n EEkgk6/OGBpTTlu8yk/iRuBxgIponV07K4yG077VA1so88K0jZrP8aBxK6z8hGDsWlsOXw\n ylKeBvXKgngpw8xh2AAAAANnaXQAAAAAAAAABnNoYTUxMgAAAGQAAAATZWNkc2Etc2hhMi\n 1uaXN0cDI1NgAAAEkAAAAgGHxkFbOMgiFnGuBYPH7ohGUYZExRBjCgH25YqO/MCjcAAAAh\n AM8EgMKX54xfKqF4qgyOaf8Ah1m1wMkb7bAleGN06m37\n -----END SSH SIGNATURE-----\n\nverdict: draw #9\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for frank with ECDSA key SHA256:f22quPxwP2rnvPDowgGVAu9GHPNPoT2LaT/lnGIzj6c"
+    }
+   }
+  },
+  {
+   "draw": 10,
+   "reviewer": "grace",
+   "signer": "grace",
+   "expect": {
+    "level": "account",
+    "why": "a software RSA 3072 key (rsa-sha2-512)"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#108\",\"draw\":8,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:10:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#109\",\"draw\":9,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:20:00Z\",\"reviewer\":\"frank\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#110\",\"draw\":10,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:30:00Z\",\"reviewer\":\"grace\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "ce8b973feaa1ba7b2c905cd1ddaf080c08c7826a",
+   "commit": "5375a982477d0a2efe82d570f4e0760504396c0d",
+   "raw": "tree ce8b973feaa1ba7b2c905cd1ddaf080c08c7826a\nparent 783ee72ec4d135d84f7422b20e5c45d994f243b8\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792557000 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792557000 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAZcAAAAHc3NoLXJzYQAAAAMBAAEAAAGBAMkP6JOk9NfP3dyxFIbWAJ\n ya5e3ldY7FsRsoJwuBBJW3tSEYTgkuUaVW3U1SxANP9uKjam4sGDC6irVLLAMRHtyvJdKM\n 0xBI/pgorF5vB9VvVnOKhjpSO53AnGoJXuZxFpgCxOflgBZELBQhlpLsmKF4kyVfxvK8Ra\n dyUHOo4Zr3Z+4T5duL78mHiem0UgerVWhAxFR5oX0DRTjU+4gv6YpQynjqPE56HCU9U5NJ\n jESCJnnLF4Si+cZZ0a43vzyf/BHDaPvF6w2GXsKZbIPTDqyFpZZleRF9r+gFEv4CS1Mh19\n b/nKnVIQ8yYiLowImcxYGfG+8cojUT9Yuv4XZ90q7m8Q6MGaT4wyIry0UY1uksiad2jRvF\n u+95n4Z1kNXPX4MdEA4hgv6XnfVIfHjo7OWeB39bTNeRj0z2WjECmnQUBHh9/IrU1o0fGu\n 9w+EKzkefzPW2HWUNiEOkeVJHsduE5i60FDNnj00MNCpOOFDU5u5LwUBXIm2SN7nnI0Nnn\n nQAAAANnaXQAAAAAAAAABnNoYTUxMgAAAZQAAAAMcnNhLXNoYTItNTEyAAABgHulwnHMDD\n sh9VKBxunT874rtRI+upv9fL3uI5dsBuK5YfwqA77BhO6b705UaqltYmWO0915//GxWF07\n x+JjJy8fP6S85ls613PH0yGjrA2R7oy03wfNBKjsoiqQ82yh9jk48bjMH7LxIsqQr2gq9f\n SRQIL61WGn9rcPs3I90FUt8TwZNq8b+KhLVqKMGdpmUmxBAVeYQAW94eR+pjzg/ONZLQ9j\n TTFZQ2HxEqbje0v5Mbuv4wJ7y/xWO550wNHzyEisqD+gQiuYo4mZnaFMbGcBAt0Sq6U1Yf\n mExivT8efFDyBBzIlIkCH3uK8GLr2z08WNvz8AdBpIfI4mT548Qc4qVKEUl/P8lAu0wRc8\n cMt69LgX0+qOEEr0VYLmfjza+RxInHQQ9n1BVdLqTZlEZdSXNrunFbCQ3ajrkWMNGMQ0Sn\n 9DLRFmyrxltzArql+lr1eMBuyhCLJHT3Rh3rEYc6/1pY3fm99u9AGAaVD1QA5RNxiVI5da\n 8x+EX6cPa3p4Yw==\n -----END SSH SIGNATURE-----\n\nverdict: draw #10\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for grace with RSA key SHA256:9ZsCt9vCWPg6Bd/xy7yKWD3Tz4qvovR9zWlrGyBx7F4"
+    }
+   }
+  },
+  {
+   "draw": 11,
+   "reviewer": "heidi",
+   "signer": "heidi",
+   "expect": {
+    "level": "account",
+    "why": "a software ecdsa-sha2-nistp384 key"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#108\",\"draw\":8,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:10:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#109\",\"draw\":9,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:20:00Z\",\"reviewer\":\"frank\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#110\",\"draw\":10,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:30:00Z\",\"reviewer\":\"grace\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#111\",\"draw\":11,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:40:00Z\",\"reviewer\":\"heidi\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "e4670616763fe26db8e0d8e3797116579d70bbff",
+   "commit": "9c17b79b42f105ec0f3158f20fbcf6f3182cb935",
+   "raw": "tree e4670616763fe26db8e0d8e3797116579d70bbff\nparent 5375a982477d0a2efe82d570f4e0760504396c0d\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792557600 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792557600 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAIgAAAATZWNkc2Etc2hhMi1uaXN0cDM4NAAAAAhuaXN0cDM4NAAAAG\n EExdWagJrCfjXWkfRvXR8LX7KO4zSXleDsXGvC4P4lXKQShL0ryXcXoUdH3nIS3aT/wgw2\n mlhdDIPiibVAqbHvcZUEUUpMxsNIxSM41SmWUwI09duHZQF3afhbiHuELwSGAAAAA2dpdA\n AAAAAAAAAGc2hhNTEyAAAAhQAAABNlY2RzYS1zaGEyLW5pc3RwMzg0AAAAagAAADEAwppD\n Je6BoZ6TSULAAWSCdW7BBI8L5f3c+SSDvUuptvXJG3pX/UsJgZR1Mh0n0MaEAAAAMQCCUW\n q9j2KAsH6GeXMZk7MFhxjwDX/T7BvkIgY5GSaTV8nLkwWS0uJ05darAvp2Yb0=\n -----END SSH SIGNATURE-----\n\nverdict: draw #11\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for heidi with ECDSA key SHA256:1YGb4nhlC3l47bwVRPmHq1/bgZPWfgkgCRr7f0A9/kA"
+    }
+   }
+  },
+  {
+   "draw": 12,
+   "reviewer": "ivan",
+   "signer": "ivan",
+   "expect": {
+    "level": "account",
+    "why": "a software ecdsa-sha2-nistp521 key"
+   },
+   "file": "audit/w/verdicts.jsonl",
+   "content": "{\"changeId\":\"json:acme/widgets#101\",\"draw\":1,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#102\",\"draw\":2,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:10:00Z\",\"reviewer\":\"bob\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#103\",\"draw\":3,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:20:00Z\",\"reviewer\":\"carol\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#104\",\"draw\":4,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:30:00Z\",\"reviewer\":\"dave\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#105\",\"draw\":5,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:40:00Z\",\"reviewer\":\"erin\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#106\",\"draw\":6,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T03:50:00Z\",\"reviewer\":\"mallory\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#107\",\"draw\":7,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:00:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#108\",\"draw\":8,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:10:00Z\",\"reviewer\":\"alice\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#109\",\"draw\":9,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:20:00Z\",\"reviewer\":\"frank\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#110\",\"draw\":10,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:30:00Z\",\"reviewer\":\"grace\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#111\",\"draw\":11,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:40:00Z\",\"reviewer\":\"heidi\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n{\"changeId\":\"json:acme/widgets#112\",\"draw\":12,\"protocolSha256\":\"abababababababababababababababababababababababababababababababab\",\"recordedAt\":\"2026-10-21T04:50:00Z\",\"reviewer\":\"ivan\",\"schema\":\"pr-rla/verdict/v1\",\"verdict\":\"pass\"}\n",
+   "tree": "e96f1d1bb4d3afe4542a35935203484c748b1eb7",
+   "commit": "b49181e076959558bbc064030d7712f388d4d0aa",
+   "raw": "tree e96f1d1bb4d3afe4542a35935203484c748b1eb7\nparent 9c17b79b42f105ec0f3158f20fbcf6f3182cb935\nauthor pr-rla fixture <user-0f1e2d3c@example.invalid> 1792558200 +0000\ncommitter pr-rla fixture <user-0f1e2d3c@example.invalid> 1792558200 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQAAAKwAAAATZWNkc2Etc2hhMi1uaXN0cDUyMQAAAAhuaXN0cDUyMQAAAI\n UEAUmCWe/Hd52aSajlHnQybnmkL9zTARUGBT82rTTIzjQwDRTKsh15y4Q8QaePgoIUDjHt\n HSj9tguPfPDER7balOx6AOB4GBHPnsE1hgV2C5+jO7x9y9fxnuzLQmUKOqP4APcse/dYKB\n JK6ZTiGHNt63RTPARSNoKISiZ8TIqwkKiz0KoBAAAAA2dpdAAAAAAAAAAGc2hhNTEyAAAA\n pwAAABNlY2RzYS1zaGEyLW5pc3RwNTIxAAAAjAAAAEIBEqZ9XUO0urzsPXSSY94RBe20mW\n Es1lLv+8XWmo8TII4siUpJDLRAX/Yhx8QMbeCYpjAbPFn/mTLRmfrPAfZW1XEAAABCAZg8\n R6kcPDyXE7STOLKRdn9Bx4UTo47poxA8/YkOTP/6f/Y4MOkzuxDlDqI2d6hrgZuH3n03v8\n 3eW38+PXs1QV83\n -----END SSH SIGNATURE-----\n\nverdict: draw #12\n",
+   "oracle": {
+    "gitVerifyCommit": {
+     "exit": 0,
+     "output": "Good \"git\" signature for ivan with ECDSA key SHA256:IaiD6C6OqPNGgJoNPgPNMAGnjds3H57zKTHAI4Hh9fE"
+    }
+   }
+  }
+ ]
+}
