@@ -9,7 +9,7 @@ Each contract has one owner, its shape, its failure behaviour and its version. T
 | 1 | Plugin SDK (`pr-rla/provider`, `pr-rla/ledger`, `pr-rla/testing`, `pr-rla/http`) | U2a (`hosts`, `credentials`, `writePaths`), U3 (provider deltas, `populationOptions`), U4 (ledger deltas) | Built-ins, external plugins, core | Typed ESM exports | `providerApiVersion` 1, `ledgerApiVersion` 1, `HTTP_HELPER_VERSION` 1 |
 | 1a | Read-only audit API (`pr-rla/api/read`) | U5 | `pr-rla-mcp` | Typed ESM export | `pr-rla` semver |
 | 2 | Fetch broker (`ctx.fetch`) | U2a | Providers, ledgers, TimeEvidence, Beacon, TransparencyLog, PluginHost | In-process call | Internal; versioned with the package |
-| 3 | Plugin host IPC | U2b | PluginRegistry ↔ child process | Line-delimited JSON over the Node IPC channel | `pr-rla/ipc/v1` |
+| 3 | Plugin host IPC | U2b | PluginRegistry ↔ child process | Length-prefixed JSON frames on the child's fd 3 | `pr-rla/ipc/v2` |
 | 4 | MCP tools | U5 | Claude Code, Codex, Cursor | MCP over stdio | `pr-rla-mcp` semver; output schemas |
 | 5 | Record schemas and the lock file | U1 (v2 in full), U2b (lock) | Every command, every verifier | Canonical JSON files in the audit directory | `pr-rla/<kind>/vN` |
 | 6 | Checkpoint git transport | U4 | `pr-rla checkpoint --push`, CI | git subprocess | Internal |
@@ -43,7 +43,7 @@ interface ProviderDefinition {
   /* phase-2 fields unchanged */
   reviewGranularity?: "submission" | "first-comment-per-user";   // absent means "submission"
   hosts?: (options: unknown) => string[];                         // hosts the broker allows for this plugin
-  credentials?: { env: string; hosts: string[] }[];               // env vars it may receive, and where they may be sent
+  credentials?: { env: string; hosts: string[]; hostFromOption?: string; headers?: string[]; secret?: boolean }[];  // env vars it may receive, where (https origins) and in which extra headers they may be sent; secret: false = an identity
   populationOptions?: string[];                                   // option keys that change the population (FAIL on mismatch in check 5)
 }
 interface ScmProvider {
@@ -108,7 +108,7 @@ interface LedgerDefinition {
   /* phase-1 fields unchanged */
   hosts?: (options: unknown) => string[];
   writePaths?: (options: unknown) => string[];     // host + path prefix a ledger may write to, e.g. api.github.com + /repos/<owner>/<audit repo>/
-  credentials?: { env: string; hosts: string[] }[];
+  credentials?: { env: string; hosts: string[]; hostFromOption?: string; headers?: string[]; secret?: boolean }[];  // as for providers
 }
 ```
 
@@ -153,10 +153,15 @@ interface BrokerPolicy {
 ### Pipeline, in order, per request
 
 1. **Host allowlist.** A non-empty `hostsFor` set must contain the URL host, or the request throws `HostNotAllowed`. Redirects are followed manually and each hop is re-checked.
-2. **Read-only guard.** In `read-only` mode, only `GET`, `HEAD` and a GraphQL `POST` whose document has no `mutation` or `subscription` operation are allowed. Anything else throws `ReadOnlyViolation { method, path }`. Provider requests are always under this guard. Ledger non-read requests must match `writePathsFor`.
-3. **Credential swap.** A header value containing `prrla-cred:<ENV>` is replaced with the secret only when the host is in that credential's host set.
-   - **Basic auth.** An `Authorization` value of exactly `prrla-basic:<USER_ENV>:<TOKEN_ENV>` becomes `Basic base64(<user>:<token>)` under the same host rule. This is how isolated plugins such as the Jira example authenticate, since a placeholder cannot sit inside base64.
-   - **Refusals.** A host outside the credential's set throws `CredentialHostMismatch`. Placeholders in URLs or bodies are never swapped.
+2. **Read-only guard.** In `read-only` mode, only `GET`, `HEAD` and a GraphQL `POST` whose document has no `mutation` or `subscription` operation are allowed. Anything else throws `ReadOnlyViolation { method, path }`. Provider requests are always under this guard. Ledger non-read requests must match `writePathsFor`, a prefix that ends on a `/` segment boundary.
+   - **What a server may read as a write is one** (plugin and broker fix round, finding 6). On a GraphQL path, a `POST` with `query`, `operationName` or `extensions` in its URL is not a read, and a `GET` is a read only when its URL's `query` is a query document and it carries no `extensions`. `X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override` and a `_method` parameter name a second method; the request must be allowed as both.
+3. **Credential swap.** A placeholder `prrla-cred:<ENV>` is replaced with the secret only (findings 4 and 5 of the fix round):
+   - on `https:`, for an origin in the credential's grant: host and port exact, the default port normalised (a `host` entry is `https://host:443`, a `host:port` entry that port);
+   - on no hop after a redirect from https to http, even one that comes back to https (raw secret headers are dropped from then on too);
+   - in `authorization`, or a header name the credential declares in `headers`.
+   - **Basic auth.** An `Authorization` value of exactly `prrla-basic:<USER_ENV>:<TOKEN_ENV>` becomes `Basic base64(<user>:<token>)` under the same rules. This is how isolated plugins such as the Jira example authenticate, since a placeholder cannot sit inside base64. A credential declared `secret: false` (an identity) may be only the user part.
+   - **Local consent.** The grants come from the lock, but take effect only with the approval of the person running the command (`src/plugins/approvals.ts`), or `--accept-lock-grants`; otherwise the credential is withheld.
+   - **Refusals, nothing sent.** Another origin, a scheme other than https or a downgraded hop throws `CredentialHostMismatch`; another header `CredentialHeaderNotAllowed` (`CREDENTIAL_HEADER_NOT_ALLOWED`); a withheld credential `CredentialNotApproved` (`CREDENTIAL_NOT_APPROVED`); an identity used as a token `CredentialIdentityOnly` (`CREDENTIAL_IDENTITY_ONLY`). Placeholders in URLs or bodies are never swapped.
 4. **Rate governor.** One budget per host, shared by every caller. Server headers (`Retry-After`, `RateLimit-*`, `X-RateLimit-*`) override the default and pause the whole host.
 5. **Timeout.** By destination: SCM 30 s, timestamp authority 15 s, drand 15 s, Rekor 30 s. A timeout throws `BrokerTimeout { host, destination, ms }`.
 6. **Retry.** The broker is the only retrier once a caller is wired to it; built-ins construct their clients with `maxRetries: 0`.
@@ -164,29 +169,37 @@ interface BrokerPolicy {
    - **Limits by destination.** SCM, drand and Rekor allow at most 7 attempts. `tsa` retries until a 5-minute per-request deadline (FR1.10).
    - **Rate-limit waits.** Waits imposed by rate-limit headers are the governor's, not retries. They do not count as attempts.
    - **Non-idempotent requests.** A request marked `idempotent: false` (ledger writes) is retried only on connection errors before send and on 429, never on 5xx after send.
-7. **Recorder.** When set, records the exchange with `authorization`, `private-token` and `cookie` headers and e-mail addresses scrubbed. It is never set in read-only mode.
+7. **Recorder.** When set, records the exchange with `authorization`, `private-token` and `cookie` headers and e-mail addresses scrubbed, and every secret value the caller holds replaced by its placeholder wherever it appears (URL, header values, body), raw, percent-encoded, base64 or base64url, and inside a Basic pair; an identity (`secret: false`) is left alone. It is never set in read-only mode.
 
 **Errors** are typed classes with `code`, `host` and a `next` hint. They surface through the CLI error form (§7).
 
-## 3. Plugin host IPC (`pr-rla/ipc/v1`)
+## 3. Plugin host IPC (`pr-rla/ipc/v2`)
 
-The parent and the child exchange JSON objects over the Node IPC channel (`stdio[3]`), one object per message.
+The parent and the child exchange JSON objects in frames on the child's file descriptor 3, a plain pipe. A frame is a 4-byte big-endian unsigned length, then that many bytes of UTF-8 JSON, one object per frame. The reader checks the length before it buffers anything more.
 
 | Direction | `type` | Fields | Meaning |
 |-----------|--------|--------|---------|
-| child → parent | `ready` | `protocol: "pr-rla/ipc/v1"`, `kind`, `name`, `apiVersion`, `reviewGranularity?` | The plugin loaded and its definition validated |
-| parent → child | `call` | `id`, `method` (`create`, `listChanges`, `listRepos`, `describeChange`, `publishDraws`, `readVerdicts`, `verifyIntegrity`, `readHistory`), `args` | Invoke one plugin method |
+| child → parent | `ready` | `protocol: "pr-rla/ipc/v2"`, `kind`, `name`, `apiVersion`, `shape`, `credentials?`, `reviewGranularity?`, `populationOptions?`, `node` | The plugin loaded; the parent validates the definition from these fields |
+| parent → child | `call` | `id`, `method` (`describe`, `create`, `listChanges`, `nativeCounts`, `listRepos`, `describeChange`, `publishDraws`, `readVerdicts`, `appendVerdict`, `verifyIntegrity`, `readHistory`), `args` | Invoke one plugin method |
 | child → parent | `result` | `id`, `value` | Method returned |
-| child → parent | `error` | `id`, `code`, `message` | Method threw |
-| child → parent | `fetch` | `fid`, `url`, `method`, `headers`, `body?` | The plugin called `ctx.fetch`; the parent sends it through the broker |
-| parent → child | `fetchResult` | `fid`, `status`, `headers`, `body` or `error` | Broker response, with credentials stripped from any echo |
+| child → parent | `error` | `id` (null: the plugin failed to load), `code`, `message` | Method threw |
+| child → parent | `fetch` | `fid`, `url`, `method`, `headers`, `body?`, `bodyEncoding?`, `broker?` | The plugin called `ctx.fetch` (or `fetch`); the parent sends it through the broker |
+| parent → child | `fetchResult` | `fid`, `status`, `statusText`, `headers`, `body`, `url`, or `error` | Broker response, with secrets scrubbed from every part of it |
+| parent → child | `accept` | `aid`, `fid`, `body` | The broker asks the plugin's own `acceptJson` rule about a 2xx JSON body (scrubbed) |
+| child → parent | `acceptResult` | `aid`, `problem` or `error` | The rule's answer: a reason to retry, or null |
+| child → parent | `sleep` / parent → child `slept` | `sid`, `ms` | The plugin called `ctx.sleep`, which waits on the command's clock |
+| child → parent | `log` | `line` | The plugin called `ctx.log` |
+| child → parent | `index` / parent → child `indexResult` | `xid`, `op`, `value?` / `value` or `error` | A ledger's `LedgerContext.index`, kept by the parent |
 | parent → child | `cancel` | `id` | Abort a call |
 | child → parent | `heartbeat` | none | Sent every 10 s while a call runs |
 
 **Failure behaviour:**
-- No heartbeat for 60 s kills the child. The command then fails with the plugin's stderr tail and writes no partial output.
-- Messages over 64 MiB are refused.
+- No heartbeat for 60 s while a call is in flight, counted from `ready`, kills the child; so does a start-up that has not reported `ready` within its own limit (60 s by default). The command then fails with the plugin's stderr tail and writes no partial output.
+- A frame over 64 MiB is refused from its length, before any of its payload is buffered, in both directions (`MESSAGE_TOO_LARGE`; the parent stops the child).
+- A `sleep` is served only while a call is in flight, for at most 15 minutes (the SDK's `MAX_WAIT_MS`), and is cancelled when the calls end or the host closes.
 - Results are re-validated by the core (`population.ts`) whatever the child returns.
+
+**Compatibility.** v2 has v1's messages and adds `accept` / `acceptResult`; what changed is the framing, from Node's IPC channel (which buffers and parses a whole message before anyone can measure it) to these frames. The parent and the child ship together in one pr-rla, and the parent refuses a child that reports another protocol. No plugin, lock or audit file carries the protocol, so nothing else changes.
 
 ## 4. MCP tools (`pr-rla-mcp`)
 
@@ -283,9 +296,9 @@ One JSON line per checkpoint in `audit/<window>/ledger-checkpoints.jsonl`:
 
 ### `pr-rla/lock/v1` (`pr-rla.lock.json`, committed, not signed)
 
-`{ schema, plugins: { "<use>": { source, name, version, resolved, npmIntegrity, treeSha256, trust, hosts, writePaths, credentials } } }`
+`{ schema, plugins: { "<use>": { source, name, version, resolved, npmIntegrity, treeSha256, trust, hosts, writePaths, credentials } } }`, where each credential is `{ env, hosts, hostFromOption?, headers?, secret? }` (optional fields added within v1).
 
-Written only by `pr-rla plugin add` and `pr-rla plugin lock` (FR2.3).
+Written only by `pr-rla plugin add` and `pr-rla plugin lock` (FR2.3). Its credential grants and `trust: full` take effect only with the local approval of whoever runs the command: `pr-rla/approvals/v1`, a per-user file outside every repo (`$PR_RLA_APPROVALS_FILE`, `$XDG_CONFIG_HOME/pr-rla/approvals.json` or `~/.config/pr-rla/approvals.json`), keyed by the plugin's use, `treeSha256`, trust and exact grants.
 
 ## 6. Checkpoint git transport
 
@@ -338,7 +351,7 @@ With no authority configured at all, `register` and `freeze` exit 0 with the `TI
 | `providerApiVersion` / `ledgerApiVersion` | integer, 1 | Optional additions only. A required method or changed meaning moves to 2, with two releases where the core loads both |
 | `HTTP_HELPER_VERSION` | integer, 1 | Independent of the API versions |
 | Record schemas | `pr-rla/<kind>/vN` | `verify` reads every schema ever written |
-| `pr-rla/ipc/v1` | string | The parent refuses a child that reports another protocol |
+| `pr-rla/ipc/v2` | string | The parent refuses a child that reports another protocol; v2 replaced v1's framing in the plugin and broker fix round (§3) |
 | Trust bundle | date-stamped (`2026-11`) | Anchors are only added; removed ones are kept as historical |
 | MCP tool contract | `pr-rla-mcp` semver plus output schemas | A renamed tool or removed field is a minor version below 1.0; the plugin pins the version |
 | Exit codes | the table in §7 | Existing codes never change meaning |

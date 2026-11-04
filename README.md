@@ -135,7 +135,7 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
    - Never return one commit for two changes. A rebase merge's commits all belong to its PR.
 3. Record real API responses (`scripts/record-fixture.mjs`) and run `assertProviderConformance((fixture, harness) => …, fixtures)` from `pr-rla/testing`.
 4. Reference it from `.pr-rla.yml`: `provider: { use: ./my-provider.mjs, options: {...} }` or `provider: { use: pr-rla-provider-gitlab }`. A provider declaring another API version is refused with a clear error.
-5. Lock it: `pr-rla plugin add <use>` prints what it trusts and writes `pr-rla.lock.json`, the only way an external plugin gets in. It then runs out of process with placeholder credentials ([`docs/security-model.md`](docs/security-model.md)); `pr-rla plugin check <use>` runs the kit through that host.
+5. Lock it: `pr-rla plugin add <use>` prints what it trusts and writes `pr-rla.lock.json`, the only way an external plugin gets in. It then runs out of process with placeholder credentials ([`docs/security-model.md`](docs/security-model.md)); `pr-rla plugin check <use>` runs the kit through that host. The lock does not hand anyone's secrets to the plugin: its credentials and `trust: full` take effect only on a machine where they are approved (`plugin add` approves them for you; anyone else runs `pr-rla plugin approve <use>`, and `--accept-lock-grants` takes them for one run in a repo you control).
 
 ## Limitations (v0.1)
 
@@ -151,4 +151,5 @@ The full walkthrough, with the Gitea plugin as the worked example, is [`docs/wri
 - **One repo per audit.** There is no org-pooled freeze yet.
 - **Timestamps** are tamper-evident only when k = 2 timestamp-authority operators agree; with fewer (or none configured) they are the signer's clock, and every output says so. Three of the eight bundled anchors (Microsoft's, pinned at its intermediate, SwissSign's and FreeTSA's) were taken from the authorities' own responses (trust on first use): see BUILD-NOTES, bolt 1.
 - **One registration per audit is a procedural control.** `verify` cannot prove that no other registration exists: hand your auditor the registration before the window opens.
+- **Verifying someone else's audit does not hand it your tokens.** Its plugins get no credential and do not run in your process until you approve them, and a built-in pointed at another host by its `.pr-rla.yml` (`base_url`, `token_env`) does not send your token there; public audits verify anonymously ([`docs/security-model.md`](docs/security-model.md), "If you verify someone else's audit").
 - **External plugins run isolated, not sandboxed.** On Node 22 and 24 an isolated plugin cannot read your tokens or files but can still open network connections and send out what it reads; Node 25 or later blocks that. The Node permission model is a seatbelt ([`docs/security-model.md`](docs/security-model.md)).
