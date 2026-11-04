@@ -25,7 +25,7 @@ export interface GqlPullRequest {
   author: GqlActor | null;
   mergedBy: GqlActor | null;
   mergeCommit: { oid: string } | null;
-  labels: { nodes: { name: string }[] };
+  labels: { totalCount?: number; pageInfo?: { hasNextPage: boolean; endCursor: string | null }; nodes: { name: string }[] };
   reviews: { totalCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: GqlReview[] };
 }
 
@@ -35,9 +35,9 @@ export interface GqlHistoryCommit {
   committedDate: string;
   additions: number;
   deletions: number;
-  parents: { nodes: { oid: string }[] };
+  parents: { totalCount?: number; nodes: { oid: string }[] };
   author: { name: string | null; email: string | null; user: { login: string; databaseId?: number | null } | null } | null;
-  associatedPullRequests: { nodes: { number: number; merged: boolean; baseRefName: string }[] };
+  associatedPullRequests: { totalCount?: number; pageInfo?: { hasNextPage: boolean; endCursor: string | null }; nodes: { number: number; merged: boolean; baseRefName: string }[] };
 }
 
 const BOT_SUFFIX = "[bot]";

@@ -138,6 +138,8 @@ diagnostic: default-branch commits in window: 3,944 · commits linked to a merge
 | Copilot PRs with no review object | 2 | 2 |
 | median size of the stratum | 53 lines | 53 lines |
 
+> **Update, 2026-11-04 (ledger, selector and provider fix round).** Everything on this page, the output block and the table, is what the run printed *before the post-merge/self-review fix* and is kept as it was. The selector now counts a review only if it was submitted at or before `mergedAt` and its reviewer is not the author. Re-running the selector over this run's recorded listing (the same 3,944 changes, reviews as of the same freeze time) gives 2,947 / **2,718** / 1,589: PR #51168 had a human APPROVED review 14 minutes after it merged, and it is 221 lines, so N is unchanged. The other numbers in the table are unaffected, except: pelikhan merged 2,670 (not 2,669) of the no-human-review set, and bot-approved-with-no-human-decision is 986 (not 985). The spec's own figures move the same way (2,719 → 2,720 over its 2,949; the two other-branch PRs, #47508 and #43457, carry no human approval before or after merging, checked by three read-only GETs each on 2026-11-04). See "Ledger, selector and provider fix round" at the end.
+
 **The difference is fully explained.** GitHub search counts 2,949 Copilot PRs merged into any branch. Two of them, #47508 (60 lines) and #43457 (1,540 lines), were merged by pelikhan into other Copilot branches (`copilot/resolve-issue-stringsjoinone`, `copilot/lint-monster-targeted-cleanup-again`), not into `main`. Both have no human decision. Removing them gives exactly 2,947 / 2,717 / 1,589 and pelikhan 2,669. This was confirmed with `-base:main` search queries (2 Copilot PRs; 6 PRs in all, matching the diagnostic) and a GraphQL read of both PRs. pr-rla's population is changes that landed on the default branch, so they are excluded by design.
 
 **Direct pushes to gh-aw's `main` in Q3: 61** (all authors).
@@ -1343,3 +1345,88 @@ npm ls --prod --depth=0                    → asn1js 4.0.0, commander 15.0.0, d
 - **Still in process:** `scripts/record-fixture.mjs` and `examples/ledgers/jira/scripts/record.mjs` import the plugin they record, as before; they are developer tools, run on code you trust.
 - **`selector.bots` does not touch verdict eligibility.** A bot on a user account (U4 finding 3) is stopped only by `verdicts.reviewers`; with `Actor.id`, `id:<n>` entries are the robust form, since they survive a rename.
 - **IPC additions within `pr-rla/ipc/v1`** in this integration: `describe` returns `reviewGranularity`, `populationOptions`, `reportsLandedVia` and `provenance`; `create` passes a ledger's `reviewers`; `index` / `indexResult` carry `LedgerContext.index`.
+
+## Ledger, selector and provider fix round
+
+Branch `fix/ledgers-selector`, off master 4b72ecb, 2026-11-04. It fixes findings 3, 4, 5, 6, 7, 9 and 10 of the review of master and every "test that cannot fail" it listed. Findings 1, 2 and 8 (ledger and provider identity in `verify`, the pinned head) are other rounds' and are untouched; so is the identity comparison and the pinned-head logic in `src/core/verify.ts`. Tests: 467 passed + 1 skipped (468) before, 552 passed + 1 skipped (553) after; the one skip is U2b's `UNVERIFIED` RK-02 placeholder, as before.
+
+### Findings, commits and tests
+
+| Finding | Fix | Commit | Regression test |
+|---|---|---|---|
+| 4 post-merge and self-approvals hide a change | A review is a human decision only if it is APPROVED or CHANGES_REQUESTED by a non-bot account, submitted at or before `mergedAt`, and the reviewer is not the author (`Actor.id` where both have one, else login). The review stays on the record | d5bd0a5 | `selector-review-rules.test.ts` |
+| 6 lexical event-id ties | `compareEventIds` / `compareByTimeThenId` (BigInt; colon-separated ids part by part, so Jira's `99:0:add` precedes `100:0:add`), used by the SDK, both issue ledgers, the checkpoint canonical order and the Jira example | c74523d, e4e293f | `ledger-event-ids.test.ts`, `jira-example.test.ts` |
+| 3 index unauthenticated | On read the tracker's issue must be the one the index names (id and number), its body must carry the marker for the same window, draw and change, and issue numbers, ids, draws and changes are unique (`indexProblems`). `sample` writes `ledgerIndexSha256` into `draws.json`, each checkpoint line carries it, and `verify` check 7 FAILs a changed or missing index or one that does not match `draws.json`, even offline | a88ddfd, 591a4a4 | `issue-ledger-binding.test.ts`, `e2e-ledger-anchors.test.ts`, `checkpoint-chain.test.ts` |
+| 7 case-only label rename | GitHub matches label names case-insensitively; any label event that is not pass, fail or draw warns (once per label per draw); a live label whose name differs from the index warns | a88ddfd | `issue-ledger-binding.test.ts` |
+| 5 Jira example | Option ids are learnt from the issue's edit metadata at publish and kept in the index; events match by id; a change to any other option FAILs; the index's field, tracker, option ids and uniqueness and each issue's id are checked on read; numeric ids compare numerically | e4e293f | `jira-example.test.ts` (hardening) |
+| 9 checkpoints vanish | `prevLineSha256` chain (old lines stay readable and are counted as unchained); a broken chain FAILs; check 7 WARNs when an issue ledger has no time-stamped checkpoint at or after the last counted verdict, and for a line with no tokens; the union dedupes on the whole line and reading keeps the copy with the most tokens | 591a4a4 | `checkpoint-chain.test.ts`, `e2e-ledger-anchors.test.ts` |
+| 10 GraphQL caps | GitHub: labels, a commit's associated PRs (paged) and parents (read to 100, refused beyond); GitLab: `approvedBy` and `reviewers` paged | 9199899 | `provider-caps.test.ts` |
+| 10 truncated diffs | `ChangeRecord.changedLinesUnknown`: set for a GitLab diff with a `too_large` or `collapsed` file (only when GraphQL has no `diffStatsSummary`) and for a Bitbucket Data Center truncated diff; `max_changed_lines` keeps it and the funnel adds "of which size unknown (kept in the stratum)" | 9199899 | `provider-caps.test.ts` |
+| 10 404 from a token that cannot read | The ledgers probe the audit repo or project; if it is unreadable too, the finding says the token has no access, not "deleted" (GitHub, GitLab, Jira) | a88ddfd, e4e293f | `issue-ledger-binding.test.ts`, `jira-example.test.ts` |
+| 10 GitLab "reset approvals" | Notes are read by `systemNoteMetadata.action` (`approved`, `unapproved`, `requested_changes`, `approvals_reset`), the English text only for an untagged note; a tagged reset that names nobody is counted in a diagnostic | 9199899 | `provider-caps.test.ts` |
+| 10 `headSha` | `^[0-9a-f]{40,64}$` in `readManifest` and `buildPopulation`; escaped in the GitLab, Bitbucket Cloud and Data Center history URLs | 9199899 | `provider-caps.test.ts` |
+| 10 stale-commit approval | Documented as a known semantic limit (README, spec, contracts, `Selector.unreviewed`); behaviour unchanged | 8d7e33a | (none: a documented limit) |
+| Tests that cannot fail | See below | 3598dd0 | `conformance.test.ts`, `ledger-conformance.test.ts`, the built-in ledger suites |
+
+The reproductions in the review's `rv.test.ts` that are in scope (the string-id tiebreak and the post-merge self-approval) are the first test of `ledger-event-ids.test.ts` and `selector-review-rules.test.ts`. Run against master's `src/`, 48 of 56 tests in the six new files for findings 3, 4, 6, 7, 9 and 10 fail, and the kit tests fail too (12 of 37 in the two kit files); the 8 that pass on master assert behaviour that was already right (an untouched index verifies, a real deletion still says deleted, and so on).
+
+### The gh-aw Q3 funnel, re-derived
+
+The dry run of 2026-11-03T14:27:18Z recorded the whole listing with every review's `submittedAt` and author, and each change's `mergedAt`, so no live re-run was needed. Running the new selector over that recorded listing at the same freeze time:
+
+| | before (this page, "Real read-only dry run") | after the post-merge/self-review fix |
+|---|---|---|
+| landed | 3,944 | 3,944 |
+| author `copilot-swe-agent[bot]` | 2,947 | 2,947 |
+| no recorded human review | 2,717 | **2,718** |
+| ≤ 200 changed lines (N) | 1,589 | **1,589** |
+| merged by pelikhan, in the no-human-review set | 2,669 | 2,670 |
+| bot-approved with no human decision | 985 | 986 |
+
+One PR moved: #51168 (221 lines) had a human APPROVED review 14 minutes after it merged, so N is unchanged. No author-approval case occurs here (the authors are bots). The spec's own counts over the 2,949 search results go 2,719 → 2,720 and 1,590 stays; the two other-branch PRs it counts that pr-rla does not, #47508 and #43457, were read (3 GETs each, 2026-11-04) and carry no human approval before or after merging. The ID-based comparison was not exercised on this data: the recorded dry run kept no `Actor.id`, so the author comparison there was by login. Old numbers are kept above in this file, README and spec were updated, and `spec.md` and the dry-run section have dated notes.
+
+### Settled and decided
+
+- **Where the index hash goes.** `sample` signs and time-stamps nothing, so the hash goes where `sample`'s output is: `draws.json` (optional field, committed with the index, its history the trail) and, so that the authorities' time covers it, each checkpoint line (optional field inside the time-stamped record). It is the SHA-256 of the canonical JSON of the parsed file, so indentation and line endings do not matter. A checkpoint whose index hash differs from the current one only WARNs: publishing more draws later changes the index legitimately. `contracts.md` §5 has the field.
+- **`foreignIssues`.** The recorded public timelines are real issues pr-rla did not open: no marker in their bodies, and many other labels. Their hand-built indexes carry `foreignIssues: true`, which skips the marker check and the stray-label warning; `verify` WARNs when an audit's index has it. The six GitHub timelines were re-recorded (2026-11-04, same issues) so the deleted-issue one carries the new repo probe and the others carry the flag; their expectations did not change.
+- **Checkpoint chain semantics.** A line must name a line that is earlier in the file, not the line immediately before it, because the git transport's union interleaves two clones' lines. This catches a deleted or edited middle line. It cannot see the newest line (and its history file) being deleted; that is what the coverage WARN is for, and the README says so.
+- **GitLab approval resets.** GitLab's own tag was checked three ways on 2026-11-04: its source (`ee/app/services/ee/system_notes/merge_requests_service.rb` gives the reset note `action: 'approvals_reset'`), its GraphQL reference (`Note.systemNoteMetadata.action`), and one anonymous GET of the GraphQL endpoint for gitlab-org/cli !3978, whose notes came back tagged `approved`, `approvals_reset`, and so on. The tag says it is a reset; WHOSE approvals it reset is still read from the `@references` in the body, because GitLab has no structured field for it. That is the remaining limit, stated in `docs/providers/gitlab.md`.
+- **Transient write faults.** The fetch broker retries a write only before it is sent and on a rate limit, never after a 5xx. The kit's harness now does the same for `idempotent: false`, and a fault can name "the nth write" and can be "lost" (the write reaches the tracker, the answer is replaced). The ledger kit's `transient-write-faults` check: a 429 on the first write (wait, repeat it), a lost 503 on call 3 (the second write the publish means to make), a recovery on the same tracker that must bring the total to exactly the writes a clean publish makes, and a 429 on a `record`. A factory that serves no fresh tracker for phase `publish-faults` gets a reported skip. github-issues, gitlab-issues and the Jira example (also with every instance in its own plugin host) pass it.
+- **`classifyVerdicts` and `recordedBeforeSeed` live in `pr-rla/ledger`.** The architecture test keeps `pr-rla/testing` free of `core/`, so the logic `computeStatus` and check 7 run is now in the SDK, and the kit and the core call the same code.
+- **Kit compatibility.** `providerApiVersion` and `ledgerApiVersion` stay 1; the kits' third parameter (`skipCases`) is new and optional. Plugin authors' existing fixtures can now fail where they used to pass vacuously: `window-and-kinds` needs `ids` (or pullRequests and directPushes), and the ledger kit needs a fixture per case. `docs/writing-a-provider.md` §3 and §8 say so. The Gitea and Jira examples pass.
+
+### Deviations and declined items
+
+- **The recorded GraphQL fixtures were not re-recorded.** The new GitHub and GitLab queries select more fields, so their request hashes changed. GraphQL queries are POSTs and this round's live reads were GET-only. The four fixtures (`github/gh-aw-2026-11-02`, three GitLab) keep their recorded responses and have only their `bodySha256` updated to the new query, with a `graphqlQueryNote` in each file; the responses lack the new fields, which the providers read as "no tag, nothing more to page". Checked instead: all seven GitHub queries validate against GitHub's published schema (`docs.github.com/public/fpt/schema.docs.graphql`, fetched 2026-11-04, validated with graphql-js in the scratch directory), and the GitLab MR batch query ran once as an anonymous GET against gitlab.com and returned the new fields. Not run live: the GitHub queries themselves (POSTs), and the Jira `editmeta` route (it needs a token that may edit issues; the fake follows Atlassian's documented shape).
+- **`no-double-counting` stays a real check.** It inspects the returned data (duplicate ids, a commit counted twice), so it needs no expectation and always runs; the kit's other expectation-driven checks skip.
+- **A manifest with a bad `headSha` aborts `verify`.** `readManifest` throws a `CommandError` instead of letting check 2 FAIL, so `verify` stops with the reason rather than printing a report. The pinned-head logic in check 5 is untouched.
+- **Event-id order and `eventsSha256`.** The checkpoint's canonical list now sorts same-instant events by the new id order. A checkpoint of a history with same-second events whose numeric ids differ in digit count would hash differently under the old order; no checkpoint exists outside test fixtures, and none of them has such events.
+- **Selector semantics changed under a registered selector.** A manifest frozen before this round and verified after it can rebuild a different population if a post-merge or author approval existed. gh-aw's was one PR outside N. The registration's selector text is unchanged, and this is recorded here and in the spec rather than versioned.
+
+### Live reads (all GET, all read-only, 2026-11-04; about 150 requests, no POST sent)
+
+- `gh api` GETs of PRs #47508, #43457 and #51168 and their reviews (6).
+- The six GitHub ledger timelines re-recorded twice and the deleted-issue one once more (about 110, anonymous GitHub REST with `gh auth token`), the Jira recorder for the two hibernate timelines (about 12).
+- GitLab: raw files from gitlab.com (`system_note_metadata.rb`, the EE system-note service files, the GraphQL reference, the MR API doc, the diff entity: about 10), and two GETs of `/api/graphql?query=` (the MR batch query on gitlab-org/cli !3000, the notes of !3978).
+- GitHub's public GraphQL schema file (1); `npm install graphql` into the scratch directory.
+
+### Files touched that other rounds are also in
+
+`src/commands/{checkpoint,context,sample,verify}.ts` (U5: a handful of lines each: the index hash and chain tip passed to the checkpoint, `readManifest` validation, the hash written after `sample` publishes, the index and unchained count read into `verify`); `src/api/checkpoint.ts` (U5: `checkpointChainTip`, the extra record fields, `readCheckpoints` returns `unchained`); `src/core/verify.ts` (U8/U9: an `addAnchor` helper, one call before check 7's summary for the index and the checkpoint coverage, the same index call in the skip branch, `lastCountedAt` captured where the counted verdicts are known, and `recordedBeforeSeed` replacing one inline comparison; nothing in the ledger-identity or pinned-head code); `src/providers/github/{index,queries,normalize}.ts` (U8: `http.ts` untouched; `index.ts` gains `completeCommit` and the label paging); `src/testing/conformance.ts` (U8: the empty-fixtures and skip rules, the completeness rule, `Fault.write`/`lost`, `idempotent: false` in the harness); `README.md` (limitations and kit lines). Not touched: `src/ledgers/git-file.ts`, `src/config.ts`, `package.json`.
+
+### Verified (command → output)
+
+From a fresh `git clone -b fix/ledgers-selector` at `8bb807e` (the last commit before this section; only this file changes after it), three runs in a row, 2026-11-04T04:18–04:19Z, Node 22 (`node --version` v22.x on PATH):
+
+```
+npm ci                                     → found 0 vulnerabilities
+npm run build                              → exit 0
+npm run typecheck                          → exit 0
+npm test                                   → Test Files 48 passed (48) · Tests 552 passed | 1 skipped (553)
+npm --prefix examples/providers/gitea ci   → found 0 vulnerabilities
+npm --prefix examples/providers/gitea test → # pass 1 · # fail 0
+npm --prefix examples/ledgers/jira ci      → found 0 vulnerabilities
+npm --prefix examples/ledgers/jira test    → # pass 1 · # fail 0
+```
+
+Each of the three runs printed the same lines. `node scripts/demo-ledgers.mjs`, `demo-sdk-carry-overs.mjs`, `demo-plugin-host.mjs` and `demo-broker.mjs` exit 0; the ledger demo's second part now shows the recorded relabel VERIFIED with check 7 WARN (the foreignIssues flag and the missing checkpoint) and the deleted issue FAILED, as before. `npm test` makes no network call. Not verified: see "Deviations and declined items" (the GitHub GraphQL queries and the Jira `editmeta` route were not run live).

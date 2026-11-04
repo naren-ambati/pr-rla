@@ -51,7 +51,7 @@ From `GET …/pull-requests/{id}/activities`, reconciled with the PR's `reviewer
 | `COMMENTED` (comment added) by anyone but the author | one `COMMENTED` per user |
 | final status `APPROVED` / `NEEDS_WORK` with no matching activity | `APPROVED` / `CHANGES_REQUESTED` at the merge time |
 
-`mergedBy` is the user of the `MERGED` activity. `mergedAt` is `closedDate`. `changedLines` counts the `ADDED` and `REMOVED` lines of `GET …/pull-requests/{id}/diff?contextLines=0`, because the REST API has no numeric diff stats. The server truncates very large diffs; those PRs are undercounted and counted in a diagnostic.
+`mergedBy` is the user of the `MERGED` activity. `mergedAt` is `closedDate`. `changedLines` counts the `ADDED` and `REMOVED` lines of `GET …/pull-requests/{id}/diff?contextLines=0`, because the REST API has no numeric diff stats. The server truncates very large diffs; a PR (or direct push) whose diff came back truncated is marked `changedLinesUnknown` instead of being undercounted: a `max_changed_lines` stratum keeps it, the funnel reports how many were kept as size unknown, and a diagnostic counts them.
 
 ## Bot detection
 

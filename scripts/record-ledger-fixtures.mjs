@@ -32,6 +32,7 @@ function trimGitHub(url, body) {
     return body.map((e) => ({ ...pick(e, ["id", "event", "created_at"]), actor: ghUser(e.actor), ...(e.label ? { label: { name: e.label.name } } : {}), performed_via_github_app: e.performed_via_github_app ? pick(e.performed_via_github_app, ["slug", "name"]) : null, ...(e.issue ? { issue: { number: e.issue.number, pull_request: !!e.issue.pull_request } } : {}) }));
   if (/\/issues\/\d+$/.test(p)) return { ...pick(body, ["number", "node_id", "html_url", "created_at", "repository_url", "state"]), labels: (body.labels ?? []).map((l) => ({ name: l.name })), body: null };
   if (/\/labels\/[^/]+$/.test(p)) return pick(body, ["id", "node_id", "name"]);
+  if (/^\/repos\/[^/]+\/[^/]+$/.test(p)) return pick(body, ["id", "full_name"]);
   return body;
 }
 
@@ -125,7 +126,8 @@ const GITHUB = [
 ];
 
 async function recordGitHub() {
-  for (const spec of GITHUB) {
+  // Optional 4th argument: only the specs whose file name contains it (re-recording one fixture, e.g. `github deleted`).
+  for (const spec of GITHUB.filter((g) => !process.argv[3] || g.file.includes(process.argv[3]))) {
     const labels = {};
     for (const role of ["pass", "fail"]) {
       const l = await ghGet(`/repos/${spec.repo}/labels/${encodeURIComponent(spec.labels[role])}`);
@@ -137,7 +139,7 @@ async function recordGitHub() {
       const meta = spec.issueMeta?.[n] ?? (await ghGet(`/repos/${spec.repo}/issues/${n}`)).body;
       issues.push({ draw: k + 1, changeId: `github:${spec.repo}#${n}`, number: n, id: meta.node_id, url: meta.html_url, createdAt: meta.created_at });
     }
-    const index = { schema: "pr-rla/ledger-index/v1", ledger: "github-issues", tracker: `https://api.github.com/repos/${spec.repo}`, window: "recorded", protocolSha256: "0".repeat(64), registrationSha256: null, labels, issues, repeats: [] };
+    const index = { schema: "pr-rla/ledger-index/v1", ledger: "github-issues", tracker: `https://api.github.com/repos/${spec.repo}`, window: "recorded", protocolSha256: "0".repeat(64), registrationSha256: null, labels, issues, repeats: [], foreignIssues: true };
     const windowDir = mkdtempSync(join(tmpdir(), "prrla-record-"));
     writeFileSync(join(windowDir, "ledger-index.json"), JSON.stringify(index, null, 2));
     const { exchanges, broker } = recorder();

@@ -168,9 +168,10 @@ describe("the Gitea example passes the conformance kit through the host", () => 
     const file = join(ROOT, "examples", "providers", "gitea", "fixtures", "codeberg-forgejo-docs-2026-10-01.json");
     const report = await hostedProviderConformance(plugin, "gitea", [{ name: "codeberg forgejo/docs", rec: readRecordedFixture(file) }]);
     expect(report.ok, formatConformanceReport(report)).toBe(true);
-    // U3's revoked-approval check has nothing to check here: the recording lists no revoked approval
-    // (its one stale Codeberg approval still counts). review-granularity runs on the traits the child describes.
-    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["bot-detection", "revoked-approval"]);
+    // The recording declares only its ids and direct pushes, so the checks that read other expectations skip and say so
+    // (merge strategies, review states, actors); U3's revoked-approval check has nothing to check (its one stale Codeberg approval
+    // still counts). review-granularity runs on the traits the child describes.
+    expect(report.results.filter((r) => r.skipped).map((r) => r.check)).toEqual(["merge-strategies", "review-state-mapping", "actors", "bot-detection", "revoked-approval"]);
     expect(report.results.find((r) => r.check === "review-granularity")).toMatchObject({ ok: true });
     expect(report.results.find((r) => r.check === "review-granularity")?.skipped).toBeFalsy();
   });
@@ -199,6 +200,16 @@ describe("the Gitea example passes the conformance kit through the host", () => 
           prCommits: x.prCommits,
           mergeShas: x.mergeShas,
           changedLines: x.changedLines,
+          reviewStates: {
+            [x.ids.squash]: Array(150).fill("COMMENTED"),
+            [x.ids.rebase]: ["CHANGES_REQUESTED", "DISMISSED"],
+            [x.ids.merge]: ["APPROVED"],
+            [x.ids.ff]: ["APPROVED"],
+            [x.ids.squash5]: [],
+            [x.ids.squashMerge]: ["DISMISSED", "APPROVED"],
+            [x.ids.atOpen]: [],
+          },
+          actors: { [x.ids.squash]: { author: { login: "agent-bot[bot]", kind: "bot" }, mergedBy: { login: "maint", kind: "human" } } },
           bots: ["agent-bot[bot]", "review-bot[bot]", "merge-bot[bot]", "forgejo-actions[bot]"],
           humans: ["maint", "bob", "dave", "erin", "carol", "alice"],
           minPages: 40,

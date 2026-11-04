@@ -69,7 +69,7 @@ describe("Bitbucket Data Center provider on a fake server built from the documen
     expect(r.defaultBranch).toBe("main");
     expect(r.changes.find((c) => c.id === x.ids.merge)!.mergeSha).toBe(OID("M3")); // no properties.mergeCommit on PR #3
     expect(r.diagnostics).toEqual([
-      { label: "PR diffs truncated by the server (changedLines undercounted)", value: 1 },
+      { label: "PR diffs truncated by the server (changedLinesUnknown: size unknown)", value: 1 },
       { label: "default-branch commits in window", value: x.inWindowCommits },
       { label: "commits linked to a merged PR", value: 14 },
       { label: "rebased commits linked by author, author time and message", value: 2 },

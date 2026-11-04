@@ -30,6 +30,7 @@ interface Actor {
 interface ChangeRecord {
   /* phase-2 fields unchanged */
   landedVia?: string;          // SHA of the direct-push merge commit whose non-first parent brought this commit in
+  changedLinesUnknown?: true;  // the SCM truncated the diff (GitLab too_large/collapsed, Bitbucket Data Center truncated) and gave no stat: changedLines is a lower bound
 }
 interface ListChangesRequest {
   /* phase-2 fields unchanged */
@@ -63,7 +64,13 @@ interface ChangeDescription {
 }
 ```
 
-`head` and `headSha` live on the request and result, not on `ChangeRecord`.
+`head` and `headSha` live on the request and result, not on `ChangeRecord`. A `head` is a commit id (`^[0-9a-f]{40,64}$`): `buildPopulation` refuses anything else, `readManifest` refuses a manifest whose `repos[].headSha` is neither null nor one, and the built-in providers escape it in their history URLs.
+
+**Size unknown.** A provider that cannot count a change's lines because the SCM truncated its diff, and has no stat field to count instead, sets `changedLinesUnknown: true` and never reports an undercount. A `max_changed_lines` stratum keeps such a change (it cannot be shown to exceed the limit); the funnel adds the step "of which size unknown (kept in the stratum)" with the count, and the provider reports a diagnostic. GitLab reads GraphQL `diffStatsSummary` first and falls back to the REST diffs only when GraphQL has none; Bitbucket Cloud's diffstat is complete; GitHub's additions and deletions are the SCM's own stat.
+
+**Review rule (the selector).** A review counts as a human decision (so the change is not in the `no-human-review` stratum) only if it is an APPROVED or CHANGES_REQUESTED review by a non-bot account, submitted at or before the change's `mergedAt`, whose reviewer is not the author (compared by `Actor.id` where both have one, by login otherwise). Reviews that do not count stay on the change record. Known semantic limit: an approval is not tied to the commit it approved, so an approval of an earlier head commit still counts (stale-commit approval); GitHub's `dismiss stale approvals` and GitLab's approval resets show up as `DISMISSED`, nothing else is inferred.
+
+**Caps.** A provider never truncates a connection silently: it pages it, or refuses and fails loudly. The built-ins page a PR's labels, a commit's associated PRs and a GitLab MR's approvers and reviewers, read the rest of a commit with more than two parents, and refuse one with more than 100.
 
 **Failure behaviour:**
 - A provider that ignores `head`, or returns a different `headSha` than requested, is not an error. `verify` adds the check-5 detail `provider does not pin history; direct pushes dated in the window but pushed after freeze will show as extra`.
@@ -75,6 +82,8 @@ interface ChangeDescription {
 - `actor-ids` (if any actor has an `id`, all must, and ids are stable across two runs);
 - `review-granularity`;
 - `revoked-approval` (a revoked approval never comes back as `APPROVED`).
+
+**Conformance-kit honesty (ledger/selector fix round).** The provider kit fails an empty fixture list; marks a check skipped (not ok) when the fixture declares nothing for it (`classification`: pullRequests/directPushes; `merge-strategies`: prCommits/mergeShas; `review-state-mapping`: reviewStates/reviewers; `actors`: actors/changedLines; `pagination`: ids/minPages); and asserts completeness in `window-and-kinds` against `expect.ids` (or pullRequests plus directPushes), failing when the fixture states neither. `no-double-counting` inspects the returned data, so it always runs.
 
 ### `pr-rla/ledger`
 
@@ -112,20 +121,27 @@ interface LedgerDefinition {
 }
 ```
 
+**Event order (added in the ledger/selector fix round).** `readVerdicts` returns verdicts in recorded order: by the tracker's time, then by event id. Ids compare part by part (split on `:`), each part as an integer when it is all digits (BigInt, so ids past 2^53 stay exact), a number before anything else, and anything else by UTF-16 code unit; equal numbers written differently fall back to code units. The order is total. `compareEventIds` and `compareByTimeThenId` in `pr-rla/ledger` are the reference; a lexical order would put id "100" before "99" and count the wrong one of two same-second verdicts. The checkpoint's canonical event list (`eventsSha256`) is sorted the same way.
+
+**The ledger index.** An issue-tracker ledger keeps `audit/<window>/ledger-index.json` (draw → issue; for an external ledger, through `LedgerContext.index`). It is a hint, not a witness: on read the issue the tracker returns must be the one the index names (GitHub node id or GitLab id, and number), its body must carry the draw's marker for the same window, draw and change, and no two draws may share an issue number or id. `sample` binds the file to the draws (§5); `verify` compares.
+
 **Failure behaviour:**
 - `readVerdicts` or `readHistory` throwing makes check 7 FAIL with the error. It never passes silently.
+- A 404 on an indexed issue is told apart from a deletion by probing the audit repo or project: if the credentials cannot read that either, the finding says the token has no access, not that the issue was deleted.
 - A ledger without `readHistory` cannot be checkpointed: `checkpoint` says so and exits 1.
 
-**Ledger conformance kit** (`runLedgerConformance`):
+**Ledger conformance kit** (`runLedgerConformance(ledger, fixtures, { skipCases? })`):
 - first-label rule;
 - relabel, same and opposite;
 - removal; deletion; label rename;
-- unlisted reviewer; app-applied event;
-- verdict before seed;
+- unlisted reviewer; app-applied event (the core must ignore the event, and the ledger's own report must name it);
+- verdict before seed (the core counts the verdict and check 7 would refuse it: `classifyVerdicts` and `recordedBeforeSeed`, shared with the core);
 - pagination past 100 events;
 - idempotent `publishDraws`;
 - checkpoint round-trip;
-- `transient-faults`.
+- `transient-faults` (reads) and `transient-write-faults` (a publish's first write meets a 429, its second a lost 503, a recovery on the same tracker makes exactly the writes a clean publish makes, and a record meets a 429).
+
+The kit fails an empty fixture list, and fails every case in `LEDGER_CASES` that no fixture exercises unless `skipCases` names it with a reason (then it is reported as skipped with the reason). `readVerdicts` must return its events in recorded order (normalization). For `transient-write-faults` the factory serves phase `publish-faults` on a fresh tracker and phase `publish-recover` on the tracker the faulted run left; a factory that does neither gets a reported skip.
 
 ### `pr-rla/http`
 
@@ -271,14 +287,22 @@ All records are canonical JSON: sorted keys, no insignificant whitespace, UTF-8,
 
 Its identity is the pair (`tsa`, `serial`), because serials are unique only per authority.
 
+### `pr-rla/draws/v1` (`audit/<window>/draws.json`, committed, not signed)
+
+Adds one optional field: `ledgerIndexSha256`, the SHA-256 of the canonical JSON (sorted keys, no whitespace) of the window's `ledger-index.json`, written by `sample` after the ledger has published. `draws.json` is committed with the index; its git history is the trail, and each checkpoint line (below) carries the same hash, so the authorities' time-stamp covers the draw → issue mapping.
+
+`verify` check 7 compares it, even offline: the file missing or changed since `sample` is a FAIL; a `draws.json` without the field (sampled by an earlier pr-rla) is a WARN; every issued first-occurrence draw must have an issue for the change `draws.json` draws, and every repeat must say which draw it repeats. An index without an `issues` list (an external ledger's own shape) gets the hash check only. An index with `foreignIssues: true` (hand-built around recorded public timelines) WARNs.
+
 ### `pr-rla/ledger-checkpoint/v1`
 
 One JSON line per checkpoint in `audit/<window>/ledger-checkpoints.jsonl`:
 
-`{ schema, window, ledger: PluginIdentity, eventsSha256, count, perDrawFirstVerdict, takenAt, timestamps }`
+`{ schema, window, ledger: PluginIdentity, eventsSha256, count, perDrawFirstVerdict, takenAt, prevLineSha256?, ledgerIndexSha256?, timestamps }`
 
 - **Identity:** the pair (`takenAt`, `eventsSha256`). Two checkpoints of an unchanged history share `eventsSha256` but differ in `takenAt`.
-- **Reading:** lines with an identical pair are de-duplicated.
+- **Chain:** `prevLineSha256` is the SHA-256 of the text of the line before this one in the file (without its line break), `null` for the first. It is part of the record the authorities time-stamp. Reading checks that a line naming a previous line names one that is earlier in the file: a deleted or edited line breaks the next line's link, and `verify` FAILs it. Lines written before the field existed carry none, stay readable, and are reported as unchained. Lines of two clones joined by the transport each link to the line their clone had before. Deleting only the newest line (and its history file) breaks no link: that is what the coverage rule below is for.
+- **Coverage (check 7, issue ledgers):** a WARN unless some checkpoint with time-stamp tokens has `takenAt` at or after the last counted verdict's time; a line with no tokens WARNs on its own.
+- **Reading:** lines with an identical pair are one checkpoint, and the copy with the most tokens is kept, so a weaker copy never shadows a stronger one; two such lines that disagree about anything but their tokens and link are a FAIL.
 - **Stored alongside:** the canonical event list, in `audit/<window>/ledger-history/<takenAt>.json`.
 
 ### `pr-rla/lock/v1` (`pr-rla.lock.json`, committed, not signed)
@@ -303,7 +327,7 @@ It runs outside the broker, because git speaks its own protocols and authenticat
 2. Up to 3 attempts:
    1. `git fetch <remote> <branch>`.
    2. `git rebase <remote>/<branch>`. This replays every unpushed local commit, including `git-file` verdict commits, onto the remote tip. Nothing is reset or discarded.
-   3. If the rebase conflicts only in `ledger-checkpoints.jsonl` or `ledger-history/`, resolve by union: the remote lines plus ours, de-duplicated by (`takenAt`, `eventsSha256`). Then continue.
+   3. If the rebase conflicts only in `ledger-checkpoints.jsonl` or `ledger-history/`, resolve by union: the remote lines plus ours, de-duplicated by the whole line (two copies of one checkpoint with different tokens both stay; reading keeps the stronger). Then continue.
    4. Any other conflict: `git rebase --abort`, leave the branch exactly as it was before the attempt, and exit 4 with the reason.
    5. `git push <remote> HEAD:<branch>`. On a non-fast-forward rejection, go round again.
 3. Never `--force`. After 3 rejected pushes, exit 4 with the exact command to re-run.

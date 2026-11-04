@@ -15,7 +15,21 @@ export const PROJECT_BOT_EMAIL = "project_42_bot_0a1b2c@noreply.gitlab.example.c
 /** The fake's stable numeric user id for a login (REST `id`, and the number in the GraphQL gid). */
 export const glUserId = (login: string) => 100 + [...login].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1_000_000, 7);
 
-export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
+export interface FakeGitLabOptions {
+  pageSize?: number;
+  /** Leave GitLab's note tags (systemNoteMetadata) off, as an older instance does: notes are then read by their English text. */
+  untagged?: boolean;
+  /** Write system-note bodies in another language (the @references of a reset stay), as an instance set to French would. */
+  french?: boolean;
+  /** MR iid -> number of extra approvers/reviewers beyond the 100 GraphQL returns at a time. */
+  extraUsers?: Record<number, number>;
+  /** MR iids whose REST diffs include a file GitLab excluded (`too_large`). */
+  tooLarge?: number[];
+  /** The reset note names nobody (the @references are missing). */
+  anonymousReset?: boolean;
+}
+
+export function fakeGitLab(sc: ScmScenario, opts: FakeGitLabOptions = {}) {
   let served = 0;
   const ps = opts.pageSize ?? 3;
   const pid = 42;
@@ -48,10 +62,14 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
       comment: [false, "Looks fine."],
       reset_by_push: [true, "reset approvals from @carol by pushing to the branch"],
     };
+    const action: Record<string, string | null> = { approve: "approved", unapprove: "unapproved", request_changes: "requested_changes", comment: null, reset_by_push: "approvals_reset" };
+    const french: Record<string, string> = { approve: "a approuvé cette demande de fusion", unapprove: "a retiré son approbation", request_changes: "a demandé des modifications", reset_by_push: "approbations réinitialisées pour @carol par une poussée sur la branche" };
+    const text = (kind: string) => (opts.anonymousReset && kind === "reset_by_push" ? "reset approvals by pushing to the branch" : opts.french && french[kind] ? french[kind]! : body[kind]![1]);
+    const tag = (a: string | null) => (opts.untagged ? {} : { systemNoteMetadata: a ? { action: a } : null });
     return [
-      { system: true, body: "requested review from @carol", createdAt: p.createdAt, author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
-      { system: false, body: "Ready for review.", createdAt: p.createdAt, author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
-      ...p.events.map((e) => ({ system: body[e.kind]![0], body: body[e.kind]![1], createdAt: e.at, author: { id: gid(e.user.login), username: e.user.login, bot: e.user.bot } })),
+      { system: true, body: "requested review from @carol", createdAt: p.createdAt, ...tag("reviewer"), author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
+      { system: false, body: "Ready for review.", createdAt: p.createdAt, ...tag(null), author: { id: gid(p.author.login), username: p.author.login, bot: p.author.bot } },
+      ...p.events.map((e) => ({ system: body[e.kind]![0], body: text(e.kind), createdAt: e.at, ...tag(body[e.kind]![0] ? action[e.kind]! : null), author: { id: gid(e.user.login), username: e.user.login, bot: e.user.bot } })),
     ];
   };
   const standing = (p: ScPr) => {
@@ -100,6 +118,19 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
         const start = after ? Number(after) : 0;
         return { pageInfo: { hasNextPage: start + 100 < all.length, endCursor: String(start + 100) }, nodes: all.slice(start, start + 100) };
       };
+      const extra = (iid: number) => Array.from({ length: opts.extraUsers?.[iid] ?? 0 }, (_, i) => ({ id: `gid://gitlab/User/${900000 + i}`, username: `bulk${i}`, bot: i % 50 === 0 }));
+      const usersPage = (base: unknown[], iid: number, after: string | null) => {
+        const all = [...base, ...extra(iid)];
+        const start = after ? Number(after) : 0;
+        return { pageInfo: { hasNextPage: start + 100 < all.length, endCursor: String(start + 100) }, nodes: all.slice(start, start + 100) };
+      };
+      if (query.includes("approvedBy(first: 100, after: $after)") || query.includes("reviewers(first: 100, after: $after)")) {
+        const p = pr(String(variables.iid));
+        const field = query.includes("approvedBy(first: 100, after") ? "approvedBy" : "reviewers";
+        const g = (u: ScUser | null) => (u ? { id: gid(u.login), username: u.login, bot: u.bot } : null);
+        const base = field === "approvedBy" ? standing(p).map((s) => g(s.user)) : reviewerStates(p).map((r) => ({ id: gid(r.user!.username), username: r.user!.username, bot: false }));
+        return json({ data: { project: { mergeRequest: { [field]: usersPage(base, p.number, String(variables.after)) } } } });
+      }
       if (query.includes("mergeRequests(iids")) {
         const nodes = (variables.iids as string[]).map((iid) => {
           const p = pr(iid);
@@ -109,8 +140,8 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
             diffStatsSummary: p.number === 5 ? null : { additions: p.additions, deletions: p.deletions },
             author: g(p.author),
             mergeUser: g(p.mergedBy),
-            approvedBy: { nodes: standing(p).map((s) => g(s.user)) },
-            reviewers: { nodes: reviewerStates(p).map((r) => ({ id: gid(r.user!.username), username: r.user!.username, bot: sc.prs.flatMap((x) => x.events).find((e) => e.user.login === r.user!.username)?.user.bot ?? false })) },
+            approvedBy: usersPage(standing(p).map((s) => g(s.user)), p.number, null),
+            reviewers: usersPage(reviewerStates(p).map((r) => ({ id: gid(r.user!.username), username: r.user!.username, bot: sc.prs.flatMap((x) => x.events).find((e) => e.user.login === r.user!.username)?.user.bot ?? false })), p.number, null),
             notes: notesPage(p, null),
           };
         });
@@ -132,7 +163,7 @@ export function fakeGitLab(sc: ScmScenario, opts: { pageSize?: number } = {}) {
     if ((m = new RegExp(`^${base}/merge_requests/(\\d+)/commits$`).exec(path))) return page(url, [...mrCommits(pr(m[1]!))].reverse().map((oid) => ({ id: oid })), 2);
     if ((m = new RegExp(`^${base}/merge_requests/(\\d+)/diffs$`).exec(path))) {
       const p = pr(m[1]!);
-      return page(url, Array.from({ length: p.additions }, () => ({ diff: "@@ -1 +1 @@\n-old\n+new\n" })));
+      return page(url, [...Array.from({ length: p.additions }, () => ({ diff: "@@ -1 +1 @@\n-old\n+new\n" })), ...(opts.tooLarge?.includes(p.number) ? [{ diff: "", too_large: true, collapsed: false }] : [])]);
     }
     if (path === `${base}/repository/branches/${sc.defaultBranch}`) return json({ name: sc.defaultBranch, commit: { id: sc.head } });
     if (path === `${base}/repository/commits`) {

@@ -64,6 +64,7 @@ Each `ChangeRecord` (validated by `assertChangeRecord`):
 | definition `reviewGranularity` | `"submission"` (one review object per submitted review: GitHub, Gitea) or `"first-comment-per-user"` (one `COMMENTED` per non-author user, at their first comment: GitLab, Bitbucket). Recorded in the manifest; absent means `"submission"` |
 | definition `populationOptions` | the option keys that change the population, e.g. `["base_url", "bots"]`. The registration hashes them; a verifier with other values FAILs check 5 |
 | definition `reportsLandedVia` | `true` if you set `landedVia`; otherwise `register` warns that `exclude` has no effect |
+| `ChangeRecord.changedLinesUnknown` | `true` when the SCM truncated the diff and gave no stat to count instead, so `changedLines` is only a lower bound. Never report an undercount: a `max_changed_lines` stratum keeps such a change, and the funnel says how many there were. GitLab (`too_large`, `collapsed`) and Bitbucket Data Center (`truncated`) set it |
 
 These three definition fields are data. When the provider runs isolated (section 7), pr-rla reads them from the plugin host's `describe` message, never by importing the plugin in its own process.
 
@@ -123,6 +124,8 @@ await assertProviderConformance(
   }],
 );
 ```
+
+**What the kit now requires (added after the master review).** A kit given no fixtures fails: it checked nothing. A check whose expectation the fixture does not declare is reported as skipped, not ok: `classification` needs `pullRequests` or `directPushes`, `merge-strategies` needs `prCommits` or `mergeShas`, `review-state-mapping` needs `reviewStates` or `reviewers`, `actors` needs `actors` or `changedLines`, `pagination` needs `ids` or `minPages`. `window-and-kinds` asserts completeness, so the fixture must state what the window holds: `expect.ids`, or `pullRequests` and `directPushes` together; with neither the check fails and says so. `providerApiVersion` stays 1.
 
 It checks: `api-version`, `normalization`, `window-and-kinds`, `classification`, `merge-strategies`, `no-double-counting`, `stable-sorted-ids` (two runs, identical records), `review-state-mapping`, `actors`, `bot-detection`, `pagination`, `kind-filtering`, `transient-faults`, and four checks for the optional fields: `pinned-head`, `actor-ids`, `review-granularity` and `revoked-approval` (below). `transient-faults` re-runs the fixture with:
 - a 503 on the first request;
@@ -188,3 +191,14 @@ So treat a provider like any code you run with your credentials, and like part o
 - **Review it** before registering an audit, and hand the auditor the provider version with the registration.
 - **Give it the narrowest token:** a read-only token for one repository. pr-rla never needs write access to the SCM.
 - **Know what is recorded.** Registrations and manifests record the provider's name, source, version, the lock's `treeSha256` over its files, an options hash and its trust. `verify` warns when the provider it loads differs from the registered one.
+
+## 8. Writing a ledger: what the ledger kit requires
+
+A ledger (`pr-rla/ledger`, `defineLedger()`) records and reads reviewers' verdicts. This is the only ledger guide; the full contract is `docs/design/phase-3-4/contracts.md` §1. Test it with `runLedgerConformance(factory, fixtures, { skipCases? })` from `pr-rla/testing` (`ledgerApiVersion` stays 1). The kit is strict about what it checks:
+
+- **Fixtures.** An empty list fails. Every case in `LEDGER_CASES` needs a fixture, or a reason in `skipCases` (`{ pagination: "the recording fits one page" }`): a skipped case is reported with its reason, a missing one fails. Mark each fixture `recorded` (read-only from a public tracker) or `synthetic`.
+- **Order.** `readVerdicts` returns events in recorded order: tracker time, then event id. Use `compareEventIds` / `compareByTimeThenId` from `pr-rla/ledger`: ids compare as integers (a lexical order counts the wrong one of two same-second verdicts), and colon-separated ids (Jira's `<history id>:<item>:<action>`) part by part. The kit counts the first eligible event by the same order and fails a ledger that returns another.
+- **Ineligible events are returned and reported.** An event by an app, a bot or an unlisted account must come back from `readVerdicts`, so the core ignores it with a reason, and the ledger's own `verifyIntegrity` report must name it (open the ledger with `LedgerContext.reviewers`; `analyzeDrawHistory` does both). The kit asks the core's own classification (`classifyVerdicts`) whether the event is ignored.
+- **Verdict before the seed.** `recordedAt` must be the tracker's own time. The kit asks whether the core would count the verdict and `recordedBeforeSeed` would refuse it.
+- **The index is a hint.** A ledger that keeps a draw → issue index (`LedgerContext.index`) must, on read, check that the tracker returns the issue the index names (its id and number) and that the issue says it is the draw's; `sample` binds the index file to `draws.json`, and `verify` compares the hash.
+- **Writes under faults (`transient-write-faults`).** Your write path meets a 429 with `Retry-After` on a publish's first write (wait, then repeat that write), then a 503 on its second write that arrives after the write happened (the fetch broker never repeats a write after a 5xx: your publish must find what exists, by a marker, and not write it again), then a clean publish on the same tracker must make exactly the writes a clean first publish makes, and a `record` that meets a 429 must wait. Your factory serves phase `publish-faults` on a fresh tracker and phase `publish-recover` on the tracker the faulted run left (with the ledger's local state); a factory that serves neither gets the check reported as skipped.

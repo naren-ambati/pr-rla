@@ -22,6 +22,7 @@ import {
 import { logPublicKey } from "./translog.js";
 import { notTamperProof, timestampsLine } from "../timestamp/verify.js";
 import { readCheckpoints } from "../api/checkpoint.js";
+import { readIndexDocument } from "../ledgers/issue-index.js";
 import { PR_RLA_VERSION } from "../version.js";
 
 export interface VerifyOptions {
@@ -49,13 +50,13 @@ export async function runVerify(ctx: CommandContext, opts: VerifyOptions): Promi
   // An external ledger's hosts are its locked ones: it is not imported here.
   const lt = await ledgerTraits(config.ledger, config.dir, auditContextFor(ctx).plugins);
   const skipLedger = !!opts.offline && lt.hosts.length > 0;
-  const { checkpoints, problems } = readCheckpoints(paths.windowDir);
+  const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
   const provider = opts.offline ? null : await providerFor(ctx, config);
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
   const report = await verifyAudit(
-    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems },
+    { registration, manifest, commitment, draws, currentProtocolSha256: currentProtocol, checkpoints, checkpointProblems: problems, checkpointsUnchained: unchained, ledgerIndex: readIndexDocument(paths.windowDir) },
     {
       provider,
       ledger,

@@ -258,7 +258,7 @@ export class BitbucketCloudProvider implements ScmProvider {
    */
   async history(base: string, branch: string, opens: number, signal?: AbortSignal, head?: string): Promise<{ head: string; commits: BbCommit[] }> {
     const tip = head ?? (await this.http.get<{ target: { hash: string } }>(`${base}/refs/branches/${encodeURIComponent(branch)}?fields=target.hash`, signal)).data.target.hash;
-    const commits = await this.paged<BbCommit>(`${base}/commits/${tip}?pagelen=100&fields=${COMMIT_FIELDS}`, signal, (page) => page.some((c) => Date.parse(c.date) >= opens));
+    const commits = await this.paged<BbCommit>(`${base}/commits/${encodeURIComponent(tip)}?pagelen=100&fields=${COMMIT_FIELDS}`, signal, (page) => page.some((c) => Date.parse(c.date) >= opens));
     return { head: tip.toLowerCase(), commits };
   }
 }

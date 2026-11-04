@@ -72,6 +72,8 @@ export class FakeGitHubIssues extends FakeClock {
   writer: FakeUser = { login: "reviewer-a", id: 501, type: "User" };
   /** The next POST /issues is created but answered with this status (a lost response). */
   loseNextCreate: number | null = null;
+  /** The token cannot see the repo: GitHub answers 404 to everything under it, as it does for a private repo. */
+  unauthorized = false;
   pageSize = 100;
   private nextIssue = 1;
   private nextLabelId = 9_000_001;
@@ -191,6 +193,8 @@ export class FakeGitHubIssues extends FakeClock {
   handle(url: URL, method: string, body: unknown): Response {
     this.requests.push({ method, url: url.href, body });
     const base = new URL(this.repoUrl).pathname;
+    if (this.unauthorized) return json(404, { message: "Not Found" });
+    if (url.pathname === base && method === "GET") return json(200, { full_name: this.repo });
     if (!url.pathname.startsWith(`${base}/`)) return json(404, { message: "Not Found" });
     const path = url.pathname.slice(base.length);
     let m: RegExpExecArray | null;
@@ -266,6 +270,8 @@ export class FakeGitLabIssues extends FakeClock {
   readonly issues = new Map<number, GlIssueState>();
   readonly requests: Req[] = [];
   writer = { id: 801, username: "reviewer-a" };
+  /** The token cannot see the project: GitLab answers 404 to everything under it. */
+  unauthorized = false;
   pageSize = 100;
   private nextIid = 1;
   private nextId = 4_000_001;
@@ -375,6 +381,8 @@ export class FakeGitLabIssues extends FakeClock {
   handle(url: URL, method: string, body: unknown): Response {
     this.requests.push({ method, url: url.href, body });
     const base = new URL(this.projectUrl).pathname;
+    if (this.unauthorized) return json(404, { message: "404 Project Not Found" });
+    if (url.pathname === base && method === "GET") return json(200, { path_with_namespace: this.project });
     if (!url.pathname.startsWith(`${base}/`)) return json(404, { message: "404 Project Not Found" });
     const path = url.pathname.slice(base.length);
     let m: RegExpExecArray | null;

@@ -31,6 +31,14 @@ export interface LedgerCheckpointRecord {
   count: number;
   perDrawFirstVerdict: CheckpointFirstVerdict[];
   takenAt: string;
+  /**
+   * Added after v1's first lines (optional, same schema): SHA-256 of the text of the line before this
+   * one in `ledger-checkpoints.jsonl` (null for the first), so a deleted or edited line breaks the
+   * chain `verify` walks. Lines written before it have no such field and stay readable.
+   */
+  prevLineSha256?: string | null;
+  /** Added likewise: `ledgerIndexSha256` of the window's ledger index when the checkpoint was taken, so the time-stamp covers the draw → issue mapping. */
+  ledgerIndexSha256?: string;
 }
 
 export interface LedgerCheckpointLine extends LedgerCheckpointRecord {
@@ -76,14 +84,29 @@ export function firstVerdictsForCheckpoint(firstVerdicts: readonly VerdictEvent[
 
 const identity = (l: Pick<LedgerCheckpointRecord, "takenAt" | "eventsSha256">) => `${l.takenAt}|${l.eventsSha256}`;
 
+/** The text of one stored line as its successor hashes it: without the line break (and a carriage return a Windows checkout may add). */
+export const lineText = (raw: string) => raw.replace(/\r$/, "");
+export const lineSha256 = (raw: string) => sha256Hex(lineText(raw));
+
+/** What the lines of one checkpoint agree on: everything but the tokens and the chain link, which differ between copies of the same checkpoint. */
+const agreement = (l: LedgerCheckpointLine) => canonicalJson({ ...checkpointRecord(l), prevLineSha256: undefined });
+
 /**
  * Reads `ledger-checkpoints.jsonl`. Lines with the same (takenAt, eventsSha256) are one checkpoint
- * (a line repeated by a cross-clone union reads once); a line that is not a checkpoint is a problem.
+ * (a line repeated by a cross-clone union reads once, and the copy with the most time-stamp tokens is
+ * the one kept, so a weaker copy never shadows a stronger one); a line that is not a checkpoint is a
+ * problem, and so are two lines of one checkpoint that disagree about anything but their tokens.
+ *
+ * The chain (`prevLineSha256`): a line that names a previous line must name one that appears
+ * earlier in the file. Deleting or editing a line in the middle breaks the next line's link;
+ * lines of two clones joined by the union each link to the line their clone had before. Lines
+ * without the field (written before it existed) are not checked.
  */
-export function parseCheckpointLines(text: string, where: string): { lines: LedgerCheckpointLine[]; problems: string[] } {
-  const lines: LedgerCheckpointLine[] = [];
+export function parseCheckpointLines(text: string, where: string): { lines: LedgerCheckpointLine[]; problems: string[]; unchained: number } {
+  const byIdentity = new Map<string, LedgerCheckpointLine>();
   const problems: string[] = [];
-  const seen = new Set<string>();
+  const earlier = new Set<string>();
+  let unchained = 0;
   text.split("\n").forEach((raw, i) => {
     if (!raw.trim()) return;
     let v: Partial<LedgerCheckpointLine>;
@@ -97,34 +120,47 @@ export function parseCheckpointLines(text: string, where: string): { lines: Ledg
       problems.push(`${where}:${i + 1}: not a pr-rla/ledger-checkpoint/v1 line`);
       return;
     }
+    if (v.prevLineSha256 !== undefined && v.prevLineSha256 !== null && !(typeof v.prevLineSha256 === "string" && /^[0-9a-f]{64}$/.test(v.prevLineSha256))) {
+      problems.push(`${where}:${i + 1}: prevLineSha256 is neither null nor 64 hex characters`);
+      return;
+    }
     const line = { ...v, timestamps: Array.isArray(v.timestamps) ? v.timestamps : [] } as LedgerCheckpointLine;
-    if (seen.has(identity(line))) return;
-    seen.add(identity(line));
-    lines.push(line);
+    if (line.prevLineSha256 === undefined) unchained++;
+    else if (line.prevLineSha256 !== null && !earlier.has(line.prevLineSha256))
+      problems.push(`${where}:${i + 1}: the chain is broken: this line follows a line (${line.prevLineSha256.slice(0, 12)}…) that is not earlier in the file; a checkpoint line was deleted or edited`);
+    earlier.add(lineSha256(raw));
+    const key = identity(line);
+    const prior = byIdentity.get(key);
+    if (!prior) byIdentity.set(key, line);
+    else {
+      if (agreement(prior) !== agreement(line)) problems.push(`${where}:${i + 1}: two lines for checkpoint ${line.takenAt} (${line.eventsSha256.slice(0, 12)}…) disagree about more than their time-stamp tokens`);
+      if (line.timestamps.length > prior.timestamps.length) byIdentity.set(key, line);
+    }
   });
-  return { lines, problems };
+  return { lines: [...byIdentity.values()], problems, unchained };
+}
+
+/** The hash a new line must carry as `prevLineSha256`: of the file's last line, null for an empty file. */
+export function chainTip(text: string): string | null {
+  const last = text.split("\n").filter((l) => l.trim()).at(-1);
+  return last === undefined ? null : lineSha256(last);
 }
 
 /**
  * The union of two versions of `ledger-checkpoints.jsonl` (the git transport's only conflict
  * resolution, contracts.md §6): every line of `theirs` (the remote) in order, then each line of
- * `ours` whose identity is new. Unparseable lines are kept verbatim, once.
+ * `ours` that is not already there. Lines are the same only if their whole text is: two copies of one
+ * checkpoint with different tokens both stay, and reading keeps the stronger. Unparseable lines are kept verbatim, once.
  */
 export function unionCheckpointLines(theirs: string, ours: string): string {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of [...theirs.split("\n"), ...ours.split("\n")]) {
     if (!raw.trim()) continue;
-    let key = `raw|${raw}`;
-    try {
-      const v = JSON.parse(raw) as Partial<LedgerCheckpointLine>;
-      if (typeof v.takenAt === "string" && typeof v.eventsSha256 === "string") key = identity(v as LedgerCheckpointLine);
-    } catch {
-      /* kept verbatim */
-    }
+    const key = lineText(raw);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(raw);
+    out.push(lineText(raw));
   }
   return out.length ? `${out.join("\n")}\n` : "";
 }

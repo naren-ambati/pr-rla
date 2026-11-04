@@ -37,7 +37,7 @@ export const BITBUCKET_DC_LIMITATIONS = [
   "direct_push: Bitbucket's commit API does not expose the pusher; `author` is the commit author (commit author != pusher) and mergedBy is null.",
   "direct_push: the window is applied to the committer timestamp, not the push time.",
   "direct_push: every commit reachable from the default branch, dated in the window, that no merged PR into that branch brought in (its merge commit, its listed commits, or a rebased copy with the same author, author time and message).",
-  "pull_request: changedLines count the ADDED and REMOVED lines of the PR diff; Bitbucket truncates very large diffs (counted as a diagnostic).",
+  "pull_request: changedLines count the ADDED and REMOVED lines of the PR diff (the REST API has no numeric diff stats). Bitbucket truncates very large diffs; such a change is marked changedLinesUnknown (size unknown) and counted in a diagnostic, never undercounted.",
   "pull_request: every merged PR into the default branch is listed (no date filter exists), then filtered by closedDate.",
   "bots: SERVICE users are bots; a bot running on a NORMAL account is counted as human.",
 ];
@@ -133,9 +133,9 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         const d = countDiff(diff);
         if (d.truncated) truncated++;
         const reviews = buildReviews({ author: p.author.user, activities: a, finals: [...(p.reviewers ?? []), ...(p.participants ?? [])], mergedAtMs });
-        changes.push(normalizePullRequest(req.repo, p, { mergeSha: sha, mergedAtMs, mergedBy: (merged?.user as DcUser | undefined) ?? null, reviews, changedLines: d.lines, webBase: web }));
+        changes.push({ ...normalizePullRequest(req.repo, p, { mergeSha: sha, mergedAtMs, mergedBy: (merged?.user as DcUser | undefined) ?? null, reviews, changedLines: d.lines, webBase: web }), ...(d.truncated ? { changedLinesUnknown: true as const } : {}) });
       }
-      diagnostics.push({ label: "PR diffs truncated by the server (changedLines undercounted)", value: truncated });
+      diagnostics.push({ label: "PR diffs truncated by the server (changedLinesUnknown: size unknown)", value: truncated });
     }
 
     // The pinned head (U3): verify passes the frozen head; freeze walks from the branch's latest commit.
@@ -149,7 +149,7 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         if (sha && !known.has(sha.toLowerCase())) known.set(sha.toLowerCase(), p.id);
       }
       // Newest first in git's date order, from the pinned head, until a whole page is older than the window.
-      const history = await this.paged<DcCommit>(`${path}/commits?until=${head}`, req.signal, (page) => page.some((c) => c.committerTimestamp >= opens));
+      const history = await this.paged<DcCommit>(`${path}/commits?until=${encodeURIComponent(head)}`, req.signal, (page) => page.some((c) => c.committerTimestamp >= opens));
       const seen = new Set<string>();
       const inWin = history.filter((c) => {
         if (seen.has(c.id) || c.committerTimestamp < opens || c.committerTimestamp >= closes) return false;
@@ -166,11 +166,15 @@ export class BitbucketDataCenterProvider implements ScmProvider {
         rebaseKey,
       });
       landedVia = landedViaMerges(new Map(history.map((c) => [c.id, c.parents.map((p) => p.id)])), res.pushes.map((c) => c.id));
+      let truncatedPushes = 0;
       for (const c of res.pushes) {
         const { data: diff } = await this.http.get<DcDiff>(`${path}/commits/${c.id}/diff?contextLines=0`, req.signal);
-        changes.push(normalizeDirectPush(req.repo, c, countDiff(diff).lines, web, landedVia.get(c.id)?.toLowerCase()));
+        const d = countDiff(diff);
+        if (d.truncated) truncatedPushes++;
+        changes.push({ ...normalizeDirectPush(req.repo, c, d.lines, web, landedVia.get(c.id)?.toLowerCase()), ...(d.truncated ? { changedLinesUnknown: true as const } : {}) });
       }
       diagnostics.push(
+        ...(truncatedPushes ? [{ label: "direct-push diffs truncated by the server (changedLinesUnknown: size unknown)", value: truncatedPushes }] : []),
         { label: "default-branch commits in window", value: inWin.length },
         { label: "commits linked to a merged PR", value: res.linked },
         { label: "rebased commits linked by author, author time and message", value: res.byRebase },

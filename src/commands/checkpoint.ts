@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { relative } from "node:path";
-import { appendCheckpoint, buildCheckpoint } from "../api/checkpoint.js";
+import { appendCheckpoint, buildCheckpoint, checkpointChainTip } from "../api/checkpoint.js";
 import { requireReadWrite } from "../api/context.js";
 import type { LedgerCheckpointLine } from "../core/checkpoint.js";
 import { isRegistrationV2, type SignedRecord } from "../core/records.js";
@@ -8,6 +8,7 @@ import { computeStatus, type StatusReport } from "../core/status.js";
 import { EXIT } from "../cli/exit-codes.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import { checkPreconditions, commitAndPush, nodeGit, type GitRunner } from "../io/git-transport.js";
+import { readIndexDocument } from "../ledgers/issue-index.js";
 import { pluginIdentity } from "../registry.js";
 import type { Ledger } from "../sdk/ledger.js";
 import { CommandError, auditContextFor, configFor, isoNow, ledgerFor, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
@@ -62,7 +63,7 @@ export async function checkpointCommand(ctx: CommandContext, opts: CheckpointOpt
   if (!ledger.readHistory) throw new CommandError(`ledger ${ledger.name} has no readHistory, so it cannot be checkpointed (git-file's tamper trail is git history itself)`, EXIT.FAIL);
   const status = await ledgerStatus(config, paths, ledger, reg);
   const takenAt = isoNow(ctx);
-  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins), window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt });
+  const { record, events } = await buildCheckpoint(auditContextFor(ctx), { ledger, identity: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins), window: config.window.name, firstVerdicts: status?.firstVerdicts ?? [], takenAt, prevLineSha256: checkpointChainTip(paths.windowDir), ledgerIndexSha256: readIndexDocument(paths.windowDir)?.sha256 ?? null });
   const bundle = trustFor(ctx, opts.tsaTrust);
   const timestamping = isRegistrationV2(reg) ? reg.record.timestamping : timestampingFor(config, bundle);
   // Skew over 10 minutes refuses here, before anything is written (FR1.8).

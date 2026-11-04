@@ -3,7 +3,7 @@
  "source": "recorded",
  "tracker": "github",
  "case": "deletion",
- "recordedAt": "2026-11-04T00:23:32.000Z",
+ "recordedAt": "2026-11-04T03:40:02.000Z",
  "options": {
   "repo": "microsoft/vscode",
   "labels": {
@@ -42,7 +42,8 @@
     "createdAt": "2026-11-02T19:45:30Z"
    }
   ],
-  "repeats": []
+  "repeats": [],
+  "foreignIssues": true
  },
  "observed": {
   "verdicts": [],
@@ -59,6 +60,7 @@
  "exchanges": [
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/bug","bodySha256":null,"status":200,"headers":{},"response":{"id":256129993,"node_id":"MDU6TGFiZWwyNTYxMjk5OTM=","name":"bug"}},
 {"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/labels/feature-request","bodySha256":null,"status":200,"headers":{},"response":{"id":272689392,"node_id":"MDU6TGFiZWwyNzI2ODkzOTI=","name":"feature-request"}},
-{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345635","bodySha256":null,"status":404,"headers":{},"response":{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/issues#get-an-issue","status":"404"}}
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode/issues/345635","bodySha256":null,"status":404,"headers":{},"response":{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/issues#get-an-issue","status":"404"}},
+{"method":"GET","url":"https://api.github.com/repos/microsoft/vscode","bodySha256":null,"status":200,"headers":{},"response":{"id":41881900,"full_name":"microsoft/vscode"}}
  ]
 }

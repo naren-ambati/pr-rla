@@ -13,5 +13,5 @@ test("the ledger kit: recorded hibernate.atlassian.net changelogs and a syntheti
   assert.equal(report.ok, true, formatLedgerConformanceReport(report));
   assert.equal(fixtures.filter((f) => f.source === "recorded").length, 2);
   const ran = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
-  for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults"]) assert.ok(ran.has(c), `check ${c} ran`);
+  for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults", "transient-write-faults"]) assert.ok(ran.has(c), `check ${c} ran`);
 });

@@ -1,5 +1,6 @@
-import { provenanceRank, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
+import { provenanceRank, recordedBeforeSeed, type Ledger, type ProvenanceLevel } from "../sdk/ledger.js";
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
+import { checkpointCoverage, indexBindingFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
 import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
@@ -54,8 +55,12 @@ export interface VerifyArtifacts {
   currentProtocolSha256: string | null;
   /** Ledger checkpoints committed in the audit repo (de-duplicated), with their stored event lists. */
   checkpoints?: CheckpointArtifact[];
-  /** Lines of ledger-checkpoints.jsonl that are not checkpoints (check 7 FAILs: the file is append-only). */
+  /** Lines of ledger-checkpoints.jsonl that are not checkpoints, or break its hash chain (check 7 FAILs: the file is append-only). */
   checkpointProblems?: string[];
+  /** Checkpoint lines with no `prevLineSha256` (written before the chain); shown, not judged. */
+  checkpointsUnchained?: number;
+  /** The window's ledger-index.json (null when there is none): check 7 compares its hash with the one draws.json bound. */
+  ledgerIndex?: LedgerIndexDocument | null;
 }
 
 export interface VerifyDeps {
@@ -91,6 +96,14 @@ export interface VerifyReport {
 }
 
 const n = (x: number) => x.toLocaleString("en-US");
+
+/** Adds anchor findings (ledger index binding, checkpoint coverage) to a check: FAIL beats WARN beats whatever it was. */
+function addAnchor(c: VerifyCheck, f: { fails: string[]; warns: string[]; notes: string[] }): boolean {
+  c.details.push(...f.fails.map((d) => `FAIL ${d}`), ...f.warns.map((d) => `WARN ${d}`), ...f.notes);
+  if (f.fails.length) c.status = "FAIL";
+  else if (f.warns.length && c.status === "PASS") c.status = "WARN";
+  return f.fails.length > 0;
+}
 
 /**
  * Checks a record's transparency-log entry. v1 records: the entry is the time evidence.
@@ -362,6 +375,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
+    // The index file is local: its hash is checked even when the tracker is not read.
+    if (a.draws && a.ledgerIndex !== undefined) {
+      if (addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex))) c7.summary = "labels FAIL";
+    }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
     const ledger = deps.ledger;
@@ -374,6 +391,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         return null;
       }
     };
+    let lastCountedAt: string | null = null;
     const verdicts = await attempt("readVerdicts", () => ledger.readVerdicts());
     const regVerdicts = isRegistrationV2(reg) ? reg.record.verdicts : null;
     const minProvenance: ProvenanceLevel = regVerdicts?.minProvenance ?? "self-asserted";
@@ -390,9 +408,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       });
       const countedIds = new Set(recomputed.slice(0, status.sequence.draws).map((d) => d.changeId));
       const firstFor = new Map(status.firstVerdicts.map((v) => [v.changeId, v]));
+      lastCountedAt = [...countedIds].map((id) => firstFor.get(id)?.recordedAt).filter((t): t is string => !!t).sort((x, y) => Date.parse(x) - Date.parse(y)).at(-1) ?? null;
       for (const id of countedIds) {
         const v = firstFor.get(id);
-        if (v && Date.parse(v.recordedAt) / 1000 < derived.publishesAt) {
+        if (v && recordedBeforeSeed(v.recordedAt, derived.publishesAt)) {
           c7.status = "FAIL";
           c7.details.push(`verdict on draw #${v.draw} (${id}) recorded ${v.recordedAt}, before the seed was public`);
         }
@@ -442,6 +461,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         }
       }
     }
+    if (a.ledgerIndex !== undefined) addAnchor(c7, indexBindingFindings(a.draws, a.ledgerIndex));
+    addAnchor(c7, checkpointCoverage(checkpoints, { checkpointable: !!ledger.readHistory, lastCountedAt, ledgerIndexSha256: a.ledgerIndex?.sha256 ?? null, unchained: a.checkpointsUnchained ?? 0 }));
     c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
   }
   checks.push(c7);

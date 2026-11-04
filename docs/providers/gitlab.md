@@ -48,13 +48,14 @@ Change ids are `gitlab:<path>#<iid>` for an MR and `gitlab:<path>@<sha>` for a d
 
 ## Reviews and approvals
 
-Review events come from the MR's system notes (GraphQL `notes`), then are reconciled with `GET …/approvals` (`approved_by`, with `approved_at`) and `GET …/reviewers` (reviewer state):
+Review events come from the MR's system notes (GraphQL `notes`), read by GitLab's own tag for each note (`systemNoteMetadata.action`: `approved`, `unapproved`, `requested_changes`, `reviewed`, `approvals_reset`; verified in GitLab's source and GraphQL reference on 2026-11-04), which does not change with the instance's language. A note with no tag (an older instance) is read by its English text, as the table shows. An `approvals_reset` note still learns WHOSE approvals it reset from the `@user` references in its body; GitLab exposes no structured list of them, so a tagged reset that names nobody is counted in a diagnostic ("approval-reset notes that name no approver") rather than applied. Then they are reconciled with `GET …/approvals` (`approved_by`, with `approved_at`) and `GET …/reviewers` (reviewer state):
 
 | GitLab | pr-rla `state` |
 |---|---|
 | system note "approved this merge request" | `APPROVED` |
 | system note "requested changes" (reviewer state `requested_changes`, GitLab 17+) | `CHANGES_REQUESTED` |
 | "unapproved this merge request", or "reset approvals from @user by pushing to the branch" | that user's last approval becomes `DISMISSED` (it no longer stood at merge) |
+| a note GitLab tagged `approvals_reset`, naming `@user` (any language) | the same: that user's last approval becomes `DISMISSED` |
 | a non-system note by anyone but the MR author | one `COMMENTED` per user, at their first note |
 | an `approved_by` entry with no note | `APPROVED` at `approved_at` |
 | reviewer state `requested_changes` / `reviewed` with no note | `CHANGES_REQUESTED` / `COMMENTED`, dated at the review request (`created_at`), because GitLab exposes no review time |
@@ -88,3 +89,9 @@ Every request retries network errors, HTTP 5xx, 429 and truncated bodies with ex
 - **Service accounts on regular users.** Accounts GitLab reports as `bot: false` are human. On gitlab.com, `gitlab-bot` (triage automation) approves MRs, and `gitlab-dependency-update-bot` authored 33 of gitlab-org/cli's 205 October MRs. On gitlab.freedesktop.org, `marge-bot` merges almost every xorg/xserver MR. If `gitlab-bot` were a bot, 4 of the 205 October MRs would have had no human approval or change request instead of 0. Registering it does exactly that: with `selector.bots: ["gitlab-bot"]` (or `["id:1786152"]`), !4191, !4247, !4251 and !4253 move into the no-human-review stratum (recorded in `test/fixtures/gitlab/gitlab-org-cli-2026-10.json`; `node scripts/demo-sdk-carry-overs.mjs`).
 - **Review times without notes.** A reviewer state with no matching system note is dated at the review request.
 - **`since`/`until` are git's.** GitLab filters history like `git log --since`, by committer date. A rebased commit carries its rebase time.
+
+## Caps and size
+
+- `approvedBy` and `reviewers` are read 100 at a time and paged to the end, so no approver or reviewer is missing its bot flag.
+- `changedLines` is GraphQL `diffStatsSummary` (GitLab's own stat). Only when GraphQL has none are the REST `merge_requests/:iid/diffs` counted, and a file diff GitLab excluded (`too_large`: cannot be retrieved; `collapsed`: left out unless asked for) makes the MR's size unknown: the record carries `changedLinesUnknown: true`, a `max_changed_lines` stratum keeps it, and a diagnostic counts it.
+- The recorded fixtures keep their original responses; their GraphQL request hashes were updated to the current query (BUILD-NOTES, "Ledger, selector and provider fix round").

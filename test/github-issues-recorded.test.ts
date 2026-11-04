@@ -9,7 +9,7 @@ import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
 
 /**
  * github-issues on recorded public timelines (FR4.7: every fixture here is `source: "recorded"`,
- * read-only, 2026-11-03, by scripts/record-ledger-fixtures.mjs). The timelines are mapped to
+ * read-only, 2026-11-03, re-recorded 2026-11-04 after the repo probe was added, by scripts/record-ledger-fixtures.mjs). The timelines are mapped to
  * verdict labels through the ledger's `labels` option, so a real reviewer's remove-and-re-add,
  * a GitHub App's label, a deleted issue and two label renames each meet the rules.
  */
@@ -51,8 +51,20 @@ describe("github-issues on recorded public timelines", () => {
       const windowDir = mkdtempSync(join(tmpdir(), "prrla-rec-"));
       writeFileSync(join(windowDir, "ledger-index.json"), JSON.stringify(r.index));
       return githubIssues.create(r.options, h.context({ fetch: replayFetch(r), windowDir }));
-    }, fixtures);
+    }, fixtures, {
+      // Public timelines show what people happened to do; the cases below need a tracker the test controls (github-issues-ledger.test.ts has them).
+      skipCases: {
+        "relabel-opposite": "no public timeline with a verdict label swapped for the other was recorded",
+        removal: "no public timeline with a counted verdict label removed was recorded",
+        "unlisted-reviewer": "a public timeline has no registered-reviewer list",
+        "verdict-before-seed": "a public timeline has no audit seed",
+        pagination: "the recorded timelines fit in one page",
+        "idempotent-publish": "publishing writes, and recordings are read-only",
+        "checkpoint-round-trip": "an admin erasing history cannot be recorded from a public tracker",
+      },
+    });
     expect(report.ok, formatLedgerConformanceReport(report)).toBe(true);
+    expect(report.results.filter((r) => r.skipped && r.fixture === "(case coverage)")).toHaveLength(7);
   });
 
   it("gives today what the recorder observed live (the recording is the live answer, replayed)", async () => {

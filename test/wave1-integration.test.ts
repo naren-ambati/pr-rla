@@ -212,7 +212,7 @@ describe("external ledgers through the plugin host (U4 with U2b)", () => {
       expect(report.ok, formatLedgerConformanceReport(report)).toBe(true);
       expect(fixtures.filter((f) => f.source === "recorded")).toHaveLength(2);
       const ran = new Set(report.results.filter((r) => !r.skipped).map((r) => r.check));
-      for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults"]) expect(ran.has(c), c).toBe(true);
+      for (const c of ["first-label", "relabel-same", "relabel-opposite", "removal", "deletion", "label-rename", "unlisted-reviewer", "app-applied", "verdict-before-seed", "pagination", "idempotent-publish", "checkpoint-round-trip", "transient-faults", "transient-write-faults"]) expect(ran.has(c), c).toBe(true);
       expect(hosts.length).toBeGreaterThan(fixtures.length);
     } finally {
       hosts.forEach((h) => h.close());

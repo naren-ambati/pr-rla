@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import githubIssues from "../src/ledgers/github-issues/index.js";
 import type { Ledger, LedgerHistoryEvent, VerdictEvent } from "../src/sdk/ledger.js";
-import { runLedgerConformance, type LedgerFixture } from "../src/testing/index.js";
+import { assertLedgerConformance, countedVerdicts, LEDGER_CASES, runLedgerConformance, type LedgerFixture } from "../src/testing/index.js";
 import { FakeGitHubIssues } from "./helpers/fake-issue-trackers.js";
 import { PUB, draw } from "./helpers/ledger-draws.js";
 
@@ -33,10 +33,26 @@ describe("the ledger kit fails ledgers that break the rules", () => {
   const first = ev(1, "pass", "alice", "2026-10-21T03:00:00Z", "e1");
   const later = ev(1, "fail", "bob", "2026-10-21T04:00:00Z", "e2");
 
-  it("first-label: a ledger that lets the latest label win (current labels, not history)", async () => {
-    const r = await result(() => memory({ verdicts: [later, first] }), base("last wins", "first-label", { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: first.recordedAt } }, integrity: "PASS" }), "first-label");
+  it("first-label: a ledger that returns the later label first is not in recorded order (the core counts the first it is given)", async () => {
+    const f = base("last wins", "first-label", { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: first.recordedAt } }, integrity: "PASS" });
+    const r = await result(() => memory({ verdicts: [later, first] }), f, "normalization");
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/readVerdicts is not in recorded order: draw #1's verdict \(2026-10-21T03:00:00Z, event e1\) comes after draw #1's \(2026-10-21T04:00:00Z, event e2\)/);
+    // The kit's own count is by time, then id, so the declared first verdict is judged against the right one.
+    expect(countedVerdicts([later, first]).get(1)).toBe(first);
+  });
+
+  it("first-label: a ledger whose first verdict is the wrong one still fails the count", async () => {
+    const r = await result(() => memory({ verdicts: [{ ...first, verdict: "fail" }] }), base("wrong", "first-label", { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: first.recordedAt } }, integrity: "PASS" }), "first-label");
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/draw #1: counted .*"fail".*expected .*"pass"/);
+  });
+
+  it("countedVerdicts orders same-second events by numeric id, as the core's ledgers do", () => {
+    const at = "2026-10-21T03:00:00Z";
+    const hundred = ev(1, "pass", "alice", at, "100");
+    const ninetyNine = ev(1, "fail", "alice", at, "99");
+    expect(countedVerdicts([hundred, ninetyNine]).get(1)).toBe(ninetyNine);
   });
 
   it("removal: a ledger that passes a verdict removed after it counted, and a fixture that declares it may", async () => {
@@ -56,15 +72,43 @@ describe("the ledger kit fails ledgers that break the rules", () => {
   it("app-applied and unlisted-reviewer: a ledger that drops ineligible events instead of returning them to be reported", async () => {
     const app = await result(() => memory({ verdicts: [] }), base("drops apps", "app-applied", { counted: { 1: null }, integrity: "PASS" }), "app-applied");
     expect(app.message).toMatch(/no verdict event applied by an app or bot account came back/);
-    const counted = await result(() => memory({ verdicts: [ev(1, "pass", "github-actions[bot]", "2026-10-21T03:00:00Z", "e9")] }), base("bot listed", "app-applied", { counted: { 1: null }, integrity: "PASS" }), "app-applied");
-    expect(counted.ok).toBe(true);
     const unlisted = await result(() => memory({ verdicts: [first] }), base("no unlisted", "unlisted-reviewer", { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: first.recordedAt } }, integrity: "PASS" }, { reviewers: ["alice"] }), "unlisted-reviewer");
     expect(unlisted.message).toMatch(/no verdict event by an unlisted account/);
+  });
+
+  it("app-applied and unlisted-reviewer exercise the ledger's own path: its report must name the event, and the core must ignore it", async () => {
+    const bot = ev(1, "pass", "github-actions[bot]", "2026-10-21T03:00:00Z", "e9");
+    const f = base("bot listed", "app-applied", { counted: { 1: null }, integrity: "PASS" });
+    const quiet = await result(() => memory({ verdicts: [bot] }), f, "app-applied");
+    expect(quiet.ok).toBe(false);
+    expect(quiet.message).toMatch(/the ledger's own integrity report does not mention the app-applied event/);
+    const told = await result(() => memory({ verdicts: [bot], findings: ["draw #1: pr-rla:pass applied by bot account github-actions[bot] (2026-10-21T03:00:00Z); not counted"] }), f, "app-applied");
+    expect(told.ok, told.message).toBe(true);
+    const intruder = ev(1, "pass", "intruder", "2026-10-21T03:00:00Z", "e8");
+    const u = base("unlisted", "unlisted-reviewer", { counted: { 1: { verdict: "fail", reviewer: "alice", recordedAt: later.recordedAt } }, integrity: "PASS" }, { reviewers: ["alice"] });
+    const silent = await result(() => memory({ verdicts: [intruder, { ...later, reviewer: "alice" }] }), u, "unlisted-reviewer");
+    expect(silent.message).toMatch(/the ledger's own integrity report does not mention the unlisted account/);
+    const loud = await result(() => memory({ verdicts: [intruder, { ...later, reviewer: "alice" }], findings: ["draw #1: pr-rla:pass intruder is not a registered reviewer (2026-10-21T03:00:00Z); not counted"] }), u, "unlisted-reviewer");
+    expect(loud.ok, loud.message).toBe(true);
   });
 
   it("verdict-before-seed: a ledger that stamps verdicts with the reading time, not the tracker's", async () => {
     const r = await result(() => memory({ verdicts: [ev(1, "pass", "alice", "2026-10-23T00:00:00Z", "e1")] }), base("read time", "verdict-before-seed", { counted: { 1: { verdict: "pass", reviewer: "alice", recordedAt: "2026-10-23T00:00:00Z" } }, integrity: "PASS", seedPublishedAt: "2026-10-22T00:00:00Z" }), "verdict-before-seed");
     expect(r.message).toMatch(/no counted verdict is dated before 2026-10-22T00:00:00Z/);
+  });
+
+  it("verdict-before-seed asks the core: only the verdict the core COUNTS can be refused (an early verdict by an unlisted account does not count)", async () => {
+    const early = ev(1, "pass", "intruder", "2026-10-21T00:00:00Z", "e1");
+    const f = base("early but ignored", "verdict-before-seed", { counted: { 1: null }, integrity: "PASS", seedPublishedAt: "2026-10-22T00:00:00Z" }, { reviewers: ["alice"] });
+    const ignored = await result(() => memory({ verdicts: [early] }), f, "verdict-before-seed");
+    expect(ignored.ok).toBe(false);
+    expect(ignored.message).toMatch(/no counted verdict is dated before/);
+    const counted = await result(() => memory({ verdicts: [{ ...early, reviewer: "alice" }] }), f, "verdict-before-seed");
+    expect(counted.ok, counted.message).toBe(true);
+    // An early event the core ignores for another reason (it names a change that was never drawn) is not a refusal either.
+    const notDrawn = await result(() => memory({ verdicts: [{ ...early, reviewer: "alice", changeId: "json:acme/widgets#999" }] }), f, "verdict-before-seed");
+    expect(notDrawn.ok).toBe(false);
+    expect(notDrawn.message).toMatch(/no counted verdict is dated before/);
   });
 
   it("checkpoint-round-trip: unstable history, a counted verdict missing from it, and an erasure that does not show", async () => {
@@ -122,5 +166,98 @@ describe("the ledger kit fails ledgers that break the rules", () => {
     };
     const r = await runLedgerConformance(forgetful, [{ ...base("forgetful", "idempotent-publish", { counted: {}, integrity: "PASS" }), publish: PUB, forgetLocalState: () => {} }]);
     expect(r.results[0]!.ok).toBe(false);
+  });
+});
+
+describe("the ledger kit does not pass by checking nothing (finding 10, tests that cannot fail)", () => {
+  it("fails an empty fixture list, and assertLedgerConformance throws", async () => {
+    const r = await runLedgerConformance(async () => memory({ verdicts: [] }), []);
+    expect(r.ok).toBe(false);
+    expect(r.results[0]).toMatchObject({ fixture: "(no fixtures)", ok: false, message: expect.stringMatching(/checked nothing/) });
+    await expect(assertLedgerConformance(async () => memory({ verdicts: [] }), [])).rejects.toThrow(/ledger conformance failed/);
+  });
+
+  it("fails every case no fixture covers, unless the caller names it with a reason, and then reports it as skipped", async () => {
+    const f = base("one case", "first-label", { counted: {}, integrity: "PASS" });
+    const r = await runLedgerConformance(async () => memory({ verdicts: [] }), [f]);
+    const missing = r.results.filter((x) => x.fixture === "(case coverage)" && !x.ok).map((x) => x.check);
+    expect(missing).toEqual(LEDGER_CASES.filter((c) => c !== "first-label"));
+    expect(r.results.find((x) => x.check === "deletion")!.message).toMatch(/no fixture exercises the case "deletion": add one, or name it in options\.skipCases/);
+    const skipAll = Object.fromEntries(LEDGER_CASES.filter((c) => c !== "first-label").map((c) => [c, `${c} needs a tracker`]));
+    const skipped = await runLedgerConformance(async () => memory({ verdicts: [] }), [f], { skipCases: skipAll });
+    expect(skipped.ok).toBe(true);
+    expect(skipped.results.filter((x) => x.skipped && x.fixture === "(case coverage)")).toHaveLength(LEDGER_CASES.length - 1);
+    expect(skipped.results.find((x) => x.check === "deletion")).toMatchObject({ ok: true, skipped: true, message: "not exercised by this run: deletion needs a tracker" });
+    const typo = await runLedgerConformance(async () => memory({ verdicts: [] }), [f], { skipCases: { ...skipAll, "no-such-case": "x" } as never });
+    expect(typo.ok).toBe(false);
+  });
+});
+
+describe("transient faults on writes (finding 10, tests that cannot fail)", () => {
+  type Mode = "careful" | "impatient";
+  // A ledger that lists the tracker's issues before it writes (so a clean re-run writes nothing), but repeats a failed
+  // write at once and blindly: it does not wait out a 429, and it writes again after a response was lost.
+  const make = (mode: Mode) => {
+    const clean = new FakeGitHubIssues();
+    const faulty = new FakeGitHubIssues();
+    const cleanDir = mkdtempSync(join(tmpdir(), "prrla-wf-"));
+    const faultyDir = mkdtempSync(join(tmpdir(), "prrla-wf-"));
+    const factory = async (_f: LedgerFixture, h: Parameters<Parameters<typeof runLedgerConformance>[0]>[1]): Promise<Ledger> => {
+      const isFaulty = h.phase === "publish-faults" || h.phase === "publish-recover";
+      const fake = isFaulty ? faulty : clean;
+      const dir = isFaulty ? faultyDir : cleanDir;
+      const real = await githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: fake.fetch, windowDir: dir, env: { GITHUB_TOKEN: "t" } }));
+      if (mode === "careful") return real;
+      const ctx = h.context({ fetch: fake.fetch, windowDir: dir });
+      const api = `${fake.repoUrl}/issues`;
+      const write = async (title: string) => {
+        const post = () => ctx.fetch(api, { method: "POST", body: JSON.stringify({ title, body: "x" }) });
+        let r = await post();
+        if (!r.ok) r = await post(); // repeated at once: no wait, and blind to a write that already happened
+        return r;
+      };
+      return {
+        ...real,
+        readVerdicts: () => real.readVerdicts(),
+        verifyIntegrity: async () => ({ ok: true, findings: [], tamperTrail: true }),
+        readHistory: async () => [],
+        appendVerdict: async () => {
+          await write("record");
+        },
+        publishDraws: async (draws) => {
+          const have = new Set(((await (await ctx.fetch(`${api}?state=all`)).json()) as { title: string }[]).map((i) => i.title));
+          for (const d of draws) if (d.firstOccurrence && !have.has(`draw ${d.draw}`)) await write(`draw ${d.draw}`);
+        },
+      } as Ledger;
+    };
+    const f: LedgerFixture = { ...base("writes", "idempotent-publish", { counted: {}, integrity: "PASS" }), http: true, draws: [draw(1, 101), draw(2, 102), draw(3, 103)], publish: PUB, forgetLocalState: () => rmSync(join(cleanDir, "ledger-index.json"), { force: true }) };
+    return { factory, f };
+  };
+
+  it("a ledger that waits out a 429 and does not repeat a write whose response was lost passes", async () => {
+    const { factory, f } = make("careful");
+    const r = await runLedgerConformance(factory, [f]);
+    const w = r.results.find((x) => x.check === "transient-write-faults")!;
+    expect(w, JSON.stringify(r.results)).toMatchObject({ ok: true });
+    expect(w.skipped).toBeFalsy();
+  });
+
+  it("a ledger that repeats a write at once, and again after a lost response, fails both ways", async () => {
+    const { factory, f } = make("impatient");
+    const r = await runLedgerConformance(factory, [f]);
+    const w = r.results.find((x) => x.check === "transient-write-faults")!;
+    expect(w.ok).toBe(false);
+    expect(w.message).toMatch(/the tracker received \d+ write\(s\) across the faulted publish and its recovery, a clean publish makes 3: a write was repeated after its response was lost \(a duplicate\)/);
+    expect(w.message).toMatch(/after the injected 429 on a record the ledger did not wait as long as Retry-After says/);
+  });
+
+  it("a factory that serves no fresh tracker for publish-faults gets a skip that says what to serve, not a pass", async () => {
+    const clean = new FakeGitHubIssues();
+    const dir = mkdtempSync(join(tmpdir(), "prrla-wf-"));
+    const f: LedgerFixture = { ...base("writes", "idempotent-publish", { counted: {}, integrity: "PASS" }), http: true, draws: [draw(1, 101)], publish: PUB, forgetLocalState: () => rmSync(join(dir, "ledger-index.json")) };
+    const r = await runLedgerConformance(async (_f, h) => githubIssues.create({ repo: "acme/audit" }, h.context({ fetch: clean.fetch, windowDir: dir, env: { GITHUB_TOKEN: "t" } })), [f]);
+    const w = r.results.find((x) => x.check === "transient-write-faults")!;
+    expect(w).toMatchObject({ ok: true, skipped: true });
+    expect(w.message).toMatch(/serve a fresh tracker .* for phase "publish-faults"|a clean publish makes \d+ write\(s\); two are needed/);
   });
 });

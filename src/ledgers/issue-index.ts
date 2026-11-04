@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { canonicalJson, sha256Hex } from "../core/canonical.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import type { DrawForLedger, PublishContext, Verdict } from "../sdk/ledger.js";
 
@@ -41,6 +42,13 @@ export interface LedgerIndex {
   labels: Record<Verdict | "draw", IndexedLabel>;
   issues: IndexedIssue[];
   repeats: { draw: number; changeId: string; sameAs: number }[];
+  /**
+   * Set by hand on an index built around issues pr-rla did not open (the recorded public timelines
+   * the ledger tests replay): their bodies carry no pr-rla marker and their other labels are not
+   * stray. A ledger reading such an index skips the body-marker check and the stray-label warning.
+   * `publishDraws` never writes it, and `verify` WARNs when an audit's index has it.
+   */
+  foreignIssues?: true;
 }
 
 export function indexPath(windowDir: string): string {
@@ -53,6 +61,67 @@ export function readIndex(windowDir: string): LedgerIndex | null {
   const v = JSON.parse(readFileSync(p, "utf8")) as LedgerIndex;
   if (v.schema !== "pr-rla/ledger-index/v1") throw new Error(`${p}: not a pr-rla ledger index (schema ${String(v.schema)})`);
   return v;
+}
+
+/**
+ * `sha256` of the index as a document: the canonical JSON (sorted keys, no whitespace) of the file's
+ * parsed content, so line endings and indentation do not matter. `sample` records it in draws.json
+ * and `checkpoint` in each checkpoint line; `verify` compares both with the file as it is now
+ * (contracts.md §5). Any ledger's index counts, the built-in schema or an external ledger's own.
+ */
+export function ledgerIndexSha256(value: unknown): string {
+  return sha256Hex(canonicalJson(value));
+}
+
+/**
+ * The window's `ledger-index.json` as parsed JSON with its hash, or null when there is none. Does not check
+ * the schema (an external ledger keeps its own). A file that is not JSON comes back with `error` set and
+ * the hash of its bytes, so `verify` can FAIL on it instead of crashing.
+ */
+export function readIndexDocument(windowDir: string): { sha256: string; value: unknown; error?: string } | null {
+  const p = indexPath(windowDir);
+  if (!existsSync(p)) return null;
+  const text = readFileSync(p, "utf8");
+  try {
+    const value: unknown = JSON.parse(text);
+    return { sha256: ledgerIndexSha256(value), value };
+  } catch (e) {
+    return { sha256: sha256Hex(text), value: null, error: `${INDEX_FILE} is not valid JSON: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * What is wrong with the index on its own, before any tracker is read (finding 3): two draws
+ * sharing one issue (a verdict would count for both), an issue listed twice by number or id, a
+ * change with two issues, a repeat that points nowhere. Issue numbers compare as text, so `7` and
+ * `"7"` are one number. Each string is a FAIL.
+ */
+export function indexProblems(index: Pick<LedgerIndex, "issues" | "repeats">): string[] {
+  const out: string[] = [];
+  const dup = <T>(items: readonly T[], key: (t: T) => string, what: (k: string, a: T, b: T) => string) => {
+    const seen = new Map<string, T>();
+    for (const t of items) {
+      const k = key(t);
+      const prior = seen.get(k);
+      if (prior !== undefined) out.push(what(k, prior, t));
+      else seen.set(k, t);
+    }
+  };
+  dup(index.issues, (i) => String(i.draw), (k) => `ledger index lists draw #${k} twice`);
+  dup(index.issues, (i) => String(i.number), (k, a, b) => `ledger index gives draws #${a.draw} and #${b.draw} the same issue number ${k}: one verdict would count for both`);
+  dup(index.issues, (i) => String(i.id), (k, a, b) => `ledger index gives draws #${a.draw} and #${b.draw} the same issue id ${k}`);
+  dup(index.issues, (i) => i.changeId, (k, a, b) => `ledger index opens two issues (draws #${a.draw} and #${b.draw}) for ${k}; a change drawn twice has one issue`);
+  const byDraw = new Map(index.issues.map((i) => [i.draw, i]));
+  const repeated = new Set<number>();
+  for (const r of index.repeats) {
+    if (repeated.has(r.draw)) out.push(`ledger index lists repeated draw #${r.draw} twice`);
+    repeated.add(r.draw);
+    const first = byDraw.get(r.sameAs);
+    if (byDraw.has(r.draw)) out.push(`ledger index lists draw #${r.draw} as both an issue and a repeat`);
+    if (!first) out.push(`ledger index: repeated draw #${r.draw} points at draw #${r.sameAs}, which has no issue`);
+    else if (first.changeId !== r.changeId) out.push(`ledger index: repeated draw #${r.draw} is ${r.changeId} but draw #${r.sameAs}'s issue is for ${first.changeId}`);
+  }
+  return out;
 }
 
 export function writeIndex(windowDir: string, index: LedgerIndex): void {

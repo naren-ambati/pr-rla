@@ -3,7 +3,7 @@
  "source": "recorded",
  "tracker": "jira-cloud",
  "case": "removal",
- "recordedAt": "2026-11-04T00:32:45.000Z",
+ "recordedAt": "2026-11-04T03:47:15.000Z",
  "options": {
   "base_url": "https://hibernate.atlassian.net",
   "project": "HHH",
@@ -20,6 +20,10 @@
   "window": "recorded",
   "protocolSha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "field": "customfield_11702",
+  "options": {
+   "pass": "10202",
+   "fail": "10203"
+  },
   "issues": [
    {
     "draw": 1,
@@ -53,6 +57,7 @@
   "integrity": {
    "ok": false,
    "findings": [
+    "draw #1: the verdict field was set to \"Undecided\" (option id 10201) at 2021-07-18T20:06:44.470Z, which is neither the Approved option (10202) nor the Rejected option (10203); a verdict set that way cannot be counted",
     "draw #1: the counted customfield_11702=Approved verdict was removed at 2021-07-18T20:06:44.470Z and nothing replaced it (removal after counting)"
    ],
    "warnings": [],

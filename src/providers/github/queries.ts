@@ -6,7 +6,7 @@ export const PR_FIELDS = `
   author { ${ACTOR} }
   mergedBy { ${ACTOR} }
   mergeCommit { oid }
-  labels(first: 50) { nodes { name } }
+  labels(first: 50) { totalCount pageInfo { hasNextPage endCursor } nodes { name } }
   reviews(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { state submittedAt author { ${ACTOR} } } }`;
 
 /** One query for up to `numbers.length` PRs via aliases (pr-rla uses batches of 40: 100 returned HTTP 502 on gh-aw). */
@@ -23,14 +23,40 @@ export const MORE_REVIEWS_QUERY = `query($owner: String!, $name: String!, $numbe
   }
 }`;
 
+/** The rest of a PR's labels, when it carries more than the first 50 (an unpaged cap would drop a label the selector filters on). */
+export const MORE_LABELS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      labels(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { name } }
+    }
+  }
+}`;
+
 export const HEAD_QUERY = `query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) { defaultBranchRef { name target { oid } } }
 }`;
 
 const COMMIT_FIELDS = `oid url committedDate additions deletions
-  parents(first: 2) { nodes { oid } }
+  parents(first: 2) { totalCount nodes { oid } }
   author { name email user { login databaseId } }
-  associatedPullRequests(first: 5) { nodes { number merged baseRefName } }`;
+  associatedPullRequests(first: 5) { totalCount pageInfo { hasNextPage endCursor } nodes { number merged baseRefName } }`;
+
+/**
+ * The history query keeps its page cheap (a commit has two parents and is rarely in more than five
+ * PRs), and says when a commit exceeds that: these two read the rest of one commit, so an octopus merge
+ * or a commit in many PRs is never truncated silently (finding 10 of the master review).
+ */
+export const COMMIT_PARENTS_QUERY = `query($owner: String!, $name: String!, $oid: GitObjectID!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) { ... on Commit { parents(first: 100) { totalCount nodes { oid } } } }
+  }
+}`;
+
+export const COMMIT_PRS_QUERY = `query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) { ... on Commit { associatedPullRequests(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { number merged baseRefName } } } }
+  }
+}`;
 
 /**
  * Default-branch history from a PINNED head oid (so new pushes during the walk

@@ -23,6 +23,7 @@ export {
   LEDGER_CONFORMANCE_CHECKS,
   type CountedVerdict,
   type LedgerCase,
+  type LedgerConformanceOptions,
   type LedgerConformanceCheck,
   type LedgerFixture,
   type LedgerHarness,

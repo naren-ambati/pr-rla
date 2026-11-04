@@ -37,7 +37,7 @@ Change ids are `github:<owner>/<repo>#<number>` and `github:<owner>/<repo>@<sha>
 ## How merges and direct pushes are detected
 
 1. **PRs.** REST `GET /repos/{o}/{r}/pulls?state=closed&sort=updated&direction=desc`, filtered by `merged_at` in the window and `base.ref` = the default branch. The head of the list is read again after the walk, because a PR updated mid-walk jumps to page 1. PRs merged into other branches are excluded and counted.
-2. **Reviews, authors, mergers, sizes.** GraphQL, 40 PRs per query by aliases; more than 100 reviews are paged.
+2. **Reviews, authors, mergers, sizes.** GraphQL, 40 PRs per query by aliases; more than 100 reviews, and more than 50 labels, are paged.
 3. **Direct pushes.** GraphQL `history(since:)` from a pinned head oid lists every ancestor (not only first parents) dated in the window. A commit is a PR's when `associatedPullRequests` has a merged PR into the default branch, or when it is a merged PR's `merge_commit_sha`: GitHub's association was missing for the merge commit of gh-aw #73884. Otherwise it is a `direct_push`.
 
 | Merge method | Commits on the default branch | Attributed by |
@@ -72,3 +72,7 @@ Retries 5xx, 429, secondary rate limits (403 with `Retry-After` or `x-ratelimit-
 - **Pusher identity.** GitHub's commit APIs do not expose who pushed; `author` is the commit author and the window uses `committedDate`.
 - **Accounts that are bots but report as users.** The `Copilot` commit-author account is a `User` to GitHub, so a commit it authors directly is classified human.
 - **Review states at freeze time.** Labels can change afterwards, so a label-based stratum may not re-verify.
+
+## Caps
+
+The history query reads two parents and five associated PRs per commit and asks for their totals. A commit with more is completed by a query of its own: associated PRs are paged to the end (a commit in more than five PRs is not mislabelled a direct push because its merged PR was the sixth), parents up to 100; a commit with more than 100 parents is refused, never classified from a truncated list.

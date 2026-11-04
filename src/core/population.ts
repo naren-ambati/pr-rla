@@ -1,4 +1,4 @@
-import { assertChangeRecord, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
+import { assertChangeRecord, isCommitId, type AuditWindow, type ChangeRecord, type ListChangesResult, type ScmProvider } from "../sdk/provider.js";
 import { sortChanges, type ManifestEntry } from "./records.js";
 import { applySelector, reviewsAsOf, type ActorAliases, type SelectionResult, type Selector } from "./selector.js";
 import { inWindow } from "./window.js";
@@ -41,6 +41,7 @@ export async function buildPopulation(
     aliases?: ActorAliases;
   },
 ): Promise<Population> {
+  if (args.head !== undefined && !isCommitId(args.head)) throw new Error(`the pinned default-branch head ${JSON.stringify(args.head)} is not a commit id (40 to 64 lowercase hex characters); the manifest was edited or is not from this pr-rla`);
   const req = { repo: args.repo, window: { opensAt: args.window.opensAt, closesAt: args.window.closesAt }, kinds: args.selector.kinds, ...(args.signal ? { signal: args.signal } : {}), ...(args.head !== undefined ? { head: args.head } : {}) };
   const listed = await provider.listChanges(req);
   const ids = new Set<string>();

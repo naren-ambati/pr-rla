@@ -3,7 +3,7 @@
  "source": "recorded",
  "tracker": "github",
  "case": "label-rename",
- "recordedAt": "2026-11-04T00:23:32.000Z",
+ "recordedAt": "2026-11-04T03:40:02.000Z",
  "options": {
   "repo": "rust-lang/rust",
   "labels": {
@@ -42,7 +42,8 @@
     "createdAt": "2015-11-23T15:41:52Z"
    }
   ],
-  "repeats": []
+  "repeats": [],
+  "foreignIssues": true
  },
  "observed": {
   "verdicts": [

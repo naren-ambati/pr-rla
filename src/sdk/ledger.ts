@@ -266,14 +266,105 @@ export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "pro
   return null;
 }
 
+/**
+ * Orders two tracker event ids. Numeric ids (GitHub's, GitLab's) compare as integers, with BigInt
+ * so ids past 2^53 stay exact; a lexical order would put "100" before "99" and so would count the
+ * wrong one of two same-second verdicts. An id made of colon-separated parts (Jira's
+ * `<history id>:<item>:<action>`) compares part by part, each part by this rule, a shorter id
+ * before a longer one it begins. In a part, a number sorts before anything else, and anything else
+ * sorts by UTF-16 code unit; equal numbers written differently ("07" and "7") fall back to code
+ * units too. The order is total and the same on every machine. Documented in contracts.md §1.
+ */
+export function compareEventIds(a: string, b: string): number {
+  const pa = a.split(":");
+  const pb = b.split(":");
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    const x = pa[i]!;
+    const y = pb[i]!;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) {
+      const bx = BigInt(x);
+      const by = BigInt(y);
+      if (bx !== by) return bx < by ? -1 : 1;
+    } else if (nx !== ny) return nx ? -1 : 1;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return pa.length === pb.length ? 0 : pa.length < pb.length ? -1 : 1;
+}
+
+/** Server time, then event id (`compareEventIds`): the order in which "the first eligible event counts". */
+export function compareByTimeThenId(a: { at: string; id: string }, b: { at: string; id: string }): number {
+  return a.at < b.at ? -1 : a.at > b.at ? 1 : compareEventIds(a.id, b.id);
+}
+
+/** One verdict the core did not count, and why (reported by `status` and check 7 as "ignored"). */
+export interface IgnoredVerdictEvent {
+  event: VerdictEvent;
+  reason: string;
+}
+
+export interface VerdictClassification {
+  /** The first eligible verdict of each drawn change, by change id, in the order the ledger returned them. */
+  first: Map<string, VerdictEvent>;
+  ignored: IgnoredVerdictEvent[];
+  /** Later verdicts on a change that disagree with its first (the first counts). */
+  relabels: { changeId: string; first: VerdictEvent; later: VerdictEvent }[];
+}
+
+/**
+ * How the core treats the verdicts a ledger returns (`computeStatus`, check 7 and the ledger kit share
+ * this): one made under another protocol, on a change that was not drawn, on a draw that is not that
+ * change, or by an ineligible account is ignored with a reason; of the rest, the FIRST per change counts,
+ * in the order the ledger returned them (a ledger returns them in recorded order: time, then event id).
+ */
+export function classifyVerdicts(verdicts: readonly VerdictEvent[], ctx: { protocolSha256: string; draws: readonly { draw: number; changeId: string }[]; reviewers?: readonly string[] | null }): VerdictClassification {
+  const drawByNumber = new Map(ctx.draws.map((d) => [d.draw, d]));
+  const drawnIds = new Set(ctx.draws.map((d) => d.changeId));
+  const first = new Map<string, VerdictEvent>();
+  const ignored: IgnoredVerdictEvent[] = [];
+  const relabels: VerdictClassification["relabels"] = [];
+  for (const ev of verdicts) {
+    if (ev.protocolSha256 !== ctx.protocolSha256) {
+      ignored.push({ event: ev, reason: `protocol ${ev.protocolSha256.slice(0, 8)}… is not the registered protocol ${ctx.protocolSha256.slice(0, 8)}…` });
+      continue;
+    }
+    if (!drawnIds.has(ev.changeId)) {
+      ignored.push({ event: ev, reason: "change was not drawn" });
+      continue;
+    }
+    const d = drawByNumber.get(ev.draw);
+    if (!d || d.changeId !== ev.changeId) {
+      ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
+      continue;
+    }
+    const ineligible = verdictIneligibility(ev, ctx.reviewers);
+    if (ineligible) {
+      ignored.push({ event: ev, reason: ineligible });
+      continue;
+    }
+    const prior = first.get(ev.changeId);
+    if (!prior) first.set(ev.changeId, ev);
+    else if (prior.verdict !== ev.verdict) relabels.push({ changeId: ev.changeId, first: prior, later: ev });
+  }
+  return { first, ignored, relabels };
+}
+
+/**
+ * Whether a counted verdict was recorded before the seed was public (`publishesAtUnix`, seconds):
+ * check 7 FAILs it, and the ledger kit's verdict-before-seed check asks this same question of the
+ * verdicts a ledger returns.
+ */
+export const recordedBeforeSeed = (recordedAt: string, publishesAtUnix: number): boolean => Date.parse(recordedAt) / 1000 < publishesAtUnix;
+
 /** A history event as it is hashed into a checkpoint: no `raw`, keys fixed. */
 export type CanonicalHistoryEvent = Omit<LedgerHistoryEvent, "raw">;
 
-/** Sorts by time then id and drops `raw`: the list `eventsSha256` is computed over (canonical JSON). */
+/** Sorts by time then id (`compareByTimeThenId`) and drops `raw`: the list `eventsSha256` is computed over (canonical JSON). */
 export function canonicalHistory(events: readonly LedgerHistoryEvent[]): CanonicalHistoryEvent[] {
   return events
     .map((e) => ({ id: e.id, at: e.at, actor: { login: e.actor.login, kind: e.actor.kind, ...(e.actor.id !== undefined ? { id: e.actor.id } : {}) }, action: e.action, label: e.label, draw: e.draw }))
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort(compareByTimeThenId);
 }
 
 const sameEvent = (a: CanonicalHistoryEvent, b: CanonicalHistoryEvent) =>
@@ -338,7 +429,7 @@ export function analyzeDrawHistory(draw: number, events: readonly VerdictLabelEv
   const out: DrawHistoryAnalysis = { counted: null, warnings: [], failures: [], notes: [] };
   // At one instant a removal comes before an add: a select-field change or a scoped-label swap is one of each.
   const rank = (e: VerdictLabelEvent) => (e.action === "remove" ? 0 : 1);
-  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  const sorted = [...events].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : rank(a) - rank(b) || compareEventIds(a.id, b.id)));
   const present = new Set<Verdict>();
   let lastRemoval: VerdictLabelEvent | null = null;
   for (const e of sorted) {

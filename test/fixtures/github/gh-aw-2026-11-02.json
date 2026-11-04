@@ -1,6 +1,7 @@
 {
  "description": "Real GitHub API responses for github/gh-aw, window 2026-11-02 (UTC), recorded read-only with page_size=30, batch_size=10, history_page_size=40. REST pull objects trimmed to the fields pr-rla reads.",
  "recordedAt": "2026-11-04T00:06:30.782Z",
+ "graphqlQueryNote": "The GraphQL request bodies (bodySha256) were updated on 2026-11-04 to the queries pr-rla sends now, which select more fields (labels, parents and associatedPullRequests totalCount/pageInfo); the responses are the original recorded ones and lack those fields, which the provider reads as 'nothing more to page'. Not re-recorded: GraphQL queries are POSTs, and this round's live reads were GET-only.",
  "options": {
   "page_size": 30,
   "batch_size": 10,
@@ -2696,7 +2697,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "47ca8f85b7568b389d9686a0b20ea7e4d2d83c557ca89257194af7ce79f6f329",
+   "bodySha256": "4ee446af6e7d7f07bb30fe2ff35332b59dc8b4e7fb50cb4562d7393450cdbb8d",
    "variables": {
     "owner": "github",
     "name": "gh-aw"
@@ -4412,7 +4413,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "ac292a93d6d847186f068f64972568bb29058f9b067a04a0781f8723f3d73832",
+   "bodySha256": "77edeccada175ec590af047baccd04d2b43d014f8179e120630d05131367ebe7",
    "variables": {
     "owner": "github",
     "name": "gh-aw"
@@ -5214,7 +5215,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "0e0629ced49220b362236473b9ef68d3cd322662c4d6826d3aa74a8861c9110a",
+   "bodySha256": "ea0303ee1b8c7fd9c05191b01ea9b97559ad77aedbeb0b8cb82313d7d229fa86",
    "variables": {
     "owner": "github",
     "name": "gh-aw"
@@ -5845,7 +5846,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "6d71cc9c3896b08049cf8f1fa184839ad62a99ee754e28019d233ec170563816",
+   "bodySha256": "80c3c9d843fc4fda06afc8841ec65d684b9c0c60ed412624c146c3fcc5b5d0b2",
    "variables": {
     "owner": "github",
     "name": "gh-aw"
@@ -6458,7 +6459,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "60251c1b210180cecf077b1804251cd116781e05d22d9c66d8fabfd879b3cedc",
+   "bodySha256": "f9a091863dc6373e41877d8a0fe87424283a7732f491155f39222d315b5c5cb2",
    "variables": {
     "owner": "github",
     "name": "gh-aw",
@@ -7728,7 +7729,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "5f483c391b9146caa236a325a07ca5b1b7521d1ed16fc59707fae6374f2e00e1",
+   "bodySha256": "50143aff05ad6cfaf768b7458c2488f6316a6a8f4d4046de95e8995729d3c1d5",
    "variables": {
     "owner": "github",
     "name": "gh-aw",
@@ -8998,7 +8999,7 @@
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
-   "bodySha256": "a0d001ed3a7b0a5b5179d58d3979fba1242bae1845a4c74ed9adcab07d6f8aa1",
+   "bodySha256": "d5791b828627a9dc8fa8faaf8362defe2d482027919def9d0ad94f7b82c6cc8d",
    "variables": {
     "owner": "github",
     "name": "gh-aw",

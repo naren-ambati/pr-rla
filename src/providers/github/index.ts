@@ -11,7 +11,7 @@ import { LANDED_VIA_LIMITATION, landedViaMerges } from "../landed-via.js";
 import { classifyHistory, type HistoryNode } from "./history.js";
 import { GAVE_UP, GitHubHttp, GitHubHttpError } from "./http.js";
 import { normalizeDirectPush, normalizePullRequest, type GqlHistoryCommit, type GqlPullRequest, type GqlReview } from "./normalize.js";
-import { HEAD_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
+import { COMMIT_PARENTS_QUERY, COMMIT_PRS_QUERY, HEAD_QUERY, MORE_LABELS_QUERY, MORE_REVIEWS_QUERY, historyQuery, prBatchQuery } from "./queries.js";
 
 export interface GitHubProviderOptions {
   /** Env var holding the token (default GITHUB_TOKEN, then GH_TOKEN; GH_ENTERPRISE_TOKEN too with base_url). */
@@ -163,7 +163,15 @@ export class GitHubProvider implements ScmProvider {
           extra.push(...more.repository.pullRequest.reviews.nodes);
           page = more.repository.pullRequest.reviews.pageInfo;
         }
-        out.push(normalizePullRequest(`${owner}/${name}`, pr, extra));
+        // A PR with more than 50 labels: read the rest. A cap that dropped a label would change who the selector matches.
+        const labels = [...pr.labels.nodes];
+        let lp = pr.labels.pageInfo;
+        while (lp?.hasNextPage) {
+          const more = await this.http.graphql<{ repository: { pullRequest: { labels: { pageInfo: NonNullable<typeof lp>; nodes: { name: string }[] } } } }>(MORE_LABELS_QUERY, { owner, name, number: n, after: lp.endCursor });
+          labels.push(...more.repository.pullRequest.labels.nodes);
+          lp = more.repository.pullRequest.labels.pageInfo;
+        }
+        out.push(normalizePullRequest(`${owner}/${name}`, labels.length === pr.labels.nodes.length ? pr : { ...pr, labels: { ...pr.labels, nodes: labels } }, extra));
       }
       if ((i / this.batchSize) % 10 === 9) this.ctx.log(`github: read reviews for ${Math.min(i + this.batchSize, numbers.length)}/${numbers.length} PRs`);
     }
@@ -198,6 +206,8 @@ export class GitHubProvider implements ScmProvider {
       if (!h.pageInfo.hasNextPage) break;
       after = h.pageInfo.endCursor;
     }
+    // The history page caps each commit at two parents and five PRs; read the rest of any commit that has more.
+    for (const c of nodes.values()) await this.completeCommit(owner, name, c);
     const toNode = (c: GqlHistoryCommit): HistoryNode => ({
       oid: c.oid,
       committedDate: c.committedDate,
@@ -213,6 +223,36 @@ export class GitHubProvider implements ScmProvider {
       inWindow: result.inWindow,
       merges: result.directPushMerges.length,
     };
+  }
+
+  /**
+   * Fills in a commit whose parents or associated PRs the history page truncated. More than 100
+   * parents is refused (git allows it; no real history has it): an unread parent could make a
+   * commit look like a direct push or hide a merge's second side.
+   */
+  async completeCommit(owner: string, name: string, c: GqlHistoryCommit): Promise<void> {
+    const total = c.parents.totalCount;
+    if (total !== undefined && total > c.parents.nodes.length) {
+      if (total > 100) throw new Error(`github: commit ${c.oid} has ${total} parents; pr-rla reads at most 100 and will not classify it from a truncated list`);
+      const r = await this.http.graphql<{ repository: { object: { parents: { totalCount: number; nodes: { oid: string }[] } } | null } }>(COMMIT_PARENTS_QUERY, { owner, name, oid: c.oid });
+      const full = r.repository.object?.parents;
+      if (!full || full.nodes.length < total) throw new Error(`github: could not read all ${total} parents of commit ${c.oid}`);
+      c.parents = { totalCount: full.totalCount, nodes: full.nodes };
+    }
+    type PrNode = { number: number; merged: boolean; baseRefName: string };
+    type More = { repository: { object: { associatedPullRequests: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: PrNode[] } } | null } };
+    let page = c.associatedPullRequests.pageInfo;
+    if (page?.hasNextPage) {
+      const all = [...c.associatedPullRequests.nodes];
+      while (page?.hasNextPage) {
+        const r: More = await this.http.graphql<More>(COMMIT_PRS_QUERY, { owner, name, oid: c.oid, after: page.endCursor });
+        const more = r.repository.object?.associatedPullRequests;
+        if (!more) throw new Error(`github: could not read the PRs of commit ${c.oid}`);
+        all.push(...more.nodes);
+        page = more.pageInfo;
+      }
+      c.associatedPullRequests = { ...c.associatedPullRequests, nodes: all, pageInfo: { hasNextPage: false, endCursor: null } };
+    }
   }
 
   /** GitHub search's own figures for the same author/window, printed next to pr-rla's population. */
