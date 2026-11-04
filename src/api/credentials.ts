@@ -66,7 +66,7 @@ const RULES: Readonly<Record<string, BuiltinCredentialRule>> = {
  * (`PR_RLA_APPROVALS_FILE`, `pr-rla plugin approve`) answers this once the branches are joined; until
  * then nothing is consented to, so the credential is withheld.
  */
-export function operatorConsents(_request: { builtin: string; reasons: readonly string[]; names: readonly string[] }): boolean {
+export function operatorConsents(_request: { subject: string; reasons: readonly string[]; names: readonly string[] }): boolean {
   return false;
 }
 
@@ -86,7 +86,7 @@ export function readOnlyBuiltinCredentials(name: string, options: Record<string,
   const present = rule.names.filter((n) => typeof env[n] === "string" && env[n] !== "");
   const why = rule.nonDefault(options, rule.names);
   const asked = [...new Set([...present, ...["token_env", "username_env"].map((k) => str(options[k])).filter((v): v is string => v !== null && typeof env[v] === "string" && env[v] !== "")])];
-  if (why.length && !operatorConsents({ builtin: name, reasons: why, names: asked })) {
+  if (why.length && !operatorConsents({ subject: name, reasons: why, names: asked })) {
     // Off the default origin, no default credential is sent either; with only another variable named, the defaults still go to the default origin.
     const movesOrigin = rule.host === null || why.some((w) => !/^(token_env|username_env) /.test(w));
     const withheld = asked.length ? `read-only: ${name} gets ${movesOrigin ? "no credential" : `only ${present.join(", ") || "no credential"}`} (${why.join("; ")} needs the operator's consent, which this build cannot record yet); the call runs ${movesOrigin || !present.length ? "anonymously" : "with the default token only"}` : null;

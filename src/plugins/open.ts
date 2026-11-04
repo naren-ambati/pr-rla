@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { readTextConfined } from "../io/confine.js";
 import { pathToFileURL } from "node:url";
 import type { AuditContext } from "../api/context.js";
+import { operatorConsents } from "../api/credentials.js";
 import { signalledFetch, signalledSleep } from "../net/abort.js";
 import { writeFileAtomic } from "../io/atomic.js";
 import { INDEX_FILE } from "../ledgers/issue-index.js";
@@ -29,14 +30,28 @@ export function fullTrustLine(entry: LockEntry): string {
 }
 
 function secretsFor(ctx: AuditContext, entry: LockEntry): { env: string; value: string }[] {
-  return entry.credentials.flatMap((c) => (typeof ctx.env[c.env] === "string" && ctx.env[c.env] ? [{ env: c.env, value: ctx.env[c.env]! }] : []));
+  return grantedCredentials(ctx, entry).flatMap((c) => (typeof ctx.env[c.env] === "string" && ctx.env[c.env] ? [{ env: c.env, value: ctx.env[c.env]! }] : []));
+}
+
+/**
+ * The lock entry's credential grants this context honours. The CLI honours the lock's. A read-only
+ * context (the MCP server) honours only those the operator consented to: the lock is the audit
+ * repo's, not the operator's (U5 fix round; review 2 finding 1). This branch has no consent store
+ * (the plugin fix round adds one: integration joins it at operatorConsents), so none is honoured
+ * there: the plugin gets no placeholder and the broker no secret.
+ */
+function grantedCredentials(ctx: AuditContext, entry: LockEntry): LockEntry["credentials"] {
+  if (ctx.mode !== "read-only" || !entry.credentials.length) return entry.credentials;
+  return entry.credentials.filter((c) => operatorConsents({ subject: entry.name, reasons: [`credential ${c.env} for ${c.hosts.join(", ") || "no host"} (pr-rla.lock.json)`], names: [c.env] }));
 }
 
 const within = (asked: readonly string[], granted: readonly string[]) => asked.filter((x) => !granted.includes(x));
 
 /** Starts the host and refuses when the plugin now asks for more than its lock entry grants (options or code changed). */
 async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", spec: PluginSpec, entry: LockEntry, plugin: ResolvedPlugin): Promise<PluginHost> {
-  const host = await startPluginHost({ kind, entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(entry.credentials, ctx.env), label: spec.use, secrets: secretsFor(ctx, entry) });
+  const granted = grantedCredentials(ctx, entry);
+  if (granted.length < entry.credentials.length) ctx.log(`read-only: plugin ${spec.use} gets no ${entry.credentials.filter((c) => !granted.includes(c)).map((c) => c.env).join(", ")} (its lock entry's credential grants need the operator's consent, which this build cannot record yet); it runs without them`);
+  const host = await startPluginHost({ kind, entry: plugin.entry, readPaths: readGrants(plugin), env: placeholderEnv(granted, ctx.env), label: spec.use, secrets: secretsFor(ctx, entry) });
   try {
     const lockAgain = `review it, then: pr-rla plugin lock ${spec.use}`;
     if (host.ready.name !== entry.name) throw new PluginError(`plugin ${spec.use} now reports the name ${JSON.stringify(host.ready.name)}; it was locked as ${entry.name}`, "LOCK_MISMATCH", lockAgain);
@@ -80,7 +95,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
     if (typeof p.listChanges !== "function") throw new PluginError(`provider "${def.name}" returned an object without listChanges()`, "PLUGIN_INVALID");
     return p;
   }
-  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: entry.credentials });
+  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, credentials: grantedCredentials(ctx, entry) });
   const host = await startLockedHost(ctx, "provider", spec, entry, plugin);
   try {
     const p = await hostedProvider(host, spec.options, { cwd, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal), log: ctx.log, ...(o.signal ? { signal: o.signal } : {}) });
@@ -133,7 +148,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");
     return l;
   }
-  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: entry.credentials });
+  ctx.grant(id, { trust: "isolated", hosts: entry.hosts, writePaths: entry.writePaths, credentials: grantedCredentials(ctx, entry) });
   const host = await startLockedHost(ctx, "ledger", spec, entry, plugin);
   try {
     const l = await hostedLedger(host, spec.options, { cwd, windowDir, fetch: signalledFetch(ctx.broker.bind(id), opts.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, opts.signal), opts.signal), log: ctx.log, index, ...reviewers, ...(opts.signal ? { signal: opts.signal } : {}) });

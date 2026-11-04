@@ -130,7 +130,7 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
   });
 
   it("a config token_env, or a non-default base URL, is withheld (no consent store yet), and says so", () => {
-    expect(operatorConsents({ builtin: "github", reasons: ["x"], names: [] })).toBe(false);
+    expect(operatorConsents({ subject: "github", reasons: ["x"], names: [] })).toBe(false);
     const other = readOnlyBuiltinCredentials("github", { token_env: "SOME_OTHER_SECRET" }, env);
     expect(other.env).not.toHaveProperty("SOME_OTHER_SECRET");
     expect(other.env).toEqual({ GITHUB_TOKEN: "prrla-cred:GITHUB_TOKEN", GH_TOKEN: "prrla-cred:GH_TOKEN" });
@@ -181,6 +181,42 @@ describe("the operator's credentials in read-only mode (review 2 finding 1)", ()
     await expect(openProvider(actx, { use: "./plugins/full.mjs", options: {} }, s.dir)).rejects.toMatchObject({ code: "FULL_TRUST_REFUSED" });
     // The CLI (read-write) still loads it.
     expect(createAuditContext({ mode: "read-write" }).plugins).toBe("locked");
+  });
+});
+
+describe("an isolated plugin's locked credential grants are the audit repo's, not the operator's (read-only mode)", () => {
+  it("the CLI passes its placeholder; a read-only call passes none, and says so", async () => {
+    const s = setupAuditRepo({ changes: makeChanges(30), provider: "{ use: ./plugins/cred/index.mjs, options: {} }" });
+    mkdirSync(join(s.dir, "plugins", "cred"), { recursive: true });
+    writeFileSync(join(s.dir, "plugins", "cred", "package.json"), JSON.stringify({ name: "cred", version: "0.0.1", type: "module" }));
+    writeFileSync(
+      join(s.dir, "plugins", "cred", "index.mjs"),
+      `import { defineProvider } from "pr-rla/provider";
+export default defineProvider({ providerApiVersion: 1, name: "cred", credentials: [{ env: "MY_TOKEN", hosts: ["api.example.com"] }],
+  create() { const seen = typeof process.env.MY_TOKEN === "string" ? process.env.MY_TOKEN : "none";
+    return { apiVersion: 1, name: "cred", async listChanges() { return { changes: [], defaultBranch: "main", limitations: ["MY_TOKEN: " + seen] }; } }; } });
+`,
+    );
+    await lockPlugin(s.dir, "./plugins/cred/index.mjs");
+    s.clock.now = T("2026-10-20T00:00:00Z");
+    const notes: string[] = [];
+    const ro = await read.freezePreview({ dir: s.dir }, { nowMs: () => s.clock.now, fetch: noNet, env: { MY_TOKEN: "operator-secret" }, log: (l) => notes.push(l) });
+    expect(ro.limitations).toContain("MY_TOKEN: none");
+    expect(notes.join("\n")).toMatch(/plugin \.\/plugins\/cred\/index\.mjs gets no MY_TOKEN \(its lock entry's credential grants need the operator's consent/);
+    // The CLI (read-write) gives the plugin its placeholder, as before.
+    const { freezePreview } = await import("../src/api/read/freeze-preview.js");
+    const rw = await freezePreview({ ...s.ctx, env: { MY_TOKEN: "operator-secret" } });
+    expect(rw.limitations).toContain("MY_TOKEN: prrla-cred:MY_TOKEN");
+  }, 60_000);
+});
+
+describe("online verify reports its progress (M2)", () => {
+  it("check 5's listing and check 7's ledger read", async () => {
+    const dir = recorded();
+    const seen: string[] = [];
+    await read.verify({ dir, offline: false }, { nowMs: () => NOW, fetch: noNet, onProgress: (p) => seen.push(p.message) });
+    expect(seen.join("\n")).toMatch(/check 5: listing github\/gh-aw on json-file to rebuild the population[\s\S]*check 5: 1,589 changes listed/);
+    expect(seen.join("\n")).toMatch(/check 7: reading the verdicts from ledger git-file/);
   });
 });
 
