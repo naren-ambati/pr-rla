@@ -214,6 +214,7 @@ describe("pr-rla plugin approve for built-ins", () => {
     expect(http.code).toBe(1);
     expect(http.err.join("\n")).toMatch(/approved only for an https origin/);
     expect((await cli(dir, ["plugin", "approve", "--env", "GHE_TOKEN"], { PR_RLA_APPROVALS_FILE: file })).err.join("\n")).toMatch(/--env and --origin go together/);
+    expect((await cli(dir, ["plugin", "approve", "github"], { PR_RLA_APPROVALS_FILE: file })).err.join("\n")).toMatch(/github is built in, and there is no \.pr-rla\.yml in .*: run "pr-rla plugin approve github" in the audit repo/);
     const ghe = github("https://ghe.example.com/api/v3");
     const { ctx } = context({ GHE_TOKEN: "ghe_MINE" }, ghe.fetch, { file });
     await (await openProvider(ctx, { use: "github", options: { base_url: "https://ghe.example.com", token_env: "GHE_TOKEN" } }, ".")).listChanges(REQ);

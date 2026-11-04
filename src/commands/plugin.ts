@@ -179,6 +179,8 @@ export async function pluginApproveCommand(ctx: CommandContext, use: string | un
   const config = configIn(ctx);
   const c = use === undefined ? null : configured(config, use);
   const builtin = c && use !== undefined ? (c.kind === "provider" ? builtinProviderName(use) : builtinLedgerName(use)) : null;
+  if (use !== undefined && !c && (builtinProviderName(use) !== null || builtinLedgerName(use) !== null))
+    throw new CommandError(`${use} is built in, and ${config ? `${config.configPath} does not use it` : `there is no ${CONFIG_FILE} in ${ctx.cwd}`}: run "pr-rla plugin approve ${use}" in the audit repo whose options it should send a credential for, or approve one directly: pr-rla plugin approve --env <ENV> --origin <https-url>`);
   const plan =
     use === undefined
       ? planBuiltinPairApproval(consent, opts.env!, opts.origin!)
