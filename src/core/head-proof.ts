@@ -99,6 +99,7 @@ export function analysePushLog(log: PushLog, a: HeadProofArgs): HeadProof {
   let anchor = -1;
   for (let i = 0; i < evs.length; i++) if (evs[i]!.t <= closes) anchor = i;
   let tipAtClose: string | null;
+  if (anchor >= 0 && evs[anchor]!.after === "" && evs[anchor]!.kind !== "deleted") return none(`the push log's last update before the window closed (${evs[anchor]!.id} at ${evs[anchor]!.at}) names no commit (a bulk push), so the branch's tip then is unknown`);
   if (anchor >= 0) tipAtClose = evs[anchor]!.kind === "deleted" || evs[anchor]!.after === NO_COMMIT ? null : evs[anchor]!.after;
   else if (evs[0]?.kind === "created") {
     tipAtClose = null;

@@ -59,7 +59,7 @@ describe("the built-ins' push logs and reachability (provider level)", () => {
     // A bulk push event names no ref or commits; the fake renders an empty before/after as GitLab's nulls.
     const p2 = new GitLabProvider({ base_url: GL_BASE }, { cwd: ".", env: {}, log: () => {}, fetch: bulk.fetch });
     const withGap = await p2.pushLog({ repo: "acme/widgets", branch: "main", since: "2026-08-01T00:00:00Z" });
-    expect(analysePushLog(withGap, { head: sc.head, window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, from: "2026-08-03T00:00:00Z", until: "2026-08-04T00:00:00Z" })).toMatchObject({ kind: "none", reason: expect.stringMatching(/the push log has a gap/) });
+    expect(analysePushLog(withGap, { head: sc.head, window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, from: "2026-08-03T00:00:00Z", until: "2026-08-04T00:00:00Z" })).toMatchObject({ kind: "none", reason: expect.stringMatching(/names no commit \(a bulk push\)/) });
     const req = { repo: "acme/widgets", window: { opensAt: "2026-08-01T00:00:00Z", closesAt: "2026-08-02T00:00:00Z" }, kinds: ["pull_request", "direct_push"] as ("pull_request" | "direct_push")[] };
     expect((await p.listChanges(req)).unreachable).toEqual([]);
     expect((await p.listChanges({ ...req, head: OID("S12") })).unreachable!.length).toBeGreaterThan(0);
@@ -162,5 +162,13 @@ describe("the push log, read twice over shifting pages", () => {
     const e = (id: string, at: string, before: string, after: string): PushLogEvent => ({ id, at, before, after, kind: "unknown" });
     const log = [e("3", "2026-10-25T00:00:00Z", h("b"), h("c")), e("2", "2026-08-01T00:00:00Z", h("a"), h("b")), e("2", "2026-08-01T00:00:00Z", h("a"), h("b")), e("1", "2026-06-01T00:00:00Z", NO_COMMIT, h("a"))];
     expect(analysePushLog({ events: log }, { head: h("b"), window: { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" }, from: "2026-10-20T12:00:00Z", until: "2026-10-21T00:00:00Z" })).toMatchObject({ kind: "proven", tipAtClose: h("b") });
+  });
+});
+
+describe("the push log at the window's close", () => {
+  it("a bulk push (no commits named) as the last update before the close: no evidence", () => {
+    const h = (t: string) => sha1(t);
+    const log: PushLogEvent[] = [{ id: "3", at: "2026-10-25T00:00:00Z", before: h("b"), after: h("c"), kind: "unknown" }, { id: "2", at: "2026-09-01T00:00:00Z", before: "", after: "", kind: "unknown" }, { id: "1", at: "2026-06-01T00:00:00Z", before: NO_COMMIT, after: h("a"), kind: "created" }];
+    expect(analysePushLog({ events: log }, { head: h("c"), window: { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" }, from: "2026-10-26T00:00:00Z", until: "2026-10-27T00:00:00Z" })).toMatchObject({ kind: "none", reason: expect.stringMatching(/names no commit \(a bulk push\)/) });
   });
 });

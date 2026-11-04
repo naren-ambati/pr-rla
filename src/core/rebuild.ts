@@ -211,7 +211,9 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
   const unreachable = pinned.unreachable ?? [];
   if (unreachable.length) out.fail.push(`${n(unreachable.length)} pull request(s) merged in the window have a merge commit that is not reachable from the frozen head ${short(frozen)} (${eg(unreachable)}): the frozen head is older than the window's merges, or the branch was rewritten after them`);
 
-  // 2. Push-time evidence for the frozen head.
+  // 2. Push-time evidence for the frozen head. `reachesClose`: everything on the branch when the window closed is
+  // reachable from it (true unless an update after the close is not a fast-forward and that could not be shown).
+  let reachesClose = true;
   if (a.freezeSpan) {
     const proof = await readHeadProof(provider, { repo: a.current, branch: a.branch || pinned.defaultBranch, head: frozen, window: a.window, from: a.freezeSpan.from, until: a.freezeSpan.until, ...(a.signal ? { signal: a.signal } : {}) });
     out.proof = proof;
@@ -220,6 +222,7 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
       const rewrites = proof.rewrites.map((e) => `${e.kind} update ${e.id} at ${e.at}`);
       if (proof.rewrites.length && proof.tipAtClose !== null && proof.tipAtClose !== frozen) {
         const r = await closeTipReached(provider, a, list, frozen, proof.tipAtClose, rewrites, pinned);
+        reachesClose = "ok" in r;
         if ("fail" in r) out.fail.push(r.fail);
         else if ("incomplete" in r) out.incomplete.push(r.incomplete);
         else out.notes.push(`push log: the default branch was updated after the window closed by ${n(rewrites.length)} update(s) ${provider.name} does not call fast-forwards (${eg(rewrites)}); ${r.ok}`);
@@ -243,9 +246,11 @@ export async function rebuildRepo(provider: ScmProvider, args: RebuildArgs): Pro
   if (prs.length) out.fail.push(`${n(prs.length)} pull request(s) merged in the window are on the default branch now but not in the history from the frozen head ${short(frozen)} (${eg(prs.map((c) => c.id))}): the frozen head hides window landings`);
   const proof = out.proof;
   if (pushes.length) {
-    if (proof?.kind === "proven")
+    if (proof?.kind === "proven" && reachesClose)
       out.notes.push(`${n(pushes.length)} commit(s) dated in the window reached the default branch after the window closed, not through the frozen head (${eg(pushes.map((c) => c.id))}): the push log shows ${short(frozen)} was the branch's tip at freeze (${provenLine(proof)}) and that it reaches everything on the branch when the window closed, so they are not in the population (FR7.2)`);
-    else if (proof?.kind !== "disproven")
+    else if (proof?.kind === "proven") {
+      // The head is proven but not shown to reach the close's tip: the FAIL or INCOMPLETE above says why.
+    } else if (proof?.kind !== "disproven")
       out.incomplete.push(`${n(pushes.length)} direct push(es) dated in the window are on the default branch now but not reachable from the frozen head ${short(frozen)} (${eg(pushes.map((c) => c.id))}), and there is no push-time evidence to place them (${proof ? proof.reason : "no push log was read"}): whether they arrived after freeze (FR7.2) or the frozen head hides them is unverified`);
   }
   if (extra.length) {
