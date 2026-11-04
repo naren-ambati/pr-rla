@@ -93,6 +93,18 @@ A killed or rate-limited freeze resumes to a byte-identical manifest. There is n
 
 `verify` exits 0 when VERIFIED, 1 when a check FAILed, and 6 when INCOMPLETE: nothing failed, but part of the population could not be rebuilt or its completeness established, so it is not a verification (`--json` has `verdict`; `ok` is true only for VERIFIED). The other exit codes are in [`contracts.md` §7](docs/design/phase-3-4/contracts.md).
 
+## CI integrations
+
+pr-rla runs in CI to keep a certificate honest between humans: on a verdict event or a schedule it reads the ledger, prints where the audit stands, and fails the job when it ESCALATEs, refuses, has too few trusted timestamps, or cannot show completeness. It makes no verdict and, by default, writes nothing.
+
+| SCM | Integration | Guide |
+|---|---|---|
+| GitHub | A composite action, [`integrations/github-action`](integrations/github-action), with its own lockfile pinning pr-rla by version and integrity | [`docs/ci/github.md`](docs/ci/github.md) |
+| GitLab | A CI/CD component, [`integrations/gitlab/templates/pr-rla.yml`](integrations/gitlab/templates/pr-rla.yml), with typed inputs; and a plain snippet. Not in the CI/CD Catalog | [`docs/ci/gitlab.md`](docs/ci/gitlab.md) |
+| Bitbucket | A Pipelines script step, no Docker pipe | [`docs/ci/bitbucket.md`](docs/ci/bitbucket.md) |
+
+All three pin the pr-rla version, run `--plugins builtin-only` unless you opt in, map the exit codes the same way (2 ESCALATE, 3 refusal, 5 timestamps and 6 INCOMPLETE fail the job by default; 1 and 4 always do), and keep to the local-consent model for credentials: the defaults go to their own SCM, and a self-hosted host needs an `approve-origins` line written by whoever owns the CI configuration. [`docs/ci/README.md`](docs/ci/README.md) has the end-to-end matrix and what is and is not verified. They are tested on fixtures and mock servers only.
+
 ## Architecture: bring-your-own providers and ledgers
 
 ```

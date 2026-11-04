@@ -1,0 +1,32 @@
+{
+  "_note": "recorded: each schema was fetched once, with a read-only GET, on the date below and is vendored byte for byte. test/ci-integrations.test.ts checks the sha256. Re-fetch only to update the checks, and record the new date.",
+  "schemas": {
+    "github-action.json": {
+      "source": "https://www.schemastore.org/github-action.json",
+      "describes": "action.yml (GitHub Actions metadata); SchemaStore, which serves it at json.schemastore.org/github-action.json too",
+      "kind": "recorded",
+      "fetchedAt": "2026-11-04",
+      "bytes": 31255,
+      "sha256": "224326cc5a334bdb97b56b6fc320cd4381ba7d61b477b425ed506e6a420b52ba",
+      "draft": "http://json-schema.org/draft-07/schema#"
+    },
+    "gitlab-ci.json": {
+      "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json",
+      "describes": "GitLab CI/CD YAML, including spec:inputs; the file in the gitlab-org/gitlab repository, master branch",
+      "kind": "recorded",
+      "fetchedAt": "2026-11-04",
+      "bytes": 128124,
+      "sha256": "2ed7f27a5be968541994704430517bad71856e0e224fc4d6ab1d0882f933063b",
+      "draft": "http://json-schema.org/draft-07/schema#"
+    },
+    "bitbucket-pipelines.json": {
+      "source": "https://api.bitbucket.org/schemas/pipelines-configuration",
+      "describes": "bitbucket-pipelines.yml; the URL SchemaStore lists for it (SchemaStore carries no copy)",
+      "kind": "recorded",
+      "fetchedAt": "2026-11-04",
+      "bytes": 33271,
+      "sha256": "b37319267d9922bd9f0a5142d657551ae844e136fa205068c8660622d66bcf64",
+      "draft": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+}

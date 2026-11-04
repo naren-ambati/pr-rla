@@ -2766,6 +2766,147 @@ Each run is a fresh `git clone --branch fix/p3-pool-head` of this worktree into 
 
 The five demo scripts (`demo-broker`, `demo-ledgers`, `demo-plugin-host`, `demo-presence`, `demo-sdk-carry-overs`) exit 0. This commit adds only these lines to `af180ac`.
 
+## Bolt 7 (U7): CI integrations (2026-11-04)
+
+Branch `bolt/u7-ci-integrations`, from `0fa9ad8` (the wave-2 integration plus the U5 seam tests). A GitHub composite action, a GitLab CI/CD component with a plain-snippet twin, and a Bitbucket Pipelines step, with a CI guide per SCM. All tested on fixtures and mock servers; nothing published, nothing written to a real service.
+
+### Definition of done (delivery-plan.md, bolt 7)
+
+FR6.1 to FR6.7 pass on fixtures and mock servers, and the templates pass schema checks. The demo: the Action's steps on a fixture ESCALATE fail the job.
+
+| ID | Covered by |
+|---|---|
+| FR6.1 Action: status and verify, summary, fails on ESCALATE, optional comment | `test/ci-github-action.test.ts`: "FR6.1: status on fixtures gives the right job outcome" (CERTIFIED passes with outputs and summary; a label-event fixture and `comment: true`; **DEMO, ESCALATE fixture fails the job**; fail-on tolerance; refusal; exit 1; verify; `dir`), "the comment is best effort and the token stays on GitHub", "what pr-rla prints is data" |
+| FR6.2 GitLab component, typed inputs, push to `audit/**` and a schedule | `test/ci-integrations.test.ts` "FR6.2, FR6.5: the GitLab component and the plain snippet pass GitLab's CI schema"; `test/ci-job-scripts.test.ts` "the GitLab component (FR6.2)" (typed inputs, the rules for push, schedule, trigger and web, `audit-path`, mock gitlab.com runs) |
+| FR6.3 Bitbucket step, no pipe | `test/ci-integrations.test.ts` "FR6.3, FR6.5: the Bitbucket step passes Bitbucket's pipelines schema"; `test/ci-job-scripts.test.ts` "the Bitbucket step (FR6.3)" |
+| FR6.4 exact version, `--plugins builtin-only` unless opted in | `test/ci-integrations.test.ts` "FR6.4, NFR18: every integration pins ..."; `test/ci-github-action.test.ts` "FR6.4"; `test/ci-job-scripts.test.ts` "pinning (FR6.4)" and "runs pr-rla --plugins builtin-only by default" |
+| FR6.5 fixtures and mocks only | the harness (`test/helpers/ci-harness.ts`), the vendored schemas test, and `denied` assertions (no socket left the machine) in every run |
+| FR6.6 no publish | `test/ci-integrations.test.ts` "FR6.6: nothing in the build publishes" |
+| FR6.7 matrix, one ledger per SCM | `docs/ci/README.md` "End-to-end matrix"; `test/ci-integrations.test.ts` "FR6.7: the end-to-end matrix names one ledger per SCM, and each cell points at a test that runs" |
+| NFR1 scopes | `docs/ci/README.md` "Scopes" (each row marked unverified); every tracker request in the Action and GitLab runs is a GET; `checkpoint` writes to the bare remote only |
+| NFR3 no public writes | every run asserts `denied` is empty; the only POSTs are the opt-in comment, to the mock |
+| NFR11 offline fixtures | `test/helpers/ci-preload.cjs` refuses non-loopback sockets in every child; `npm test` opens none |
+| NFR16 exit codes | `test/ci-integrations.test.ts` "the exit-code mapping" (15 codes by 6 lists, in dash and bash); the mapping tables in all three runners |
+| NFR18 supply chain | the pin tests above; `npm --prefix integrations/github-action ci` |
+| NFR19 platforms | `docs/ci/README.md` "Platforms" (macOS tested here; Linux unverified; Windows untested) |
+
+### Done
+
+- **`integrations/github-action/`**: `action.yml` (composite), `package.json` and `package-lock.json` (private, UNLICENSED, one dependency), `vendor/pr-rla-0.1.0.tgz`, `scripts/{prepare.sh,run.sh,exit-map.sh,report.mjs,comment.mjs}`.
+- **`integrations/gitlab/templates/pr-rla.yml`**: two YAML documents, `spec:inputs` (12 typed inputs) and the job.
+- **`docs/ci/{README,github,gitlab,bitbucket}.md`**: guides, the matrix, the scope table, the platforms note, the credentials models, and the release re-pin steps for U10. The README gets a "CI integrations" section (before "Architecture").
+- **`test/helpers/ci-harness.ts`, `ci-fixtures.ts`, `ci-preload.cjs`**: the harness (below). **`scripts/pack-action-tarball.mjs`**: rebuilds the vendored tarball and the lockfile. **`scripts/demo-ci.mjs`**: the demo.
+- **`ajv@8.20.0`** (exact) in devDependencies: the pinned JSON-schema validator.
+
+### The harness (FR6.5)
+
+- **`runComposite`** reads `action.yml`, evaluates the `${{ }}` subset it uses (contexts `inputs`, `github`, `runner`, `steps`; `==`, `!=`, `&&`, `||`, `!`; `always()`, `success()`, `failure()`; anything else throws), and runs each `run` step with `bash --noprofile --norc -e -o pipefail`, with `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY` and `GITHUB_ENV` on temporary files. A `uses` step is recorded, never fetched. The `install` step (`npm ci`, which needs the network) is skipped by id, and a test pins its exact text. The action path is a copy of the action with a `pr-rla` shim running `dist/cli.js` where `npm ci` would have put one.
+- **`runScript`** runs a GitLab job's or a Bitbucket step's `script` lines in one shell (dash for GitLab where `/bin/dash` exists, bash for Bitbucket). `renderGitLabTemplate` interpolates `$[[ inputs.x ]]` the way GitLab does and `ruleApplies` evaluates the component's `rules`.
+- **Mock servers**: `MockApi` is one HTTP server on 127.0.0.1 with a path prefix per mocked origin. The real CLI runs unchanged in a child; `ci-preload.cjs` (`NODE_OPTIONS=--require`) swaps only the last hop of `fetch` for the origins in `PRRLA_TEST_ROUTES`, so the broker's grants, read-only guard and pacing run as in production, and refuses every other socket (recorded in a file the test reads). The trackers behind it are `FakeGitHubIssues` and `FakeGitLabIssues` (synthetic).
+- **Fixtures** (`test/fixtures/ci/README.md`): synthetic github-issues, gitlab-issues and small-population audits built at test time with the in-process commands; the recorded gh-aw Q3 audit plus synthetic verdict lines for git-file; one synthetic `issues`/`labeled` event payload.
+- The child's git is hermetic (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`): a machine-wide gitconfig identity had been reaching a checkpoint commit.
+
+### Settled or recorded, with dates (all read-only; 2026-11-04)
+
+- **`actions/setup-node`**: `gh api repos/actions/setup-node/tags` at 08:21Z. Latest release v7.1.0 is commit `949feb2413d6458794dcd2491c4babbbce0c15c1` (committed 2026-10-08T02:43:26Z; a commit, not a tag object). Its `action.yml` has `package-manager-cache`, set to `false`. Pinned in `action.yml` with `# v7.1.0` at `node-version: "24"`.
+- **`actions/checkout`**: v7.0.1 is `3d3c42e5aac5ba805825da76410c181273ba90b1` (committed 2026-07-17T18:45:11Z); used in the docs example only.
+- **Schemas**, each fetched once with a GET and vendored byte for byte under `test/fixtures/schemas/` (URL, date, bytes and sha256 in `SOURCES.json`, checked by a test):
+
+  | File | Source | sha256 |
+  |---|---|---|
+  | `github-action.json` (31,255 bytes) | `https://www.schemastore.org/github-action.json` (identical to `json.schemastore.org/github-action.json`) | `224326cc…` |
+  | `gitlab-ci.json` (128,124 bytes) | `https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json` | `2ed7f27a…` |
+  | `bitbucket-pipelines.json` (33,271 bytes) | `https://api.bitbucket.org/schemas/pipelines-configuration` (SchemaStore's catalog points there and carries no copy; `json.schemastore.org/bitbucket-pipelines.json` is a 404) | `b3731926…` |
+
+  All three are JSON Schema draft-07 and compile under ajv 8.20.0 with `strict: false` and `validateFormats: false`.
+- **Image digests** (Docker Hub's public tag API): `node:24-alpine` index `sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85` and `node:24` index `sha256:e7add2a490bb17d97b485b8641bd88455fff7839ade0f5eba493c3508124d413`, both tags last updated 2026-10-28.
+- **The pin**: `npm pack` of this checkout is `integrations/github-action/vendor/pr-rla-0.1.0.tgz`, sha512 `P9hXc6xR…dng==`, recorded in the Action's lockfile. `npm ci` there installs 21 packages and `pr-rla --version` prints 0.1.0.
+
+### Verified (command → output), Node 22.23.2
+
+```
+npm ci && npm run build && npm run typecheck && npm test
+  Test Files  86 passed (86)      (before this bolt, on 0fa9ad8: 83 files)
+  Tests       1420 passed (1420)  (before: 1218; +202, all in the three new files)
+  ~118 s (before: ~79 s), the three CI files running beside the others
+npm --prefix packages/pr-rla-mcp ci && npm --prefix packages/pr-rla-mcp test     # 59 of 59
+npm --prefix examples/providers/gitea ci && npm --prefix examples/providers/gitea test   # 1 of 1
+npm --prefix examples/ledgers/jira ci && npm --prefix examples/ledgers/jira test         # 1 of 1
+npm --prefix integrations/github-action ci      # 21 packages; node_modules/.bin/pr-rla --version = 0.1.0
+```
+
+The new tests by file: `test/ci-github-action.test.ts` 46, `test/ci-job-scripts.test.ts` 113, `test/ci-integrations.test.ts` 43. Every `npm test` run listed `denied` connections as empty for the Action and the two job-script runners; the vitest process's own network-deny setup also passed for all three files.
+
+Shellcheck (not part of the suite; run by hand, 2026-11-04) is clean for `prepare.sh`, `run.sh`, `exit-map.sh` and the shared job script, apart from two info notes (`SC1091` not following a sourced file, `SC2016` about the single-quoted `node -e`).
+
+### The demo
+
+`npm run build && node scripts/demo-ci.mjs` (offline, Node 22.23.2) runs the Action's `prepare.sh` and `run.sh` as the runner would on a fixture ESCALATE audit and on a fixture CERTIFIED one:
+
+```
+== fixture ESCALATE (6 fails of 6 labelled draws) ==
+  [run.sh] pr-rla --plugins builtin-only -C . status --json --offline -> exit 2
+  [run.sh] pr-rla: prefix 6/36 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -9.657 / target 2.996 · ESCALATE: review all 1,589 or narrow the claim · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF
+  outputs: state=ESCALATE prefix=6/36 llr=-9.657 exit-code=2
+  job summary: ## pr-rla status / ### ESCALATE / the certificate line / a table / **Job result: FAIL** (exit 2: ESCALATE …; fail-on includes escalate)
+  [decide] ::error title=pr-rla::exit 2: ESCALATE (the sequential test cannot certify), or the seed round is not yet published; fail-on includes escalate
+  JOB RESULT: FAILED
+
+== fixture CERTIFIED (36 passes) ==
+  outputs: state=CERTIFIED prefix=36/36 llr=3.066 exit-code=0
+  JOB RESULT: passed
+```
+
+The same thing, with `action.yml` read and its expressions evaluated, is the test "DEMO, ESCALATE fixture fails the job" in `test/ci-github-action.test.ts`.
+
+### Deviations from the design, and why
+
+1. **`window` input dropped.** The design lists it; the CLI has no `--window` option (the window is in `.pr-rla.yml`).
+2. **Added inputs and outputs.** `comment-issue` (the audit issue, defaulting to the event's), `approve-origins`, `accept-lock-grants`, `allow-writes`, `token`; output `exit-code`. The design's `sample` stays out of the default and is accepted only with `allow-writes: true`, as in the draft.
+3. **pr-rla is a vendored tarball, not an npm version.** Nothing is published, so the lockfile pins a tarball made by `npm pack` from this checkout and its integrity. The re-pin to the published version is written out in `docs/ci/github.md`. The tarball is a snapshot: it does not move when `src/` does, and `node scripts/pack-action-tarball.mjs` re-takes it. The root `.gitignore` ignores `pr-rla-0.1.0.tgz`, so one exception was added for that directory.
+4. **GitLab and Bitbucket offer `status` and `verify` only.** The design lists `checkpoint` for the component. Pushing needs a write credential and git auth plumbing a job does not have, and none of it could be exercised against a real remote with a token, so the guides say to run `checkpoint` and `sample` from a clone with push rights. (The Action's checkpoint uses the checkout's own credentials and was tested against a local bare repo.)
+5. **No `act`-style full workflow run.** The harness runs the composite action's steps only (`workflow` events, `permissions:` and `uses:` resolution are not simulated); the example workflow is a documented example and is checked only for its pins.
+6. **GitLab and Bitbucket install by version, not by lockfile.** They have no lockfile of their own. The script requires one exact version, checks `--version` after the install, installs with `--ignore-scripts`, and takes an optional `integrity` (checked against `npm view`). Transitive dependencies still resolve on the day. Recorded for U10: publish with an `npm-shrinkwrap.json`.
+7. **Credential approvals use `approve-origins`**, the typed input the brief suggests, in the Action and the component; `PRRLA_APPROVE_ORIGINS` in the snippet and Bitbucket. Entries are `ENV_VAR=https://host`.
+8. **Booleans of the component are strings with `options`.** GitLab keeps the type of an input that is the whole value, which would put a boolean in a `variables:` map.
+
+### Findings
+
+- **A withheld credential does not fail anything.** On GitHub Enterprise Server with no `approve-origins`, `pr-rla status` runs anonymously, a private tracker answers 404, and the job passes `NOT_CERTIFIED 0/36` with exit 0. The only sign is one stderr line (`… is not approved on this machine, so withheld`). The Action now puts stderr in the summary, and the guides name the line. Whether `status` should exit non-zero when a credential was withheld and the ledger then read nothing is a CLI decision I did not make. Test: "a self-hosted SCM gets no token without an approve-origins entry".
+- **`npm install --package-lock-only` keeps a stale integrity for a `file:` tarball whose bytes changed**, both from the lockfile and from `node_modules/.package-lock.json`. The first version of the pack script reported success with the old integrity. It now deletes both and checks the result against the tarball's own sha512.
+- **The Bitbucket schema accepts a step with no `script` and a step with an unknown key.** The GitLab and GitHub schemas refuse the equivalents. The Bitbucket test records this and adds its own structural assertions.
+- **The `git-file` ledger cannot be checkpointed** ("ledger git-file has no readHistory"), so `checkpoint --push` in CI needs an issue ledger. The harness test uses github-issues and a local bare remote.
+- **Exit 3 comes from `sample` in practice.** `status` reports a refusal only when a sampled audit's population is below the minimum, which `sample` refuses to produce; the harness covers exit 3 through `sample` on a 12-change audit and the REFUSED state through a canned status result.
+- **A runner has no git identity.** The checkpoint is a commit, so `run.sh` sets the `github-actions[bot]` identity unless the repository sets one. The harness caught the other direction: the machine's own system gitconfig identity leaked into the commit until the harness made git hermetic.
+- **A child bash inherits no `-e`, but `run.sh` is also run directly in the demo.** `run.sh` now says `set +e` itself, since the exit code is its data.
+- **An offline `verify` of a tracker ledger skips check 7 and still says VERIFIED** (exit 0). The Action therefore reports no `state` for it (the certificate was not read); the summary shows the verdict and the seven checks.
+- **A shell glob in `approve-origins`** would have expanded against the checkout; both shell versions run the loop under `set -f`. Origins are checked to `https://` plus host characters, and the approvals file's directory is compared by physical path (a symlink cannot move it into the workspace; the GitLab and Bitbucket first version compared strings and the test caught the macOS `/var` to `/private/var` case).
+
+### Unverified
+
+- Any run on a real GitHub runner, GitLab instance or Bitbucket pipeline. In particular: GitLab's own interpolation of `spec:inputs` and its rule evaluation; Bitbucket's handling of the YAML anchor for the shared script; `condition: changesets` on Bitbucket; the Actions runner's expression semantics beyond the subset the harness implements.
+- Linux. Everything ran on macOS 26 (Node 22.23.2, bash 5.3, dash from `/bin/dash`). Alpine's `ash` is not dash; the script uses only POSIX constructs, but it was not run under ash.
+- The webhook route for GitLab label events (described from GitLab's documentation).
+- Bitbucket Data Center (as in phase 2).
+- That `npm install pr-rla@X` from the registry behaves like the tarball: nothing is published.
+- That `GITHUB_TOKEN`'s default permissions cover reading the audit repository's issues (documented as the scope, exercised on a mock).
+
+### Shared files touched (for the integration step)
+
+- `README.md`: a "CI integrations" section inserted before "Architecture: bring-your-own providers and ledgers". U6 will add its own README section; keep both.
+- `package.json` and `package-lock.json`: one devDependency, `ajv` `8.20.0`. U8 and U9 changed neither when branched; resolve by keeping both sides' edits and re-running `npm install`.
+- `.gitignore`: one appended exception for `integrations/github-action/vendor/pr-rla-*.tgz`.
+- `BUILD-NOTES.md`: this section is at the end.
+- Nothing in `src/` changed, so no code from U5, U8 or U9 can conflict. The vendored tarball is a snapshot of `dist/` at this branch's tip; after the merge, re-take it with `node scripts/pack-action-tarball.mjs` (it is the only place the integrated build would otherwise differ from what the Action installs).
+- `test/ci-*.test.ts` read `dist/cli.js`, so run `npm run build` before `npm test` (as `api-cli-contract.test.ts` already needs).
+
+### What U10 needs to know
+
+- The re-pin is `docs/ci/github.md`, "Re-pinning at release": 7 numbered steps, including what to delete (`vendor/`, `scripts/pack-action-tarball.mjs`, the `.gitignore` exception) and which defaults to change in the GitLab template, the snippet and the Bitbucket step. The tests read the root `package.json` version, so they need no edit; they accept both the tarball form and an exact registry version.
+- Decide on `npm-shrinkwrap.json` for the published package (finding 6 above).
+- The README's Windows statement (NFR19) is U10's; `docs/ci/README.md` says only what applies to CI.
+- `<owner>/pr-rla` and `<exact ref>` in `docs/ci/*.md` are placeholders until the repository has an address.
+
 ## Integration: wave 2
 
 Branch `integrate/wave2`, off master `3059cfb` (which carries `4b72ecb`, the reviewer, and `3059cfb`, the protocol edit), 2026-11-04. Real merges (`--no-ff`), one branch at a time, in the coordinator's order; each merge verified before the next. Master is not moved until the coordinator says so.
