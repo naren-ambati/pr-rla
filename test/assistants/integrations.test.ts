@@ -97,11 +97,11 @@ describe("the Claude Code plugin (integrations/claude-code)", () => {
     for (const v of Object.values(env)) expect(v).toMatch(/^\$\{PR_RLA_READONLY_[A-Z_]+:-\}$/);
   });
 
-  it("hooks.json runs guard.mjs before Bash, Write, Edit and MultiEdit (and PowerShell, NotebookEdit, Read, Grep, MCP tools), in exec form, failing closed", () => {
+  it("hooks.json runs guard.mjs before Bash, Write, Edit and MultiEdit (and PowerShell, Monitor, NotebookEdit, Read, Grep, MCP tools), in exec form, failing closed", () => {
     const h = json("integrations/claude-code/hooks/hooks.json") as { hooks: { PreToolUse: { matcher: string; hooks: { type: string; command: string; args: string[]; timeout: number; onFailure: string }[] }[] } };
     const groups = h.hooks.PreToolUse;
     const exact = groups.filter((g) => /^[A-Za-z|]+$/.test(g.matcher)).flatMap((g) => g.matcher.split("|"));
-    for (const tool of ["Bash", "Write", "Edit", "MultiEdit", "PowerShell", "NotebookEdit", "Read", "Grep"]) expect(exact).toContain(tool);
+    for (const tool of ["Bash", "Write", "Edit", "MultiEdit", "PowerShell", "Monitor", "NotebookEdit", "Read", "Grep"]) expect(exact).toContain(tool);
     expect(groups.some((g) => g.matcher === "mcp__.*")).toBe(true);
     for (const g of groups)
       for (const handler of g.hooks) {

@@ -86,7 +86,7 @@ cd /path/to/audit-repo && claude --plugin-dir ~/pr-rla-plugin
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
+        "matcher": "Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
         "hooks": [
           { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs", "--client", "claude-code"], "timeout": 30, "onFailure": "block" }
         ]
@@ -103,7 +103,7 @@ cd /path/to/audit-repo && claude --plugin-dir ~/pr-rla-plugin
 ```
 
 - **Exec form.** `command: node` with `args`, so `${CLAUDE_PLUGIN_ROOT}` reaches the guard as one argument with no shell. Node must be on Claude Code's `PATH` (the MCP server needs it too).
-- **Matchers.** `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep` is a list of exact tool names; `mcp__.*` matches every MCP tool, the plugin's own included (they pass: none carries a label or a path).
+- **Matchers.** `Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep` is a list of exact tool names (`Monitor` runs a shell command in the background, so it is read like `Bash`); `mcp__.*` matches every MCP tool, the plugin's own included (they pass: none carries a label or a path).
 - **A block** exits 2 with the reason on stderr; Claude Code shows it to Claude as the tool's error (`PreToolUse:Bash hook error: … pr-rla guard blocked this: …`).
 - **`onFailure: "block"`** makes a guard that cannot start, crashes or times out block the call. It needs Claude Code 2.1.295 or later; 2.1.267, installed here, accepts the field (`claude plugin validate` passes) and, per the docs, lets the call through on such a failure. The guard itself blocks whatever it cannot parse.
 - The rules, what they cannot see, and how to check a command by hand: [guard.md](guard.md).
