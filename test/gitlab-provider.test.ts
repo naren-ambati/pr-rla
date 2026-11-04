@@ -6,7 +6,7 @@ import { formatConformanceReport, runProviderConformance, type ConformanceHarnes
 import { applySelector, normalizeSelector } from "../src/core/selector.js";
 import { fakeGitLab, GL_BASE, glUserId } from "./helpers/fake-gitlab.js";
 import { readJsonFixture } from "./helpers/fixtures.js";
-import { replayFetch, type Recording } from "./helpers/replay-fetch.js";
+import { recordedWalkClock, replayFetch, type Recording } from "./helpers/replay-fetch.js";
 import { buildScenario, OID, scenarioExpectations, scmScenario, U } from "./helpers/scm-scenario.js";
 
 /** gitlab.com's 429: Retry-After plus RateLimit-Reset in epoch seconds. */
@@ -162,13 +162,13 @@ describe("GitLab normalizers (pure)", () => {
 });
 
 type Rec = Recording & { options: Record<string, string>; window: { opensAt: string; closesAt: string }; repo: string; expected: { ids: string[]; directPushes: string[]; diagnostics: { label: string; value: number }[] } };
-const recorded = (name: string) => {
+const recorded = (name: string, clock: (rec: Rec) => number = (rec) => Date.parse(rec.recordedAt)) => {
   const rec = readJsonFixture<Rec>("gitlab", name);
   let last = replayFetch(rec);
   const make = (h?: ConformanceHarness) => {
     last = replayFetch(rec);
     const base = { cwd: ".", env: {}, log: () => {}, fetch: last as typeof fetch };
-    return new GitLabProvider(rec.options, { ...(h ? h.context(base) : base), now: () => Date.parse(rec.recordedAt) });
+    return new GitLabProvider(rec.options, { ...(h ? h.context(base) : base), now: () => clock(rec) });
   };
   return { rec, make, served: () => last.served(), request: { repo: rec.repo, window: rec.window, kinds: ["pull_request", "direct_push"] as ("pull_request" | "direct_push")[] } };
 };
@@ -260,5 +260,32 @@ describe("GitLab provider on recorded self-managed responses: gitlab.freedesktop
       { label: "commits linked only through GitLab's commit->MR lookup", value: 0 },
       { label: "direct pushes that are merge commits", value: 0 },
     ]);
+  });
+});
+
+describe("GitLab provider on recorded gitlab.com responses: gitlab-org/cli, October 2026 (FR7.1, the U3 demo)", () => {
+  // Recorded read-only during `pr-rla -C examples/gitlab-cli-2026-10 freeze --dry-run` (scripts/record-fixture.mjs --cli).
+  const r = recorded("gitlab-org-cli-2026-10.json", recordedWalkClock);
+  const id = (n: number) => `gitlab:gitlab-org/cli#${n}`;
+  // The example's stratum (examples/gitlab-cli-2026-10/.pr-rla.yml), with and without the registered bot list.
+  const selector = (bots: string[], max_changed_lines: number | null = 200) => normalizeSelector({ kinds: ["pull_request", "direct_push"], authors: "any", unreviewed: "no-human-review", merged_by: "any", max_changed_lines, bots });
+
+  it("bots: [gitlab-bot] moves exactly 4 MRs into the no-human-review stratum (0 -> 4); the provider still reports gitlab-bot as human", async () => {
+    const out = await r.make().listChanges(r.request);
+    expect(out.changes).toHaveLength(205);
+    expect(out.diagnostics).toEqual(r.rec.expected.diagnostics);
+    const step = (s: ReturnType<typeof applySelector>) => s.funnel.find((x) => x.step === "no recorded human review")!.count;
+    const without = applySelector(out.changes, selector([], null), r.rec.recordedAt);
+    const withBots = applySelector(out.changes, selector(["gitlab-bot"], null), r.rec.recordedAt);
+    expect(step(without)).toBe(0);
+    expect(step(withBots)).toBe(4);
+    // Each was approved only by GitLabDuo (bot: true) and gitlab-bot (checked by hand with curl on /approvals, 2026-11-04).
+    expect(withBots.selected.map((c) => c.id)).toEqual([id(4191), id(4247), id(4251), id(4253)]);
+    expect(withBots.funnel[1]).toEqual({ step: "actor entries re-labelled as bot by selector", count: 164 });
+    // The example's 200-line cap keeps 3 of them (!4247 has 569 lines).
+    expect(applySelector(out.changes, selector(["gitlab-bot"]), r.rec.recordedAt).selected.map((c) => c.id)).toEqual([id(4191), id(4251), id(4253)]);
+    // The same list by account id: gitlab-bot is user 1786152 on gitlab.com.
+    expect(applySelector(out.changes, selector(["id:1786152"], null), r.rec.recordedAt).selected.map((c) => c.id)).toEqual(withBots.selected.map((c) => c.id));
+    expect(out.changes.flatMap((c) => c.reviews.map((rv) => rv.author)).find((a) => a.login === "gitlab-bot")).toEqual({ login: "gitlab-bot", kind: "human", id: "1786152" });
   });
 });
