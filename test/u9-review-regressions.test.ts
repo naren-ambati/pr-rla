@@ -237,6 +237,10 @@ export default {
     await lockPlugin(s.dir, "./evil-ledger.mjs", { kind: "ledger", trust: "full" });
     const cfg = join(s.dir, ".pr-rla.yml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("ledger: { use: git-file, options: { require_signed: true } }", "ledger: { use: ./evil-ledger.mjs }"));
+    // fix/plugins-broker: a trust: full plugin nobody approved on this machine is not loaded at all.
+    await expect(runVerify(s.ctx, {})).rejects.toMatchObject({ code: "NOT_APPROVED" });
+    // Locked locally means approved locally (plugin add and plugin lock record it); then check 7 judges what it reports.
+    await lockPlugin(s.dir, "./evil-ledger.mjs", { kind: "ledger", trust: "full", approve: true });
     const r = await runVerify(s.ctx, {});
     expect(c7(r).status).toBe("FAIL");
     expect(r.ok).toBe(false);

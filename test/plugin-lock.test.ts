@@ -507,6 +507,10 @@ describe("plugin check runs the ledger kit for a ledger (finding 15)", () => {
     expect(r.out).toContain("  conformance     the ledger kit through the plugin host, on 2 recorded fixture(s)");
     for (const c of ["api-version", "normalization", "first-label", "integrity", "transient-faults"]) expect(r.out).toContain(`    ok   hibernate-first-verdicts.json › ${c}`);
     expect(r.out).toContain("    ok   hibernate-removal-HHH-14722.json › removal");
+    // The kit's case-coverage rule (fix/ledgers-selector): each case no recording shows is reported as skipped, with why.
+    expect(r.out).toContain("    skip (case coverage) › idempotent-publish: not exercised by this run: a recording cannot show it (the tracker must change between reads); the ledger's own kit run covers it");
+    expect(r.out).toContain("    skip (case coverage) › deletion: not exercised by this run: plugin check was given no recorded fixture for this case; record one, or cover it in the ledger's own kit run");
+    expect(r.out.filter((l) => l.startsWith("    skip (case coverage) › "))).toHaveLength(10);
     expect(r.out).toContain("  conformance     PASS");
     expect(r.out[r.out.length - 1]).toBe(CORRECTNESS_NOT_SAFETY);
   });

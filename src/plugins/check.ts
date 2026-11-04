@@ -145,6 +145,21 @@ export function readRecordedLedgerFixture(path: string): RecordedLedgerFixture {
 }
 
 /**
+ * The kit needs a fixture per case or a stated reason (fix/ledgers-selector). `plugin check` runs
+ * recordings only, so every case they do not show is named, with why, and the report lists it as
+ * skipped: the ledger's own kit run on a fake tracker is where those cases are covered.
+ */
+function unrecordedCases(recorded: readonly LedgerCase[]): Partial<Record<LedgerCase, string>> {
+  const out: Partial<Record<LedgerCase, string>> = {};
+  for (const c of LEDGER_CASES)
+    if (!recorded.includes(c))
+      out[c] = REPLAYABLE.includes(c)
+        ? "plugin check was given no recorded fixture for this case; record one, or cover it in the ledger's own kit run"
+        : "a recording cannot show it (the tracker must change between reads); the ledger's own kit run covers it";
+  return out;
+}
+
+/**
  * Runs the ledger kit through the host on recorded ledger fixtures, as hostedProviderConformance
  * does for providers: every instance the kit makes is a fresh child, fed the recording by the
  * parent; requests to hosts the ledger did not declare are refused; its index is kept here.
@@ -185,7 +200,7 @@ export async function hostedLedgerConformance(plugin: ResolvedPlugin, label: str
       }) as typeof fetch;
       const lctx = harness.context({ fetch: guarded, windowDir });
       return hostedLedger(h, rec.options ?? {}, { cwd: windowDir, windowDir, fetch: lctx.fetch, log: lctx.log, ...(lctx.sleep ? { sleep: lctx.sleep } : {}), ...(f.reviewers !== undefined ? { reviewers: f.reviewers } : {}), index: ledgerIndexStore({ mode: "read-write" }, windowDir) });
-    }, kit);
+    }, kit, { skipCases: unrecordedCases(fixtures.map((f) => f.rec.case)) });
   } finally {
     for (const h of started) h.close();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });

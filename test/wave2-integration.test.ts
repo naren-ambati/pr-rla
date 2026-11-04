@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkpointCommand } from "../src/commands/checkpoint.js";
 import { freezeCommand } from "../src/commands/freeze.js";
@@ -9,6 +10,9 @@ import { runVerify, verifyExitCode } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
 import { checkpointRecord, type LedgerCheckpointLine } from "../src/core/checkpoint.js";
 import { buildPooledPopulation } from "../src/core/population.js";
+import { rebuildRepo } from "../src/core/rebuild.js";
+import { hostedProvider, startPluginHost } from "../src/plugins/host.js";
+import { readGrants, resolvePlugin } from "../src/plugins/lock.js";
 import { normalizeSelector } from "../src/core/selector.js";
 import type { ScmProvider } from "../src/sdk/provider.js";
 import type { DrawsFile, TimestampEvidence } from "../src/core/records.js";
@@ -35,6 +39,9 @@ import { MockTsaServer, makeTestAuthority, mintResponse, tokenOf, type TestAutho
  *
  * bolt/u8-org-pooled-freeze × fix/ledgers-selector: the ledger index binds pooled draws (repo-qualified
  * change ids across the org's repos), and a FAIL in check 7 outranks U8's INCOMPLETE in check 5.
+ *
+ * fix/plugins-broker × bolt/u8-org-pooled-freeze: U8's error fields (status, rateLimited) cross the
+ * plugin host on pr-rla/ipc/v2, so check 5's rebuild tells a rate limit from a missing repository.
  */
 const W = "audit/2026-q3";
 let tsa: MockTsaServer;
@@ -231,6 +238,46 @@ describe("the ledger index anchor with pooled draws (bolt/u8-org-pooled-freeze �
       expect(verifyExitCode(r)).toBe(1);
     } finally {
       writeFileSync(idxPath, original);
+    }
+  });
+});
+
+describe("U8's error fields over pr-rla/ipc/v2 (fix/plugins-broker × bolt/u8-org-pooled-freeze)", () => {
+  const PLUGIN = `import { defineProvider } from "pr-rla/provider";
+if (process.env.PR_RLA_HOST !== "1") throw new Error("imported outside the plugin host");
+export default defineProvider({
+  providerApiVersion: 1,
+  name: "limited",
+  hosts: () => [],
+  create: () => ({
+    apiVersion: 1,
+    name: "limited",
+    async listChanges() {
+      throw Object.assign(new Error("API rate limit exceeded"), { code: "HTTP_ERROR", status: 403, rateLimited: true });
+    },
+    async describeRepo(ref) {
+      return { repo: ref.repo, id: "7", defaultBranch: "main", archived: false, fork: false, visibility: "public" };
+    },
+  }),
+});
+`;
+
+  it("an isolated provider's rate-limited 403 reaches the rebuild with its status and flag: INCOMPLETE (run verify again), not a FAIL or a gone repo", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "prrla-wave2-limited-"));
+    mkdirSync(join(dir, "limited"));
+    writeFileSync(join(dir, "limited", "package.json"), JSON.stringify({ name: "limited-provider", version: "0.0.1", type: "module" }));
+    writeFileSync(join(dir, "limited", "index.mjs"), PLUGIN);
+    const plugin = resolvePlugin("./limited/index.mjs", dir);
+    const host = await startPluginHost({ kind: "provider", entry: plugin.entry, readPaths: readGrants(plugin), env: { PR_RLA_HOST: "1" }, label: "limited" });
+    try {
+      const provider = await hostedProvider(host, {}, { cwd: dir, fetch: globalThis.fetch, log: () => {} });
+      const window = { opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" };
+      await expect(provider.listChanges({ repo: "acme/a", window, kinds: ["pull_request"] })).rejects.toMatchObject({ status: 403, rateLimited: true });
+      const r = await rebuildRepo(provider, { repo: "acme/a", frozenHead: "a".repeat(40), frozenEmpty: false, window, selector: normalizeSelector({ kinds: ["pull_request"], unreviewed: "no-human-review" }) });
+      expect(r.fail).toEqual([]);
+      expect(r.incomplete).toEqual([expect.stringMatching(/^could not be listed \(.*API rate limit exceeded.*\): a rate limit or an outage, not a missing repository; run verify again$/)]);
+    } finally {
+      host.close();
     }
   });
 });
