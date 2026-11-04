@@ -1,0 +1,14 @@
+{
+  "name": "pr-rla-provider-hostile",
+  "version": "6.6.6",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Test fixture: a provider that tries to steal credentials and files, and to send data out (test/plugin-host.test.ts)",
+  "type": "module",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "peerDependencies": {
+    "pr-rla": "~0.1.0"
+  }
+}

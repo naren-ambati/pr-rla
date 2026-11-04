@@ -7,7 +7,7 @@ import { stoppingTable, effectiveCap } from "../core/sprt.js";
 import { pluginIdentity } from "../registry.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
-import { CommandError, configFor, isoNow, pct, protocolSha256, trustFor, writeJson, type CommandContext } from "./context.js";
+import { auditContextFor, CommandError, configFor, isoNow, pct, protocolSha256, trustFor, writeJson, type CommandContext } from "./context.js";
 import { assessRecord, obtainTimestamps, reportTimestamps, timestampingFor } from "./timestamps.js";
 import { confirmRekorV2, rekorApi, submitSigned, submitSignedV2, submitUrl } from "./translog.js";
 
@@ -41,7 +41,7 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
     beacon: beaconParams(),
     registeredAt: isoNow(ctx),
     timestamping,
-    plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir), ledger: await pluginIdentity(config.ledger, "ledger", config.dir) },
+    plugins: { provider: await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins), ledger: await pluginIdentity(config.ledger, "ledger", config.dir, auditContextFor(ctx).plugins) },
     // Bolt 1 has only the git-file ledger (and external ledgers), so verdicts are self-asserted. Issue ledgers (bolt 3) default to "account".
     verdicts: { minProvenance: "self-asserted", reviewers: null },
     prRlaVersion: PR_RLA_VERSION,
@@ -60,6 +60,10 @@ export async function registerCommand(ctx: CommandContext, opts: RegisterOptions
   ctx.out(`  selector ${JSON.stringify(config.selector)}`);
   ctx.out(`  protocol ${record.protocolSha256.slice(0, 12)}… (${config.protocol})`);
   ctx.out(`  provider ${record.plugins.provider.name} (${record.plugins.provider.source}${record.plugins.provider.version ? ` ${record.plugins.provider.version}` : ""}) · ledger ${record.plugins.ledger.name} · verdict provenance ${record.verdicts.minProvenance}`);
+  for (const id of [record.plugins.provider, record.plugins.ledger]) {
+    if (id.integrity) ctx.out(`  plugin ${id.name}: trust ${id.trust} · treeSha256 ${id.integrity.slice(0, 12)}… (pr-rla.lock.json)`);
+    if (id.trust === "full") ctx.out(`  PLUGIN TRUST: full (${id.name}@${id.version ?? "unversioned"} runs with your environment and files)`);
+  }
   ctx.out(`  seed round R = ${r.round} (drand quicknet), publishes ${unixToIso(r.publishesAt)}: 24 h after the ${r.base === "registration" ? "registration" : "window close"}`);
   const claimed: AuditMode = Date.parse(record.registeredAt) < Date.parse(record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE";
   const retro = " (registered after the window opened: a demonstration, not evidence)";

@@ -1,8 +1,10 @@
 # A read-only Forgejo population through the EXTERNAL Gitea plugin: forgejo/docs on Codeberg,
 # October 2026, every change that landed on its default branch (next). No token needed.
-# The plugin resolves pr-rla/provider from its own node_modules, so link it once:
-#   (cd examples/providers/gitea && npm install)
+# Lock the plugin once (it prints what it trusts, then writes pr-rla.lock.json here):
+#   pr-rla -C examples/codeberg-forgejo-docs-2026-10 plugin add ../providers/gitea/index.mjs
 #   pr-rla -C examples/codeberg-forgejo-docs-2026-10 freeze --dry-run
+# It runs in pr-rla's plugin host. With --trust full it runs in process instead, and then resolves
+# pr-rla/provider from its own node_modules: (cd examples/providers/gitea && npm install).
 provider:
   use: ../providers/gitea/index.mjs        # a path, relative to this file; or a package name
   options:

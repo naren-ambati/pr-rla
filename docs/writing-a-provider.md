@@ -119,7 +119,7 @@ The provider must retry each one, wait at least as long as the headers say, and 
 
 **Behind the fetch broker.** In a real run `ctx.fetch` is pr-rla's fetch broker: every request passes its read-only guard (a provider may send only `GET`, `HEAD` and GraphQL queries), a per-host rate budget shared with every other caller, and a 30 s timeout. A request made as plain `fetch(url, init)`, as this example makes them, gets one attempt and the provider retries it, as above. A provider may instead hand retries to the broker by passing `destination: "scm"` (and optionally `retry: { maxRetries, acceptJson }`) in the init, as the built-in providers do; the kit's harness then retries that request with the broker's policy, and the provider passes by recovering through it.
 
-Two optional definition fields tell the broker what the provider reaches: `hosts(options)` (the hosts it contacts) and `credentials` (`[{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }]`). A header value `prrla-cred:GITEA_TOKEN` is then replaced with the token for those hosts only; a request to any other host carrying it is refused unsent.
+Two optional definition fields tell the broker what the provider reaches: `hosts(options)` (the hosts it contacts) and `credentials` (`[{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }]`). A header value `prrla-cred:GITEA_TOKEN` is then replaced with the token for those hosts only; a request to any other host carrying it is refused unsent. **Declare both:** an external provider runs isolated by default (section 7), where it may contact only the hosts it declared and receives each declared credential only as its placeholder.
 
 Two kinds of fixture are worth having:
 - **Recorded real responses.** `node scripts/record-fixture.mjs ./examples/providers/gitea/index.mjs forgejo/docs 2026-10-01 2026-10-07 out.json '{"base_url":"https://codeberg.org"}'` records read-only responses. It trims them to the fields pr-rla reads, scrubs personal e-mail addresses and never records tokens. The example ships one: [`fixtures/codeberg-forgejo-docs-2026-10-01.json`](../examples/providers/gitea/fixtures/codeberg-forgejo-docs-2026-10-01.json).
@@ -138,6 +138,8 @@ repo: forgejo/docs
 
 or, once installed in the audit repo, `use: pr-rla-provider-gitea`. A package name is resolved from the audit repo's `node_modules`. The module's default export (or a named `provider` export) must be the definition.
 
+Before the first run, lock it: `pr-rla plugin add ./providers/gitea/index.mjs` prints what it is about to trust (version, npm integrity, a tree hash of the files, hosts and credentials) and writes `pr-rla.lock.json`, which you commit with the audit. Until then every command refuses the plugin. After a reviewed change, `pr-rla plugin lock <use>` re-hashes it. `pr-rla plugin check <use>` runs the conformance kit through the plugin host on the fixtures your package.json lists (`"pr-rla": { "conformance": ["fixtures/…json"] }`), as this example does.
+
 ## 5. API versioning
 
 - `PROVIDER_API_VERSION` (now 1) changes only on a breaking change to anything exported by `pr-rla/provider`. pr-rla lists the versions it can load in `SUPPORTED_PROVIDER_API_VERSIONS`. A definition or instance that declares another version is refused with `ProviderApiVersionError`: `provider "x" declares providerApiVersion 2; this pr-rla supports 1. Upgrade pr-rla or use a provider release built for API 1.`
@@ -152,10 +154,12 @@ Name the package `pr-rla-provider-<name>`, add the `pr-rla-provider` keyword, sh
 
 ## 7. Trust model
 
-**An external provider runs inside the pr-rla process, with the CLI's privileges.** It receives `ctx.env` (the process environment, so every token in it: `GITHUB_TOKEN`, `GITLAB_TOKEN`, …), it can read and write files, and it can open network connections. It also *decides the population*. A provider that drops changes produces a manifest that its own re-run will "verify". `verify` rebuilds the population with the configured provider, so it can only catch tampering with the manifest, not a lying provider.
+**An external provider runs out of process by default**, in pr-rla's plugin host: a child Node process under the permission model, which can read only its own files, cannot write files or start processes, and receives credentials only as `prrla-cred:<ENV>` placeholders that the fetch broker swaps for the secret on the declared hosts. On Node 22 and 24 it can still open its own network connections. [`docs/security-model.md`](security-model.md) has the details and the limits. `plugin add --trust full` runs it in pr-rla's process instead, with your environment and files, and every command then says so (`PLUGIN TRUST: full`).
+
+Whichever way it runs, a provider *decides the population*. A provider that drops changes produces a manifest that its own re-run will "verify". `verify` rebuilds the population with the configured provider, so it can only catch tampering with the manifest, not a lying provider.
 
 So treat a provider like any code you run with your credentials, and like part of the audit's evidence:
 - **Pin it exactly.** Use an exact version in the audit repo's `package.json` (`"pr-rla-provider-gitea": "0.1.0"`, no range), commit the lockfile and install with `npm ci`, so the lockfile's `integrity` hash pins the bytes. Or vendor the file into the audit repo and reference it by path; then the git history of the audit repo pins it.
 - **Review it** before registering an audit, and hand the auditor the provider version with the registration.
 - **Give it the narrowest token:** a read-only token for one repository. pr-rla never needs write access to the SCM.
-- **Know what is recorded.** Manifests record the provider's `name` and `apiVersion`, but not its package version or a hash of its code. A verifier must use the same provider release. Recording an integrity hash is an open question (see `BUILD-NOTES.md`).
+- **Know what is recorded.** Registrations and manifests record the provider's name, source, version, the lock's `treeSha256` over its files, an options hash and its trust. `verify` warns when the provider it loads differs from the registered one.

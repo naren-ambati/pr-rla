@@ -6,6 +6,8 @@ import { Command } from "commander";
 import { CommandError, nodeContext, type CommandContext } from "./commands/context.js";
 import { freezeCommand } from "./commands/freeze.js";
 import { initCommand } from "./commands/init.js";
+import { pluginAddCommand, pluginCheckCommand, pluginLockCommand } from "./commands/plugin.js";
+import { closeAllPluginHosts } from "./plugins/host.js";
 import { recordCommand } from "./commands/record.js";
 import { registerCommand } from "./commands/register.js";
 import { sampleCommand } from "./commands/sample.js";
@@ -14,7 +16,7 @@ import { statusCommand } from "./commands/status.js";
 import { verifyCommand } from "./commands/verify.js";
 import { PR_RLA_VERSION } from "./version.js";
 
-export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromFile?: string }) => CommandContext, setExit: (code: number) => void): Command {
+export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromFile?: string; plugins?: string }) => CommandContext, setExit: (code: number) => void): Command {
   const program = new Command();
   program
     .name("pr-rla")
@@ -23,12 +25,14 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("-C, --dir <path>", "audit repo directory (holds .pr-rla.yml)")
     .option("-c, --config <path>", "config file (default <dir>/.pr-rla.yml)")
     .option("--from-file <changes.json>", "use the json-file provider with this export instead of the configured provider")
+    .option("--plugins <builtin-only>", "builtin-only: refuse every external provider and ledger (as PR_RLA_PLUGINS=builtin-only does)")
     .showHelpAfterError();
 
   const collect = (v: string, prev: string[] = []) => [...prev, v];
   const run = (fn: (ctx: CommandContext) => Promise<number>) => async () => {
-    const g = program.opts<{ dir?: string; config?: string; fromFile?: string }>();
+    const g = program.opts<{ dir?: string; config?: string; fromFile?: string; plugins?: string }>();
     const ctx = makeCtx(g);
+    if (g.plugins !== undefined) ctx.plugins = g.plugins;
     try {
       setExit(await fn(ctx));
     } catch (e) {
@@ -37,6 +41,8 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
       const next = (e as { next?: unknown }).next;
       if (typeof next === "string" && next) ctx.err(`  next: ${next}`);
       setExit(e instanceof CommandError ? e.exitCode : 1);
+    } finally {
+      closeAllPluginHosts();
     }
   };
 
@@ -120,6 +126,33 @@ export function buildProgram(makeCtx: (g: { dir?: string; config?: string; fromF
     .option("--json", "machine-readable output")
     .action(function (this: Command) {
       return run((ctx) => verifyCommand(ctx, this.opts()))();
+    });
+
+  const plugin = program.command("plugin").description("lock, re-lock and check external providers and ledgers (pr-rla.lock.json)");
+  plugin
+    .command("add <use>")
+    .description("review an external plugin named in .pr-rla.yml and add it to pr-rla.lock.json (the only way in)")
+    .option("--trust <isolated|full>", "isolated (default): out of process with placeholder credentials; full: in process with your environment", "isolated")
+    .option("--yes", "trust what is printed without asking")
+    .action(function (this: Command, use: string) {
+      return run((ctx) => pluginAddCommand(ctx, use, this.opts()))();
+    });
+  plugin
+    .command("lock <use>")
+    .description("re-hash an added plugin after you reviewed a change, and update its lock entry")
+    .option("--trust <isolated|full>", "change its trust")
+    .option("--yes", "trust what is printed without asking")
+    .action(function (this: Command, use: string) {
+      return run((ctx) => pluginLockCommand(ctx, use, this.opts()))();
+    });
+  plugin
+    .command("check <use>")
+    .description("lock status, npm signatures, hosts and credentials, and the conformance kit through the plugin host (correctness, not safety)")
+    .option("--fixture <file>", "a recorded fixture to run the kit on (repeatable)", collect)
+    .option("--offline", "skip npm audit signatures (it asks the npm registry)")
+    .option("--kind <provider|ledger>", "for a plugin not named in .pr-rla.yml", "provider")
+    .action(function (this: Command, use: string) {
+      return run((ctx) => pluginCheckCommand(ctx, use, this.opts()))();
     });
 
   program

@@ -21,7 +21,7 @@ import { pluginIdentity } from "../registry.js";
 import { PROVIDER_API_VERSION } from "../sdk/provider.js";
 import { isoMs } from "../timestamp/verify.js";
 import { PR_RLA_VERSION } from "../version.js";
-import { CommandError, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, trustFor, writeJson, type CommandContext } from "./context.js";
+import { auditContextFor, CommandError, configFor, fmt, isoNow, protocolSha256, providerFor, readRegistration, trustFor, writeJson, type CommandContext } from "./context.js";
 import { assessRecord, obtainTimestamps, reportTimestamps } from "./timestamps.js";
 import { confirmRekorV2, rekorApi, submitSigned, submitSignedV2, submitUrl } from "./translog.js";
 
@@ -168,7 +168,7 @@ export async function freezeCommand(ctx: CommandContext, opts: FreezeOptions): P
   }
 
   const v2reg = reg as SignedRecord<RegistrationRecordV2>;
-  const providerId = await pluginIdentity(config.provider, "provider", config.dir);
+  const providerId = await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx).plugins);
   const registered = v2reg.record.plugins.provider;
   if (providerId.name !== registered.name || providerId.optionsSha256 !== registered.optionsSha256)
     ctx.err(`note: the provider in .pr-rla.yml (${providerId.name}) differs from the registered one (${registered.name}, options ${registered.optionsSha256.slice(0, 8)}…); verify rebuilds the population with the provider it is given`);
