@@ -1601,7 +1601,7 @@ From a fresh clone of the branch at `6fcfe33` into the session's scratchpad, thr
 | `packages/pr-rla-mcp` | 19 packages, 0 vulnerabilities; 57 of 57 pass |
 | `examples/providers/gitea`, `examples/ledgers/jira` | 0 vulnerabilities; 1 of 1 pass each |
 
-Tests: at `cf3a779` 547 at the root (546 passed, 1 skipped) and 42 in the package; now 625 (624 passed, the same 1 skipped) and 57. The earlier runs of this round, for the record: of runs 1 to 5 on `21c6dec`, runs 2 and 5 failed master's heartbeat test at load averages above 100 (`69f0af7`); of runs 6 to 8 on `9666d25`, run 6 timed out the Jira conformance test at a load average of 24 (`6fcfe33`); no other test failed in any run.
+Tests: at `cf3a779` 547 at the root (546 passed, 1 skipped) and 42 in the package; now 625 (624 passed, the same 1 skipped) and 57. The earlier runs of this round, for the record: run 0 on `e78bcc6`, at load averages above 100, failed master's heartbeat test, the Jira conformance test's 60 s, and NFR10's MCP start (best of five starts 2,268 ms against 2 s; every later run met it); of runs 1 to 5 on `21c6dec`, runs 2 and 5 failed the heartbeat test, again above 100 (`69f0af7`); of runs 6 to 8 on `9666d25`, run 6 timed out the Jira conformance test at a load average of 24 (`6fcfe33`). No other test failed in any run. NFR10's 2 s start is a requirement, so its test keeps the bound and stays sensitive to a starved machine.
 
 ### Deviations from the design, and why
 
