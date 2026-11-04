@@ -170,6 +170,14 @@ export interface ScmProvider {
 export interface PluginCredential {
   env: string;
   hosts: string[];
+  /**
+   * Optional (phase 3, same API version): the option that holds the service's URL, such as
+   * `base_url`, for a self-hosted server. When the options set it, the credential may be sent to
+   * that URL's host instead of `hosts` (which then name the default service), and only to an
+   * `https:` URL's host. pr-rla reads the option itself: the plugin's code never chooses where its
+   * credential goes, and `pr-rla plugin add` records the host it computed in pr-rla.lock.json.
+   */
+  hostFromOption?: string;
 }
 
 export interface ProviderDefinition<Options = Record<string, unknown>> {
@@ -258,6 +266,7 @@ export function pluginGrantProblems(def: { hosts?: unknown; credentials?: unknow
   if (def.credentials !== undefined) {
     const ok = Array.isArray(def.credentials) && def.credentials.every((c) => c && typeof c === "object" && typeof (c as PluginCredential).env === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test((c as PluginCredential).env) && Array.isArray((c as PluginCredential).hosts) && (c as PluginCredential).hosts.every((h) => typeof h === "string" && h.length > 0));
     if (!ok) return 'credentials must be a list of { env: "NAME", hosts: ["host", …] }';
+    if (!(def.credentials as PluginCredential[]).every((c) => c.hostFromOption === undefined || (typeof c.hostFromOption === "string" && c.hostFromOption.length > 0))) return "a credential's hostFromOption must name an option (a string)";
   }
   return null;
 }

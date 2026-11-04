@@ -7,7 +7,7 @@ import { formatConformanceReport } from "../testing/conformance.js";
 import { CORRECTNESS_NOT_SAFETY, fixtureName, hostedProviderConformance, readRecordedFixture } from "../plugins/check.js";
 import { inspectPlugin as inspect, lockEntryFor as entryFor } from "../plugins/entry.js";
 import { NETWORK_DENIED_FROM_NODE } from "../plugins/host.js";
-import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, verifyLocked, writeLock, type LockEntry, type PluginTrust, type ResolvedPlugin } from "../plugins/lock.js";
+import { installScripts, lockPath, readLock, refuseIfBuiltinOnly, resolvePlugin, verifyLocked, writeLock, type LockedCredential, type LockEntry, type PluginTrust, type ResolvedPlugin } from "../plugins/lock.js";
 import { auditContextFor, CommandError, type CommandContext } from "./context.js";
 
 /**
@@ -58,6 +58,12 @@ function trustText(trust: PluginTrust, nodeMajor: number): string {
   return `isolated: out of process, placeholder credentials, read-only access to its own files; ${net}`;
 }
 
+/** `GITEA_TOKEN -> gitea.example.com (the host of option base_url)`. */
+function credentialText(c: LockedCredential): string {
+  const from = c.hostFromOption === undefined ? "" : c.hosts.length ? ` (the host of option ${c.hostFromOption})` : ` (option ${c.hostFromOption} is not an https:// URL)`;
+  return `${c.env} -> ${c.hosts.join(", ") || "none"}${from}`;
+}
+
 function describeEntry(e: LockEntry, nodeMajor: number): string[] {
   const list = (a: string[]) => (a.length ? a.join(", ") : "none");
   const integrity = e.npmIntegrity ?? (e.source === "path" ? "none (a path plugin: the tree hash and the audit repo's git history pin it)" : "none (npm installed it from a local path: the tree hash pins it)");
@@ -70,7 +76,7 @@ function describeEntry(e: LockEntry, nodeMajor: number): string[] {
     `  trust         ${trustText(e.trust, nodeMajor)}`,
     `  hosts         ${list(e.hosts)}`,
     `  writePaths    ${list(e.writePaths)}`,
-    `  credentials   ${e.credentials.length ? e.credentials.map((c) => `${c.env} -> ${list(c.hosts)}`).join("; ") : "none"}`,
+    `  credentials   ${e.credentials.length ? e.credentials.map(credentialText).join("; ") : "none"}`,
   ];
 }
 
@@ -179,7 +185,7 @@ export async function pluginCheckCommand(ctx: CommandContext, use: string, opts:
   ctx.out(`  lock            ${lockLine}`);
   ctx.out(`  npm signatures  ${npmSignatures(plugin, opts.offline)}`);
   ctx.out(`  hosts           ${x.hosts.join(", ") || "none"}${c ? "" : " (with no options: not named in .pr-rla.yml)"}`);
-  ctx.out(`  credentials     ${x.credentials.length ? x.credentials.map((cr) => `${cr.env} -> ${cr.hosts.join(", ")}`).join("; ") : "none"}`);
+  ctx.out(`  credentials     ${x.credentials.length ? x.credentials.map(credentialText).join("; ") : "none"}`);
   warnInstallScripts(ctx, plugin);
   let ok = false;
   if (kind === "ledger") ctx.out("  conformance     not run: this build has no ledger conformance kit");

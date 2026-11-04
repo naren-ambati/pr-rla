@@ -26,6 +26,8 @@ export type PluginTrust = "isolated" | "full";
 export interface LockedCredential {
   env: string;
   hosts: string[];
+  /** The option whose URL gave `hosts` (the definition's `hostFromOption`), when it did. */
+  hostFromOption?: string;
 }
 
 export interface LockEntry {
@@ -82,7 +84,7 @@ function entryProblem(e: unknown): string | null {
   if (typeof x.treeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(x.treeSha256)) return "treeSha256 must be 64 hex characters";
   if (x.trust !== "isolated" && x.trust !== "full") return 'trust must be "isolated" or "full"';
   if (!isStrings(x.hosts) || !isStrings(x.writePaths)) return "hosts and writePaths must be lists of strings";
-  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts))) return "credentials must be a list of { env, hosts }";
+  if (!Array.isArray(x.credentials) || !x.credentials.every((c) => c && typeof c.env === "string" && isStrings(c.hosts) && (c.hostFromOption === undefined || typeof c.hostFromOption === "string"))) return "credentials must be a list of { env, hosts, hostFromOption? }";
   return null;
 }
 
@@ -122,7 +124,7 @@ function normalizedEntry(e: LockEntry): LockEntry {
     trust: e.trust,
     hosts: sorted(e.hosts),
     writePaths: sorted(e.writePaths),
-    credentials: [...e.credentials].map((c) => ({ env: c.env, hosts: sorted(c.hosts) })).sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
+    credentials: [...e.credentials].map((c) => ({ env: c.env, hosts: sorted(c.hosts), ...(c.hostFromOption !== undefined ? { hostFromOption: c.hostFromOption } : {}) })).sort((a, b) => (a.env < b.env ? -1 : a.env > b.env ? 1 : 0)),
   };
 }
 

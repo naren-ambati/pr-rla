@@ -1,20 +1,25 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createAuditContext, openProvider } from "../src/api/context.js";
 import { freezeCommand } from "../src/commands/freeze.js";
 import { registerCommand } from "../src/commands/register.js";
 import { runVerify } from "../src/commands/verify.js";
 import type { ManifestV2 } from "../src/core/records.js";
-import { closeAllPluginHosts } from "../src/plugins/host.js";
+import { closeAllPluginHosts, credentialGrants } from "../src/plugins/host.js";
 import { readLock } from "../src/plugins/lock.js";
 import { providerTraits } from "../src/provider-traits.js";
 import { optionsDigest, pluginIdentity } from "../src/registry.js";
+import { assertProviderDefinition } from "../src/sdk/provider.js";
 import { makeChanges, setupAuditRepo, T } from "./helpers/audit-scenario.js";
+import { fakeGitea } from "./helpers/fake-gitea.js";
 import { auditDirWith, lockPlugin } from "./helpers/plugin-lock.js";
+import { scenarioExpectations, scmScenario } from "./helpers/scm-scenario.js";
 
 /**
  * Integration of U2b (the isolated plugin host) and U3 (the SDK carry-overs): the definition's U3
- * traits cross the host in `describe` (pr-rla/ipc/v1).
+ * traits cross the host in `describe` (pr-rla/ipc/v1), and a self-hosted isolated plugin's credential
+ * follows its validated URL option (`hostFromOption`), recorded in pr-rla.lock.json.
  */
 
 const ROOT = join(import.meta.dirname, "..");
@@ -96,5 +101,75 @@ export default defineProvider({
   it("the parent validates the traits a child reports with the SDK's own check", async () => {
     const { s, options } = withTraitsPlugin("per-comment");
     await expect(lockPlugin(s.dir, TRAITS_USE, { options })).rejects.toMatchObject({ code: "PLUGIN_INVALID", message: expect.stringMatching(/reviewGranularity must be "submission" or "first-comment-per-user"/) });
+  });
+});
+
+describe("credentials for a self-hosted isolated plugin (hostFromOption, provider API version 1)", () => {
+  const SECRET = "gitea-token-0123456789abcdef";
+  const sc = scmScenario();
+  const x = scenarioExpectations("gitea");
+  const options = { base_url: "https://forge.example.com", page_size: 3, bots: BOTS };
+  const contextWith = (fetchImpl: typeof fetch) => createAuditContext({ mode: "read-write", env: { GITEA_TOKEN: SECRET }, fetch: fetchImpl, sleep: async () => {} });
+  /** The fake Gitea at forge.example.com, recording each request's Authorization header. */
+  const recordingGitea = () => {
+    const fake = fakeGitea(sc, { limit: 3 });
+    const seen: string[] = [];
+    const f = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("authorization") ?? "");
+      return fake.fetch(input, init);
+    }) as typeof fetch;
+    return { fetch: f, seen };
+  };
+
+  it("plugin add records the base_url host for GITEA_TOKEN, and the broker swaps the placeholder there", async () => {
+    const dir = giteaAudit();
+    await lockPlugin(dir, USE, { options });
+    expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: ["forge.example.com"], hostFromOption: "base_url" }]);
+    const gitea = recordingGitea();
+    const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options }, dir);
+    const r = await provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request", "direct_push"] });
+    expect(r.changes.map((c) => c.id).sort()).toEqual([...x.all].sort());
+    expect(gitea.seen.length).toBeGreaterThan(10);
+    expect(new Set(gitea.seen)).toEqual(new Set([`token ${SECRET}`]));
+  });
+
+  it("without base_url, GITEA_TOKEN keeps its declared host, codeberg.org", async () => {
+    const dir = giteaAudit();
+    await lockPlugin(dir, USE, { options: {} });
+    expect(readLock(dir).plugins[USE]!).toMatchObject({ hosts: ["codeberg.org"], credentials: [{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }] });
+    expect(readLock(dir).plugins[USE]!.credentials[0]).not.toHaveProperty("hostFromOption");
+  });
+
+  it("a base_url changed after plugin add is refused at load, naming the credential", async () => {
+    const dir = giteaAudit();
+    await lockPlugin(dir, USE, { options });
+    const gitea = recordingGitea();
+    await expect(openProvider(contextWith(gitea.fetch), { use: USE, options: { ...options, base_url: "https://other.example.com" } }, dir)).rejects.toMatchObject({
+      code: "LOCK_MISMATCH",
+      message: expect.stringMatching(/asks for host other\.example\.com, credential GITEA_TOKEN for other\.example\.com, which its lock entry does not grant/),
+    });
+    expect(gitea.seen).toEqual([]);
+  });
+
+  it("an http:// base_url grants the token no host: the request carrying it is refused unsent", async () => {
+    const dir = giteaAudit();
+    const http = { ...options, base_url: "http://forge.example.com" };
+    await lockPlugin(dir, USE, { options: http });
+    expect(readLock(dir).plugins[USE]!.credentials).toEqual([{ env: "GITEA_TOKEN", hosts: [], hostFromOption: "base_url" }]);
+    const gitea = recordingGitea();
+    const provider = await openProvider(contextWith(gitea.fetch), { use: USE, options: http }, dir);
+    await expect(provider.listChanges({ repo: sc.repo, window: sc.window, kinds: ["pull_request"] })).rejects.toThrow(/credential GITEA_TOKEN may be sent only to no host, not forge\.example\.com; nothing was sent/);
+    expect(gitea.seen).toEqual([]);
+  });
+
+  it("the SDK checks the field; pr-rla computes the host from the option itself", () => {
+    const def = { providerApiVersion: 1, name: "x", create: () => ({}) };
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], hostFromOption: 3 }] }, "x")).toThrow(/hostFromOption must name an option/);
+    expect(() => assertProviderDefinition({ ...def, credentials: [{ env: "T", hosts: ["a.example"], hostFromOption: "base_url" }] }, "x")).not.toThrow();
+    const c = [{ env: "T", hosts: ["a.example"], hostFromOption: "base_url" }];
+    expect(credentialGrants(c, { base_url: "https://git.example.com:8443/gitea/" })).toEqual([{ env: "T", hosts: ["git.example.com:8443"], hostFromOption: "base_url" }]);
+    expect(credentialGrants(c, { base_url: "git.example.com" })).toEqual([{ env: "T", hosts: [], hostFromOption: "base_url" }]);
+    expect(credentialGrants(c, { base_url: null })).toEqual([{ env: "T", hosts: ["a.example"] }]);
+    expect(credentialGrants([{ env: "T", hosts: ["b.example", "a.example"] }], { base_url: "https://elsewhere.example" })).toEqual([{ env: "T", hosts: ["a.example", "b.example"] }]);
   });
 });

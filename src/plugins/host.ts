@@ -15,6 +15,7 @@ import {
   type ScmProvider,
 } from "../sdk/provider.js";
 import { PluginError } from "./errors.js";
+import type { LockedCredential } from "./lock.js";
 import {
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
@@ -448,10 +449,33 @@ export async function describePlugin(host: PluginHost, options: unknown): Promis
   return { hosts: list(d.hosts, "hosts"), writePaths: list(d.writePaths, "writePaths"), traits: definitionTraits(d, host.label) };
 }
 
-/** The credentials the definition declares (validated in validateReady). */
-export function declaredCredentials(host: PluginHost): PluginCredential[] {
+/**
+ * Where each declared credential may be sent with these options. A credential with
+ * `hostFromOption` goes to the host of that option's URL when the options set it, and only to an
+ * `https:` URL's host (any other value grants it no host, so a token is never sent in clear text);
+ * without the option it keeps its declared `hosts`. pr-rla computes this from the audit's own
+ * options, not from the plugin's code, and the lock records the result.
+ */
+export function credentialGrants(declared: readonly PluginCredential[], options: unknown): LockedCredential[] {
+  const o = options && typeof options === "object" ? (options as Record<string, unknown>) : {};
+  return declared.map((c) => {
+    const key = c.hostFromOption;
+    if (key === undefined || o[key] === undefined || o[key] === null) return { env: c.env, hosts: [...new Set(c.hosts)].sort() };
+    let host: string | null = null;
+    try {
+      const u = typeof o[key] === "string" ? new URL(o[key] as string) : null;
+      if (u?.protocol === "https:" && u.host) host = u.host;
+    } catch {
+      host = null;
+    }
+    return { env: c.env, hosts: host ? [host] : [], hostFromOption: key };
+  });
+}
+
+/** The credentials the definition declares (validated in validateReady), with their hosts for these options. */
+export function declaredCredentials(host: PluginHost, options: unknown): LockedCredential[] {
   const c = host.ready.credentials;
-  return Array.isArray(c) ? (c as PluginCredential[]).map((x) => ({ env: x.env, hosts: [...new Set(x.hosts)].sort() })) : [];
+  return Array.isArray(c) ? credentialGrants(c as PluginCredential[], options) : [];
 }
 
 async function createInstance(host: PluginHost, options: unknown, base: { cwd: string; windowDir?: string }): Promise<CreateResult> {

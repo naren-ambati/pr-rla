@@ -4,7 +4,7 @@ import type { PluginSpec } from "../registry.js";
 import { assertLedgerDefinition, LedgerApiVersionError, SUPPORTED_LEDGER_API_VERSIONS, type Ledger, type LedgerDefinition } from "../sdk/ledger.js";
 import { assertProviderDefinition, ProviderApiVersionError, SUPPORTED_PROVIDER_API_VERSIONS, type ProviderDefinition, type ScmProvider } from "../sdk/provider.js";
 import { PluginError } from "./errors.js";
-import { declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
+import { credentialGrants, declaredCredentials, describePlugin, hostedLedger, hostedProvider, isolationLine, startPluginHost, type PluginHost } from "./host.js";
 import { placeholderEnv, readGrants, refuseIfBuiltinOnly, verifyLocked, type LockEntry, type ResolvedPlugin } from "./lock.js";
 
 /**
@@ -38,7 +38,7 @@ async function startLockedHost(ctx: AuditContext, kind: "provider" | "ledger", s
     const extra = [
       ...within(asked.hosts, entry.hosts).map((h) => `host ${h}`),
       ...within(asked.writePaths, entry.writePaths).map((w) => `write path ${w}`),
-      ...declaredCredentials(host).flatMap((c) => {
+      ...declaredCredentials(host, spec.options).flatMap((c) => {
         const locked = entry.credentials.find((l) => l.env === c.env);
         return locked ? within(c.hosts, locked.hosts).map((h) => `credential ${c.env} for ${h}`) : [`credential ${c.env}`];
       }),
@@ -67,7 +67,7 @@ export async function openExternalProvider(ctx: AuditContext, spec: PluginSpec, 
   if (entry.trust === "full") {
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("provider", spec, entry, plugin)) as ProviderDefinition;
-    ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], credentials: def.credentials ?? [] });
+    ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
     const p = await def.create(spec.options, { cwd, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id), sleep: ctx.sleep });
     if (!SUPPORTED_PROVIDER_API_VERSIONS.includes(p.apiVersion)) throw new ProviderApiVersionError(def.name, p.apiVersion);
     if (typeof p.listChanges !== "function") throw new PluginError(`provider "${def.name}" returned an object without listChanges()`, "PLUGIN_INVALID");
@@ -92,7 +92,7 @@ export async function openExternalLedger(ctx: AuditContext, spec: PluginSpec, cw
   if (entry.trust === "full") {
     ctx.log(fullTrustLine(entry));
     const def = (await importInProcess("ledger", spec, entry, plugin)) as LedgerDefinition;
-    ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], writePaths: def.writePaths?.(spec.options) ?? [], credentials: def.credentials ?? [] });
+    ctx.grant(id, { trust: "full", hosts: def.hosts?.(spec.options) ?? [], writePaths: def.writePaths?.(spec.options) ?? [], credentials: credentialGrants(def.credentials ?? [], spec.options) });
     const l = await def.create(spec.options, { cwd, windowDir, env: ctx.env, log: ctx.log, fetch: ctx.broker.bind(id) });
     if (!SUPPORTED_LEDGER_API_VERSIONS.includes(l.apiVersion)) throw new LedgerApiVersionError(def.name, l.apiVersion);
     for (const m of ["readVerdicts", "appendVerdict"] as const) if (typeof l[m] !== "function") throw new PluginError(`ledger "${def.name}" has no ${m}()`, "PLUGIN_INVALID");

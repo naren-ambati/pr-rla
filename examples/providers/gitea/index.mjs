@@ -287,9 +287,9 @@ export default defineProvider({
   description: "Gitea / Forgejo (Codeberg): merged PRs, reviews and default-branch history (example plugin)",
   // What the plugin reaches, for the fetch broker. Run isolated (pr-rla's plugin host, the default),
   // it may contact these hosts only, and GITEA_TOKEN reaches it as a placeholder the broker swaps
-  // for the token on codeberg.org only.
+  // for the token on one host: that of options.base_url when it is set (https only), else codeberg.org.
   hosts: (options) => [new URL(options?.base_url ?? "https://codeberg.org").host],
-  credentials: [{ env: "GITEA_TOKEN", hosts: ["codeberg.org"] }],
+  credentials: [{ env: "GITEA_TOKEN", hosts: ["codeberg.org"], hostFromOption: "base_url" }],
   // Optional fields of the same API version: one review object per submitted review; the options that
   // change the population (hashed into the registration).
   reviewGranularity: "submission",
