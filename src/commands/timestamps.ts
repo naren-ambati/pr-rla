@@ -4,7 +4,7 @@ import { EXIT } from "../cli/exit-codes.js";
 import type { PrRlaConfig } from "../config.js";
 import { DEFAULT_ACCURACY_SECONDS, TOLERANCE_SECONDS, operatorCount, type TrustBundle } from "../timestamp/bundle.js";
 import { requestTimestamps, type AuthorityOutcome } from "../timestamp/client.js";
-import { assessTimestamps, isoMs, medianGenTimeMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
+import { anchorLines, assessTimestamps, isoMs, medianGenTimeMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
 import { verifyLoggedEntry } from "../translog/rekor.js";
 import { CommandError, brokerFor, type CommandContext } from "./context.js";
 import { logPublicKey } from "./translog.js";
@@ -87,6 +87,7 @@ export async function assessRecord(ctx: CommandContext, config: PrRlaConfig, sig
  */
 export function reportTimestamps(ctx: CommandContext, summary: TimeEvidenceSummary, outcomes: readonly AuthorityOutcome[], rerun: string): number {
   ctx.out(`  ${timestampsLine(summary)}`);
+  for (const l of anchorLines(summary)) ctx.out(`    ${l}`);
   for (const o of outcomes) {
     if (o.check?.accepted) continue;
     const why = o.error ?? o.check?.problems.join("; ") ?? "no token";

@@ -2,7 +2,7 @@ import { provenanceRank, type Ledger, type ProvenanceLevel } from "../sdk/ledger
 import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import type { ScmProvider } from "../sdk/provider.js";
 import type { TrustBundle } from "../timestamp/bundle.js";
-import { assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
+import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
 import { logKeySource } from "../translog/keys.js";
 import { verifyLoggedEntry } from "../translog/rekor.js";
 import { verifyRekorV2Entry } from "../translog/rekor-v2.js";
@@ -156,6 +156,7 @@ async function checkTimestamps(signed: SignedRecord<unknown>, signedTimeIso: str
     c.details.push(`FAIL ${what} ${ts.logProblem}`);
   }
   c.details.push(`${what} ${timestampsLine(ts)}${ts.ukMs !== null ? ` · existed by ${isoMs(ts.ukMs)} (U_k)` : ""}`);
+  for (const l of anchorLines(ts)) c.details.push(`${what} ${l}`);
   if (!ts.proven) {
     c.details.push(`${notTamperProof(ts)}: the ${what}'s time is the signer's own clock${ts.configured.length ? `, bounded by ${ts.operators.length} operator(s) where ${ts.k} are required` : ""}`);
     if (c.status === "PASS") c.status = "WARN";

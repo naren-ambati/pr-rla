@@ -9,7 +9,7 @@ import { checkpointCommand } from "./checkpoint.js";
 import { windowDays } from "../core/window.js";
 import type { PrRlaConfig, WindowPaths } from "../config.js";
 import type { Selector } from "../core/selector.js";
-import { notTamperProof } from "../timestamp/verify.js";
+import { anchorLines, notTamperProof } from "../timestamp/verify.js";
 import { configFor, fmt, isoNow, ledgerFor, pct, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type CommandContext } from "./context.js";
 import { assessRecord, logBound } from "./timestamps.js";
 
@@ -17,25 +17,28 @@ import { assessRecord, logBound } from "./timestamps.js";
  * The audit mode and the honest-output note for status. v1: tamper-evident iff its log entries verify
  * under a pinned log key (an entry in any other log is unverified). v2: the stored tokens are checked
  * offline; the mode is proven by U_k when k operators agree, and the note says TIMESTAMP NOT TAMPER-PROOF
- * (n of k) when the registration or the commitment falls short.
+ * (n of k) when the registration or the commitment falls short. `anchors` names each counted authority's
+ * anchor and its independence (NFR4), or is empty.
  */
-export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean }> {
+export async function timeStanding(ctx: CommandContext, config: PrRlaConfig, paths: WindowPaths, reg: ReturnType<typeof readRegistration>): Promise<{ mode: AuditMode; note: string; tamperProof: boolean; anchors: string }> {
   if (!isRegistrationV2(reg)) {
     const logged = (await logBound(ctx, config, reg)) !== null && (!existsSync(paths.commitment) || (await logBound(ctx, config, readCommitment(paths))) !== null);
-    return { mode: auditMode(reg), note: logged ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: logged };
+    return { mode: auditMode(reg), note: logged ? "" : " · TIMESTAMP NOT TAMPER-PROOF", tamperProof: logged, anchors: "" };
   }
   const v2 = reg as SignedRecord<RegistrationRecordV2>;
   const bundle = trustFor(ctx);
   const ts = v2.record.timestamping;
   const r = await assessRecord(ctx, config, v2, v2.record.registeredAt, ts, bundle);
   let short = r.proven ? null : r;
+  const lines = anchorLines(r);
   if (existsSync(paths.commitment)) {
     const cm = readCommitment(paths);
     const c = await assessRecord(ctx, config, cm, cm.record.frozenAt, ts, bundle);
     if (!c.proven && !short) short = c;
+    for (const l of anchorLines(c)) if (!lines.includes(l)) lines.push(l);
   }
   const mode: AuditMode = r.proven ? (r.ukMs! < Date.parse(v2.record.window.opensAt) ? "PROSPECTIVE" : "RETROSPECTIVE") : auditMode(reg);
-  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short };
+  return { mode, note: short ? ` · ${notTamperProof(short)}` : "", tamperProof: !short, anchors: lines.length ? `  timestamp anchors: ${lines.join(" · ")}` : "" };
 }
 
 export interface StatusOptions {
@@ -82,7 +85,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     return 1;
   }
   const reg = readRegistration(paths);
-  const { mode, note: tsNote, tamperProof } = await timeStanding(ctx, config, paths, reg);
+  const { mode, note: tsNote, tamperProof, anchors } = await timeStanding(ctx, config, paths, reg);
   const w = reg.record.window;
   const now = Math.floor(ctx.nowMs() / 1000);
   const { round, publishesAt } = derivedRoundFor(reg);
@@ -97,11 +100,13 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
       soFar = ` · N so far ${fmt(pop.entries.length)}`;
     }
     ctx.out(`${mode} · ${phase}${soFar} · seed round ${round} ${now < publishesAt ? "not yet published" : "published"}${tsNote}`);
+    if (anchors) ctx.out(anchors);
     return 0;
   }
   const manifest = readManifest(paths);
   if (!existsSync(paths.draws)) {
     ctx.out(`${mode} · frozen N ${fmt(manifest.N)} · seed round ${round} ${now < publishesAt ? `publishes ${unixToIso(publishesAt)}` : `published ${unixToIso(publishesAt)}: run "pr-rla sample"`}${tsNote}`);
+    if (anchors) ctx.out(anchors);
     return 0;
   }
   const draws = readDraws(paths);
@@ -124,6 +129,7 @@ async function statusOnly(ctx: CommandContext, opts: StatusOptions): Promise<num
     return 3;
   } else {
     ctx.out(statusLine(report, { p0: reg.record.parameters.p0, alpha: reg.record.parameters.alpha, protocol: reg.record.protocolSha256, maxLines: reg.record.selector.max_changed_lines, mode, selector: reg.record.selector }) + tsNote);
+    if (anchors) ctx.out(anchors);
     if (report.blockingDraw) ctx.out(`  blocking draw: #${report.blockingDraw.draw} ${report.blockingDraw.changeId} ${report.blockingDraw.url}`);
     ctx.out(`  distinct changes reviewed: ${report.distinctReviewed} · draws counted: ${report.sequence.draws}${report.beyondStop ? ` · ${report.beyondStop} labelled draw(s) after the stop are not counted` : ""}`);
     for (const i of report.ignored) ctx.out(`  ignored verdict on draw #${i.event.draw} (${i.event.changeId}): ${i.reason}`);
