@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveExecutable } from "./executables.js";
 import {
   VERDICT_NAMESPACE,
   describeSigner,
@@ -26,9 +27,17 @@ export function sshKeygenSign(payload: Uint8Array, keyPath: string, env: Readonl
   const dir = mkdtempSync(join(tmpdir(), "pr-rla-sign-"));
   const file = join(dir, "verdict");
   writeFileSync(file, payload);
+  const childEnv = { PATH: process.env.PATH, ...env };
   return new Promise<string>((done, fail) => {
+    // By absolute path from PATH (P4): never an ssh-keygen found through the working directory.
+    let exe: string;
+    try {
+      exe = resolveExecutable("ssh-keygen", childEnv.PATH ?? "");
+    } catch (e) {
+      return fail(new Error(`${(e as Error).message}; sign the verdict's bytes by hand instead (README, "Signed verdicts")`));
+    }
     // ssh-keygen's own messages (the touch request among them) reach the reviewer as they come.
-    const child = spawn("ssh-keygen", ["-Y", "sign", "-n", VERDICT_NAMESPACE, "-f", keyPath, file], { env: { PATH: process.env.PATH, ...env }, stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(exe, ["-Y", "sign", "-n", VERDICT_NAMESPACE, "-f", keyPath, file], { env: childEnv, stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     child.stderr.on("data", (c: Buffer) => {
       err += c.toString("utf8");
