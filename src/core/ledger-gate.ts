@@ -1,17 +1,21 @@
 import { recordedBeforeSeed, type LedgerHistoryEvent, type LedgerIntegrityReport, type VerdictEvent } from "../sdk/ledger.js";
-import { anchorLines, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
-import { compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
+import { canonicalJson, sha256Hex } from "./canonical.js";
+import type { TrustBundle } from "../timestamp/bundle.js";
+import { anchorLines, assessTimestamps, isoMs, notTamperProof, timestampsLine, type TimeEvidenceSummary } from "../timestamp/verify.js";
+import { checkpointRecord, compareWithCheckpoint, type CheckpointArtifact } from "./checkpoint.js";
 import { checkpointCoverage, indexBindingFindings, type AnchorFindings, type LedgerIndexDocument } from "./ledger-anchor.js";
 import { ledgerPathFindings } from "./ledger-path.js";
 import { publicationFindings, type PublicationTime, type ReadPublications } from "./ledger-publication.js";
 import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
 import { signaturesCountFor, verdictRuleFailures, type VerdictRules } from "./presence/provenance.js";
-import { isRegistrationV2, type AnyRegistration, type DrawsFile, type SignedRecord } from "./records.js";
+import { derivedRoundFor, isRegistrationV2, type AnyRegistration, type DrawsFile, type RegistrationRecordV2, type SignedRecord } from "./records.js";
 
 /**
  * Check 7's gate (P1, with the seam review of 45f1c9d): every rule of check 7 that turns on what pr-rla has
- * already read, in one place, so verify and status reach the same FAIL for the same audit. Status folds each
- * FAIL into `certificateWithheld`, so nothing verify would FAIL here can show as CERTIFIED there.
+ * already read, in one place, so verify and status reach the same FAIL (and INCOMPLETE) for the same audit.
+ * Status folds each into the certificate's withholdings, so nothing verify would FAIL here can show as
+ * CERTIFIED there. `assessedLedgerGate` (below) adds the token assessment; `check7Gate`
+ * (src/api/read/ledger-gate.ts) reads the audit directory for it.
  *
  * It covers: the ledger read being the registered one; `require_signed` needing git-file; counted verdicts
  * recorded before the seed, below the registered provenance, or unsigned where signatures are required; the
@@ -21,6 +25,9 @@ import { isRegistrationV2, type AnyRegistration, type DrawsFile, type SignedReco
  *
  * What it does not do is read anything: the caller reads the ledger (verdicts, integrity, history) and
  * assesses the tokens, and passes what it got. Pure.
+ *
+ * FAIL is what is shown false; INCOMPLETE (time round B) what the files on hand cannot establish but do not
+ * show false: today, a verdict whose issue only a publication short of tokens lists.
  */
 
 /** Which rule a line comes from (status prints some of them its own way: the verdict rules and the integrity report). */
@@ -28,7 +35,7 @@ export type GateRule = "identity" | "seed" | "provenance" | "signatures" | "inte
 
 /** One line of check 7's details, as verify prints it, and whether it FAILs, WARNs or only informs. */
 export interface GateLine {
-  level: "fail" | "warn" | "note";
+  level: "fail" | "incomplete" | "warn" | "note";
   text: string;
   rule: GateRule;
 }
@@ -38,10 +45,14 @@ export interface LedgerGate {
   lines: GateLine[];
   /** Each FAIL, as a sentence (without the `FAIL ` some lines carry). */
   fails: string[];
+  /** Each INCOMPLETE (not established, not shown false), likewise. Check 7 is INCOMPLETE for these when nothing FAILs. */
+  incompletes: string[];
   /** Each WARN, likewise. */
   warns: string[];
   /** Why status withholds CERTIFIED: one short reason per kind of FAIL (P4's wording where it had one). */
   withheld: string[];
+  /** Why status withholds CERTIFIED as INCOMPLETE: one short reason per kind of INCOMPLETE. */
+  unestablished: string[];
 }
 
 /** What the ledger gave when it was read (null in the gate: it was not read, offline or not the registered one). */
@@ -115,7 +126,12 @@ function tokenLines(what: string, ts: TimeEvidenceSummary, unprovenLevel: "warn"
   return out;
 }
 
-const fromAnchor = (f: AnchorFindings): Omit<GateLine, "rule">[] => [...f.fails.map((t) => ({ level: "fail" as const, text: `FAIL ${t}` })), ...f.warns.map((t) => ({ level: "warn" as const, text: `WARN ${t}` })), ...f.notes.map((t) => ({ level: "note" as const, text: t }))];
+const fromAnchor = (f: AnchorFindings & { incompletes?: string[] }): Omit<GateLine, "rule">[] => [
+  ...f.fails.map((t) => ({ level: "fail" as const, text: `FAIL ${t}` })),
+  ...(f.incompletes ?? []).map((t) => ({ level: "incomplete" as const, text: `INCOMPLETE ${t}` })),
+  ...f.warns.map((t) => ({ level: "warn" as const, text: `WARN ${t}` })),
+  ...f.notes.map((t) => ({ level: "note" as const, text: t })),
+];
 
 export function ledgerGate(i: LedgerGateInput): LedgerGate {
   const reg = i.registration;
@@ -211,7 +227,7 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
       counted: i.ledger ? counted : null,
     });
     const dedupe = (xs: string[]) => [...new Set(xs)];
-    add("publication", "the draw → issue publication record FAILs", [...stampLines, ...fromAnchor({ fails: dedupe(f.fails), warns: dedupe(f.warns), notes: f.notes })]);
+    add("publication", "the draw → issue publication record FAILs", [...stampLines, ...fromAnchor({ fails: dedupe(f.fails), incompletes: dedupe(f.incompletes), warns: dedupe(f.warns), notes: f.notes })]);
   }
 
   // Coverage (pass-2 review #5): a checkpoint covers the last counted verdict only when its tokens are proven, with U_k at or after it.
@@ -236,11 +252,73 @@ export function ledgerGate(i: LedgerGateInput): LedgerGate {
   }
 
   const lines = groups.flatMap((g) => g.lines);
-  const strip = (t: string) => t.replace(/^(FAIL|WARN) /, "");
+  const strip = (t: string) => t.replace(/^(FAIL|INCOMPLETE|WARN) /, "");
+  const unestablishedReason = (g: { reason: string }) => (g.reason === "the draw → issue publication record FAILs" ? "the draw → issue mapping is not established (a publication short of tokens)" : g.reason);
   return {
     lines,
     fails: lines.filter((l) => l.level === "fail").map((l) => strip(l.text)),
+    incompletes: lines.filter((l) => l.level === "incomplete").map((l) => strip(l.text)),
     warns: lines.filter((l) => l.level === "warn").map((l) => strip(l.text)),
     withheld: [...new Set(groups.filter((g) => g.lines.some((l) => l.level === "fail")).map((g) => g.reason))],
+    unestablished: [...new Set(groups.filter((g) => g.lines.some((l) => l.level === "incomplete")).map(unestablishedReason))],
   };
+}
+
+/** What check 7's local rules read from the audit directory (`check7Gate` reads it; verify has it as artifacts). */
+export interface Check7Artifacts {
+  manifestSha256: string | null;
+  drawsFile: DrawsFile | null;
+  ledgerIndex: LedgerIndexDocument | null | undefined;
+  publications: ReadPublications | null;
+  checkpoints: readonly CheckpointArtifact[];
+  checkpointProblems: readonly string[];
+  checkpointsUnchained: number;
+}
+
+/** The ledger as check 7 has it: its identity (from its definition or lock, never by running it) and what was read from it. */
+export interface LoadedLedger {
+  /** The configured ledger's identity (src/registry.ts `bindingIdentity`); null when it could not be read. */
+  identity: BindingIdentity | null;
+  /** Test-only options it runs with (src/ledger-traits.ts `testOnlyLedgerOptions`): an audit never sets one. */
+  testOnlyOptions?: readonly string[];
+  /** What was read from it: verdicts, integrity, history. Null when it was not read (offline, or not the registered one). */
+  read: GateLedger | null;
+}
+
+/** A record's tokens under the registration's timestamping, offline (no log entry: these records are not logged). */
+async function assessTokens(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], trust: TrustBundle): Promise<TimeEvidenceSummary> {
+  const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
+  return assessTimestamps({ timestamps: signed.timestamps ?? [], data, digestHex: sha256Hex(data), signedTimeIso, timestamping, bundle: trust, log: null });
+}
+
+/**
+ * The gate with the checkpoints' and publications' tokens assessed under the registration's timestamping and `trust`
+ * (the shipped bundle plus the caller's anchors). No request and no write: verify's check 7 and `check7Gate` both run it.
+ * `draws` are the issued draws as verified (verify: check 6's recomputation); draws.json's otherwise.
+ */
+export async function assessedLedgerGate(registration: SignedRecord<AnyRegistration>, a: Check7Artifacts, ledger: LoadedLedger, trust: TrustBundle, o: { draws?: LedgerGateInput["draws"] } = {}): Promise<LedgerGate> {
+  const checkpointStamps = new Map<CheckpointArtifact, TimeEvidenceSummary>();
+  const publicationStamps: (TimeEvidenceSummary | null)[] = [];
+  if (isRegistrationV2(registration)) {
+    const ts = registration.record.timestamping;
+    for (const cp of a.checkpoints) if (cp.line.timestamps.length) checkpointStamps.set(cp, await assessTokens({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, ts, trust));
+    for (const p of a.publications?.publications ?? []) publicationStamps.push(await assessTokens(p, p.record.publishedAt, ts, trust));
+  }
+  return ledgerGate({
+    registration,
+    manifestSha256: a.manifestSha256,
+    drawsFile: a.drawsFile,
+    draws: o.draws ?? a.drawsFile?.draws ?? null,
+    seedPublishesAt: derivedRoundFor(registration).publishesAt,
+    ledgerIdentity: ledger.identity,
+    testOnlyOptions: ledger.testOnlyOptions ?? [],
+    ledger: ledger.read,
+    ledgerIndex: a.ledgerIndex,
+    publications: a.publications,
+    publicationStamps,
+    checkpoints: a.checkpoints,
+    checkpointProblems: a.checkpointProblems,
+    checkpointsUnchained: a.checkpointsUnchained,
+    checkpointStamps,
+  });
 }

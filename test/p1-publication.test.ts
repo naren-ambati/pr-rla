@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as read from "pr-rla/api/read";
 import { status as apiStatus, statusExitCode } from "../src/api/read/status.js";
@@ -9,7 +10,9 @@ import { registerCommand } from "../src/commands/register.js";
 import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify } from "../src/commands/verify.js";
-import { indexExtensionProblems, issueOrderProblems, publicationFindings, type LedgerPublicationsFile } from "../src/core/ledger-publication.js";
+import { check7Gate } from "../src/api/read/ledger-gate.js";
+import { configFor, trustFor } from "../src/api/session.js";
+import { indexExtensionProblems, issueOrderProblems, publicationFindings, type LedgerPublicationsFile, type SignedPublication } from "../src/core/ledger-publication.js";
 import type { DrawsFile, RegistrationRecordV2, SignedRecord } from "../src/core/records.js";
 import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { ledgerIndexSha256, type LedgerIndex } from "../src/ledgers/issue-index.js";
@@ -276,7 +279,7 @@ describe("the legitimate paths", () => {
     expect(c.details.filter((d) => /^FAIL .*publication|append-only/.test(d))).toEqual([]);
   });
 
-  it("a publication short of tokens: sample exits 5 and says to publish again; a verdict recorded before a proven one FAILs, one after it does not", async () => {
+  it("a publication short of tokens: sample exits 5 and says to publish again; what it alone binds is INCOMPLETE (not shown false), and a failing token FAILs", async () => {
     const s = clone();
     at(s, "2026-10-21T01:30:00Z");
     tsa.behaviour["test-b"] = { status: 2 };
@@ -294,18 +297,54 @@ describe("the legitimate paths", () => {
     const r = await runVerify(s.ctx, {});
     expect(r.status!.sequence.draws).toBeGreaterThanOrEqual(newFirst.draw); // the new verdict is counted
     let c = r.checks.find((x) => x.n === 7)!;
+    // Publication #2 has one token of the two required, and none failing: it proves nothing, but shows nothing false.
+    expect(c.status).toBe("INCOMPLETE");
+    expect(c.details.join("\n")).toMatch(new RegExp(`INCOMPLETE a verdict on draw #${newFirst.draw} was read from issue #\\d+, which only publication #2 lists, and too few registered authorities time-stamped it`));
+    expect(r.verdict).toBe("INCOMPLETE");
+    expect(r.exitCode).toBe(6);
+    // The same through check 7's local gate on its own: the audit directory, the registration and the loaded ledger.
+    const { config, paths } = configFor(s.ctx);
+    const gate = await check7Gate(paths, readJ(s, `${W}/registration.json`), { identity: readJ<SignedRecord<RegistrationRecordV2>>(s, `${W}/registration.json`).record.plugins.ledger, read: null }, trustFor(s.ctx));
+    expect(config.ledger.use).toBe("github-issues");
+    expect(gate.fails).toEqual([]);
+    // (Not read, so no verdict is bound to anything yet: the issues it alone lists are only a WARN.)
+    expect(gate.warns.join("\n")).toMatch(/no proven publication record lists/);
+    // A token of #2 that fails a rule is shown false: FAIL, as check 1 judges a registration's token.
+    const pubs = readJ<{ publications: { timestamps: { tokenDer: string }[] }[] }>(s, `${W}/ledger-publication.json`);
+    const t = pubs.publications[1]!.timestamps[0]!;
+    t.tokenDer = t.tokenDer.slice(0, 40) + (t.tokenDer[40] === "A" ? "B" : "A") + t.tokenDer.slice(41);
+    writeJ(s, `${W}/ledger-publication.json`, pubs);
+    c = await c7(s);
+    expect(c.status).toBe("FAIL");
+    expect(c.details.join("\n")).toMatch(/FAIL ledger publication #2 token from test-a/);
     expect(c.details.join("\n")).toMatch(new RegExp(`FAIL a verdict on draw #${newFirst.draw} was read from issue #\\d+, which no proven \\(time-stamped\\) publication record lists`));
+  });
+
+  it("a short publication, then a proven one after the verdict: the order is not established (INCOMPLETE)", async () => {
+    const s = clone();
+    at(s, "2026-10-21T01:30:00Z");
+    tsa.behaviour["test-b"] = { status: 2 };
+    try {
+      expect(await sampleCommand(s.ctx, { through: 80 })).toBe(5);
+    } finally {
+      delete tsa.behaviour["test-b"];
+    }
+    const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
+    const newFirst = draws.draws.slice(75, 80).find((d) => d.firstOccurrence)!;
+    s.fake.setTime("2026-10-21T01:40:00Z");
+    for (const d of draws.draws.slice(75, 80)) if (d.firstOccurrence) s.fake.label(s.fake.issueByDraw(d.draw).number, "pr-rla:pass", alice);
     at(s, "2026-10-21T01:50:00Z");
     expect(await sampleCommand(s.ctx, { through: 80 })).toBe(0); // publication #3, proven
-    c = await c7(s);
-    // Its verdict (01:40) came before the first proven publication listing its issue (#3, 01:50).
-    expect(c.details.join("\n")).toMatch(new RegExp(`FAIL the counted verdict on draw #${newFirst.draw} .* was recorded 2026-10-21T01:40:\\d\\dZ, but the first publication listing that issue \\(#3\\)`));
+    const c = await c7(s);
+    // Its verdict (01:40) came before the first proven publication listing its issue (#3, 01:50); #2 (signed 01:30) lists it, unproven.
+    expect(c.status).toBe("INCOMPLETE");
+    expect(c.details.join("\n")).toMatch(new RegExp(`INCOMPLETE the counted verdict on draw #${newFirst.draw} .* was recorded 2026-10-21T01:40:\\d\\dZ, before the first proven publication listing that issue \\(#3, .*\\); publication #2, signed 2026-10-21T01:30:00Z, lists it too`));
   });
 });
 
 describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review #7; the seam review of 45f1c9d)", () => {
-  /** A small audit on its own fake tracker: 40 draws, the 36 counted all PASS but draw 3's FAIL; four PASSes beyond the stop. */
-  async function seamAudit() {
+  /** A small audit on its own fake tracker: 40 draws, the 36 counted all PASS but draw 3's FAIL (unless `allPass`); four PASSes beyond the stop. */
+  async function seamAudit(o: { allPass?: boolean } = {}) {
     const f2 = new FakeGitHubIssues();
     const s = withToken(
       setupAuditRepo({
@@ -329,7 +368,7 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     const all = readJ<DrawsFile>(s, `${W}/draws.json`).draws.slice(0, 40);
     const ds = all.filter((d) => d.firstOccurrence);
     const third = all.filter((d) => d.firstOccurrence && d.draw <= 36)[2]!;
-    for (const d of ds) f2.label(f2.issueByDraw(d.draw).number, d === third ? "pr-rla:fail" : "pr-rla:pass", alice);
+    for (const d of ds) f2.label(f2.issueByDraw(d.draw).number, d === third && !o.allPass ? "pr-rla:fail" : "pr-rla:pass", alice);
     at(s, "2026-10-21T03:00:00Z");
     expect(await checkpointCommand(s.ctx, {})).toBe(0);
     return { s, fake: f2, third, beyond: ds.filter((d) => d.draw > 36)[0]! };
@@ -390,6 +429,29 @@ describe("status shows what verify FAILs, and withholds CERTIFIED (pass-2 review
     for (const f of st.ledgerGate.fails) expect(c7d).toContain(f);
   }, 180_000);
 
+  it("a certifying audit whose publication is short of tokens: status withholds the certificate as INCOMPLETE (exit 6), and verify's check 7 is INCOMPLETE", async () => {
+    const { s } = await seamAudit({ allPass: true });
+    const st0 = (await apiStatus(s.ctx, {})) as Extract<Awaited<ReturnType<typeof apiStatus>>, { verdictsRead: true }>;
+    expect(st0.certificate.state).toBe("CERTIFIED");
+    // One of the publication's two tokens taken away (tokens are outside the signed record): it is short, nothing in it is false.
+    const pubs = readJ<{ publications: { timestamps: { tsa: string }[] }[] }>(s, `${W}/ledger-publication.json`);
+    pubs.publications[0]!.timestamps = pubs.publications[0]!.timestamps.filter((t) => t.tsa !== "test-b");
+    writeJ(s, `${W}/ledger-publication.json`, pubs);
+    const st = (await apiStatus(s.ctx, {})) as typeof st0;
+    expect(st.sequence.state).toBe("CERTIFIED");
+    expect(st.ledgerGate.fails).toEqual([]);
+    expect(st.ledgerGate.incompletes.length).toBeGreaterThan(0);
+    expect(st.certificate).toMatchObject({ state: "WITHHELD", withheld: [{ verdict: "INCOMPLETE", reason: "verify check 7 would be INCOMPLETE: the draw → issue mapping is not established (a publication short of tokens)" }] });
+    expect(st.certified).toBe(false);
+    expect(statusExitCode(st)).toBe(6);
+    const v = await runVerify(s.ctx, {});
+    expect(v.checks.find((c) => c.n === 7)!.status).toBe("INCOMPLETE");
+    expect(v.verdict).toBe("INCOMPLETE");
+    // The same findings, from the same gate.
+    const c7d = v.checks.find((c) => c.n === 7)!.details.map((d) => d.replace(/^INCOMPLETE /, ""));
+    for (const f of st.ledgerGate.incompletes) expect(c7d).toContain(f);
+  }, 180_000);
+
   it("offline status (the MCP status tool's default) still runs the local rules", async () => {
     const s = clone();
     remap(s, { editBodies: false, foreign: true });
@@ -414,6 +476,41 @@ describe("the rules, unit by unit", () => {
     expect(indexExtensionProblems(a, { ...a, issues: [issue(1, 10), issue(2, 11)] }, { prev: "p", next: "n" })).toEqual([]);
     expect(indexExtensionProblems(a, { ...a, labels: { pass: { id: "2" } } }, { prev: "p", next: "n" })[0]).toMatch(/n changes "labels" from p/);
     expect(indexExtensionProblems(a, { ...a, issues: [] }, { prev: "p", next: "n" })[0]).toMatch(/draw #1: p lists issue #10, and n lists none/);
+  });
+
+  it("a verdict only a publication short of tokens binds is INCOMPLETE; a failing token, or a short listing signed after the verdict, FAILs", () => {
+    const key = loadOrCreateKey(join(mkdtempSync(join(tmpdir(), "prrla-pub-")), "k.pem"));
+    const index = { issues: [issue(1, 10)], repeats: [] };
+    const mk = (sequence: number, previousSha256: string | null, publishedAt: string): SignedPublication =>
+      ({ ...signRecord({ schema: "pr-rla/ledger-publication/v1" as const, window: "w", registrationSha256: "r", manifestSha256: "m", ledger: null, sequence, previousSha256, draws: { through: 1 }, ledgerIndexSha256: ledgerIndexSha256(index as never), index, publishedAt, prRlaVersion: "0.1.0" }, key), timestamps: [] }) as never;
+    const p1 = mk(1, null, "2026-10-21T01:30:00Z");
+    const p2 = mk(2, p1.sha256, "2026-10-21T01:50:00Z");
+    const verdict = { draw: 1, changeId: "c1", recordedAt: "2026-10-21T01:40:00Z" };
+    const base = { required: true, authoritiesRegistered: true, registration: { sha256: "r", publicKeyPem: p1.publicKeyPem, window: "w", ledger: null }, manifestSha256: "m", index: { value: index, sha256: ledgerIndexSha256(index as never) }, draws: [{ draw: 1, changeId: "c1", firstOccurrence: true }], issued: 1, verdictsRead: [verdict], counted: [verdict] };
+    const short = { proven: false, boundMs: null, failed: 0 };
+    const proven = (at: string) => ({ proven: true, boundMs: Date.parse(at), failed: 0 });
+    // #1 short (signed 01:30, before the verdict), #2 proven at 01:50, after it: when the mapping existed is not established.
+    let f = publicationFindings({ ...base, file: { publications: [p1, p2], problems: [] }, times: [short, proven("2026-10-21T01:50:00Z")] });
+    expect(f.fails).toEqual([]);
+    expect(f.incompletes).toEqual([expect.stringMatching(/^the counted verdict on draw #1 \(c1, issue #10\) was recorded 2026-10-21T01:40:00Z, before the first proven publication listing that issue \(#2, 2026-10-21T01:50:00Z\); publication #1, signed 2026-10-21T01:30:00Z, lists it too/)]);
+    // Only #1, short: nothing proven lists the issue.
+    f = publicationFindings({ ...base, file: { publications: [p1], problems: [] }, times: [short] });
+    expect(f.fails).toEqual([]);
+    expect(f.incompletes).toEqual([expect.stringMatching(/^a verdict on draw #1 was read from issue #10, which only publication #1 lists, and too few registered authorities time-stamped it/)]);
+    // #1 with a failing token: shown false.
+    f = publicationFindings({ ...base, file: { publications: [p1], problems: [] }, times: [{ ...short, failed: 1 }] });
+    expect(f.incompletes).toEqual([]);
+    expect(f.fails).toEqual([expect.stringMatching(/^a verdict on draw #1 was read from issue #10, which no proven \(time-stamped\) publication record lists/)]);
+    // #1 short but signed after the verdict, #2 proven after it: the mapping was published after the verdict.
+    const late1 = mk(1, null, "2026-10-21T01:45:00Z");
+    const late2 = mk(2, late1.sha256, "2026-10-21T01:50:00Z");
+    f = publicationFindings({ ...base, file: { publications: [late1, late2], problems: [] }, times: [short, proven("2026-10-21T01:50:00Z")] });
+    expect(f.incompletes).toEqual([]);
+    expect(f.fails).toEqual([expect.stringMatching(/^the counted verdict on draw #1 \(c1, issue #10\) was recorded 2026-10-21T01:40:00Z, but the first publication listing that issue \(#2\)/)]);
+    // A short publication with a problem of its own (another registration) is only wrong, never short.
+    f = publicationFindings({ ...base, registration: { ...base.registration, sha256: "other" }, file: { publications: [p1], problems: [] }, times: [short] });
+    expect(f.incompletes).toEqual([]);
+    expect(f.fails).toEqual(expect.arrayContaining([expect.stringMatching(/names a different registration/), expect.stringMatching(/which no proven \(time-stamped\) publication record lists/)]));
   });
 
   it("no proven publication: every verdict read FAILs; the registration does not name authorities: a WARN and the signed time", () => {

@@ -228,7 +228,13 @@ export interface PublicationInput {
 }
 
 export interface PublicationFindings {
+  /** What is shown false: check 7 FAILs. */
   fails: string[];
+  /**
+   * What cannot be established from what is on file, but is not shown false (time round B's INCOMPLETE): a verdict
+   * whose issue only publications short of tokens list, none of their tokens failing. Check 7 is INCOMPLETE for it.
+   */
+  incompletes: string[];
   warns: string[];
   notes: string[];
 }
@@ -237,7 +243,7 @@ const iso = (ms: number) => new Date(ms).toISOString().replace(".000Z", "Z");
 
 /** Check 7's publication rules (P1). Pure. */
 export function publicationFindings(i: PublicationInput): PublicationFindings {
-  const out: PublicationFindings = { fails: [], warns: [], notes: [] };
+  const out: PublicationFindings = { fails: [], incompletes: [], warns: [], notes: [] };
   const pubs = i.file?.publications ?? [];
   for (const p of i.file?.problems ?? []) out.fails.push(p);
   if (!pubs.length) {
@@ -249,7 +255,10 @@ export function publicationFindings(i: PublicationInput): PublicationFindings {
   }
   // The file's own integrity: each record signed by the registration's key, for this audit, chained and append-only.
   let prev: SignedPublication | null = null;
+  // Publications with a problem of their own (signature, key, audit, chain, order): never "short", only wrong.
+  const bad = new Set<number>();
   pubs.forEach((p, n) => {
+    const before = out.fails.length;
     const r = p.record;
     const what = `publication #${n + 1}`;
     const sig = verifySignedRecord(p);
@@ -269,6 +278,7 @@ export function publicationFindings(i: PublicationInput): PublicationFindings {
       if (r.draws.through < prev.record.draws.through) out.fails.push(`${PUBLICATION_FILE} ${what} covers draws 1–${r.draws.through}, fewer than #${n} (1–${prev.record.draws.through})`);
       out.fails.push(...indexExtensionProblems(prev.record.index, r.index, { prev: `publication #${n}`, next: what }).map((x) => `${PUBLICATION_FILE}: ${x}`));
     }
+    if (out.fails.length > before) bad.add(n);
     prev = p;
   });
   // The index now must extend the latest publication.
@@ -295,14 +305,26 @@ export function publicationFindings(i: PublicationInput): PublicationFindings {
     for (let n = 0; n < pubs.length; n++) if (counts(n) && lists(pubs[n]!.record, draw, entry)) return { n, boundMs: i.times[n]!.boundMs! };
     return null;
   };
+  // A publication short of tokens (fewer than k registered authorities, none of its tokens failing) proves nothing, but
+  // shows nothing false either: a verdict it alone binds is not established (INCOMPLETE), as an unproven registration
+  // time is. A failing token is shown false (FAIL), as check 1 judges the registration's.
+  const short = (n: number) => i.authoritiesRegistered && !counts(n) && (i.times[n]?.failed ?? 1) === 0 && !bad.has(n);
+  const firstShortListing = (draw: number, entry: unknown): { n: number; signedAt: string } | null => {
+    for (let n = 0; n < pubs.length; n++) if (short(n) && lists(pubs[n]!.record, draw, entry)) return { n, signedAt: pubs[n]!.record.publishedAt };
+    return null;
+  };
   const unpublished = new Map<number, string>();
   for (const v of i.verdictsRead ?? []) {
     const e = issueEntryFor(i.index.value, v.draw);
     if (!e) continue;
     if (!firstListing(e.draw, e.entry)) unpublished.set(e.draw, issueName(e.entry as Entry));
   }
-  for (const [draw, name] of unpublished)
-    out.fails.push(`a verdict on draw #${draw} was read from issue ${name}, which no ${i.authoritiesRegistered ? "proven (time-stamped) " : ""}publication record lists: run "pr-rla sample" to publish the issues before anyone records a verdict on them`);
+  for (const [draw, name] of unpublished) {
+    const e = issueEntryFor(i.index.value, draw)!;
+    const s = firstShortListing(e.draw, e.entry);
+    if (s) out.incompletes.push(`a verdict on draw #${draw} was read from issue ${name}, which only publication #${s.n + 1} lists, and too few registered authorities time-stamped it: the draw → issue mapping it was read through is not established; run "pr-rla sample" to publish again`);
+    else out.fails.push(`a verdict on draw #${draw} was read from issue ${name}, which no ${i.authoritiesRegistered ? "proven (time-stamped) " : ""}publication record lists: run "pr-rla sample" to publish the issues before anyone records a verdict on them`);
+  }
   const earliest = new Map<number, { at: number; v: { changeId: string; recordedAt: string } }>();
   for (const v of i.counted ?? []) {
     const e = issueEntryFor(i.index.value, v.draw);
@@ -315,8 +337,13 @@ export function publicationFindings(i: PublicationInput): PublicationFindings {
     if (unpublished.has(draw)) continue;
     const e = issueEntryFor(i.index.value, draw)!;
     const first = firstListing(e.draw, e.entry)!;
-    if (first.boundMs > at)
-      out.fails.push(`the counted verdict on draw #${draw} (${v.changeId}, issue ${issueName(e.entry as Entry)}) was recorded ${v.recordedAt}, but the first publication listing that issue (#${first.n + 1}) ${i.authoritiesRegistered ? "was proven to exist only by" : "was signed at"} ${iso(first.boundMs)}: the mapping it was read through was published after the verdict existed`);
+    if (first.boundMs <= at) continue;
+    // An earlier publication short of tokens, signed before the verdict, lists the issue: when it existed is not
+    // established, so neither is the order (INCOMPLETE); without one, the mapping was published after the verdict (FAIL).
+    const s = firstShortListing(e.draw, e.entry);
+    if (s && s.n < first.n && Date.parse(s.signedAt) <= at)
+      out.incompletes.push(`the counted verdict on draw #${draw} (${v.changeId}, issue ${issueName(e.entry as Entry)}) was recorded ${v.recordedAt}, before the first proven publication listing that issue (#${first.n + 1}, ${iso(first.boundMs)}); publication #${s.n + 1}, signed ${s.signedAt}, lists it too, but too few registered authorities time-stamped it: whether the mapping existed before the verdict is not established`);
+    else out.fails.push(`the counted verdict on draw #${draw} (${v.changeId}, issue ${issueName(e.entry as Entry)}) was recorded ${v.recordedAt}, but the first publication listing that issue (#${first.n + 1}) ${i.authoritiesRegistered ? "was proven to exist only by" : "was signed at"} ${iso(first.boundMs)}: the mapping it was read through was published after the verdict existed`);
   }
   const extra = (entries(i.index.value, "issues") ?? []).filter((e) => typeof e.draw === "number" && !firstListing(e.draw as number, e)).map((e) => Number(e.draw));
   const notRead = extra.filter((d) => !unpublished.has(d));

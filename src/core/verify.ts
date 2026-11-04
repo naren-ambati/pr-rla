@@ -1,7 +1,7 @@
 import type { Ledger, ProvenanceLevel, VerdictEvent } from "../sdk/ledger.js";
-import { checkpointRecord, type CheckpointArtifact } from "./checkpoint.js";
+import type { CheckpointArtifact } from "./checkpoint.js";
 import type { LedgerIndexDocument } from "./ledger-anchor.js";
-import { ledgerGate, type GateLedger, type LedgerGate } from "./ledger-gate.js";
+import { assessedLedgerGate, type Check7Artifacts, type GateLedger, type LedgerGate } from "./ledger-gate.js";
 import type { ReadPublications } from "./ledger-publication.js";
 import { identityDiffs, type BindingIdentity } from "./plugin-binding.js";
 import type { ScmProvider } from "../sdk/provider.js";
@@ -157,11 +157,6 @@ export function countedFirstVerdicts(status: StatusReport, draws: readonly { cha
   return status.firstVerdicts.filter((v) => ids.has(v.changeId));
 }
 
-/** A record's tokens assessed under the registration's timestamping, printing nothing (check 7's gate prints). */
-async function assessTokens(signed: SignedRecord<unknown>, signedTimeIso: string, timestamping: RegistrationRecordV2["timestamping"], deps: VerifyDeps): Promise<TimeEvidenceSummary> {
-  const data = new Uint8Array(Buffer.from(canonicalJson(signed.record)));
-  return assessTimestamps({ timestamps: signed.timestamps ?? [], data, digestHex: sha256Hex(data), signedTimeIso, timestamping, bundle: deps.trustBundle, log: null });
-}
 
 /**
  * Checks a record's transparency-log entry. v1 records: the entry is the time evidence (the caller makes the check
@@ -625,45 +620,39 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const c7: VerifyCheck = { n: 7, name: "labels", status: "PASS", summary: "labels", details: [] };
   let status: StatusReport | null = null;
   const registeredLedger = isRegistrationV2(reg) ? reg.record.plugins.ledger : null;
-  // Every checkpoint's and publication's tokens, assessed under the registration's rules (local: no request).
+  // Check 7's local rules (src/core/ledger-gate.ts, the gate status runs through check7Gate): the files here, every
+  // checkpoint's and publication's tokens assessed under the registration's rules (local: no request), and what the
+  // ledger gave when it was read.
   const checkpoints = a.checkpoints ?? [];
-  const checkpointStamps = new Map<CheckpointArtifact, TimeEvidenceSummary>();
-  const publicationStamps: (TimeEvidenceSummary | null)[] = [];
-  if (isRegistrationV2(reg)) {
-    for (const cp of checkpoints) if (cp.line.timestamps.length) checkpointStamps.set(cp, await assessTokens({ record: checkpointRecord(cp.line), timestamps: cp.line.timestamps } as SignedRecord<unknown>, cp.line.takenAt, reg.record.timestamping, deps));
-    for (const p of a.ledgerPublications?.publications ?? []) publicationStamps.push(await assessTokens(p, p.record.publishedAt, reg.record.timestamping, deps));
-  }
-  const gateBase = {
-    registration: reg,
+  const artifacts: Check7Artifacts = {
     manifestSha256: m?.sha256 ?? null,
     drawsFile: a.draws,
-    draws: recomputed,
-    seedPublishesAt: derived.publishesAt,
-    ledgerIdentity: deps.ledgerIdentity ?? null,
-    testOnlyOptions: deps.ledgerTestOnlyOptions ?? [],
     ledgerIndex: a.ledgerIndex,
     publications: a.ledgerPublications ?? null,
-    publicationStamps,
     checkpoints,
     checkpointProblems: a.checkpointProblems ?? [],
     checkpointsUnchained: a.checkpointsUnchained ?? 0,
-    checkpointStamps,
   };
-  /** The gate's lines (src/core/ledger-gate.ts, shared with status): FAIL beats WARN beats whatever check 7 was. */
+  const gateFor = (read: GateLedger | null) => assessedLedgerGate(reg, artifacts, { identity: deps.ledgerIdentity ?? null, testOnlyOptions: deps.ledgerTestOnlyOptions ?? [], read }, deps.trustBundle, recomputed ? { draws: recomputed } : {});
+  /** The gate's lines (shared with status): FAIL beats INCOMPLETE beats WARN beats whatever check 7 was. */
   const applyGate = (g: LedgerGate) => {
     c7.details.push(...g.lines.map((l) => l.text));
     if (g.fails.length) c7.status = "FAIL";
+    else if (g.incompletes.length) c7.status = raiseStatus(c7.status, "INCOMPLETE");
     else if (g.warns.length && c7.status === "PASS") c7.status = "WARN";
   };
   if (!recomputed || !a.draws || !m || !deps.ledger) {
     c7.status = "SKIP";
     c7.summary = !deps.ledger && deps.ledgerSkipped ? deps.ledgerSkipped : "no verified draws to check labels against";
     // What is local is checked even when the tracker is not read: the ledger's identity, the index and its publication, the checkpoint file.
-    const g = ledgerGate({ ...gateBase, ledger: null });
+    const g = await gateFor(null);
     c7.details.push(...g.lines.map((l) => l.text));
     if (g.fails.length) {
       c7.status = "FAIL";
       c7.summary = "labels FAIL";
+    } else if (g.incompletes.length) {
+      c7.status = "INCOMPLETE";
+      c7.summary = `${c7.summary} · not established: ${g.incompletes.length} local finding(s)`;
     }
   } else {
     // A ledger that cannot be read FAILs check 7 with the error; it never passes silently (contracts.md §1).
@@ -728,13 +717,8 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         history = { events: null, error: (e as Error).message };
       }
     }
-    applyGate(
-      ledgerGate({
-        ...gateBase,
-        ledger: { name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: verdicts, counted: countedFirst, firstVerdicts: status?.firstVerdicts ?? [], integrity, history },
-      }),
-    );
-    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)`;
+    applyGate(await gateFor({ name: ledger.name, publishes: !!ledger.publishDraws, checkpointable: !!ledger.readHistory, verdictsRead: verdicts, counted: countedFirst, firstVerdicts: status?.firstVerdicts ?? [], integrity, history }));
+    c7.summary = c7.status === "FAIL" ? "labels FAIL" : `labels (prefix ${status?.labelledPrefix ?? 0}, ${verdicts?.length ?? 0} events)${c7.status === "INCOMPLETE" ? " · not established: the draw → issue mapping (a publication short of tokens)" : ""}`;
   }
   checks.push(c7);
 
