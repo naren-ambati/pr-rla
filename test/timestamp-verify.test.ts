@@ -6,7 +6,7 @@ import { rootCertificates } from "node:tls";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../src/core/canonical.js";
-import { beaconParams, derivedRoundFor, type RegistrationRecordV2, type SignedRecord, type TimestampEvidence } from "../src/core/records.js";
+import { beaconParams, derivedRoundFor, effectiveTime, type LoggedEntry, type RegistrationRecord, type RegistrationRecordV2, type SignedRecord, type TimestampEvidence } from "../src/core/records.js";
 import { SHIPPED_TRUST_BUNDLE, mergeTrust, type TrustBundle } from "../src/timestamp/bundle.js";
 import { parseTimeStampResp } from "../src/timestamp/client.js";
 import { assessTimestamps, checkToken, isoMs, notTamperProof, readToken, timestampsLine, type TokenCheck } from "../src/timestamp/verify.js";
@@ -178,20 +178,29 @@ describe("k-of-n by operator", () => {
     expect(notTamperProof(s)).toBe("TIMESTAMP NOT TAMPER-PROOF");
   });
 
-  it("FR1.4: tokens with different genTimes do not move the seed round", async () => {
-    const reg = (timestamps: TimestampEvidence[]): SignedRecord<RegistrationRecordV2> => ({
+  it("FR1.4: tokens with different genTimes, a log entry, or no `timestamps` field at all do not move the seed round", async () => {
+    // A log entry whose integratedTime is 5 min after the signed time: it would give round 33245912 if it were used.
+    const log = { logUrl: "http://127.0.0.1:9", uuid: "u", logIndex: 0, integratedTime: Math.floor(Date.parse("2026-10-20T00:05:00Z") / 1000), logID: "l", body: "", verification: { signedEntryTimestamp: "" } } satisfies LoggedEntry;
+    const reg = (envelope: { timestamps?: TimestampEvidence[]; log?: LoggedEntry | null }): SignedRecord<RegistrationRecordV2> => ({
       record: { schema: "pr-rla/registration/v2", registeredAt: "2026-10-20T00:00:00Z", window: { name: "w", start: "2026-07-01", end: "2026-09-30", opensAt: "2026-07-01T00:00:00Z", closesAt: "2026-10-01T00:00:00Z" }, beacon: beaconParams() } as RegistrationRecordV2,
       sha256: "",
       signature: "",
       publicKeyPem: "",
-      log: null,
-      timestamps,
+      log: envelope.log ?? null,
+      ...(envelope.timestamps ? { timestamps: envelope.timestamps } : {}),
     });
     const early = await evidence(A, { genTime: new Date("2026-10-20T00:00:01Z") });
     const late = await evidence(auth.b!, { genTime: new Date("2026-10-20T00:09:00Z") });
-    expect(derivedRoundFor(reg([early])).round).toBe(33245812);
-    expect(derivedRoundFor(reg([late])).round).toBe(33245812);
-    expect(derivedRoundFor(reg([early, late])).round).toBe(33245812);
+    expect(derivedRoundFor(reg({ timestamps: [early] })).round).toBe(33245812);
+    expect(derivedRoundFor(reg({ timestamps: [late] })).round).toBe(33245812);
+    expect(derivedRoundFor(reg({ timestamps: [early, late], log })).round).toBe(33245812);
+    // Review finding 4: dropping the unsigned `timestamps` field once handed the time to the log's integratedTime.
+    expect(derivedRoundFor(reg({ log })).round).toBe(33245812);
+    expect(effectiveTime(reg({ log }), "2026-10-20T00:00:00Z")).toEqual({ unix: Date.parse("2026-10-20T00:00:00Z") / 1000, iso: "2026-10-20T00:00:00Z", source: "signed" });
+    // And the reverse: a v1 record keeps its log time even if `timestamps: []` is added to its envelope.
+    const v1: SignedRecord<RegistrationRecord> = { ...(reg({ log }) as unknown as SignedRecord<RegistrationRecord>), record: { ...(reg({}).record as unknown as RegistrationRecord), schema: "pr-rla/registration/v1" }, timestamps: [] };
+    expect(derivedRoundFor(v1).round).toBe(33245912);
+    expect(effectiveTime(v1, v1.record.registeredAt).source).toBe("log");
   });
 });
 

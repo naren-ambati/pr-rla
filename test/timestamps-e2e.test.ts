@@ -12,7 +12,7 @@ import { sampleCommand } from "../src/commands/sample.js";
 import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { canonicalJson, sha256Hex } from "../src/core/canonical.js";
-import type { DrawsFile, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
+import type { CommitmentRecordV2, DrawsFile, LoggedEntry, RegistrationRecordV2, SignedRecord, TimestampEvidence } from "../src/core/records.js";
 import { roundPublishTime } from "../src/core/seed.js";
 import { loadConfig } from "../src/config.js";
 import { isoMs, readToken } from "../src/timestamp/verify.js";
@@ -302,6 +302,34 @@ describe("an honest v2 audit and six tamper fixtures on its registration's token
     s.out.length = 0;
     await statusCommand(s.ctx, {});
     expect(s.out[0]).toMatch(/CERTIFIED \(risk 5%\) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF \(1 of 2\)$/);
+  });
+
+  // A log entry 5 min after the signed time: if it were the time, R would move from 33,245,812 to 33,245,912.
+  const lateLog: LoggedEntry = { logUrl: "http://127.0.0.1:9", uuid: "u", logIndex: 0, integratedTime: T("2026-10-20T00:05:00Z") / 1000, logID: "l", body: "", verification: { signedEntryTimestamp: "" } };
+
+  it("review finding 4: the `timestamps` field dropped from the registration's envelope FAILs check 1 and does not move R to the log's time", async () => {
+    const s = cloneScenario(honest);
+    const reg = readJ<SignedRecord<RegistrationRecordV2>>(s, regPath);
+    delete (reg as { timestamps?: unknown }).timestamps;
+    reg.log = lateLog;
+    writeJ(s, regPath, reg);
+    const r = await runVerify(s.ctx, { offline: true });
+    expect(r.derivedRound).toBe(33245812);
+    expect(r.checks[0]!.status).toBe("FAIL");
+    expect(r.checks[0]!.details).toContain("FAIL registration: a schema-v2 record has no timestamps field (writers always store one); its time evidence was removed");
+    expect(r.checks[2]!.status).toBe("PASS"); // the commitment still names the honest R
+  });
+
+  it("review finding 4: the same for the commitment: check 2 FAILs", async () => {
+    const s = cloneScenario(honest);
+    const p = `${W}/manifest-commitment.json`;
+    const cm = readJ<SignedRecord<CommitmentRecordV2>>(s, p);
+    delete (cm as { timestamps?: unknown }).timestamps;
+    cm.log = lateLog;
+    writeJ(s, p, cm);
+    const c2 = (await runVerify(s.ctx, { offline: true })).checks[1]!;
+    expect(c2.status).toBe("FAIL");
+    expect(c2.details).toContain("a schema-v2 commitment has no timestamps field (writers always store one); its time evidence was removed");
   });
 });
 

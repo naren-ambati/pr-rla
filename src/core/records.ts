@@ -275,14 +275,22 @@ export interface EffectiveTime {
   source: "log" | "local" | "signed";
 }
 
+/** A schema-v2 signed record (registration or commitment): its signed time is its time, whatever its envelope holds. */
+export function isSignedV2(signed: SignedRecord<unknown>): boolean {
+  const schema = (signed.record as { schema?: unknown } | null)?.schema;
+  return schema === "pr-rla/registration/v2" || schema === "pr-rla/commitment/v2";
+}
+
 /**
  * v1: the time a signed record counts as registered is the log's integratedTime
  * if logged, else the self-asserted local time. v2: always the signed field
- * (FR1.4); RFC 3161 tokens and any log entry only bound it.
+ * (FR1.4); RFC 3161 tokens and any log entry only bound it. Keyed on the signed
+ * `record.schema`, never on the unsigned envelope: dropping `timestamps` from a v2
+ * envelope must not hand the time to the log, nor adding it take the time from a v1 log.
  */
 export function effectiveTime(signed: SignedRecord<unknown>, localIso: string): EffectiveTime {
   const unix = isoToUnix(localIso);
-  if (signed.timestamps !== undefined) return { unix, iso: unixToIso(unix), source: "signed" };
+  if (isSignedV2(signed)) return { unix, iso: unixToIso(unix), source: "signed" };
   if (signed.log && !("apiVersion" in signed.log)) return { unix: signed.log.integratedTime, iso: unixToIso(signed.log.integratedTime), source: "log" };
   return { unix, iso: unixToIso(unix), source: "local" };
 }

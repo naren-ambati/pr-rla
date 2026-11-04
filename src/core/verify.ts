@@ -178,6 +178,11 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     c1.details.push(`registration signature: ${sig.reason}`);
   }
   const regLog = await checkLog(reg.log, reg, "registration", deps, c1, v2);
+  if (v2 && reg.timestamps === undefined) {
+    // A v2 record always carries the field (empty when no authority is configured): its absence is tampering, never a fallback to the log (FR1.4).
+    c1.status = "FAIL";
+    c1.details.push("FAIL registration: a schema-v2 record has no timestamps field (writers always store one); its time evidence was removed");
+  }
   if (v2) {
     regTs = await checkTimestamps(reg, reg.record.registeredAt, reg.record.timestamping, regLog, "registration", deps, c1);
     if (!regTs.proven) tamperProof = false;
@@ -236,6 +241,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     if (cm.record.manifestSha256 !== m.sha256) c2.details.push("commitment names a different manifest hash");
     if (cm.record.N !== m.N) c2.details.push("commitment names a different N");
     if (cm.record.registrationSha256 !== reg.sha256) c2.details.push("commitment names a different registration");
+    if (isCommitmentV2(cm) && cm.timestamps === undefined) c2.details.push("a schema-v2 commitment has no timestamps field (writers always store one); its time evidence was removed");
     if (isoToUnix(m.frozenAt) < isoToUnix(reg.record.window.closesAt)) c2.details.push(`frozen ${m.frozenAt}, before the window closed`);
     if (c2.details.length) c2.status = "FAIL";
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
