@@ -2,7 +2,7 @@ import { McpServer, type CallToolResult, type ServerContext } from "@modelcontex
 import * as z from "zod";
 import { LONG_CALL_DEADLINE_MS, SIMULATE_MAX_DRAWS, auditList, drawContext, draws, freezePreview, simulate, status, verify, type FreezePreview, type ReadOptions } from "pr-rla/api/read";
 import { toToolError, type ToolErrorBody } from "./errors.js";
-import { DEFAULT_LIMITS, Jobs, resultBytes, tooLarge, type JobLimits, type Progress } from "./jobs.js";
+import { DEFAULT_LIMITS, Jobs, callScope, guardFailure, resultBytes, tooLarge, type JobLimits, type Progress } from "./jobs.js";
 import { Roots } from "./roots.js";
 import { PR_RLA_MCP_VERSION } from "./version.js";
 
@@ -106,9 +106,17 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
     const r = await jobs.run(tool, ({ progress, signal }) => work(readOptions(progress, signal)), notifier(ctx), ctx.mcpReq.signal);
     return ok(r.kind === "job" ? r.handle : r.value, limits.maxResultBytes, tool);
   };
-  const guard = async (fn: () => Promise<CallToolResult>): Promise<CallToolResult> => {
+  /**
+   * Every tool call: its errors become error results, and it runs in its own call scope (src/jobs.ts), so the process
+   * guard fails this call, at once, when a rejection nothing awaited comes from it (S1). A long call's job scope,
+   * inside, also stops its work through the call's signal.
+   */
+  const guard = async (tool: string, fn: () => Promise<CallToolResult>): Promise<CallToolResult> => {
+    let failCall: (e: unknown) => void = () => {};
+    const failed = new Promise<never>((_, reject) => (failCall = reject));
+    failed.catch(() => {});
     try {
-      return await fn();
+      return await callScope.run({ tool, fail: (reason) => failCall(guardFailure(tool, reason)) }, () => Promise.race([fn(), failed]));
     } catch (e) {
       return fail(toToolError(e));
     }
@@ -126,7 +134,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         outputSchema: z.looseObject({ dir: z.string(), windows: z.array(z.looseObject({ name: z.string(), phase: z.string(), mode: z.string().nullable() })) }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: false },
       },
-      (args) => guard(async () => ok(await auditList({ dir: roots.resolveDir(args.dir) }, readOptions()), limits.maxResultBytes, "audit_list")),
+      (args) => guard("audit_list", async () => ok(await auditList({ dir: roots.resolveDir(args.dir) }, readOptions()), limits.maxResultBytes, "audit_list")),
     );
 
     server.registerTool(
@@ -139,7 +147,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>
-        guard(async () => {
+        guard("status", async () => {
           const input = { dir: roots.resolveDir(args.dir), offline: args.offline, ...(args.window !== undefined ? { window: args.window } : {}) };
           if (args.offline) return ok(await status(input, readOptions()), limits.maxResultBytes, "status");
           return long("status", ctx, (opts) => status(input, opts));
@@ -156,7 +164,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         annotations: { ...RO, idempotentHint: true, openWorldHint: false },
       },
       (args) =>
-        guard(async () => {
+        guard("draws", async () => {
           const input = { dir: roots.resolveDir(args.dir), ...(args.window !== undefined ? { window: args.window } : {}), ...(args.from !== undefined ? { from: args.from } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) };
           return ok(await draws(input, readOptions()), limits.maxResultBytes, "draws");
         }),
@@ -172,7 +180,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>
-        guard(async () => {
+        guard("draw_context", async () => {
           const input = { dir: roots.resolveDir(args.dir), draw: args.draw, ...(args.window !== undefined ? { window: args.window } : {}), ...(args.maxPatchBytes !== undefined ? { maxPatchBytes: args.maxPatchBytes } : {}) };
           return long("draw_context", ctx, (opts) => drawContext(input, opts));
         }),
@@ -188,7 +196,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         annotations: { ...RO, idempotentHint: true, openWorldHint: true },
       },
       (args, ctx) =>
-        guard(async () => {
+        guard("verify", async () => {
           const input = { dir: roots.resolveDir(args.dir), offline: args.offline, ...(args.window !== undefined ? { window: args.window } : {}) };
           if (args.offline) return ok(await verify(input, readOptions()), limits.maxResultBytes, "verify");
           return long("verify", ctx, (opts) => verify(input, opts));
@@ -214,7 +222,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         outputSchema: z.looseObject({ population: z.number().optional(), defects: z.number().optional(), runs: z.number().optional(), certifiedRate: z.number().optional(), ...handle }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: false },
       },
-      (args, ctx) => guard(async () => long("simulate", ctx, (opts) => simulate(args, opts))),
+      (args, ctx) => guard("simulate", async () => long("simulate", ctx, (opts) => simulate(args, opts))),
     );
 
     server.registerTool(
@@ -227,7 +235,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         annotations: { ...RO, idempotentHint: false, openWorldHint: true },
       },
       (args, ctx) =>
-        guard(async () => {
+        guard("freeze_preview", async () => {
           const input = { dir: roots.resolveDir(args.dir), ...(args.window !== undefined ? { window: args.window } : {}), ...(args.estimate !== undefined ? { estimate: args.estimate } : {}) };
           return long("freeze_preview", ctx, (opts) => freezePreview(input, opts));
         }),
@@ -242,7 +250,7 @@ export function createPrRlaMcp(o: PrRlaMcpOptions = {}): { factory: () => McpSer
         outputSchema: z.looseObject({ jobId: z.string(), state: z.enum(["running", "done", "failed", "unknown"]) }),
         annotations: { ...RO, idempotentHint: true, openWorldHint: false },
       },
-      (args) => guard(async () => ok(jobs.status(args.jobId), limits.maxResultBytes, "job_status")),
+      (args) => guard("job_status", async () => ok(jobs.status(args.jobId), limits.maxResultBytes, "job_status")),
     );
 
     return server;

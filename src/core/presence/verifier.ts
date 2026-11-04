@@ -1,4 +1,6 @@
 import type { ProvenanceLevel, VerdictEvent, VerdictProvenance } from "../../sdk/ledger.js";
+import { isChangeId } from "../../sdk/provider.js";
+import { foreign, quoted, said, type Foreign, type Line } from "../said.js";
 import { signersFor, type AllowedSigner } from "./allowed-signers.js";
 import { dearmorSshsig, verifySshsigBlob, type SecurityKeySignature } from "./sshsig.js";
 import { VERDICT_NAMESPACE, VERDICT_PAYLOAD_V1, verdictPayload, verdictPayloadProblems, verdictPayloadV1, type VerdictBinding, type VerdictPayloadFields } from "./verdict-payload.js";
@@ -22,8 +24,8 @@ export type VerdictSignatureState = "unsigned" | "unreadable" | "other-registrat
 
 export interface VerdictSignatureCheck {
   state: VerdictSignatureState;
-  /** One line saying why. */
-  detail: string;
+  /** One line saying why; what the verdict line or its signature blob carries is foreign text in it (S1, src/core/said.ts). */
+  detail: Line;
   /** The key the signature names, once its blob parses. */
   key?: { type: string; fingerprint: string; securityKey: boolean };
   /** `signed`: the registered principal holding the key (the verdict's reviewer). */
@@ -34,6 +36,12 @@ export interface VerdictSignatureCheck {
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
+/** What a verdict line names, as a piece of a line: its change id when it is one, its reviewer always the ledger's (S1). */
+export const lineChange = (v: Pick<VerdictEvent, "changeId">): string | Foreign => (isChangeId(v.changeId) ? v.changeId : foreign("the change the ledger line names", v.changeId));
+const lineReviewer = (v: Pick<VerdictEvent, "reviewer">): Foreign => foreign("the reviewer the ledger line names", v.reviewer);
+/** A problem the signature check found: it quotes the blob (a namespace, a key type), so it is the line's text. */
+const blobProblem = (p: string | undefined): Foreign => foreign("what the signature check found", p ?? "unknown");
+
 /**
  * Checks one verdict's own signature against the audit it must be signed for (the registration, the
  * manifest and the seed: `binding`) and the registered allowed signers.
@@ -43,7 +51,7 @@ export function checkVerdictSignature(v: VerdictEvent, binding: VerdictBinding, 
   if (v.sshsig === undefined) return { state: "unsigned", detail: "carries no signature" };
   if (typeof v.sshsig !== "string" || !BASE64.test(v.sshsig)) return { state: "unreadable", detail: "has an sshsig field that is not base64" };
   if (v.registrationSha256 !== undefined && v.registrationSha256 !== registrationSha256)
-    return { state: "other-registration", detail: `is signed for registration ${String(v.registrationSha256).slice(0, 12)}…, not this audit's ${registrationSha256.slice(0, 12)}…` };
+    return { state: "other-registration", detail: said`is signed for registration ${/^[0-9a-f]{12}/.test(String(v.registrationSha256)) ? String(v.registrationSha256).slice(0, 12) : foreign("the registration the ledger line names", String(v.registrationSha256).slice(0, 64))}…, not this audit's ${registrationSha256.slice(0, 12)}…` };
   const fields = { ...binding, protocolSha256: v.protocolSha256, draw: v.draw, changeId: v.changeId, verdict: v.verdict, reviewer: v.reviewer, recordedAt: v.recordedAt } as VerdictPayloadFields;
   const problems = verdictPayloadProblems(fields);
   if (problems.length) return { state: "unreadable", detail: `cannot be checked: ${problems.join("; ")}` };
@@ -53,15 +61,15 @@ export function checkVerdictSignature(v: VerdictEvent, binding: VerdictBinding, 
   if (!s.ok && verifySshsigBlob(blob, verdictPayloadV1(fields), VERDICT_NAMESPACE).ok)
     return { state: "invalid", detail: `is signed over the ${VERDICT_PAYLOAD_V1} bytes, which name neither the manifest nor the seed and so could be signed before the seed was public; such signatures are refused: sign it again (pr-rla record --sign)`, ...(key ? { key } : {}) };
   if (!s.ok && /does not match the signed data/.test(s.problem ?? ""))
-    return { state: "invalid", detail: `has a signature that does not verify for this audit (its registration, manifest and seed): ${s.problem}`, ...(key ? { key } : {}) };
-  if (!s.ok) return { state: "invalid", detail: `has a signature that does not verify: ${s.problem}`, ...(key ? { key } : {}) };
+    return { state: "invalid", detail: said`has a signature that does not verify for this audit (its registration, manifest and seed): ${blobProblem(s.problem)}`, ...(key ? { key } : {}) };
+  if (!s.ok) return { state: "invalid", detail: said`has a signature that does not verify: ${blobProblem(s.problem)}`, ...(key ? { key } : {}) };
   const holders = signersFor(s.key!, signers);
   const sk = s.sk ? { sk: s.sk } : {};
-  if (!holders.length) return { state: "unlisted", detail: `is signed by key ${s.key!.fingerprint} (${s.key!.type}), which no registered reviewer holds`, key: key!, ...sk };
+  if (!holders.length) return { state: "unlisted", detail: said`is signed by key ${s.key!.fingerprint} (${foreign("the key type the signature names", s.key!.type)}), which no registered reviewer holds`, key: key!, ...sk };
   const principals = holders.flatMap((h) => h.principals);
   // Exact, as `ssh-keygen -Y verify -I <reviewer>` matches: the registration refuses principals equal ignoring case.
   const principal = principals.find((p) => p === v.reviewer);
-  if (!principal) return { state: "mismatch", detail: `names reviewer ${v.reviewer} but is signed by ${principals.join(", ")}'s key ${s.key!.fingerprint}`, key: key!, ...sk };
+  if (!principal) return { state: "mismatch", detail: said`names reviewer ${lineReviewer(v)} but is signed by ${principals.join(", ")}'s key ${s.key!.fingerprint}`, key: key!, ...sk };
   const touch = s.sk ? (s.sk.userPresent ? " with the user-presence flag" : " without the user-presence flag (no touch)") : "";
   return { state: "signed", detail: `is signed by ${principal}'s ${s.key!.type} key ${s.key!.fingerprint}${touch}`, key: key!, principal, ...sk };
 }
@@ -85,12 +93,12 @@ export interface VerdictAttestation {
   /** Each event's signature check, in the same order (null: no keys are registered, nothing was checked). */
   checks: (VerdictSignatureCheck | null)[];
   /** Informational: unsigned lines, security-key signatures without the user-presence flag. */
-  findings: string[];
+  findings: Line[];
   /** Check 7 WARNs: unreadable, invalid or foreign signatures, an unlisted key, a signer who is not the named reviewer, a decreasing counter. */
-  warnings: string[];
+  warnings: Line[];
 }
 
-const where = (v: VerdictEvent) => `verdict on draw #${v.draw} (${v.changeId})`;
+const where = (v: VerdictEvent): Line => said`verdict on draw #${v.draw} (${lineChange(v)})`;
 const drawList = (vs: readonly VerdictEvent[]) => vs.map((v) => `#${v.draw}`).join(", ");
 
 /**
@@ -104,8 +112,8 @@ const drawList = (vs: readonly VerdictEvent[]) => vs.map((v) => `#${v.draw}`).jo
 export function attestVerdicts(read: readonly VerdictEvent[], binding: VerdictBinding, signers: readonly AllowedSigner[], opts: { quiet?: boolean } = {}): VerdictAttestation {
   const events: VerdictEvent[] = [];
   const checks: (VerdictSignatureCheck | null)[] = [];
-  const findings: string[] = [];
-  const warnings: string[] = [];
+  const findings: Line[] = [];
+  const warnings: Line[] = [];
   const unsigned: VerdictEvent[] = [];
   const highest = new Map<string, { counter: number; draw: number }>();
   for (const v of read) {
@@ -122,10 +130,10 @@ export function attestVerdicts(read: readonly VerdictEvent[], binding: VerdictBi
     if (check.state === "unsigned") {
       if (!opts.quiet) unsigned.push(v);
     } else if (check.state !== "signed") {
-      if (!opts.quiet) warnings.push(`${where(v)} ${check.detail}: self-asserted`);
+      if (!opts.quiet) warnings.push(said`${where(v)} ${check.detail}: self-asserted`);
     }
     else if (check.sk) {
-      if (!check.sk.userPresent) findings.push(`${where(v)} ${check.detail}: account`);
+      if (!check.sk.userPresent) findings.push(said`${where(v)} ${check.detail}: account`);
       const fp = check.key!.fingerprint;
       const prev = highest.get(fp);
       if (prev && check.sk.counter < prev.counter)
@@ -154,7 +162,7 @@ export async function signVerdict(fields: VerdictPayloadFields, signers: readonl
   }
   const { manifestSha256: _m, beaconRound: _r, beaconRandomness: _b, ...line } = fields;
   const check = checkVerdictSignature({ ...line, sshsig }, fields, signers);
-  if (check.state !== "signed") throw new Error(`the signature would not count: the verdict ${check.detail}`);
+  if (check.state !== "signed") throw new Error(`the signature would not count: the verdict ${quoted(check.detail)}`);
   return { registrationSha256: fields.registrationSha256, sshsig, check };
 }
 

@@ -268,6 +268,32 @@ export function verdictEventProblems(value: unknown): string[] {
 const BOT_SUFFIX = "[bot]";
 
 /**
+ * Optional (S1): a reason in parts, so a read-only result can keep what a ledger line said (a reviewer's login, an
+ * app's name, a change id) apart from pr-rla's words: a string is pr-rla's text, `{ words, foreign }` a value the
+ * ledger supplied, with pr-rla's name for it. `reasonText` joins them as the reason reads in the CLI.
+ */
+export type ReasonPart = string | { readonly words: string; readonly foreign: string };
+export const reasonText = (parts: readonly ReasonPart[]): string => parts.map((p) => (typeof p === "string" ? p : p.foreign)).join("");
+
+/** `verdictIneligibility`, in parts (S1). */
+export function verdictIneligibilityParts(event: Pick<VerdictEvent, "reviewer" | "provenance">, reviewers?: readonly string[] | null): ReasonPart[] | null {
+  const login = event.reviewer.trim().toLowerCase();
+  const who = { words: "the reviewer the ledger names", foreign: event.reviewer };
+  if (login.endsWith(BOT_SUFFIX)) return ["applied by bot account ", who];
+  const app = event.provenance?.viaApp;
+  if (app) return ["applied by app ", { words: "the app's name", foreign: `"${app}"` }];
+  if (reviewers) {
+    const id = event.provenance?.actorId;
+    const listed = reviewers.some((r) => {
+      const entry = r.trim();
+      return entry.startsWith("id:") ? id !== undefined && entry.slice(3) === id : entry.toLowerCase() === login;
+    });
+    if (!listed) return [who, " is not a registered reviewer"];
+  }
+  return null;
+}
+
+/**
  * Why a verdict event cannot count, or null if it can (functional-design.md §U4):
  * a bot account (`[bot]` login), an app (`viaApp`), or, when reviewers are registered,
  * an account that is not on the list. Entries match as U3's selectors do (`actorMatches` in
@@ -277,19 +303,8 @@ const BOT_SUFFIX = "[bot]";
  * its draw stays unlabelled.
  */
 export function verdictIneligibility(event: Pick<VerdictEvent, "reviewer" | "provenance">, reviewers?: readonly string[] | null): string | null {
-  const login = event.reviewer.trim().toLowerCase();
-  if (login.endsWith(BOT_SUFFIX)) return `applied by bot account ${event.reviewer}`;
-  const app = event.provenance?.viaApp;
-  if (app) return `applied by app "${app}"`;
-  if (reviewers) {
-    const id = event.provenance?.actorId;
-    const listed = reviewers.some((r) => {
-      const entry = r.trim();
-      return entry.startsWith("id:") ? id !== undefined && entry.slice(3) === id : entry.toLowerCase() === login;
-    });
-    if (!listed) return `${event.reviewer} is not a registered reviewer`;
-  }
-  return null;
+  const parts = verdictIneligibilityParts(event, reviewers);
+  return parts ? reasonText(parts) : null;
 }
 
 /**
@@ -328,6 +343,8 @@ export function compareByTimeThenId(a: { at: string; id: string }, b: { at: stri
 export interface IgnoredVerdictEvent {
   event: VerdictEvent;
   reason: string;
+  /** Optional (S1): `reason` in parts (ReasonPart). */
+  reasonParts?: ReasonPart[];
 }
 
 export interface VerdictClassification {
@@ -350,8 +367,8 @@ export function classifyVerdicts(
     protocolSha256: string;
     draws: readonly { draw: number; changeId: string }[];
     reviewers?: readonly string[] | null;
-    /** Optional (P4): a further reason a verdict is ineligible (the core's signing rules); null when it is eligible. */
-    ineligible?: (event: VerdictEvent) => string | null;
+    /** Optional (P4): a further reason a verdict is ineligible (the core's signing rules), as text or in parts (S1); null when it is eligible. */
+    ineligible?: (event: VerdictEvent) => string | readonly ReasonPart[] | null;
   },
 ): VerdictClassification {
   const drawByNumber = new Map(ctx.draws.map((d) => [d.draw, d]));
@@ -360,8 +377,10 @@ export function classifyVerdicts(
   const ignored: IgnoredVerdictEvent[] = [];
   const relabels: VerdictClassification["relabels"] = [];
   for (const ev of verdicts) {
+    const ignore = (parts: readonly ReasonPart[]) => ignored.push({ event: ev, reason: reasonText(parts), reasonParts: [...parts] });
     if (ev.protocolSha256 !== ctx.protocolSha256) {
-      ignored.push({ event: ev, reason: `protocol ${ev.protocolSha256.slice(0, 8)}… is not the registered protocol ${ctx.protocolSha256.slice(0, 8)}…` });
+      const theirs = String(ev.protocolSha256).slice(0, 8);
+      ignore(["protocol ", /^[0-9a-f]{8}$/.test(theirs) ? theirs : { words: "the protocol the ledger line names", foreign: theirs }, `… is not the registered protocol ${ctx.protocolSha256.slice(0, 8)}…`]);
       continue;
     }
     if (!drawnIds.has(ev.changeId)) {
@@ -373,9 +392,10 @@ export function classifyVerdicts(
       ignored.push({ event: ev, reason: `draw #${ev.draw} is not ${ev.changeId}` });
       continue;
     }
-    const ineligible = verdictIneligibility(ev, ctx.reviewers) ?? ctx.ineligible?.(ev) ?? null;
+    const more = ctx.ineligible?.(ev) ?? null;
+    const ineligible = verdictIneligibilityParts(ev, ctx.reviewers) ?? (typeof more === "string" ? (more ? [more] : null) : more?.length ? more : null);
     if (ineligible) {
-      ignored.push({ event: ev, reason: ineligible });
+      ignore(ineligible);
       continue;
     }
     const prior = first.get(ev.changeId);

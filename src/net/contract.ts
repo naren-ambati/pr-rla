@@ -1,3 +1,5 @@
+import { BROKER_REFUSALS, PrRlaError } from "../core/said.js";
+import { bounded } from "../core/text.js";
 import { RETRIES_EXHAUSTED, TIMED_OUT, type RetryHints } from "../sdk/http.js";
 
 /**
@@ -37,15 +39,21 @@ export const DESTINATION_TIMEOUT_MS: Readonly<Record<Destination, number>> = {
 export const TSA_RETRY_DEADLINE_MS = 5 * 60_000;
 
 /** Typed broker errors carry a code, the host and a next step (contracts.md §2, §7). */
-export class BrokerError extends Error {
+export class BrokerError extends PrRlaError {
+  readonly host: string;
   constructor(
     message: string,
     readonly code: string,
-    readonly host: string,
+    host: string,
     readonly next: string,
   ) {
     super(message);
     this.name = "BrokerError";
+    this.host = bounded(host);
+  }
+  /** A refusal or a timeout is pr-rla's words; giving up quotes the service's last answer (S1, src/core/said.ts). */
+  override said(): { own: string } | { words: string; foreign: string } {
+    return BROKER_REFUSALS.has(this.code) ? { own: this.message } : { words: `${this.host}: the service did not answer usefully (${this.code})`, foreign: this.message };
   }
 }
 
@@ -57,7 +65,7 @@ export class BrokerTimeout extends BrokerError {
     readonly ms: number,
     readonly attempts = 1,
   ) {
-    super(`${host}: no response within ${ms / 1000} s (${destination})${attempts > 1 ? `, ${attempts} attempts` : ""}`, TIMED_OUT, host, "check the network or the service's status, then run the command again");
+    super(`${bounded(host)}: no response within ${ms / 1000} s (${destination})${attempts > 1 ? `, ${attempts} attempts` : ""}`, TIMED_OUT, host, "check the network or the service's status, then run the command again");
     this.name = "BrokerTimeout";
   }
   get lastProblem(): string {
@@ -76,8 +84,22 @@ export class BrokerRetriesExhausted extends BrokerError {
     /** True when the service was rate limiting the requests. */
     readonly rateLimited = false,
   ) {
-    super(`${host}: gave up after ${attempts} attempt(s) in ${Math.round(elapsedMs / 1000)} s (last: ${lastProblem})`, RETRIES_EXHAUSTED, host, rateLimited ? "the service is rate limiting this client; use a token, or run the command again later" : "the service is unavailable; run the command again later");
+    super(`${bounded(host)}: gave up after ${attempts} attempt(s) in ${Math.round(elapsedMs / 1000)} s (last: ${bounded(lastProblem)})`, RETRIES_EXHAUSTED, host, rateLimited ? "the service is rate limiting this client; use a token, or run the command again later" : "the service is unavailable; run the command again later");
     this.name = "BrokerRetriesExhausted";
+  }
+}
+
+/**
+ * Step 6: a retry hint that is not a finite number of 0 or more (S1: a NaN attempt limit is never reached, so the
+ * request would be retried without end). Nothing was sent.
+ */
+export class RetryHintInvalid extends BrokerError {
+  constructor(
+    readonly hint: "maxRetries" | "maxBlindRateLimitRetries" | "blindRateLimitWaitMs",
+    host: string,
+  ) {
+    super(`the request's retry hint ${hint} is not a finite number of 0 or more; nothing was sent`, "RETRY_HINT_INVALID", host, `pass ${hint} as a number of 0 or more, or leave it out for the default`);
+    this.name = "RetryHintInvalid";
   }
 }
 
@@ -88,35 +110,39 @@ export class HostNotAllowed extends BrokerError {
     readonly pluginId: string,
     readonly allowed: readonly string[],
   ) {
-    super(`${pluginId} may not contact ${host} (declared hosts: ${allowed.join(", ") || "none"})`, "HOST_NOT_ALLOWED", host, "declare the host in the plugin's hosts(), or point it at a declared host");
+    super(`${bounded(pluginId)} may not contact ${bounded(host)} (declared hosts: ${bounded(allowed.join(", ")) || "none"})`, "HOST_NOT_ALLOWED", host, "declare the host in the plugin's hosts(), or point it at a declared host");
     this.name = "HostNotAllowed";
   }
 }
 
 /** Step 2: a request that is not a read (GET, HEAD, a GraphQL query) under the read-only guard. */
 export class ReadOnlyViolation extends BrokerError {
-  constructor(
-    readonly method: string,
-    readonly path: string,
-    host: string,
-    why: string,
-  ) {
-    super(`read-only: ${method} ${host}${path} refused (${why})`, "READ_ONLY_VIOLATION", host, "this command or tool only reads; run the writing command yourself from the CLI");
+  readonly method: string;
+  readonly path: string;
+  constructor(method: string, path: string, host: string, why: string) {
+    // Every part is the caller's (a plugin chooses its method and URL): each is bounded (S1), and so is the whole.
+    super(`read-only: ${bounded(method)} ${bounded(host)}${bounded(path)} refused (${bounded(why)})`, "READ_ONLY_VIOLATION", host, "this command or tool only reads; run the writing command yourself from the CLI");
     this.name = "ReadOnlyViolation";
+    this.method = bounded(method);
+    this.path = bounded(path);
   }
 }
 
 /** Step 2: a ledger's non-read request outside its declared writePaths. */
 export class WritePathNotAllowed extends BrokerError {
+  readonly method: string;
+  readonly path: string;
   constructor(
-    readonly method: string,
-    readonly path: string,
+    method: string,
+    path: string,
     host: string,
     readonly pluginId: string,
     readonly allowed: readonly string[],
   ) {
-    super(`${pluginId} may not ${method} ${host}${path} (it may write only under: ${allowed.join(", ") || "nothing"})`, "WRITE_PATH_NOT_ALLOWED", host, "declare the path in the ledger's writePaths(), or write to the audit repo or project");
+    super(`${bounded(pluginId)} may not ${bounded(method)} ${bounded(host)}${bounded(path)} (it may write only under: ${bounded(allowed.join(", ")) || "nothing"})`, "WRITE_PATH_NOT_ALLOWED", host, "declare the path in the ledger's writePaths(), or write to the audit repo or project");
     this.name = "WritePathNotAllowed";
+    this.method = bounded(method);
+    this.path = bounded(path);
   }
 }
 
@@ -132,7 +158,7 @@ export class CredentialHostMismatch extends BrokerError {
     readonly allowed: readonly string[],
     target: { name: string; overHttps: true } | null = null,
   ) {
-    super(`credential ${env} may be sent only to ${allowed.join(", ") || "no host"}${target ? " over https" : ""}, not ${target?.name ?? host}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, target ? `use the https URL of ${host}; a credential is never sent in clear text` : `declare ${host} in the plugin's credentials for ${env}, or remove the credential from this request`);
+    super(`credential ${bounded(env)} may be sent only to ${bounded(allowed.join(", ")) || "no host"}${target ? " over https" : ""}, not ${bounded(target?.name ?? host)}; nothing was sent`, "CREDENTIAL_HOST_MISMATCH", host, target ? `use the https URL of ${bounded(host)}; a credential is never sent in clear text` : `declare ${bounded(host)} in the plugin's credentials for ${bounded(env)}, or remove the credential from this request`);
     this.name = "CredentialHostMismatch";
   }
 }
@@ -148,7 +174,7 @@ export class CredentialNotApproved extends BrokerError {
     readonly pluginId: string,
     readonly approve: string,
   ) {
-    super(`credential ${env} is withheld from ${pluginId}: you have not approved sending it to ${host} on this machine; nothing was sent`, "CREDENTIAL_NOT_APPROVED", host, `review the plugin, then: ${approve}`);
+    super(`credential ${bounded(env)} is withheld from ${bounded(pluginId)}: you have not approved sending it to ${bounded(host)} on this machine; nothing was sent`, "CREDENTIAL_NOT_APPROVED", host, `review the plugin, then: ${bounded(approve)}`);
     this.name = "CredentialNotApproved";
   }
 }
@@ -163,7 +189,7 @@ export class CredentialHeaderNotAllowed extends BrokerError {
     readonly header: string,
     host: string,
   ) {
-    super(`credential ${env} may be sent only in authorization${header === "authorization" ? "" : ` or a header its plugin declares for it, not in ${header}`}; nothing was sent`, "CREDENTIAL_HEADER_NOT_ALLOWED", host, `send it in authorization, or declare ${header} in the credential's headers`);
+    super(`credential ${bounded(env)} may be sent only in authorization${header === "authorization" ? "" : ` or a header its plugin declares for it, not in ${bounded(header)}`}; nothing was sent`, "CREDENTIAL_HEADER_NOT_ALLOWED", host, `send it in authorization, or declare ${bounded(header)} in the credential's headers`);
     this.name = "CredentialHeaderNotAllowed";
   }
 }
@@ -174,7 +200,7 @@ export class CredentialIdentityOnly extends BrokerError {
     readonly env: string,
     host: string,
   ) {
-    super(`credential ${env} is declared an identity (secret: false), so it is sent only as the user part of prrla-basic:<USER_ENV>:<TOKEN_ENV>; nothing was sent`, "CREDENTIAL_IDENTITY_ONLY", host, `use it as prrla-basic:${env}:<TOKEN_ENV>, or declare it a secret`);
+    super(`credential ${bounded(env)} is declared an identity (secret: false), so it is sent only as the user part of prrla-basic:<USER_ENV>:<TOKEN_ENV>; nothing was sent`, "CREDENTIAL_IDENTITY_ONLY", host, `use it as prrla-basic:${bounded(env)}:<TOKEN_ENV>, or declare it a secret`);
     this.name = "CredentialIdentityOnly";
   }
 }

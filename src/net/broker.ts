@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { bounded } from "../core/text.js";
 import { abortable, sleepFor } from "./abort.js";
 import { DEFAULT_MAX_RETRIES, backoffMs, blindRateLimitWaitMs, checkJsonBody, isRateLimited, isRetryableStatus, rateLimitedByBody, waitFromHeaders, type RetryHints } from "../sdk/http.js";
 import {
@@ -12,6 +13,7 @@ import {
   DESTINATION_TIMEOUT_MS,
   HostNotAllowed,
   ReadOnlyViolation,
+  RetryHintInvalid,
   TSA_RETRY_DEADLINE_MS,
   WritePathNotAllowed,
   type BrokerFetch,
@@ -19,7 +21,7 @@ import {
   type Destination,
 } from "./contract.js";
 import { isGraphqlPath, isQueryOnly } from "./graphql.js";
-import { scrubPairs, scrubText, type SecretValue } from "./scrub.js";
+import { scrubBytes, scrubPairs, scrubText, type SecretValue } from "./scrub.js";
 import { RateGovernor, type GovernedRequest } from "./governor.js";
 import { defaultBudgets, type HostBudgetDefault } from "./rate-limits.js";
 
@@ -170,6 +172,8 @@ export interface Broker {
 }
 
 const MAX_REDIRECTS = 10;
+/** The shortest secret read-only mode scrubs from responses: 8 characters, NIST SP 800-63B's minimum for a memorized secret. */
+const MIN_SCRUBBED_SECRET = 8;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 /** A request body, as RequestInit types it (lib "dom" is not loaded). */
 type Body = NonNullable<RequestInit["body"]>;
@@ -351,12 +355,29 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     }
   }
 
+  /** The secret values the caller holds (its granted, approved credentials). */
+  const callerSecrets = (call: Call): SecretValue[] => [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
+
+  /**
+   * A response with every form of `secrets` replaced by its placeholder: body, header values, status text. A value
+   * shorter than MIN_SCRUBBED_SECRET is left alone: it occurs in ordinary responses (a one-letter value is in nearly
+   * every JSON key), so replacing it would corrupt them, and a credential that short is no secret.
+   */
+  async function scrubResponse(res: Response, all: readonly SecretValue[]): Promise<Response> {
+    const secrets = all.filter((x) => x.value.length >= MIN_SCRUBBED_SECRET);
+    if (!secrets.some((x) => x.secret !== false && x.value)) return res;
+    const pairs = scrubPairs(secrets);
+    const body = NULL_BODY.has(res.status) ? null : scrubBytes(pairs, Buffer.from(await res.arrayBuffer()));
+    const headers = new Headers();
+    for (const [k, v] of res.headers) headers.append(k, scrubText(pairs, v));
+    return new Response(body, { status: res.status, statusText: scrubText(pairs, res.statusText), headers });
+  }
+
   // Step 7. Every secret value the caller holds is scrubbed wherever it appears, in every form (finding 5).
   async function record(call: Call, url: URL, method: string, headers: Headers, body: Body | null, res: Response): Promise<void> {
     if (!p.recorder) return;
     const bytes = bodyBytes(body);
-    const secrets: SecretValue[] = [...p.credentialsFor(call.pluginId)].flatMap(([env, c]) => (c.withheld || !c.value ? [] : [{ env, value: c.value, secret: c.secret !== false }]));
-    const pairs = scrubPairs(secrets);
+    const pairs = scrubPairs(callerSecrets(call));
     p.recorder({
       pluginId: call.pluginId,
       destination: call.destination,
@@ -378,7 +399,7 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
     const original = new Headers(call.req.headers);
     let downgraded = false;
     for (let hop = 0; ; hop++) {
-      if (hop > MAX_REDIRECTS) throw new BrokerError(`${url.host}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
+      if (hop > MAX_REDIRECTS) throw new BrokerError(`${bounded(url.host)}: more than ${MAX_REDIRECTS} redirects`, "TOO_MANY_REDIRECTS", url.host, "check the URL");
       checkHost(call, url);
       const text = bodyText(body);
       // A method override must be allowed too, every one of them: a server may run any of the methods.
@@ -418,6 +439,10 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
         release();
       }
       governor.observe(g, res);
+      // Read-only mode (S1, item 8): a response reaches a built-in as an isolated plugin's reaches its child (src/plugins/host.ts):
+      // every secret the caller holds, in every form a server may echo it in, is its placeholder, so no error body,
+      // header, status text or redirect can carry the operator's token into a read result.
+      if (p.mode === "read-only") res = await scrubResponse(res, callerSecrets(call));
       await record(call, url, method, headers, body, res);
       const location = res.headers.get("location");
       if (REDIRECTS.has(res.status) && location) {
@@ -445,6 +470,12 @@ export function createBroker(policy: Partial<BrokerPolicy> = {}, deps: BrokerDep
    * the caller's `blindRateLimitWaitMs`, doubling, and gives up after `maxBlindRateLimitRetries` of them.
    */
   async function withRetries(call: Call, hints: RetryHints): Promise<Response> {
+    // Every caller's limits are checked here, whatever checked them before (S1): a cap that is not a finite number
+    // (NaN compares false with everything) would never be reached.
+    for (const k of ["maxRetries", "maxBlindRateLimitRetries", "blindRateLimitWaitMs"] as const) {
+      const v: unknown = hints[k];
+      if (v !== undefined && !(typeof v === "number" && Number.isFinite(v) && v >= 0)) throw new RetryHintInvalid(k, call.url.host);
+    }
     const max = hints.maxRetries ?? DEFAULT_MAX_RETRIES;
     const maxBlind = hints.maxBlindRateLimitRetries ?? max;
     const start = now();

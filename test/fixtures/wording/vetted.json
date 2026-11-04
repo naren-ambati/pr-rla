@@ -187,6 +187,10 @@
    "Built-in ledgers whose per-verdict signatures the core's PresenceVerifier checks (src/core/presence).",
    "Made by scripts/make-presence-fixtures.mjs.",
    "The five demo scripts (demo-broker, demo-ledgers, demo-plugin-host, demo-presence, demo-sdk-carry-overs) exit 0.",
+   "Where text enters, now a piece: every provider or ledger error in check 5 and check 7, probe details (failures.ts), listingVisibility reasons, sources and identities (and those the manifest and registration recorded), the push log's reasons and the values a malformed one sent, a ledger's integrity findings and warnings (all but the built-in git-file's, see below), check 4's relay errors, signature details (presence/verifier.ts), rule failures, checkpoint comparisons, and the reviewer, app and change id a ledger line names in ignored reasons.",
+   "Tests changed where core lines are read directly (render them as the CLI does, quoted/render, never weaker): pool-integrity, p3-head-proof, presence-fixtures, presence-verifier, presence-oracle, e2e-presence, e2e-u3.",
+   "scripts/demo-presence.mjs prints the core's lines quoted, as the CLI does (it read them through plain templates, which now give pr-rla's words only).",
+   "Touched: src/core/{said,text,verify,rebuild,failures,head-proof,checkpoint,repo-set,status}.ts, src/core/presence/{verifier,provenance}.ts, src/api/{context,errors,freeze-estimate,plugin-check,pool-list}.ts, src/api/read/{verify,status,draws,freeze-preview,errors,untrusted}.ts, src/net/{broker,contract,governor}.ts, src/plugins/{host,errors,lock,open,builtin-credentials}.ts, src/providers/github/{http,index}.ts, src/sdk/{provider,ledger}.ts, packages/pr-rla-mcp/src/{bin,guard,jobs,server}.ts, scripts/demo-presence.mjs, the docs (README, the MCP README, docs/security-model.md, docs/writing-a-provider.md, contracts.md), the Action's vendored tarball and lockfile, and the tests named above.",
    "node scripts/demo-{broker,ledgers,plugin-host,presence,sdk-carry-overs}.mjs, packages/pr-rla-mcp/scripts/demo-draw-context.mjs → exit 0"
   ],
   "mechanism": [

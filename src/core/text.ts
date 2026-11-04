@@ -25,3 +25,17 @@ export const hasControls = (s: string): boolean => {
   CONTROLS.lastIndex = 0;
   return CONTROLS.test(s);
 };
+
+/** At most this many bytes of a string pr-rla did not write are kept where it echoes one (an error, a frame, a log line). */
+export const MAX_ECHO_BYTES = 2048;
+
+/**
+ * A string another party chose, cut to `max` UTF-8 bytes (on a character boundary) with an ellipsis and its full
+ * length, so an error that echoes a request's method or URL cannot grow past any frame or log (S1: a 34-million-
+ * character method gave a 71 MB error frame). Shorter strings are returned as they are.
+ */
+export function bounded(s: string, max: number = MAX_ECHO_BYTES): string {
+  if (s.length <= max / 4 || Buffer.byteLength(s, "utf8") <= max) return s;
+  const cut = Buffer.from(s.slice(0, max), "utf8").subarray(0, max).toString("utf8").replace(/�$/, "");
+  return `${cut}… (${s.length.toLocaleString("en-US")} characters)`;
+}

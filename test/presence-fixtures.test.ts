@@ -7,6 +7,10 @@ import { attestVerdicts, checkVerdictSignature, countedVerdicts, parseAllowedSig
 import type { RegistrationRecordV2, SignedRecord } from "../src/core/records.js";
 import { createLedger } from "../src/registry.js";
 import type { VerdictEvent } from "../src/sdk/ledger.js";
+import { quoted, render } from "../src/core/said.js";
+
+/** A core result as the CLI renders it (S1: its lines carry what a ledger line says as foreign text, src/core/said.ts). */
+const q = <T>(x: T): T => render(x, null);
 
 /**
  * FR9.5 on signatures made by real OpenSSH tooling: one `ssh-keygen -Y sign -n pr-rla-verdict@v1`
@@ -64,7 +68,7 @@ beforeAll(async () => {
   mkdirSync(join(dir, "audit/w"), { recursive: true });
   writeFileSync(join(dir, "audit/w/verdicts.jsonl"), fx.steps.map((s) => s.line).join(""));
   read = await (await createLedger({ use: "git-file", options: {} }, { cwd: dir, windowDir: join(dir, "audit/w"), env: {}, log: () => {}, fetch: globalThis.fetch })).readVerdicts();
-  a = attestVerdicts(read, B, signers);
+  a = q(attestVerdicts(read, B, signers));
 });
 
 describe("the sk-dummy fixture (synthetic: OpenSSH tooling, software keys only)", () => {
@@ -91,7 +95,7 @@ describe("the sk-dummy fixture (synthetic: OpenSSH tooling, software keys only)"
   it("FR9.2: pr-rla reads the same flags and counter from each -sk signature as ssh-keygen -vv did when it was made", () => {
     // Every signature made in the verdict namespace (draw #14 was made as a commit signature, which pr-rla refuses before reading it).
     for (const s of fx.steps.filter((x) => x.oracle && !x.namespace && !x.payloadVersion)) {
-      const c = checkVerdictSignature(read.find((v) => v.draw === s.draw)!, madeFor(s), signers);
+      const c = q(checkVerdictSignature(read.find((v) => v.draw === s.draw)!, madeFor(s), signers));
       if (s.oracle!.details) expect(c.sk, `draw #${s.draw}`).toMatchObject({ flags: s.oracle!.details.flags, counter: s.oracle!.details.counter });
       else expect(c.sk, `draw #${s.draw}`).toBeUndefined();
       // The key ssh-keygen reported for a good signature is the key pr-rla verified.
@@ -107,28 +111,28 @@ describe("the sk-dummy fixture (synthetic: OpenSSH tooling, software keys only)"
   it("FR9.5 (1): an -sk signature with UP set passes at presence (ed25519-sk and ecdsa-sk)", () => {
     for (const d of [2, 3]) {
       expect(byDraw(d).provenance).toMatchObject({ level: "presence", source: "verdict-signature", signer: step(d).reviewer, counter: 0x12345678 });
-      expect(verdictRuleFailures(byDraw(d), { minProvenance: "presence", requireSigned: true })).toEqual([]);
+      expect(q(verdictRuleFailures(byDraw(d), { minProvenance: "presence", requireSigned: true }))).toEqual([]);
     }
   });
 
   it("FR9.5 (2): one with UP clear fails at presence (no-touch-required keys), and is account", () => {
     for (const d of [4, 5]) {
       expect(byDraw(d).provenance).toMatchObject({ level: "account", source: "verdict-signature", signer: step(d).reviewer });
-      expect(verdictRuleFailures(byDraw(d), { minProvenance: "presence" })).toEqual([`verdict on draw #${d} (json:acme/widgets#${100 + d}) is account; the registration requires presence (user-presence flag verified; key hardware not attested)`]);
-      expect(verdictRuleFailures(byDraw(d), { minProvenance: "account", requireSigned: true })).toEqual([]);
+      expect(q(verdictRuleFailures(byDraw(d), { minProvenance: "presence" }))).toEqual([`verdict on draw #${d} (json:acme/widgets#${100 + d}) is account; the registration requires presence (user-presence flag verified; key hardware not attested)`]);
+      expect(q(verdictRuleFailures(byDraw(d), { minProvenance: "account", requireSigned: true }))).toEqual([]);
     }
   });
 
   it("FR9.5 (3): an unlisted signer fails (FR9.3); ssh-keygen refuses it too", () => {
     expect(byDraw(6).provenance).toBeUndefined();
     expect(step(6).oracle!.verify.exit).not.toBe(0);
-    expect(verdictRuleFailures(byDraw(6), { minProvenance: "account" })).toHaveLength(1);
+    expect(q(verdictRuleFailures(byDraw(6), { minProvenance: "account" }))).toHaveLength(1);
     expect(a.warnings).toContainEqual(expect.stringMatching(/^verdict on draw #6 \(json:acme\/widgets#106\) is signed by key SHA256:\S+ \(ssh-ed25519\), which no registered reviewer holds: self-asserted$/));
   });
 
   it("FR9.5 (4): an unsigned verdict under require_signed never counts (FR9.1): it is ineligible, and the rule would FAIL it", () => {
     expect(byDraw(7).provenance).toBeUndefined();
-    expect(verdictRuleFailures(byDraw(7), { minProvenance: "self-asserted", requireSigned: true })).toEqual([
+    expect(q(verdictRuleFailures(byDraw(7), { minProvenance: "self-asserted", requireSigned: true }))).toEqual([
       "verdict on draw #7 (json:acme/widgets#107) carries no valid signature by the registered key of reviewer alice; the registration requires signed verdicts (require_signed)",
     ]);
     expect(a.findings).toContain("1 verdict line(s) carry no signature (draws #7): self-asserted");
@@ -162,15 +166,15 @@ describe("the sk-dummy fixture (synthetic: OpenSSH tooling, software keys only)"
     expect(a.warnings).toContainEqual(expect.stringMatching(/^verdict on draw #15 .* has a signature that does not verify for this audit \(its registration, manifest and seed\)/));
     expect(a.warnings).toContainEqual(expect.stringMatching(/^verdict on draw #16 .* is signed over the pr-rla-verdict\/v1 bytes, which name neither the manifest nor the seed/));
     // #15 is a good signature for the other manifest; #16 for no manifest at all, and v1 is refused whatever it names.
-    expect(checkVerdictSignature(read.find((v) => v.draw === 15)!, madeFor(step(15)), signers).state).toBe("signed");
-    expect(checkVerdictSignature(read.find((v) => v.draw === 16)!, madeFor(step(16)), signers).state).toBe("invalid");
+    expect(q(checkVerdictSignature(read.find((v) => v.draw === 15)!, madeFor(step(15)), signers)).state).toBe("signed");
+    expect(q(checkVerdictSignature(read.find((v) => v.draw === 16)!, madeFor(step(16)), signers)).state).toBe("invalid");
   });
 
   it("notes the touch-less signatures; sk-dummy's constant counter is not a decreasing one", () => {
-    expect(a.findings.filter((f) => /without the user-presence flag/.test(f))).toEqual([expect.stringMatching(/^verdict on draw #4 .* is signed by dave's sk-ssh-ed25519@openssh.com key SHA256:\S+ without the user-presence flag \(no touch\): account$/), expect.stringMatching(/^verdict on draw #5 .* erin's sk-ecdsa-sha2-nistp256@openssh.com key/)]);
+    expect(a.findings.map(quoted).filter((f) => /without the user-presence flag/.test(f))).toEqual([expect.stringMatching(/^verdict on draw #4 .* is signed by dave's sk-ssh-ed25519@openssh.com key SHA256:\S+ without the user-presence flag \(no touch\): account$/), expect.stringMatching(/^verdict on draw #5 .* erin's sk-ecdsa-sha2-nistp256@openssh.com key/)]);
     const counters = fx.steps.flatMap((s) => (s.oracle?.details ? [s.oracle.details.counter] : []));
     expect(new Set(counters)).toEqual(new Set([0x12345678]));
-    expect(a.warnings.some((w) => /counter went down/.test(w))).toBe(false);
+    expect(a.warnings.map(quoted).some((w) => /counter went down/.test(w))).toBe(false);
   });
 
   it("without registered keys, or with another ledger, the signatures count for nothing", () => {

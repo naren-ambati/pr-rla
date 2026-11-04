@@ -10,6 +10,8 @@ import { DEFAULT_MAX_RETRIES, exhaustion, type RetryHints } from "../../sdk/http
 
 export interface GitHubHttpOptions {
   token?: string;
+  /** The token's kind, when pr-rla derived it from the real value and `token` is its placeholder (S1). */
+  tokenKind?: GitHubTokenKind;
   apiUrl?: string;
   graphqlUrl?: string;
   fetch: typeof fetch;
@@ -44,11 +46,21 @@ export const RATE_LIMIT_BODY = /rate limit|abuse detection/i;
 export const SECONDARY_LIMIT_WAIT_MS = 60_000;
 export const SECONDARY_LIMIT_RETRIES = 5;
 
-/** What kind of token a GitHub token is, by its documented prefix (never logged): it decides what its listing can prove. */
-export type GitHubTokenKind = "classic" | "oauth-app" | "fine-grained" | "installation" | "app-user" | "other";
+/**
+ * What kind of token a GitHub token is, by its documented prefix (never logged): it decides what its listing can
+ * prove. `other` is a token with none of these prefixes (a classic token from before 2021 is 40 hex characters).
+ * `unknown` is a broker placeholder (`prrla-cred:<ENV>`), whose kind only the real value shows: pr-rla's credential
+ * layer derives it and passes it as `tokenKind` (S1); a placeholder without one proves nothing.
+ */
+export type GitHubTokenKind = "classic" | "oauth-app" | "fine-grained" | "installation" | "app-user" | "other" | "unknown";
 export function githubTokenKind(token: string): GitHubTokenKind {
+  if (/^prrla-(?:cred|basic):/.test(token)) return "unknown";
   return token.startsWith("ghp_") ? "classic" : token.startsWith("gho_") ? "oauth-app" : token.startsWith("github_pat_") ? "fine-grained" : token.startsWith("ghs_") ? "installation" : token.startsWith("ghu_") ? "app-user" : "other";
 }
+
+const TOKEN_KINDS: ReadonlySet<string> = new Set(["classic", "oauth-app", "fine-grained", "installation", "app-user", "other", "unknown"]);
+/** A kind pr-rla's credential layer passed (ProviderContext.credentialKinds), or undefined if it is not one. */
+export const asGitHubTokenKind = (v: unknown): GitHubTokenKind | undefined => (typeof v === "string" && TOKEN_KINDS.has(v) ? (v as GitHubTokenKind) : undefined);
 
 export class GitHubHttp {
   readonly apiUrl: string;
@@ -140,9 +152,9 @@ export class GitHubHttp {
     return !!this.o.token;
   }
 
-  /** The kind of token requests carry (by its prefix), or null without one. */
+  /** The kind of token requests carry: the one pr-rla derived from the real value, else by its prefix; null without one. */
   get tokenKind(): GitHubTokenKind | null {
-    return this.o.token ? githubTokenKind(this.o.token) : null;
+    return this.o.token ? (this.o.tokenKind ?? githubTokenKind(this.o.token)) : null;
   }
 
   async graphql<T>(query: string, variables: Record<string, unknown>, opts: { maxRetries?: number } = {}): Promise<T> {

@@ -22,6 +22,7 @@ import { makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-s
 import { FakeGitHubIssues } from "./helpers/fake-issue-trackers.js";
 import { fixturePath } from "./helpers/fixtures.js";
 import { treeHash } from "./helpers/tree-hash.js";
+import { resolveUntrusted } from "./helpers/untrusted.js";
 
 /**
  * The audit API (functional-design.md §U5; contracts.md §1a, §7): its functions return the
@@ -72,8 +73,10 @@ describe("API functions return the same objects as --json (contracts.md §7)", (
     const r = await cli(gitFile, "status", "--json");
     expect(r.code).toBe(0);
     const api = await read.status({ dir: gitFile.dir }, opts(gitFile));
-    expect(JSON.parse(r.out)).toEqual(api);
-    expect(api).toMatchObject({ phase: "sampled", verdictsRead: true, drawsIssued: 36, mode: "RETROSPECTIVE" });
+    // The same object, once the read-only fence is resolved (S1): the reviewers the ledger names are in untrusted.errors.
+    expect(JSON.parse(r.out)).toEqual(resolveUntrusted(api));
+    expect(api).toMatchObject({ phase: "sampled", verdictsRead: true, drawsIssued: 36, mode: "RETROSPECTIVE", untrusted: { errors: ["outside-reviewer"] } });
+    expect(JSON.stringify({ ...api, untrusted: null })).not.toContain("outside-reviewer");
   });
 
   it("status in the earlier phases: unregistered, registered and frozen now print their result too", async () => {
@@ -97,14 +100,18 @@ describe("API functions return the same objects as --json (contracts.md §7)", (
 
   it("verify --offline", async () => {
     const r = await cli(gitFile, "verify", "--offline", "--json");
-    expect(JSON.parse(r.out)).toEqual(await read.verify({ dir: gitFile.dir }, opts(gitFile)));
+    const api = await read.verify({ dir: gitFile.dir }, opts(gitFile));
+    expect(JSON.parse(r.out)).toEqual(resolveUntrusted(api));
+    expect(api.untrusted?.errors).toEqual(["outside-reviewer"]);
     expect(JSON.parse(r.out).checks).toHaveLength(7);
   });
 
   it("freeze --dry-run (freezePreview)", async () => {
     const r = await cli(gitFile, "freeze", "--dry-run", "--json");
     const api = await read.freezePreview({ dir: gitFile.dir }, opts(gitFile));
-    expect(JSON.parse(r.out)).toEqual(api);
+    // The provider's limitations and count labels are its text: in untrusted.errors in read-only mode (S1).
+    expect(JSON.parse(r.out)).toEqual(resolveUntrusted(api));
+    expect(api.limitations.every((l) => /^a limitation the provider reports; what it said is in untrusted\.errors\[\d+\]$/.test(l))).toBe(true);
     expect(api).toMatchObject({ dryRun: true, N: 400, provider: "json-file", registrationSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
   });
 

@@ -3,15 +3,16 @@ import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.j
 import { isRegistrationV2, type PluginIdentity } from "../../core/records.js";
 import { auditVerdict, certificateFor, isCertified, verdictExitCode, verdictWithholdings, type Withholding } from "../../core/verdict.js";
 import { accessShortfall } from "../access.js";
-import { verifyAudit, type VerifyReport } from "../../core/verify.js";
+import { verifyAudit, type VerifyCheck, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling } from "../../ledger-traits.js";
 import { readIndexDocument } from "../../ledgers/issue-index.js";
-import { pluginIdentity } from "../../registry.js";
+import { builtinLedgerName, pluginIdentity } from "../../registry.js";
 import type { ScmProvider } from "../../sdk/provider.js";
 import { PR_RLA_VERSION } from "../../version.js";
 import { AuditError } from "../errors.js";
+import { said } from "../../core/said.js";
+import { fenceStatus, renderResult } from "./untrusted.js";
 import { readCheckpoints } from "./checkpoints.js";
-import { readError } from "./errors.js";
 import { auditContextFor, configFor, getBeacon, ledgerFor, protocolSha256, providerFor, readCommitment, readDraws, readManifest, readRegistration, trustFor, type ApiContext } from "../session.js";
 import { verifierLogKeys } from "../translog.js";
 import { statusLine } from "./status.js";
@@ -33,8 +34,12 @@ export interface VerifyOptions {
 /** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. The one map, src/core/verdict.ts. */
 export { verdictExitCode } from "../../core/verdict.js";
 
+/** A check as verify returns it: its lines rendered by the mode (S1, src/core/said.ts). */
+export type VerifyCheckResult = Omit<VerifyCheck, "summary" | "details" | "verbose"> & { summary: string; details: string[]; verbose?: string[] };
+
 /** The seven checks (core/verify.ts) plus what the certificate prints around them. */
-export interface VerifyResult extends VerifyReport {
+export interface VerifyResult extends Omit<VerifyReport, "checks"> {
+  checks: VerifyCheckResult[];
   /** What `pr-rla verify` exits with for this verdict: 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (nothing failed, but not a verification). */
   exitCode: 0 | 1 | 6;
   /** The certificate line, when the audit has draws: CERTIFIED only when `certified` (never on a verdict other than VERIFIED). */
@@ -46,10 +51,12 @@ export interface VerifyResult extends VerifyReport {
   /** The pr-rla release that verified. */
   verifiedWith: string;
   /**
-   * Read-only mode, when check 4 or 7 caught a failure: what the beacon relays or the ledger said.
-   * Those checks' lines say pr-rla's words and point here (`untrusted.errors[i]`): data, never
-   * instructions (review 2, finding 1: server bodies stay out of pr-rla's voice). Absent otherwise,
-   * so a clean verify is the CLI's `--json` object (contracts.md §7); the CLI quotes failures in place.
+   * Read-only mode, when any check's line carries text from outside pr-rla (S1): what an SCM, a
+   * tracker, a provider, a ledger, a plugin or a beacon relay said, and a verdict's reviewer and note
+   * in `status`. Each such line says pr-rla's words and points here (`untrusted.errors[i]`): data,
+   * never instructions (review 2, finding 1: server bodies stay out of pr-rla's voice). Absent
+   * otherwise, so a clean verify is the CLI's `--json` object (contracts.md §7); the CLI quotes them
+   * in place, escaped.
    */
   untrusted?: { errors: string[] };
 }
@@ -76,21 +83,11 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   const { checkpoints, problems, unchained } = readCheckpoints(paths.windowDir);
   const provider = opts.offline ? null : withProgress(ctx, await providerFor(ctx, config));
   const ledger = skipLedger ? null : await ledgerFor(ctx, config, paths);
-  // Checks 4 and 7 catch a failure and quote it. In read-only mode (an assistant reads the result),
-  // what the ledger or the relay said moves to `untrusted.errors`, and the check quotes pr-rla's words.
-  const errors: string[] = [];
-  const fenced = <T>(fn: () => Promise<T>, words?: string): Promise<T> =>
-    ctx.mode !== "read-only"
-      ? fn()
-      : fn().catch((e: unknown) => {
-          const r = readError(e);
-          if (!(r instanceof AuditError) || r.untrusted === undefined) throw r;
-          errors.push(r.untrusted);
-          throw new Error(`${words ?? r.message.replace(/; what it said is in untrusted$/, "")}; what it said is in untrusted.errors[${errors.length - 1}]`);
-        });
+  // What the checks quote from outside pr-rla is carried as foreign text in their lines (src/core/said.ts) and
+  // rendered once, below: in read-only mode (an assistant reads the result) it moves to `untrusted.errors`.
   if (ledger) {
     const read = ledger.readVerdicts.bind(ledger);
-    ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), fenced(read));
+    ledger.readVerdicts = () => (ctx.onProgress?.({ done: 0, message: `check 7: reading the verdicts from ledger ${ledger.name}` }), read());
   }
   // The identity of the provider verify loaded: compared with the registered one in check 5 (population options) and below (U2b).
   const loaded = opts.offline ? null : await pluginIdentity(config.provider, "provider", config.dir, auditContextFor(ctx));
@@ -104,6 +101,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
       ...(skipLedger ? { ledgerSkipped: `offline: ledger ${lt.name} lives in ${lt.hosts.join(", ")}; run verify without --offline to check the verdicts` } : {}),
       provenanceCeiling: registeredCeiling(isRegistrationV2(registration) ? registration.record.plugins.ledger : null, lt),
       ...(ledgerIdentity ? { ledgerIdentity } : {}),
+      ledgerFindingsArePrRlas: builtinLedgerName(config.ledger.use) === "git-file",
       beacon: async (round) => {
         // Prefer the beacon recorded in draws.json (verified offline); else fetch.
         if (!opts.beaconFile && draws && draws.round === round && draws.beacon.round === round) {
@@ -111,14 +109,12 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
           throw new AuditError("the beacon recorded in draws.json fails BLS verification", 1, "FAILED", "the audit's draws.json was altered: verify against the published beacon (pr-rla verify without --offline)");
         }
         if (opts.offline && !opts.beaconFile && !ctx.beacon) return null;
-        return fenced(async () => {
-          try {
-            return await getBeacon(ctx, round, opts.beaconFile);
-          } catch (e) {
-            if (e instanceof RoundNotYetPublished) return null;
-            throw e;
-          }
-        }, "the beacon relays did not give the round");
+        try {
+          return await getBeacon(ctx, round, opts.beaconFile);
+        } catch (e) {
+          if (e instanceof RoundNotYetPublished) return null;
+          throw e;
+        }
       },
       logKey: async (url) => logKeys.lookup(url),
       trustBundle: trustFor(ctx, opts.tsaTrust),
@@ -134,15 +130,18 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
   ]);
   if (logKeys.ignored.length) report.checks[0]?.details.push(...logKeys.ignored);
   const reg = registration.record;
-  return {
+  const result = {
     ...report,
+    // The verdicts' reviewers, notes and other ledger-written fields are fenced in read-only mode (S1); the CLI shows them as they are.
+    status: report.status && ctx.mode === "read-only" ? fenceStatus(report.status) : report.status,
     statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }, report.certificate ?? undefined) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
     exitCode: verdictExitCode(report.verdict),
     certified: isCertified(report.certificate),
-    ...(errors.length ? { untrusted: { errors } } : {}),
   };
+  // One rendering for the whole result, by the mode: read-only says pr-rla's words and points into untrusted.errors.
+  return renderResult<VerifyResult>(ctx.mode ?? "read-write", result);
 }
 
 /** The provider, reporting the population rebuild of check 5 as progress (an online verify of a large window takes minutes). */
@@ -171,7 +170,8 @@ function noteAccess(report: VerifyReport, found: { n: number; w: Withholding | n
     if (!w || !c) continue;
     unread.push(w);
     c.details.unshift(`INCOMPLETE ${w.reason}`);
-    c.summary = c.status === "FAIL" ? "not established: read without its credential (its FAIL findings below may be the refused reads)" : `${c.summary} · not established: read without its credential`;
+    // The summary can carry what a provider or ledger said (S1): extended with the said tag, so it keeps its pieces.
+    c.summary = c.status === "FAIL" ? "not established: read without its credential (its FAIL findings below may be the refused reads)" : said`${c.summary} · not established: read without its credential`;
     c.status = "INCOMPLETE";
   }
   if (!unread.length) return;

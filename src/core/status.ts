@@ -1,4 +1,5 @@
-import { PROVENANCE_LEVELS, classifyVerdicts, type ProvenanceLevel, type VerdictEvent } from "../sdk/ledger.js";
+import { PROVENANCE_LEVELS, classifyVerdicts, type ProvenanceLevel, type ReasonPart, type VerdictEvent } from "../sdk/ledger.js";
+import { Foreign, Said, type Line } from "./said.js";
 import { evaluateSequence, type SequenceResult, type SprtParams } from "./sprt.js";
 import { provenanceLabel } from "./presence/provenance.js";
 
@@ -11,8 +12,15 @@ export interface DrawnChange {
 
 export interface IgnoredVerdict {
   event: VerdictEvent;
-  reason: string;
+  /** A line (src/core/said.ts): a reviewer's login, an app's name or a change id the ledger line gave is carried as foreign text (S1). */
+  reason: Line;
 }
+
+/** A reason in the SDK's parts (ReasonPart), as a line. */
+export const reasonLine = (parts: readonly ReasonPart[]): Line => {
+  const l = new Said(parts.map((p) => (typeof p === "string" ? p : new Foreign(p.words, p.foreign))));
+  return l.pieces.length ? l : l.words;
+};
 
 export interface StatusReport {
   N: number;
@@ -65,11 +73,13 @@ export function computeStatus(input: {
   /** The registration's `verdicts.reviewers`: only their verdicts count. null/absent: any account that is not a bot or an app. */
   reviewers?: readonly string[] | null;
   /** Why a verdict cannot count under the registration's signing rules (P4: `countedVerdicts(…).ineligible`), or null. */
-  ineligible?: (v: VerdictEvent) => string | null;
+  ineligible?: (v: VerdictEvent) => Line | null;
 }): StatusReport {
   const { N, minPopulation, draws, verdicts, params } = input;
   const refusal = N < minPopulation ? `population ${N} < ${minPopulation}: review all ${N} instead` : null;
-  const { first, ignored, relabels } = classifyVerdicts(verdicts, { protocolSha256: input.protocolSha256, draws, reviewers: input.reviewers ?? null, ...(input.ineligible ? { ineligible: input.ineligible } : {}) });
+  const why = input.ineligible;
+  const { first, ignored: classified, relabels } = classifyVerdicts(verdicts, { protocolSha256: input.protocolSha256, draws, reviewers: input.reviewers ?? null, ...(why ? { ineligible: (v: VerdictEvent) => { const l = why(v); return l === null ? null : typeof l === "string" ? l : l.parts; } } : {}) });
+  const ignored: IgnoredVerdict[] = classified.map((i) => ({ event: i.event, reason: i.reasonParts ? reasonLine(i.reasonParts) : i.reason }));
   const seq: ("pass" | "fail")[] = [];
   let blockingDraw: DrawnChange | null = null;
   const ordered = [...draws].sort((a, b) => a.draw - b.draw);

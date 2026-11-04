@@ -77,8 +77,12 @@ export class RateGovernor {
     return budgetFor(this.budgets, host);
   }
 
-  /** Reserves capacity for one request now and returns how long it must wait before it is sent. */
-  reserve(r: GovernedRequest): number {
+  /**
+   * Reserves capacity for `count` identical requests now (default one) and returns how long the last of them must
+   * wait before it is sent. More than one is for the freeze estimate's replay (S1), which reserves its predicted
+   * requests in a bounded number of batches instead of one call per request.
+   */
+  reserve(r: GovernedRequest, count = 1): number {
     const now = this.now();
     // What a server's headers impose is capped (a bogus header cannot stall a run for hours);
     // what the budget itself requires is not, or the budget would not hold.
@@ -92,7 +96,7 @@ export class RateGovernor {
         win.remaining = win.limit;
         win.resetAtMs = null;
       }
-      win.remaining -= 1;
+      win.remaining -= count;
       if (win.remaining < 0 && win.resetAtMs !== null) told = Math.max(told, win.resetAtMs - now);
     }
     for (const rule of this.budget(r.host)?.rules ?? []) {
@@ -101,7 +105,7 @@ export class RateGovernor {
       const b = this.buckets.get(key) ?? { tokens: rule.burst, last: now };
       b.tokens = Math.min(rule.burst, b.tokens + (Math.max(0, now - b.last) * rule.count) / rule.perMs);
       b.last = Math.max(b.last, now);
-      b.tokens -= rule.cost === "points" && r.write ? 5 : 1;
+      b.tokens -= (rule.cost === "points" && r.write ? 5 : 1) * count;
       this.buckets.set(key, b);
       if (b.tokens < 0) wait = Math.max(wait, (-b.tokens * rule.perMs) / rule.count);
     }

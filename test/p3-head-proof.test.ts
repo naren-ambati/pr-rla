@@ -10,6 +10,7 @@ import { runProviderConformance, type ConformanceFixture } from "../src/testing/
 import { fakeGitLab, GL_BASE } from "./helpers/fake-gitlab.js";
 import { fakeOrg, orgSpec, ORG, type FakeOrg } from "./helpers/fake-org.js";
 import { OID, scmScenario } from "./helpers/scm-scenario.js";
+import { render } from "../src/core/said.js";
 
 /**
  * Round P3's new pieces on their own (fixture kind: synthetic): the push log analysis (src/core/head-proof.ts), the
@@ -98,7 +99,10 @@ describe("the push log, analysed (src/core/head-proof.ts)", () => {
     expect(analysePushLog({ events: [] }, { head: h("c"), window: WIN, ...span })).toMatchObject({ kind: "none" });
     const gap = [log[0]!, e("3", "2026-10-05T00:00:00Z", h("q"), h("c")), ...log.slice(2)];
     expect(analysePushLog({ events: gap }, { head: h("c"), window: WIN, ...span })).toMatchObject({ kind: "none", reason: expect.stringMatching(/the push log has a gap: update 3 at 2026-10-05T00:00:00Z starts from [0-9a-f]{12}…, but the tip before it was/) });
-    expect(analysePushLog({ events: [{ ...log[0]!, at: "yesterday" }] }, { head: h("c"), window: WIN, ...span })).toMatchObject({ kind: "none", reason: expect.stringMatching(/malformed/) });
+    // The reason quotes what the provider sent as foreign text (S1): as the CLI renders it, and pr-rla's words without it.
+    const malformed = analysePushLog({ events: [{ ...log[0]!, at: "yesterday" }] }, { head: h("c"), window: WIN, ...span });
+    expect(render(malformed, null)).toMatchObject({ kind: "none", reason: 'the provider\'s push log is malformed: update 4 has no ISO 8601 UTC time ("yesterday")' });
+    expect(String((malformed as { reason: unknown }).reason)).toBe("the provider's push log is malformed: update 4 has no ISO 8601 UTC time (what the provider sent)");
     const late = [e("2", "2026-10-15T00:00:00Z", h("m"), h("n")), e("1", "2026-10-10T00:00:00Z", NO_COMMIT, h("m"), "created")];
     expect(analysePushLog({ events: late }, { head: h("n"), window: WIN, ...span })).toMatchObject({ kind: "proven", tipAtClose: null });
   });

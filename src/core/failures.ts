@@ -1,5 +1,6 @@
 import { RETRIES_EXHAUSTED, TIMED_OUT } from "../sdk/http.js";
 import { isRepoUnavailable, REPO_UNAVAILABLE, type RepoRef, type ScmProvider } from "../sdk/provider.js";
+import { foreign, foreignError, said, type Foreign, type Line } from "./said.js";
 
 /**
  * How the core reads a provider's failures (U8): transient (wait it out), a repository that is gone (decided only by
@@ -29,25 +30,31 @@ export function looksUnavailable(e: unknown): boolean {
   return !isTransientFailure(e) && isRepoUnavailable(e);
 }
 
+/** `detail` is what the provider said (S1: carried as foreign text, src/core/said.ts). */
 export type ProbeResult =
   | { kind: "exists"; ref: RepoRef }
   /** The repo-level probe answered 404, or the provider's documented hidden 403 (a RepoUnavailableError). */
-  | { kind: "gone"; status: 403 | 404; detail: string }
+  | { kind: "gone"; status: 403 | 404; detail: Line | Foreign }
   /** The probe answered 403 without the provider calling it a hidden repository: the caller has no access. */
-  | { kind: "no-access"; status: number; detail: string }
-  | { kind: "transient"; detail: string; error: unknown }
+  | { kind: "no-access"; status: number; detail: Line | Foreign }
+  | { kind: "transient"; detail: Line | Foreign; error: unknown }
   /** The provider cannot probe a repository (no describeRepo). */
   | { kind: "unsupported" }
-  | { kind: "error"; detail: string };
+  | { kind: "error"; detail: Line | Foreign };
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const message = (e: unknown) => foreignError(e);
+
+/** A repository path as every listing must give it (`owner/name`, more segments for a subgroup; no space): the core checks it. */
+export const REPO_PATH = /^[^\s/:]+(?:\/[^\s/]+)+$/;
 
 /** One repo-level metadata probe (`describeRepo`), classified. By id where one is known, so a renamed repo is found. */
 export async function probeRepo(provider: Pick<ScmProvider, "describeRepo">, ref: { repo: string; id?: string | null }): Promise<ProbeResult> {
   if (typeof provider.describeRepo !== "function") return { kind: "unsupported" };
   try {
     const got = await provider.describeRepo({ repo: ref.repo, ...(ref.id ? { id: ref.id } : {}) });
-    if (!got || typeof got !== "object" || typeof got.repo !== "string" || typeof got.id !== "string") return { kind: "error", detail: `describeRepo returned ${JSON.stringify(got)?.slice(0, 120)}, not a repository` };
+    if (!got || typeof got !== "object" || typeof got.repo !== "string" || typeof got.id !== "string") return { kind: "error", detail: said`describeRepo returned ${foreign("what the provider returned", JSON.stringify(got)?.slice(0, 120) ?? String(got))}, not a repository` };
+    // The path is the provider's: it becomes the repo's path now (a rename), so it must be one (S1).
+    if (!REPO_PATH.test(got.repo)) return { kind: "error", detail: said`describeRepo returned ${foreign("the repository path the provider returned", got.repo.slice(0, 200))}, which is not a repository path` };
     return { kind: "exists", ref: got };
   } catch (e) {
     if (isTransientFailure(e)) return { kind: "transient", detail: message(e), error: e };

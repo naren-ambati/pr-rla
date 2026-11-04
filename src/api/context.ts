@@ -3,7 +3,7 @@ import { createBroker, type Broker, type BrokerMode, type Credential, type Recor
 import { DESTINATION_TIMEOUT_MS, type Destination } from "../net/contract.js";
 import { LEDGER_BUDGET_FAMILY, PROVIDER_BUDGET_FAMILY, applyRateOverrides, defaultBudgets, familyBudget, type BudgetFamily, type HostBudgetDefault, type RateLimitOverrides } from "../net/rate-limits.js";
 import { httpsOrigin, localConsent, type LocalConsent } from "../plugins/approvals.js";
-import { builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
+import { builtinCredentialKind, builtinCredentialUses, type BuiltinCredentialUse } from "../plugins/builtin-credentials.js";
 import { pluginPolicy, type PluginPolicy } from "../plugins/lock.js";
 import { openExternalLedger, openExternalProvider } from "../plugins/open.js";
 import { BUILTIN_LEDGERS, BUILTIN_PROVIDERS, builtinLedgerName, builtinProviderName, createLedger, createProvider, loadLedgerDefinition, loadProviderDefinition, type PluginSpec } from "../registry.js";
@@ -185,7 +185,7 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
     log,
     broker,
     plugins: readOnlyPolicy(o.mode, o.plugins ?? pluginPolicy(undefined, env)),
-    consent: approvedOnly(o.mode, localConsent(env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
+    consent: approvedOnly(o.mode, localConsent(o.mode === "read-only" ? withoutAcceptLockGrants(env, log) : env, { ...(o.acceptLockGrants !== undefined ? { acceptLockGrants: o.acceptLockGrants } : {}), ...(o.approvalsFile !== undefined ? { file: o.approvalsFile } : {}) })),
     componentFetch: (id, destination) => broker.bind(id, destination),
     grant(pluginId, g) {
       const credentials = new Map<string, Credential>();
@@ -214,6 +214,25 @@ export function createAuditContext(o: AuditContextOptions): AuditContext {
   };
   if (o.rateLimits) ctx.setRateLimits(o.rateLimits);
   return ctx;
+}
+
+let warnedAcceptLockGrants = false;
+
+/**
+ * Read-only mode never reads PR_RLA_ACCEPT_LOCK_GRANTS (S1, item 7): it takes only approvals stored on this machine
+ * (`approvedOnly` below), so the variable cannot change anything there, and a value the CLI would refuse (anything but
+ * unset, empty, 0 or 1) must not make every read call throw. Set to anything but empty or 0, it gets one warning per
+ * process, the first time a read-only context sees it.
+ */
+function withoutAcceptLockGrants(env: Readonly<Record<string, string | undefined>>, log: (line: string) => void): Readonly<Record<string, string | undefined>> {
+  const v = env.PR_RLA_ACCEPT_LOCK_GRANTS;
+  if (v === undefined) return env;
+  if (v !== "" && v !== "0" && !warnedAcceptLockGrants) {
+    warnedAcceptLockGrants = true;
+    log("PR_RLA_ACCEPT_LOCK_GRANTS is ignored in read-only mode (pr-rla/api/read, the MCP server): it takes only the approvals stored on this machine (pr-rla plugin approve)");
+  }
+  const { PR_RLA_ACCEPT_LOCK_GRANTS: _ignored, ...rest } = env;
+  return rest;
 }
 
 /**
@@ -289,12 +308,19 @@ const builtinGrantCredentials = (granted: readonly BuiltinCredentialUse[]) => gr
  * (pr-rla/api/read, the MCP server) the built-in holds placeholders, never the secrets: the broker
  * swaps each only on the origin it was approved for (U5 fix round, joined to the approvals store).
  */
-export function builtinEnv(ctx: AuditContext, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; credentials: PluginCredential[] } {
+export function builtinEnv(ctx: AuditContext, kind: "provider" | "ledger", name: string, use: string, options: unknown): { env: Record<string, string | undefined>; credentials: PluginCredential[]; kinds: Record<string, string> } {
   const { env, granted, standing } = builtinEnvironment(ctx, kind, name, use, options);
   ctx.credentialStanding.set(`${kind}:${name}`, standing);
   const credentials = builtinGrantCredentials(granted);
-  if (ctx.mode !== "read-only") return { env, credentials };
-  return { env: Object.fromEntries(Object.keys(env).map((k) => [k, `prrla-cred:${k}`])), credentials };
+  // What the built-in's decisions need from each value (GitHub's token kind), derived here from the real value, in
+  // both modes, so the decision is the same whether the built-in holds the token or its placeholder (S1).
+  const kinds: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    const derived = v === undefined ? null : builtinCredentialKind(kind, name, v);
+    if (derived !== null) kinds[k] = derived;
+  }
+  if (ctx.mode !== "read-only") return { env, credentials, kinds };
+  return { env: Object.fromEntries(Object.keys(env).map((k) => [k, `prrla-cred:${k}`])), credentials, kinds };
 }
 
 /**
@@ -306,7 +332,7 @@ export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: str
   const def = await loadProviderDefinition(spec.use, cwd);
   const builtin = Object.values(BUILTIN_PROVIDERS).includes(def as never);
   const id = `provider:${def.name}`;
-  const { env, credentials } = builtinEnv(ctx, "provider", def.name, spec.use, spec.options);
+  const { env, credentials, kinds } = builtinEnv(ctx, "provider", def.name, spec.use, spec.options);
   ctx.grant(id, {
     trust: builtin ? "builtin" : "full",
     hosts: def.hosts?.(spec.options as never) ?? [],
@@ -314,7 +340,7 @@ export async function openProvider(ctx: AuditContext, spec: PluginSpec, cwd: str
     ...(builtin && PROVIDER_BUDGET_FAMILY[def.name] ? { budgetFamily: PROVIDER_BUDGET_FAMILY[def.name] } : {}),
   });
   for (const host of ctx.pendingRateLimits()) ctx.log(`rate_limits: ${host} has no default budget (not a known public host or a host of provider ${def.name}); the override is not used`);
-  return createProvider(spec, { cwd, env, log: ctx.log, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal) });
+  return createProvider(spec, { cwd, env, log: ctx.log, fetch: signalledFetch(ctx.broker.bind(id), o.signal), sleep: signalledSleep((ms) => ctx.sleep(ms, o.signal), o.signal), ...(builtin && Object.keys(kinds).length ? { credentialKinds: kinds } : {}) });
 }
 
 const LEDGER_READS = ["readVerdicts", "verifyIntegrity", "readHistory"] as const;

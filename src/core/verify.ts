@@ -42,6 +42,7 @@ import {
   type RekorV2Entry,
   type SignedRecord,
 } from "./records.js";
+import { dropPrefix, foreign, foreignError, ident, joinLines, said, wordsOf, type Line } from "./said.js";
 import { computeDraws, isoToUnix, unixToIso } from "./seed.js";
 import { verifySignedRecord } from "./signing.js";
 import { effectiveCap } from "./sprt.js";
@@ -65,11 +66,14 @@ export interface VerifyCheck {
   n: number;
   name: string;
   status: CheckStatus;
-  /** One-line summary, e.g. "population 1,590/1,590 match". */
-  summary: string;
-  details: string[];
+  /**
+   * One-line summary, e.g. "population 1,590/1,590 match". Lines (src/core/said.ts): what a provider, a ledger or a
+   * relay said is carried in them as foreign text, and pr-rla/api/read renders them by mode (S1).
+   */
+  summary: Line;
+  details: Line[];
   /** Optional (P3): the per-item lines a summary line in `details` stands for; `verify` prints them with --verbose, and --json has them. */
-  verbose?: string[];
+  verbose?: Line[];
 }
 
 export interface VerifyArtifacts {
@@ -103,6 +107,12 @@ export interface VerifyDeps {
   provenanceCeiling?: ProvenanceLevel;
   /** The identity of the ledger verify loaded (U9, after review): check 7 FAILs when it is not the registered one. */
   ledgerIdentity?: PluginIdentity;
+  /**
+   * The ledger is pr-rla's built-in git-file (S1): its integrity findings are pr-rla's own words (commit ids, the
+   * registered path, counts). Any other ledger's findings and warnings are its text, quoted as foreign: an issue
+   * tracker's label names, a plugin's sentences.
+   */
+  ledgerFindingsArePrRlas?: boolean;
   /** Returns a VERIFIED beacon for the round, or null if unavailable (not yet published / offline). */
   beacon: (round: number) => Promise<{ round: number; randomness: string; signature: string } | null>;
   /**
@@ -198,14 +208,19 @@ function sameKey(a: string, b: string): boolean {
   }
 }
 
-/** A registered window whose opensAt/closesAt are not what its start/end resolve to (src/core/window.ts), or null. */
-function windowProblem(w: { name: string; start: string; end: string; opensAt: string; closesAt: string }): string | null {
+/**
+ * A registered window whose opensAt/closesAt are not what its start/end resolve to (src/core/window.ts), or null.
+ * The window's fields are the registration's, as the auditee wrote them: each is a piece unless it is an identifier
+ * (S1), and resolveWindow's refusal, which quotes them, is one too.
+ */
+function windowProblem(w: { name: string; start: string; end: string; opensAt: string; closesAt: string }): Line | null {
+  const f = (words: string, v: unknown) => ident(words, v);
   try {
     const r = resolveWindow({ name: w.name, start: w.start, end: w.end });
-    if (r.opensAt !== w.opensAt || r.closesAt !== w.closesAt) return `the registered window ${w.name} says ${w.opensAt}..${w.closesAt}, but its days ${w.start}..${w.end} resolve to ${r.opensAt}..${r.closesAt}`;
+    if (r.opensAt !== w.opensAt || r.closesAt !== w.closesAt) return said`the registered window ${f("its name", w.name)} says ${f("its opening time", w.opensAt)}..${f("its closing time", w.closesAt)}, but its days ${f("its first day", w.start)}..${f("its last day", w.end)} resolve to ${r.opensAt}..${r.closesAt}`;
     return null;
   } catch (e) {
-    return `the registered window is malformed: ${(e as Error).message}`;
+    return said`the registered window is malformed: ${foreign("the reason, which quotes the registered window", (e as Error).message)}`;
   }
 }
 
@@ -261,7 +276,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const win = windowProblem(reg.record.window);
   if (win) {
     c1.status = "FAIL";
-    c1.details.push(`FAIL ${win}`);
+    c1.details.push(said`FAIL ${win}`);
   }
   if (v2) {
     // Time round B: a v2 registration names its own signing key inside the signed, time-stamped bytes.
@@ -348,7 +363,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     else if (registrationRepoSet(reg).kind === "repo" && cm.record.frozenAt !== m.frozenAt) c2.details.push(`commitment dated ${cm.record.frozenAt}, but a single-repo freeze signs it at the manifest's own time ${m.frozenAt}`);
     if (c2.details.length) c2.status = "FAIL";
     if (labelled.length) {
-      c2.details.push(`WARN the registered stratum selects by labels (${labelled.join(", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
+      c2.details.push(said`WARN the registered stratum selects by labels (${joinLines(labelled.map((l) => ident("a registered label", l)), ", ")}), which can change after a change lands and are read as of the freeze: whoever could relabel before the freeze could change N, and so the draws`);
       c2.status = raiseStatus(c2.status, "WARN");
     }
     const cmLog = await checkLog(cm.log, cm, "manifest commitment", deps, c2, v2);
@@ -379,7 +394,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
   const named = [cm ? ["commitment", cm.record.seedRound] : null, a.draws ? ["draws", a.draws.round] : null].filter(Boolean) as [string, number][];
   for (const [where, r] of named) if (r !== derived.round) c3.details.push(`FAIL seed round ${n(r)} ≠ derived round ${n(derived.round)} (${where})`);
   c3.status = c3.details.length ? "FAIL" : "PASS";
-  c3.summary = c3.details.length ? c3.details[0]!.replace(/^FAIL /, "") : `R = ${n(derived.round)}: first round ≥ 24 h after ${derived.base === "registration" ? "registration" : "window close"}`;
+  c3.summary = c3.details.length ? dropPrefix(c3.details[0]!, "FAIL ") : `R = ${n(derived.round)}: first round ≥ 24 h after ${derived.base === "registration" ? "registration" : "window close"}`;
   if (!c3.details.length && !regProven) {
     // R is fixed by the registration time (or by window close, given a registration before it): when that time is not
     // proven, whoever wrote it could have chosen R after the seed was public (pass-2 review #2). Not established, so not a PASS.
@@ -404,7 +419,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     } else c4.details.push(`round ${derived.round} randomness ${beacon.randomness.slice(0, 16)}… verified with drand-client against pinned quicknet key`);
   } catch (e) {
     c4.status = "FAIL";
-    c4.summary = `round ${derived.round}: ${(e as Error).message}`;
+    c4.summary = said`round ${derived.round}: ${foreignError(e, "the beacon relays did not give the round")}`;
   }
   checks.push(c4);
 
@@ -455,12 +470,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     let unverified = 0;
     const unrebuilt = new Set<string>();
     for (const b of pool.rebuilt) {
-      for (const r of b.fail) c5.details.push(`FAIL ${pooled ? `${b.repo}: ` : ""}${r}`);
+      for (const r of b.fail) c5.details.push(said`FAIL ${pooled ? `${b.repo}: ` : ""}${r}`);
       if (!b.listed) {
         unrebuilt.add(b.repo);
         unverified += count(b.repo);
       }
-      for (const r of b.incomplete) c5.details.push(`INCOMPLETE ${b.repo}: ${r}${!b.listed ? `: its ${n(count(b.repo))} changes in the manifest were not rebuilt` : ""}`);
+      for (const r of b.incomplete) c5.details.push(said`INCOMPLETE ${b.repo}: ${r}${!b.listed ? `: its ${n(count(b.repo))} changes in the manifest were not rebuilt` : ""}`);
       for (const note of b.notes) c5.details.push(note);
     }
     c5.details.push(...pool.lines);
@@ -469,7 +484,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     try {
       pop = assemblePopulation(provider.name, listings, { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
     } catch (e) {
-      c5.details.push(`FAIL population: the rebuilt population is malformed: ${(e as Error).message}`);
+      c5.details.push(said`FAIL population: the rebuilt population is malformed: ${foreignError(e)}`);
       pop = assemblePopulation(provider.name, [], { window, selector, cutoffIso: m.frozenAt, aliases, horizon: reviewHorizonFor(reg) });
     }
     const verifiable = m.changes.filter((x) => !unrebuilt.has(x.repo));
@@ -519,12 +534,12 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         if (was !== undefined && was !== a.login) renamed.set(`${was} → ${a.login}`, a.id!);
       }
     if (renamed.size) c5.details.push(`${n(renamed.size)} account(s) renamed since freeze, matched by account id: ${[...renamed.keys()].slice(0, 5).join(", ")}`);
-    const has = (p: string) => c5.details.some((d) => d.startsWith(p));
+    const has = (p: string) => c5.details.some((d) => wordsOf(d).startsWith(p));
     c5.status = has("FAIL ") ? "FAIL" : has("INCOMPLETE ") ? "INCOMPLETE" : unpinned || has("WARN ") ? "WARN" : "PASS";
-    const others = c5.details.filter((d) => d.startsWith("INCOMPLETE ")).length - pool.rebuilt.filter((b) => !b.listed).reduce((k, b) => k + b.incomplete.length, 0);
+    const others = c5.details.filter((d) => wordsOf(d).startsWith("INCOMPLETE ")).length - pool.rebuilt.filter((b) => !b.listed).reduce((k, b) => k + b.incomplete.length, 0);
     c5.summary =
       c5.status === "FAIL"
-        ? c5.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "")
+        ? dropPrefix(c5.details.find((d) => wordsOf(d).startsWith("FAIL "))!, "FAIL ")
         : `population ${n(pop.entries.length)}/${n(verifiable.length)} match${unverified || unrebuilt.size ? ` · ${n(unverified)} changes in ${n(unrebuilt.size)} repo(s) could not be rebuilt` : ""}${others > 0 ? ` · completeness not established (${n(others)} reason(s) below)` : ""}`;
   }
   checks.push(c5);
@@ -595,10 +610,10 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
     const missing = Array.from({ length: Math.max(0, Math.min(a.draws.issued, cap)) }, (_, i) => i + 1).filter((k) => !numbers.has(k));
     if (missing.length) c6.details.push(`FAIL draws file lists ${n(a.draws.issued - missing.length)} of the ${n(a.draws.issued)} issued draws (missing ${missing.slice(0, 5).map((k) => `#${k}`).join(", ")}${missing.length > 5 ? ", …" : ""})`);
     const reproduced = recomputed ? Math.max(0, file.issued - missing.length - bad.filter((k) => k <= file.issued).length) : 0;
-    c6.status = c6.details.some((d) => d.startsWith("FAIL ")) ? "FAIL" : "PASS";
+    c6.status = c6.details.some((d) => wordsOf(d).startsWith("FAIL ")) ? "FAIL" : "PASS";
     if (c6.status === "PASS")
       c6.details.push(`${n(compared)} draw(s) in the file compared, every one reproduces: SHA-256(randomness ‖ ${binding.derivation === "registration" ? "registrationSha256" : "manifest sha256 (schema v1)"} ‖ uint64be(i)) mod N over the ${n(m.N)} change ids in canonical order`);
-    c6.summary = c6.status === "PASS" ? `${n(reproduced)}/${n(a.draws.issued)} draws reproduce` : bad.length ? `${n(bad.length)} draws do not reproduce` : c6.details.find((d) => d.startsWith("FAIL "))!.replace(/^FAIL /, "");
+    c6.summary = c6.status === "PASS" ? `${n(reproduced)}/${n(a.draws.issued)} draws reproduce` : bad.length ? `${n(bad.length)} draws do not reproduce` : dropPrefix(c6.details.find((d) => wordsOf(d).startsWith("FAIL "))!, "FAIL ");
   }
   checks.push(c6);
 
@@ -620,7 +635,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
         return await fn();
       } catch (e) {
         c7.status = "FAIL";
-        c7.details.push(`ledger ${ledger.name}: ${what} failed: ${(e as Error).message}`);
+        c7.details.push(said`ledger ${ledger.name}: ${what} failed: ${foreignError(e)}`);
         return null;
       }
     };
@@ -681,14 +696,16 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
       }
       c7.details.push(`${provenanceLine(status.provenance)} (${rulesLine(rules)})`);
       if (rules.minProvenance === "presence" || status.provenance.some((p) => p.level === "presence")) c7.details.push(PRESENCE_LIMIT);
-      for (const i of status.ignored) c7.details.push(`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
+      for (const i of status.ignored) c7.details.push(said`ignored verdict on draw #${i.event.draw}: ${i.reason}`);
       for (const r of status.relabels) c7.details.push(`relabel: ${r.changeId} first ${r.first.verdict} (counts), later ${r.later.verdict}`);
       if (status.ignored.length || status.relabels.length) if (c7.status === "PASS") c7.status = "WARN";
     }
     if (ledger.verifyIntegrity) {
       const integ = await attempt("verifyIntegrity", () => ledger.verifyIntegrity!());
       if (integ) {
-        c7.details.push(...integ.findings, ...(integ.warnings ?? []));
+        // What a ledger reports about its own integrity is the ledger's text (S1): its status decides, its words are quoted.
+        const ours = deps.ledgerFindingsArePrRlas === true;
+        c7.details.push(...integ.findings.map((f) => (ours ? f : said`${foreign("the ledger's integrity finding", f)}`)), ...(integ.warnings ?? []).map((w) => (ours ? w : said`${foreign("the ledger's integrity warning", w)}`)));
         if (!integ.ok) c7.status = "FAIL";
         else if ((!integ.tamperTrail || integ.warnings?.length) && c7.status === "PASS") c7.status = "WARN";
         // P4: the git-file ledger walked must be at the path the registration records.
@@ -714,7 +731,7 @@ export async function verifyAudit(a: VerifyArtifacts, deps: VerifyDeps): Promise
           const problems = compareWithCheckpoint(cp, current, status?.firstVerdicts ?? []);
           if (problems.length) {
             c7.status = "FAIL";
-            c7.details.push(...problems.map((p) => `FAIL ${p}`));
+            c7.details.push(...problems.map((p) => said`FAIL ${p}`));
           }
           if (!problems.length) c7.details.push(`checkpoint ${cp.line.takenAt}: ${cp.line.count} events, all still present`);
           // Its tokens bound when the history existed; one failing rules 1–7 FAILs, too few WARN.

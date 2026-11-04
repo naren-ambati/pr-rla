@@ -32,6 +32,10 @@ import type { SignedRecord, RegistrationRecordV2 } from "../src/core/records.js"
 import type { VerdictEvent } from "../src/sdk/ledger.js";
 import { armor, makeTestKey, tamperArmor, type TestKeyType } from "./helpers/sshsig-signer.js";
 import { signedLine, unsignedLine, verdictBytes, type LineFields } from "./helpers/verdict-lines.js";
+import { quoted, render } from "../src/core/said.js";
+
+/** A core result as the CLI renders it (S1: its lines carry what a ledger line says as foreign text, src/core/said.ts). */
+const q = <T>(x: T): T => render(x, null);
 
 /**
  * The PresenceVerifier on its own (FR9.2, FR9.3, FR9.4; U9 as changed after review): SSHSIG over
@@ -234,7 +238,7 @@ describe("each verdict's own signature (U9, after review)", () => {
   const bob = keys["sk-ssh-ed25519@openssh.com"];
   const alice = keys["ssh-ed25519"];
   const signers = parseAllowedSigners([`bob ${bob.publicText}`, `alice ${alice.publicText}`]);
-  const check = (line: string) => checkVerdictSignature(event(line), B, signers);
+  const check = (line: string) => q(checkVerdictSignature(event(line), B, signers));
 
   it("a registered software key gives account; a security key with UP, presence; with UP clear, account", () => {
     expect(signatureProvenance(check(signedLine(B, fields(1, "alice"), alice)))).toEqual({ level: "account", source: "verdict-signature", signer: "alice", keyFingerprint: parseAllowedSigner(`a ${alice.publicText}`).key.fingerprint });
@@ -246,9 +250,9 @@ describe("each verdict's own signature (U9, after review)", () => {
   it("covers every field: a verdict flipped, a draw or change moved, a protocol or time changed no longer verifies", () => {
     const line = JSON.parse(signedLine(B, fields(4, "bob", { verdict: "fail" }), bob)) as Record<string, unknown>;
     for (const [k, v] of [["verdict", "pass"], ["draw", 5], ["changeId", "json:acme/widgets#105"], ["recordedAt", "2026-10-22T03:00:00Z"], ["protocolSha256", "cd".repeat(32)]] as const)
-      expect(checkVerdictSignature({ ...line, [k]: v } as unknown as VerdictEvent, B, signers), k).toMatchObject({ state: "invalid", detail: expect.stringMatching(/does not match the signed data/) });
-    expect(checkVerdictSignature({ ...line, reviewer: "alice" } as unknown as VerdictEvent, B, signers).state).not.toBe("signed");
-    expect(checkVerdictSignature(line as unknown as VerdictEvent, B, signers).state).toBe("signed");
+      expect(q(checkVerdictSignature({ ...line, [k]: v } as unknown as VerdictEvent, B, signers)), k).toMatchObject({ state: "invalid", detail: expect.stringMatching(/does not match the signed data/) });
+    expect(q(checkVerdictSignature({ ...line, reviewer: "alice" } as unknown as VerdictEvent, B, signers)).state).not.toBe("signed");
+    expect(q(checkVerdictSignature(line as unknown as VerdictEvent, B, signers)).state).toBe("signed");
   });
 
   it("P4 finding 5: the signature binds the manifest and the seed; one made over the v1 bytes (no manifest, no seed) is refused, saying why", () => {
@@ -272,8 +276,8 @@ describe("each verdict's own signature (U9, after review)", () => {
     // Exact, as ssh-keygen -Y verify -I matches principals (finding 10): "Bob" is not "bob".
     expect(check(signedLine(B, fields(1, "Bob"), bob))).toMatchObject({ state: "mismatch" });
     expect(check(unsignedLine(fields(1, "bob")))).toMatchObject({ state: "unsigned" });
-    expect(checkVerdictSignature({ ...verdict(1, "bob"), sshsig: "not base64!" }, B, signers)).toMatchObject({ state: "unreadable" });
-    expect(checkVerdictSignature({ ...event(signedLine(B, fields(1, "bob"), bob)), changeId: "x\ny" }, B, signers)).toMatchObject({ state: "unreadable", detail: expect.stringMatching(/changeId must be non-empty text/) });
+    expect(q(checkVerdictSignature({ ...verdict(1, "bob"), sshsig: "not base64!" }, B, signers))).toMatchObject({ state: "unreadable" });
+    expect(q(checkVerdictSignature({ ...event(signedLine(B, fields(1, "bob"), bob)), changeId: "x\ny" }, B, signers))).toMatchObject({ state: "unreadable", detail: expect.stringMatching(/changeId must be non-empty text/) });
     expect(check(signedLine(B, fields(1, "bob"), bob, { reservedBlob: "X", reservedSigned: "X" }))).toMatchObject({ state: "invalid", detail: expect.stringMatching(/reserved field is not empty/) });
   });
 
@@ -286,17 +290,17 @@ describe("each verdict's own signature (U9, after review)", () => {
       event(signedLine(B, fields(5, "bob"), bob, { counter: 11, flags: 0x00 })),
       event(signedLine(B, fields(6, "bob"), makeTestKey("ssh-ed25519"))),
     ];
-    const a = attestVerdicts(lines, B, signers);
+    const a = q(attestVerdicts(lines, B, signers));
     expect(a.events.map((e) => e.provenance?.level ?? "self-asserted")).toEqual(["self-asserted", "presence", "presence", "presence", "account", "self-asserted"]);
     expect(a.events[0]!.provenance).toBeUndefined();
     expect(a.events.every((e) => e.sshsig === undefined && e.registrationSha256 === undefined)).toBe(true);
-    expect(a.warnings.filter((w) => /counter went down/.test(w))).toEqual([expect.stringMatching(/went down from 10 \(draw #2\) to 4 \(draw #4\); authenticators differ in counter behaviour, so this is a warning, not a failure/)]);
+    expect(a.warnings.map(quoted).filter((w) => /counter went down/.test(w))).toEqual([expect.stringMatching(/went down from 10 \(draw #2\) to 4 \(draw #4\); authenticators differ in counter behaviour, so this is a warning, not a failure/)]);
     expect(a.warnings).toContainEqual(expect.stringMatching(/^verdict on draw #6 \(json:acme\/widgets#106\) is signed by key SHA256:\S+ \(ssh-ed25519\), which no registered reviewer holds: self-asserted$/));
     expect(a.findings).toEqual([expect.stringMatching(/^verdict on draw #5 .* without the user-presence flag \(no touch\): account$/), "1 verdict line(s) carry no signature (draws #1): self-asserted"]);
   });
 
   it("with no keys registered nothing is checked and nothing is noted", () => {
-    const a = attestVerdicts([event(signedLine(B, fields(1, "bob"), bob)), event(unsignedLine(fields(2, "bob")))], B, []);
+    const a = q(attestVerdicts([event(signedLine(B, fields(1, "bob"), bob)), event(unsignedLine(fields(2, "bob")))], B, []));
     expect(a.findings).toEqual([]);
     expect(a.warnings).toEqual([]);
     expect(a.events.map((e) => [e.draw, e.provenance, e.sshsig])).toEqual([[1, undefined, undefined], [2, undefined, undefined]]);
@@ -310,15 +314,15 @@ describe("the rules check 7 applies (FR9.1, FR9.4) and the ceiling", () => {
   const issue = verdict(4, "alice", { provenance: { level: "account", source: "scm-label-event", eventId: "9" } });
 
   it("FR9.4: a verdict below the registered minimum fails; FR9.1: under require_signed one without a valid signature fails", () => {
-    expect(verdictRuleFailures(presence, { minProvenance: "presence", requireSigned: true })).toEqual([]);
-    expect(verdictRuleFailures(account, { minProvenance: "presence" })).toEqual([`verdict on draw #2 (json:acme/widgets#102) is account; the registration requires ${PRESENCE_LABEL}`]);
-    expect(verdictRuleFailures(unsigned, { minProvenance: "account" })).toEqual([`verdict on draw #3 (json:acme/widgets#103) is self-asserted; the registration requires account`]);
-    expect(verdictRuleFailures(unsigned, { minProvenance: "self-asserted", requireSigned: true })).toEqual([
+    expect(q(verdictRuleFailures(presence, { minProvenance: "presence", requireSigned: true }))).toEqual([]);
+    expect(q(verdictRuleFailures(account, { minProvenance: "presence" }))).toEqual([`verdict on draw #2 (json:acme/widgets#102) is account; the registration requires ${PRESENCE_LABEL}`]);
+    expect(q(verdictRuleFailures(unsigned, { minProvenance: "account" }))).toEqual([`verdict on draw #3 (json:acme/widgets#103) is self-asserted; the registration requires account`]);
+    expect(q(verdictRuleFailures(unsigned, { minProvenance: "self-asserted", requireSigned: true }))).toEqual([
       `verdict on draw #3 (json:acme/widgets#103) carries no valid signature by the registered key of reviewer alice; the registration requires signed verdicts (require_signed)`,
     ]);
     // An issue ledger's account verdict is not a signed verdict.
-    expect(verdictRuleFailures(issue, { minProvenance: "account" })).toEqual([]);
-    expect(verdictRuleFailures(issue, { minProvenance: "account", requireSigned: true })).toHaveLength(1);
+    expect(q(verdictRuleFailures(issue, { minProvenance: "account" }))).toEqual([]);
+    expect(q(verdictRuleFailures(issue, { minProvenance: "account", requireSigned: true }))).toHaveLength(1);
   });
 
   it("a ledger cannot count a verdict above its ceiling, and says so with the level labelled", () => {
@@ -347,7 +351,7 @@ describe("the rules check 7 applies (FR9.1, FR9.4) and the ceiling", () => {
     for (const v of [{ minProvenance: "self-asserted", require_signed: true }, { minProvenance: "account" }, { minProvenance: "presence" }]) {
       expect(signaturesRequired(regWith(v)), JSON.stringify(v)).toBe(true);
       const c = countedVerdicts(lines, { registration: regWith(v), binding: B, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" });
-      expect(c.verdicts.map((x) => c.ineligible(x))).toEqual([
+      expect(c.verdicts.map((x) => { const l = c.ineligible(x); return l === null ? null : quoted(l); })).toEqual([
         "carries no signature, and the registration counts only verdicts signed with their reviewer's registered key",
         null,
         expect.stringMatching(/^is signed by key SHA256:\S+ \(ssh-ed25519\), which no registered reviewer holds, and the registration counts only/),
@@ -359,12 +363,12 @@ describe("the rules check 7 applies (FR9.1, FR9.4) and the ceiling", () => {
       expect(countingVerdictFor(lines, fields(1, "bob").changeId, { registration: regWith(v), binding: B, verifiesSignatures: true, ledger: "git-file", protocolSha256: P, eligible: () => true })?.verdict).toBe("fail");
       // Through another ledger than the registered git-file, nothing is eligible.
       const other = countedVerdicts(lines, { registration: regWith(v), binding: B, verifiesSignatures: false, ledger: "tracker" });
-      expect(other.verdicts.every((x) => /^the ledger read is not the registered built-in git-file/.test(other.ineligible(x) ?? ""))).toBe(true);
+      expect(other.verdicts.every((x) => /^the ledger read is not the registered built-in git-file/.test(quoted(other.ineligible(x) ?? "")))).toBe(true);
     }
     const lax = regWith({ minProvenance: "self-asserted" });
     expect(signaturesRequired(lax)).toBe(false);
     const c = countedVerdicts(lines, { registration: lax, binding: B, verifiesSignatures: true, ceiling: "presence", ledger: "git-file" });
-    expect(c.verdicts.map((x) => c.ineligible(x))).toEqual([null, null, null]);
+    expect(c.verdicts.map((x) => { const l = c.ineligible(x); return l === null ? null : quoted(l); })).toEqual([null, null, null]);
     expect(countingVerdictFor(lines, fields(1, "bob").changeId, { registration: lax, binding: B, verifiesSignatures: true, ledger: "git-file", protocolSha256: P, eligible: () => true })?.verdict).toBe("pass");
     expect(c.findings).toEqual(["1 verdict line(s) carry no signature (draws #1): self-asserted"]);
   });

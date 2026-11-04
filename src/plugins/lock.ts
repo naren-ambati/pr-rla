@@ -6,6 +6,7 @@ import { writeFileAtomic } from "../io/atomic.js";
 import type { LocalConsent } from "./approvals.js";
 import { PluginError } from "./errors.js";
 import { guardInProcessImports } from "./inprocess-guard.js";
+import { isPluginName } from "../sdk/provider.js";
 
 /**
  * `pr-rla.lock.json` (contracts.md §5; functional-design.md §U2b item 4; FR2.2, FR2.3).
@@ -86,7 +87,7 @@ function entryProblem(e: unknown): string | null {
   if (!e || typeof e !== "object") return "an entry must be an object";
   const x = e as Partial<LockEntry>;
   if (x.source !== "package" && x.source !== "path") return 'source must be "package" or "path"';
-  if (typeof x.name !== "string" || !x.name) return "name must be a string";
+  if (!isPluginName(x.name)) return "name must be a plugin name (lowercase letters, digits and hyphens)";
   for (const k of ["version", "resolved", "npmIntegrity"] as const) if (x[k] !== null && typeof x[k] !== "string") return `${k} must be a string or null`;
   if (typeof x.treeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(x.treeSha256)) return "treeSha256 must be 64 hex characters";
   if (x.trust !== "isolated" && x.trust !== "full") return 'trust must be "isolated" or "full"';
