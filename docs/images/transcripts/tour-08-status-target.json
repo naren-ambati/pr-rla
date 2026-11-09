@@ -1,0 +1,16 @@
+{
+ "id": "tour-08-status-target",
+ "title": "status, target reached",
+ "caption": "status reaches the target (LLR 3.066 against 2.996) and withholds the certificate: it never rebuilds the population, and the times here are the signer's own clock.",
+ "alt": "Terminal output of pr-rla status: prefix 36/36, target reached, certificate withheld",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:41.770Z",
+ "commands": [
+  {
+   "command": "pr-rla status",
+   "exit": 6,
+   "seconds": 0.5,
+   "output": "prefix 36/36 · fails 0 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR 3.066 / target 2.996 · target reached · CERTIFICATE WITHHELD (registration time unproven (TIMESTAMP NOT TAMPER-PROOF); manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF); population not verified: run `pr-rla verify`) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF\n  WARN the registration does not record the git-file ledger's path (registrations made before this field, only test fixtures, lack it): where the ledger lives is not bound, so a copy kept elsewhere would be read; register again to bind it\n  distinct changes reviewed: 34 · draws counted: 36\n  VERDICT PROVENANCE: account (34) · registered minimum self-asserted\n  certificate withheld (INCOMPLETE): registration time unproven (TIMESTAMP NOT TAMPER-PROOF)\n  certificate withheld (INCOMPLETE): manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF)\n  certificate withheld (INCOMPLETE): population not verified: run `pr-rla verify`\n  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement."
+  }
+ ]
+}

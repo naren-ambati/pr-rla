@@ -256,19 +256,28 @@ it("hideDraws counts a repeated draw and hides its line like any other (the comp
   expect((h.dump.a!.steps as Record<string, Step>).sample!.out).toEqual((h.dump.b!.steps as Record<string, Step>).sample!.out);
 });
 
+/** master as wave 2 found it (the tip of integrate/wave1): the build every single-repo result below is compared with. */
+const ANCHOR = "e6e6adab";
+
+describe("the anchor", () => {
+  it("is an ancestor of this checkout and not its tip, so the comparison is between two different builds (e2e round, 2026-11-09)", () => {
+    // Regression: the anchor used to be `git merge-base HEAD master`. Once wave 2 was merged into master that was HEAD
+    // itself, the "master build" was this build, and the comparison failed on master's own `npm test`.
+    const base = git("rev-parse", "--verify", `${ANCHOR}^{commit}`);
+    expect(() => git("merge-base", "--is-ancestor", base, "HEAD")).not.toThrow();
+    expect(base).not.toBe(git("rev-parse", "HEAD"));
+    expect(git("rev-parse", `${base}^{tree}`)).not.toBe(git("rev-parse", "HEAD^{tree}"));
+  });
+});
+
 describe("single-repo audits behave as master does (a pool of one), against the master build itself", () => {
   it("json-file (400 changes), a GitHub repo, an empty GitHub repo, and a GitHub repo whose head moved after freeze in six honest ways: every output, record and verify result is master's, but for the listed U8 and P3 changes", { timeout: 300_000 }, () => {
-    // master here, or origin/master in a fresh clone of this branch.
-    const commit = (name: string) => {
-      try {
-        return git("rev-parse", "--verify", "-q", `${name}^{commit}`);
-      } catch {
-        return "";
-      }
-    };
-    const master = commit("master") || commit("origin/master");
-    expect(master).toMatch(/^[0-9a-f]{40}$/);
-    const base = git("merge-base", "HEAD", master);
+    // The anchor is a fixed commit, not `master`: wave 2 was merged into master, so `git merge-base HEAD master` is
+    // now HEAD itself and the "master build" would be this build (the test then fails, comparing a build with itself).
+    // e6e6ada is master as wave 2 found it: the tip of integrate/wave1 (bolts 2b to 5 merged, before U8's pooled freeze,
+    // P1 to P5 and time round B). Every clone has it, as it is an ancestor of every branch of this repository.
+    const base = git("rev-parse", "--verify", `${ANCHOR}^{commit}`);
+    expect(base).toMatch(/^[0-9a-f]{40}$/);
     const work = mkdtempSync(join(tmpdir(), "prrla-anchor-"));
     symlinkSync(join(ROOT, "node_modules"), join(work, "node_modules"));
     try {

@@ -108,6 +108,28 @@ cd /path/to/audit-repo && claude --plugin-dir ~/pr-rla-plugin
 - **`onFailure: "block"`** makes a guard that cannot start, crashes or times out block the call. It needs Claude Code 2.1.295 or later; 2.1.267, installed here, accepts the field (`claude plugin validate` passes) and, per the docs, lets the call through on such a failure. The guard itself blocks whatever it cannot parse.
 - The rules, what they cannot see, and how to check a command by hand: [guard.md](guard.md).
 
+## The MCP server and the guard, run for real
+
+Run 2026-11-09 on the recorded gh-aw audit, with Claude Code 2.1.267 and the local plugin from `scripts/local-claude-plugin.mjs`. Codex and Cursor are not installed on this machine, so only Claude Code was run ([manual acceptance](manual-acceptance.md) is still the founder's check in the other two).
+
+**Every MCP tool, once.** A script, [`packages/pr-rla-mcp/scripts/demo-all-tools.mjs`](../../packages/pr-rla-mcp/scripts/demo-all-tools.mjs), starts the server over stdio with the MCP SDK's own client, under Node's permission model with no write grant, calls all eight tools (a second server, started with `--handoff-ms 1`, gives `job_status` a real job to report), and compares the audit directory's tree hash before and after.
+
+![Terminal output of the MCP client calling all eight pr-rla-mcp tools and the tree hash unchanged](../images/mcp-all-tools.png)
+
+*`node scripts/demo-all-tools.mjs <audit>`, run 2026-11-09: eight tools called, zero write attempts, and the audit directory's tree hash unchanged.*
+
+**One headless run.** `claude -p` with `--plugin-dir`, one prompt: use the review-draw skill to show draw 1, then run `pr-rla record 1 pass --reviewer demo --note test` with the Bash tool. The skill showed the change, its CI and the checklist and declined to give a verdict; the guard blocked the record command before it ran (7 turns, 27 seconds). The audit directory had no `verdicts.jsonl` afterwards.
+
+![Transcript of a headless Claude Code run: draw 1's context shown, then pr-rla record blocked by the guard hook](../images/claude-code-headless.png)
+
+*One headless `claude -p` run, 2026-11-09, formatted from `--output-format stream-json`: the skill's MCP calls, then "pr-rla guard blocked this".*
+
+The same guard, run directly on the command the assistant tried:
+
+![Terminal output: the guard blocks pr-rla record with exit code 2](../images/guard-blocks-record.png)
+
+*`guard.mjs` fed the hook input for `pr-rla record`, run 2026-11-09: exit 2, and the reason Claude Code shows to Claude.*
+
 ## Validation
 
 `claude plugin validate integrations/claude-code` and `claude plugin validate .` (the marketplace) both print `Validation passed` with Claude Code 2.1.267 (2026-11-04). Its checks of MCP server entries need 2.1.281 or later, so `.mcp.json` was checked against the docs and by `test/assistants/integrations.test.ts`.

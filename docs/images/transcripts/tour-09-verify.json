@@ -1,0 +1,16 @@
+{
+ "id": "tour-09-verify",
+ "title": "verify",
+ "caption": "verify is the only command that can print VERIFIED. Here checks 4 to 7 pass and 1 to 3 are INCOMPLETE because no timestamp authority proved the times: exit 6.",
+ "alt": "Terminal output of pr-rla verify: checks listed, ending INCOMPLETE exit 6",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:42.307Z",
+ "commands": [
+  {
+   "command": "pr-rla verify | sed -n '/^[1-7]\\./p;/^INCOMPLETE/p'",
+   "exit": 6,
+   "seconds": 0.54,
+   "output": "1. INCOMPLETE registration: registration after window close → RETROSPECTIVE (a demonstration) (unproven: too few timestamps)\n2. INCOMPLETE manifest before seed: manifest written (signed time, unproven) 2026-10-20T12:00:00Z: not shown to precede R\n3. INCOMPLETE seed round: R = 33,245,812: first round ≥ 24 h after registration, but the registration time it rests on is unproven\n4. PASS BLS: BLS\n5. PASS population: population 1,589/1,589 match\n6. PASS draws: 36/36 draws reproduce\n7. WARN labels: labels (prefix 36, 34 events)\nINCOMPLETE: check 1 (registration), check 2 (manifest before seed), check 3 (seed round) could not be established; nothing failed, but this is not a verification (exit 6)"
+  }
+ ]
+}

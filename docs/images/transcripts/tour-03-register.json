@@ -1,0 +1,17 @@
+{
+ "id": "tour-03-register",
+ "title": "register",
+ "caption": "register signs the selector, window, parameters and protocol, and time-stamps the record with four authorities (only its SHA-256 is sent).",
+ "alt": "Terminal output of pr-rla register: four timestamp authorities, seed round R 24 hours later",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:40.518Z",
+ "commands": [
+  {
+   "command": "pr-rla register --key demo.pem",
+   "exit": 0,
+   "seconds": 1.482,
+   "output": "registration 0b0a88bbc733… · github/gh-aw · window 2026-demo (2026-10-19..2026-11-08)\n  accounts: copilot-swe-agent[bot] = id 198982749 (signed in: the selector matches them by account id only)\n  claim D: detected-defect rate <= 10% (p1 2%, risk 5%) · certify after 36 / 56 / 75 draws with 0/1/2 fails · cap 144\n  selector {\"kinds\":[\"pull_request\",\"direct_push\"],\"authors\":[\"copilot-swe-agent[bot]\"],\"labels\":[],\"unreviewed\":\"no-human-review\",\"merged_by\":\"any\",\"max_changed_lines\":200,\"exclude_generated\":true,\"bots\":[],\"direct_push_via_merge\":\"include\"}\n  protocol f4849a8793d1… (review-protocol.md)\n  provider github (builtin 0.1.0) · ledger git-file · verdict provenance self-asserted\n  ledger path audit/2026-demo/verdicts.jsonl (signed in: verify reads the ledger only there)\n  seed round R = 33843684 (drand quicknet), publishes 2026-11-10T18:13:36Z: 24 h after the registration\n  RETROSPECTIVE (registered after the window opened: a demonstration, not evidence) · registration existed by 2026-11-09T18:13:38Z (U_k)\n  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN\n    sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true)\n    digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1)\n    globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025)\n    microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\nwrote ~/e2e/gh-aw-demo/audit/2026-demo/registration.json",
+   "recordedAt": "2026-11-09T18:13:37.694Z"
+  }
+ ]
+}

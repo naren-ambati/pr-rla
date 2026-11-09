@@ -1,0 +1,16 @@
+{
+ "id": "tamper-shallow-clone",
+ "title": "tamper: shallow clone",
+ "caption": "A depth-1 clone cannot show that nothing was removed before the cut, so check 7 FAILs and says how to fix it.",
+ "alt": "Terminal output: verify FAILED check 7 because the repository is a shallow clone",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:45.672Z",
+ "commands": [
+  {
+   "command": "git rev-parse --is-shallow-repository && pr-rla verify --offline | grep -E -A3 '^[1-7]\\. FAIL|^FAILED'",
+   "exit": 1,
+   "seconds": 0.45,
+   "output": "true\n7. FAIL labels: labels FAIL\n        VERDICT PROVENANCE: account (34) (registered minimum: self-asserted)\n        audit/2026-q3/verdicts.jsonl: the repository is a shallow clone (~/e2e/tamper/shallow/.git/shallow): its history is cut, so a verdict removed or rewritten before the cut could not be seen; verify in a full clone: run `git fetch --unshallow` here, or `git clone` without `--depth` or `--filter`\n        WARN the registration does not record the git-file ledger's path (registrations made before this field, only test fixtures, lack it): where the ledger lives is not bound, so a copy kept elsewhere would be read; register again to bind it\n--\nFAILED: check 7 (labels)"
+  }
+ ]
+}

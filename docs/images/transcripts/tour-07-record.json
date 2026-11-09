@@ -1,0 +1,16 @@
+{
+ "id": "tour-07-record",
+ "title": "record --sign",
+ "caption": "record appends a verdict, signed with the reviewer's own software key. These are DEMO verdicts on a synthetic registration.",
+ "alt": "Terminal output of pr-rla record 1 pass with --sign",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:41.267Z",
+ "commands": [
+  {
+   "command": "pr-rla record 1 pass --reviewer demo-reviewer --note \"DEMO verdict, not a review\" --sign ../keys/demo-ed25519",
+   "exit": 0,
+   "seconds": 0.34,
+   "output": "ssh-keygen: Signing file $TMPDIR/pr-rla-sign-dL8Llk/verdict\nssh-keygen: Write signature to $TMPDIR/pr-rla-sign-dL8Llk/verdict.sig\nrecorded draw #1 github:github/gh-aw#45298: pass (per protocol f4849a87…) in ledger git-file\nsigned: the verdict is signed by demo-reviewer's ssh-ed25519 key SHA256:7PhpqlVHZwdCxf3sLYoYBUfa10rJ9wNDgCGHG2DJXi8: account\ncommit the ledger file now: git history is the tamper trail"
+  }
+ ]
+}

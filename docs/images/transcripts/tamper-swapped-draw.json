@@ -1,0 +1,16 @@
+{
+ "id": "tamper-swapped-draw",
+ "title": "tamper: swapped draws.json entry",
+ "caption": "Two draws swapped in draws.json: check 6 recomputes every draw from the seed and FAILs both.",
+ "alt": "Terminal output: verify FAILED check 6, draws 1 and 2 do not reproduce",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:45.222Z",
+ "commands": [
+  {
+   "command": "pr-rla verify --offline | grep -E -A3 '^[1-7]\\. FAIL|^FAILED'",
+   "exit": 1,
+   "seconds": 0.5,
+   "output": "6. FAIL draws: 2 draws do not reproduce\n        FAIL draw #1: file says github:github/gh-aw#50436 (index 722), recomputed github:github/gh-aw#45298 (index 221)\n        FAIL draw #2: file says github:github/gh-aw#45298 (index 221), recomputed github:github/gh-aw#50436 (index 722)\n7. WARN labels: labels (prefix 36, 34 events)\n--\nFAILED: check 6 (draws)"
+  }
+ ]
+}

@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error: a plain .mjs maintainer script, no type declarations
-import { blockProblems, checkDocs, cliMentions, cliProblems, cliSurface, exitCodeProblems, isUserDoc, linkProblems, markdownFiles, pendingHooks, simpleCommands } from "../scripts/check-docs.mjs";
+import { IMAGE_BUDGET_BYTES, blockProblems, checkDocs, cliMentions, cliProblems, cliSurface, exitCodeProblems, imageProblems, isUserDoc, linkProblems, markdownFiles, pendingHooks, simpleCommands } from "../scripts/check-docs.mjs";
 // @ts-expect-error: a plain .mjs maintainer script, no type declarations
 import { OUTPUTS, generatedBlocks, masked, regenerate } from "../scripts/docs-outputs.mjs";
 
@@ -240,6 +240,31 @@ describe("the accuracy pass", () => {
       expect(r.count).toBe(6);
       expect(r.problems.map((p) => p.replace(/^docs\/b\.md:1: link /, "").split(/[: ]/)[0])).toEqual(["nope.md", "a.md#nope", "../../etc/passwd"]);
       expect(r.problems[2]).toMatch(/leaves the repository$/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("every image in the docs has alt text, a caption and an existing PNG under docs/images, and the images stay under 3 MB", () => {
+    expect(all.problems.filter((p) => /image|docs\/images/.test(p))).toEqual([]);
+    const refs = ["README.md", "docs/tour.md", "docs/ci/github.md", "docs/assistants/claude-code.md", "docs/security-model.md"];
+    for (const f of refs) expect(read(f), f).toMatch(/!\[[^\]]+\]\([^)]*docs\/images\/[^)]+\.png\)|!\[[^\]]+\]\((?:\.\.\/)*images\/[^)]+\.png\)/);
+    expect(IMAGE_BUDGET_BYTES).toBe(3 * 1024 * 1024);
+  });
+
+  it("the image check catches no alt text, a missing file, a non-PNG, a missing caption, an unused image and a blown budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "pr-rla-images-"));
+    try {
+      mkdirSync(join(root, "docs", "images"), { recursive: true });
+      writeFileSync(join(root, "docs", "images", "ok.png"), "x");
+      writeFileSync(join(root, "docs", "images", "unused.png"), "x");
+      writeFileSync(join(root, "docs", "images", "big.png"), Buffer.alloc(IMAGE_BUDGET_BYTES));
+      writeFileSync(join(root, "docs", "a.md"), ["![fine](images/ok.png)", "", "*A caption.*", "", "![](images/ok.png)", "*Caption.*", "", "![gone](images/gone.png)", "*Caption.*", "", "![svg](images/x.svg)", "*Caption.*", "", "![nocaption](images/ok.png)", "", "text", "", "```sh", "![in a block](nope.png)", "```", ""].join("\n"));
+      const problems = imageProblems(["docs/a.md"], root) as string[];
+      const short = problems.map((p) => p.replace(/^docs\/a\.md:\d+: /, "").replace(/^docs\/images\//, ""));
+      for (const want of ["image images/ok.png has no alt text", "image images/gone.png does not exist", "image images/x.svg is not a PNG directly under docs/images", "image images/ok.png needs a one-line italic caption (*...*) on the next line", "unused.png: no doc uses this image", "big.png: no doc uses this image"]) expect(short, want).toContain(want);
+      expect(short.some((p) => /^docs\/images: the images weigh .* MB, over the 3 MB budget$/.test(p))).toBe(true);
+      expect(problems).toHaveLength(7);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -1,0 +1,16 @@
+{
+ "id": "tour-01-init",
+ "title": "init",
+ "caption": "pr-rla init writes the configuration, a review protocol and the audit directory.",
+ "alt": "Terminal output of pr-rla init for github/gh-aw",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:34.456Z",
+ "commands": [
+  {
+   "command": "pr-rla init --repo github/gh-aw && ls -a",
+   "exit": 0,
+   "seconds": 0.33,
+   "output": "wrote .pr-rla.yml, review-protocol.md, audit/\nnext: edit the selector and window, finalize review-protocol.md, then `pr-rla register --dry-run`\n.\n..\n.git\n.gitignore\n.pr-rla.yml\naudit\nreview-protocol.md"
+  }
+ ]
+}

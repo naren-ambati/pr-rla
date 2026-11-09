@@ -1,0 +1,16 @@
+{
+ "id": "ci-bitbucket",
+ "title": "Bitbucket step",
+ "caption": "The Bitbucket step on an ESCALATE fixture: the job fails with exit 2.",
+ "alt": "Terminal output of the Bitbucket step: ESCALATE, fail exit 2",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:47.822Z",
+ "commands": [
+  {
+   "command": "bitbucket-pipelines.yml step script  (status)",
+   "exit": 1,
+   "seconds": 1.19,
+   "output": "prefix 6/36 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -9.657 / target 2.996 · ESCALATE: review all 1,589 or narrow the claim · RETROSPECTIVE\npr-rla: fail (exit 2: ESCALATE (the sequential test cannot certify), or the seed round is not yet published; fail-on includes escalate)"
+  }
+ ]
+}

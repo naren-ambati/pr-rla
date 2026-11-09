@@ -212,6 +212,12 @@ pipelines:
 - **Image.** `node:24`, pinned by the digest of the tag on 2026-11-04. Re-pin it when you update Node.
 - **Artifact.** `pr-rla.json` is the command's `--json` output. The step prints the certificate line.
 
+The step's script, run by the end-to-end harness on an ESCALATE git-file fixture (six fails in six labelled draws):
+
+![Terminal output of the Bitbucket step: ESCALATE, fail exit 2](../images/ci-bitbucket.png)
+
+*The Bitbucket step's script, run 2026-11-09 on an ESCALATE fixture: the status line, then `pr-rla: fail (exit 2: ESCALATE ...)`, so the step fails.*
+
 ## Credentials
 
 pr-rla reads credentials from the environment and sends each one only where a local approval allows. In a pipeline the person who writes `bitbucket-pipelines.yml` is the one who approves; the audited repository is never asked.

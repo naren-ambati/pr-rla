@@ -1,0 +1,16 @@
+{
+ "id": "guard-blocks-record",
+ "title": "guard: pr-rla record blocked",
+ "caption": "The plugin's guard hook, run directly on the command an assistant tries: exit 2, the verdict stays with the person.",
+ "alt": "Terminal output: the guard blocks pr-rla record with exit code 2",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:47.821Z",
+ "commands": [
+  {
+   "command": "echo '{\"hook_event_name\":\"PreToolUse\",\"cwd\":\"/x\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"pr-rla record 1 pass --reviewer a --note b\"}}' | node integrations/claude-code/hooks/guard.mjs",
+   "exit": 2,
+   "seconds": 0.1,
+   "output": "pr-rla guard blocked this: pr-rla record writes a verdict, and a verdict is the reviewer's: they run \"pr-rla record …\" themselves (a person's own command, in their own terminal), or apply the label in the tracker.\n(pr-rla's guard keeps the verdict with the person reviewing: see docs/assistants/guard.md in pr-rla.)"
+  }
+ ]
+}

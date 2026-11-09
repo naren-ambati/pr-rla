@@ -62,6 +62,20 @@ There is no `sample` by default: issuing draws and opening issues are writes. `c
 
 Every run appends to `$GITHUB_STEP_SUMMARY`: the certificate line, a table of the state, prefix, LLR and mode, for `verify` the verdict and the seven checks (with the details of any check that is not a PASS), anything pr-rla said on standard error, and the job result with the rule that decided it. For exit 4 it also shows the command that finishes the job. Everything from the audit is escaped as data before it goes into markdown, and a line of pr-rla's output that starts with `::` is indented in the log so it cannot be read as a workflow command.
 
+What the summary looks like, rendered from the real `GITHUB_STEP_SUMMARY` of the action's own steps (run on a fixture: the harness of `test/ci-github-action.test.ts`, with a synthetic 400-change population, mock timestamp authorities and a fake tracker on 127.0.0.1):
+
+![The job summary of an online verify on a CERTIFIED fixture: the certificate line, the state table, seven PASS or WARN checks, Job result PASS](../images/ci-github-summary-certified.png)
+
+*`pr-rla verify`, run 2026-11-09 through the action's steps on a CERTIFIED fixture: the summary ends "Job result: PASS" and the job passes.*
+
+![The job summary of status on a WITHHELD fixture: target reached, certificate withheld, Job result FAIL, exit 6](../images/ci-github-summary-withheld.png)
+
+*`pr-rla status`, run 2026-11-09 through the action's steps on the same fixture: the target is reached but `status` never certifies, so the state is WITHHELD and the job fails with exit 6.*
+
+![The action's run step log for the WITHHELD fixture: the command line and its exit 6](../images/ci-github-step-log-withheld.png)
+
+*The run step's own log for the WITHHELD fixture, run 2026-11-09: the exact command the action ran, and its exit code.*
+
 ## Exit codes
 
 | Code | The job |

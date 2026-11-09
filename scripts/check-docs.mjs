@@ -9,12 +9,15 @@
 //   - a block that looks like pr-rla's output but is not marked as output;
 //   - a generated block that no longer matches a fresh run (scripts/docs-outputs.mjs);
 //   - a relative link or anchor that does not resolve (offline: http and mailto links are not fetched);
+//   - an image (`![alt](path)`) with no alt text, one that is not a PNG under docs/images, one whose file is
+//     missing, one not followed by a one-line italic caption, and a PNG under docs/images no doc uses;
+//     the images together must stay under 3 MB;
 //   - a `pr-rla` command or option the CLI does not have;
 //   - an exit-code table that disagrees with contracts.md §7 or src/cli/exit-codes.ts, or an exit code
 //     outside 0–6 named for pr-rla.
 // It lists the `pending` hooks (`<!-- pending P1: … -->`, `<!-- pending S1: … -->`) still in the docs.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { OUTPUTS, generatedBlocks, masked, runOutput } from "./docs-outputs.mjs";
@@ -178,6 +181,56 @@ export function linkProblems(files, root = ROOT) {
     });
   }
   return { problems, count };
+}
+
+/** The images together may not weigh more than this (docs/images). */
+export const IMAGE_BUDGET_BYTES = 3 * 1024 * 1024;
+
+/**
+ * Problems with the images in the docs: every `![alt](path)` outside code has alt text, points at an existing PNG
+ * under docs/images, and is followed by a one-line italic caption (`*...*`); every PNG under docs/images is used
+ * by some doc; and the PNGs together stay under IMAGE_BUDGET_BYTES. (A missing file is also a link problem.)
+ */
+export function imageProblems(files, root = ROOT) {
+  const problems = [];
+  const used = new Set();
+  for (const f of files) {
+    const lines = readFileSync(join(root, f), "utf8").split("\n");
+    let fence = null;
+    lines.forEach((line, i) => {
+      const fm = /^\s*(`{3,}|~{3,})/.exec(line);
+      if (fm) {
+        if (!fence) fence = fm[1];
+        else if (line.trim().startsWith(fence)) fence = null;
+        return;
+      }
+      if (fence) return;
+      for (const m of line.replace(/`[^`]*`/g, "").matchAll(/!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) {
+        const at = `${f}:${i + 1}`;
+        const [, alt, target] = m;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+        const abs = normalize(join(root, dirname(f), decodeURIComponent(target.split("#")[0])));
+        const rel = abs.slice(root.length + 1);
+        used.add(rel);
+        if (!alt.trim()) problems.push(`${at}: image ${target} has no alt text`);
+        if (!/^docs\/images\/[^/]+\.png$/.test(rel)) problems.push(`${at}: image ${target} is not a PNG directly under docs/images`);
+        else if (!existsSync(abs)) problems.push(`${at}: image ${target} does not exist`);
+        let c = i + 1;
+        while (c < lines.length && lines[c].trim() === "") c++;
+        if (!/^\*[^*].*[^*]\*$/.test((lines[c] ?? "").trim())) problems.push(`${at}: image ${target} needs a one-line italic caption (*...*) on the next line`);
+      }
+    });
+  }
+  const dir = join(root, "docs", "images");
+  if (existsSync(dir)) {
+    let total = 0;
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".png"))) {
+      total += statSync(join(dir, name)).size;
+      if (!used.has(`docs/images/${name}`)) problems.push(`docs/images/${name}: no doc uses this image`);
+    }
+    if (total > IMAGE_BUDGET_BYTES) problems.push(`docs/images: the images weigh ${(total / 1048576).toFixed(2)} MB, over the 3 MB budget`);
+  }
+  return problems;
 }
 
 /** The CLI's commands and options, read from the program the CLI builds (dist/cli.js). */
@@ -379,7 +432,7 @@ export async function checkDocs({ root = ROOT, today, rerun = true } = {}) {
     problems.push(...blockProblems(f, text, today ? { today } : {}), ...cliProblems(f, text, surface));
   }
   const links = linkProblems(files, root);
-  problems.push(...links.problems, ...(await exitCodeProblems(files, root)));
+  problems.push(...links.problems, ...imageProblems(user, root), ...(await exitCodeProblems(files, root)));
   if (rerun) problems.push(...staleOutputs(user, root));
   return { problems, pending: pendingHooks(files, root), links: links.count };
 }

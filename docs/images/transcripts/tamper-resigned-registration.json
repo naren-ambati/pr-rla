@@ -1,0 +1,16 @@
+{
+ "id": "tamper-resigned-registration",
+ "title": "tamper: re-signed registration",
+ "caption": "A registration re-signed by another key: the manifest and commitment name the old one, so checks 2 and 3 FAIL.",
+ "alt": "Terminal output: verify FAILED checks 2 and 3 after the registration was re-signed",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:44.720Z",
+ "commands": [
+  {
+   "command": "pr-rla verify --offline | grep -E -A3 '^[1-7]\\. FAIL|^FAILED'",
+   "exit": 1,
+   "seconds": 0.37,
+   "output": "2. FAIL manifest before seed: manifest inconsistent\n        manifest names a different registration\n        commitment is signed by a different key than the registration\n        commitment names a different registration\n--\n3. FAIL seed round: seed round 33,245,812 ≠ derived round 33,843,903 (commitment)\n        FAIL seed round 33,245,812 ≠ derived round 33,843,903 (commitment)\n        FAIL seed round 33,245,812 ≠ derived round 33,843,903 (draws)\n4. SKIP BLS: round 33843903 not available (not yet published, or offline without it)\n--\nFAILED: check 2 (manifest before seed), check 3 (seed round)"
+  }
+ ]
+}

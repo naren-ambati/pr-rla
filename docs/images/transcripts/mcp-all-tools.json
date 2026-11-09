@@ -1,0 +1,16 @@
+{
+ "id": "mcp-all-tools",
+ "title": "MCP: every tool",
+ "caption": "pr-rla-mcp over stdio, driven by the MCP SDK's own client: eight tools, each once, and the audit directory's tree hash unchanged.",
+ "alt": "Terminal output of the MCP client calling all eight pr-rla-mcp tools and the tree hash unchanged",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:33:21.723Z",
+ "commands": [
+  {
+   "command": "node scripts/demo-all-tools.mjs ~/e2e/recorded | grep -v -E '^(TAP|#|1\\.\\.)'",
+   "exit": 0,
+   "seconds": 2.11,
+   "output": "pr-rla-mcp 0.1.0 over stdio, started in 371 ms (node --permission, no fs-write grant)\naudit directory ~/e2e/recorded\ntools (8): audit_list [readOnly], status [readOnly], draws [readOnly], draw_context [readOnly], verify [readOnly], simulate [readOnly], freeze_preview [readOnly], job_status [readOnly]\n\naudit_list {}  ok · 228 ms\n    2026-q3: sampled · N 1589 · 36 draws · certified false\nstatus {}  ok · 168 ms\n    prefix 0/36 · LLR 0.000 / target 2.996 · NOT CERTIFIED\n    certified false\ndraws {\"limit\":3}  ok · 9 ms\n    36 issued, showing 3; blocking draw #1\n    #1 github:github/gh-aw#53413\n    #2 github:github/gh-aw#44286\n    #3 github:github/gh-aw#52960\ndraw_context {\"draw\":1}  ok · 25 ms\n    github:github/gh-aw#53413 · https://github.com/github/gh-aw/pull/53413\n    files 3 (+51 -0) · CI {\"failure\":1} · fence 3433087c3c53d3c2a5a7669a2b104062\n    how to record (for the person): pr-rla record 1 pass|fail --reviewer <you> --note \"<one line>\", then commit audit/2026-q3/verdicts.jsonl\nverify {\"offline\":true}  ok · 161 ms\n    verdict INCOMPLETE · exitCode 6 · certified false\n    check 1 INCOMPLETE registration\n    check 2 INCOMPLETE manifest before seed\n    check 3 INCOMPLETE seed round\n    check 4 PASS BLS\n    check 5 SKIP population\n    check 6 PASS draws\n    check 7 WARN labels\nsimulate {\"population\":1000,\"defects\":20,\"runs\":200,\"seed\":7}  ok · 5 ms\n    200 runs on 1000 changes with 20 defects: certified 195, escalated 5, mean draws 57.47\nfreeze_preview {}  ok · 42 ms\n    dry run for github/gh-aw, window 2026-q3: N 1589, nothing written\njob_status {\"jobId\":\"no-such-job\"}  ok · 1 ms\n    state unknown\n\nverify {\"offline\":false} with --handoff-ms 1: handed off as job verify:54d058fb3c1faf2878de3591 (running) after 206 ms\njob_status {\"jobId\":\"verify:54d058fb3c1faf2878de3591\"}  state done · result verdict INCOMPLETE, exitCode 6\n\ntree hash before f345c75bd20a622f64b1b13f90b0a3a76dd951ba88b30dfc006f7f194ad09077\ntree hash after  f345c75bd20a622f64b1b13f90b0a3a76dd951ba88b30dfc006f7f194ad09077  (unchanged)\nwrite attempts by the servers: 0 · sockets beyond loopback refused: 0 · tool errors: 0"
+  }
+ ]
+}

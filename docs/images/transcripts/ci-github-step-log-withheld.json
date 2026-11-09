@@ -1,0 +1,16 @@
+{
+ "id": "ci-github-step-log-withheld",
+ "title": "GitHub Action step log",
+ "caption": "The Action's run step on a WITHHELD fixture.",
+ "alt": "Terminal output of the GitHub Action run step: exit 6 WITHHELD",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:47.824Z",
+ "commands": [
+  {
+   "command": "pr-rla-action  run.sh  (status)",
+   "exit": 6,
+   "seconds": 0.97,
+   "output": "pr-rla --plugins builtin-only -C . status --json --offline --tsa-trust $TMPDIR/prrla-ci-trust-ECNsvF/tsa-trust.json -> exit 6\npr-rla: prefix 36/36 · fails 0 · claim D (detected-defect rate ≤ 10%, protocol bf82…, direct pushes via a pushed merge included) · LLR 3.066 / target 2.996 · target reached · CERTIFICATE WITHHELD (population not verified: run `pr-rla verify`) · RETROSPECTIVE"
+  }
+ ]
+}

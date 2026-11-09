@@ -1,0 +1,16 @@
+{
+ "id": "tamper-edited-verdict",
+ "title": "tamper: edited verdict line",
+ "caption": "An edited verdict line: check 7 FAILs, because the ledger was rewritten, not appended.",
+ "alt": "Terminal output: verify FAILED check 7 after a verdict line was edited",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:43.847Z",
+ "commands": [
+  {
+   "command": "pr-rla verify --offline | grep -E -A3 '^[1-7]\\. FAIL|^FAILED'",
+   "exit": 1,
+   "seconds": 0.5,
+   "output": "7. FAIL labels: labels FAIL\n        VERDICT PROVENANCE: account (34) (registered minimum: self-asserted)\n        audit/2026-q3/verdicts.jsonl was rewritten (not appended) in commit 36db734b60\n        WARN the registration does not record the git-file ledger's path (registrations made before this field, only test fixtures, lack it): where the ledger lives is not bound, so a copy kept elsewhere would be read; register again to bind it\n--\nFAILED: check 7 (labels)"
+  }
+ ]
+}

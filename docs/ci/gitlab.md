@@ -35,6 +35,12 @@ Components work only from the same GitLab instance, so a self-managed instance m
 
 Booleans are strings with `options`, so they can sit in `variables:` without GitLab turning them into booleans.
 
+The component's script, run by the end-to-end harness on a CERTIFIED git-file fixture (the recorded gh-aw audit with synthetic time-stamps and verdicts):
+
+![Terminal output of the GitLab job script: VERIFIED, CERTIFIED, pass exit 0](../images/ci-gitlab.png)
+
+*The GitLab component's script with `PRRLA_COMMAND=verify`, run 2026-11-09 on a CERTIFIED fixture: `VERIFIED`, then `pr-rla: pass (exit 0)`.*
+
 ## When it runs
 
 - **A push** that changes files matching `audit-path` (the ledger's `git-file` verdicts, the registration, the draws).

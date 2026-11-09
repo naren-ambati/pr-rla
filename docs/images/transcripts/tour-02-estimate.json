@@ -1,0 +1,16 @@
+{
+ "id": "tour-02-estimate",
+ "title": "freeze --dry-run --estimate",
+ "caption": "Before freezing, pr-rla predicts the requests and wall time from the first page of the repository.",
+ "alt": "Terminal output of pr-rla freeze --dry-run --estimate: about 70 requests and 2 minutes",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:40.516Z",
+ "commands": [
+  {
+   "command": "pr-rla freeze --dry-run --estimate",
+   "exit": 0,
+   "seconds": 6.06,
+   "output": "estimate: 1 repos (all probed)\n  requests: ~70 = 0 listing + ~70 for the repos (~15 REST, ~55 GraphQL); the probes already spent 4\n  wall time: ~2 min at 4 repos at a time (bound by request latency, 1408 ms each: 2 min; the rate budget alone needs 0 s)\n  budget api.github.com: the server reports 5,000 requests per window (4,919 left); the estimate paces to that\n  budget api.github.com: the server reports 5,000 GraphQL points per window (4,891 left); the estimate paces to that\n  budget api.github.com: rest_points (secondary): no more than 900 points per minute for REST API endpoints (GET, HEAD, OPTIONS 1 point; POST, PATCH, PUT, DELETE 5)\n  budget api.github.com: graphql_points (secondary): no more than 2,000 points per minute for the GraphQL API endpoint (without mutations 1 point; with mutations 5)\n  the figures are predictions from the first pages of each repo: request counts depend on how evenly the window's activity is spread, and a retried request counts again\n  time left before seed round R publishes: 23.7 h"
+  }
+ ]
+}

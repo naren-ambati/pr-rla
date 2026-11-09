@@ -1,0 +1,16 @@
+{
+ "id": "ci-gitlab",
+ "title": "GitLab component",
+ "caption": "The GitLab component's script on a CERTIFIED fixture (verify, online): exit 0.",
+ "alt": "Terminal output of the GitLab job script: VERIFIED, CERTIFIED, pass exit 0",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:47.822Z",
+ "commands": [
+  {
+   "command": "pr-rla.yml component script  (PRRLA_COMMAND=verify PRRLA_OFFLINE=false)",
+   "exit": 0,
+   "seconds": 1.2,
+   "output": "VERIFIED: prefix 36/36 · fails 0 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR 3.066 / target 2.996 · CERTIFIED (risk 5%) · RETROSPECTIVE\npr-rla: pass (exit 0)"
+  }
+ ]
+}

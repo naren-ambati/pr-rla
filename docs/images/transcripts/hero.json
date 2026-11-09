@@ -1,0 +1,22 @@
+{
+ "id": "hero",
+ "title": "status vs verify",
+ "caption": "A reached target is not a certificate: status withholds it, verify says what it could not establish.",
+ "alt": "pr-rla status showing target reached with the certificate withheld, then verify ending INCOMPLETE (exit 6)",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:29:43.343Z",
+ "commands": [
+  {
+   "command": "pr-rla status | head -n 1",
+   "exit": 6,
+   "seconds": 0.5,
+   "output": "prefix 36/36 · fails 0 · claim D (detected-defect rate ≤ 10%, protocol f484…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR 3.066 / target 2.996 · target reached · CERTIFICATE WITHHELD (registration time unproven (TIMESTAMP NOT TAMPER-PROOF); manifest commitment time unproven (TIMESTAMP NOT TAMPER-PROOF); population not verified: run `pr-rla verify`) · RETROSPECTIVE · TIMESTAMP NOT TAMPER-PROOF"
+  },
+  {
+   "command": "pr-rla verify | tail -n 1",
+   "exit": 6,
+   "seconds": 0.53,
+   "output": "INCOMPLETE: check 1 (registration), check 2 (manifest before seed), check 3 (seed round) could not be established; nothing failed, but this is not a verification (exit 6)"
+  }
+ ]
+}

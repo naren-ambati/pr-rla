@@ -1,0 +1,22 @@
+{
+ "id": "tamper-deleted-fail",
+ "title": "tamper: deleted signed FAIL",
+ "caption": "A signed FAIL deleted from the ledger: the git history shows a rewrite, so check 7 FAILs and the status line no longer counts it.",
+ "alt": "Terminal output: verify FAILED check 7 after a signed FAIL line was deleted",
+ "version": "0.1.0",
+ "capturedAt": "2026-11-09T18:31:07.543Z",
+ "commands": [
+  {
+   "command": "git log --oneline",
+   "exit": 0,
+   "seconds": 0.02,
+   "output": "6e2cfed remove the failing line\n7ecab62 verdict 2\nceabd1f verdict 1 FAIL\n538da3d recorded-signed variant"
+  },
+  {
+   "command": "pr-rla verify --offline | grep -E -A3 '^[1-7]\\. FAIL|^FAILED'",
+   "exit": 1,
+   "seconds": 0.49,
+   "output": "7. FAIL labels: labels FAIL\n        VERDICT PROVENANCE: none counted (registered minimum: self-asserted)\n        audit/2026-q3/verdicts.jsonl was rewritten (not appended) in commit 6e2cfed1a7\n        WARN the registration does not record the git-file ledger's path (registrations made before this field, only test fixtures, lack it): where the ledger lives is not bound, so a copy kept elsewhere would be read; register again to bind it\n--\nFAILED: check 7 (labels)"
+  }
+ ]
+}
