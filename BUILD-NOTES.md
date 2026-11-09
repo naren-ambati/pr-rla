@@ -1,5 +1,7 @@
 # BUILD-NOTES
 
+> **Commit hashes in this file** predate the 2026-11-09 rewrite of the author identity on every commit (before the first push). Map any quoted hash to the current one with [`docs/history/commit-map.txt`](docs/history/commit-map.txt).
+
 Working log for pr-rla v0.1: what is done, what is verified (with the command and its output), what is stubbed, and every assumption. The design is in `docs/design/spec.md`. Where this file and the spec differ, this file records why.
 
 ## Status (v0.1, claim D)
