@@ -257,7 +257,7 @@ it("hideDraws counts a repeated draw and hides its line like any other (the comp
 });
 
 /** master as wave 2 found it (the tip of integrate/wave1): the build every single-repo result below is compared with. */
-const ANCHOR = "e6e6adab";
+const ANCHOR = "0fd06b92"; // e6e6adab before the 2026-11-09 author rewrite (docs/history/commit-map.txt)
 
 describe("the anchor", () => {
   it("is an ancestor of this checkout and not its tip, so the comparison is between two different builds (e2e round, 2026-11-09)", () => {
@@ -274,7 +274,7 @@ describe("single-repo audits behave as master does (a pool of one), against the 
   it("json-file (400 changes), a GitHub repo, an empty GitHub repo, and a GitHub repo whose head moved after freeze in six honest ways: every output, record and verify result is master's, but for the listed U8 and P3 changes", { timeout: 300_000 }, () => {
     // The anchor is a fixed commit, not `master`: wave 2 was merged into master, so `git merge-base HEAD master` is
     // now HEAD itself and the "master build" would be this build (the test then fails, comparing a build with itself).
-    // e6e6ada is master as wave 2 found it: the tip of integrate/wave1 (bolts 2b to 5 merged, before U8's pooled freeze,
+    // 0fd06b9 (e6e6ada before the author rewrite) is master as wave 2 found it: the tip of integrate/wave1 (bolts 2b to 5 merged, before U8's pooled freeze,
     // P1 to P5 and time round B). Every clone has it, as it is an ancestor of every branch of this repository.
     const base = git("rev-parse", "--verify", `${ANCHOR}^{commit}`);
     expect(base).toMatch(/^[0-9a-f]{40}$/);
