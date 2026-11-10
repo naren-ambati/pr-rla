@@ -2,9 +2,9 @@
 
 Risk-limiting audits for code changes that landed on a default branch with no recorded human review, such as agent PRs merged on a bare click or direct pushes. pr-rla freezes the list of changes for a window, draws a publicly seeded random sample that anyone can re-derive, and runs a sequential test on your deep-review verdicts. It then certifies a bounded defect-rate claim, says how many more reviews it needs, or tells you to review everything.
 
-![pr-rla status showing the target reached with the certificate withheld, then verify ending INCOMPLETE (exit 6)](docs/images/hero.png)
+![pr-rla status showing the target reached with the certificate withheld, then verify ending CERTIFIED and VERIFIED (exit 0)](docs/images/hero.png)
 
-*`pr-rla status` and `pr-rla verify`, run 2026-11-09 on the recorded gh-aw audit with DEMO verdicts: the test reached its target, and only `verify` can say whether a certificate is earned. [A tour with real output](docs/tour.md).*
+*`pr-rla status` and `pr-rla verify`, run 2026-11-10 on a live, retrospective demo audit of github/gh-aw with DEMO verdicts (not a review, not an audit claim): `status` withholds the certificate, and only `verify` can print VERIFIED. [A tour with real output](docs/tour.md).*
 
 Status: **0.1.0, not yet released.** All eleven units of the phase 3–4 design are built and tested, most of them on fixtures and mock servers; nothing is published ([`CHANGELOG.md`](CHANGELOG.md)). What has been verified against live services, and what only on fixtures, is in [`docs/compatibility.md`](docs/compatibility.md). Every document is listed in [`docs/README.md`](docs/README.md): start with [concepts](docs/concepts.md) and [the statistics](docs/statistics.md). The design is in [`docs/design/`](docs/design/spec.md); what was built, verified and assumed, round by round, is in [`BUILD-NOTES.md`](BUILD-NOTES.md). Licence: decided by the founder before release.
 

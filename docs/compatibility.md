@@ -35,7 +35,7 @@ This is short of NFR19, which asks for macOS **and** Linux tested: a Linux run i
 
 | Provider | Population (`listChanges`) | Draw context (`describeChange`) | Org pools (`listRepos`, push log, visibility proof) |
 |---|---|---|---|
-| `github` (github.com) | **live**: github/gh-aw Q3 2026, 3,944 changes (2026-11-03); recorded and synthetic fixtures | **live**, read-only, for the 36 issued gh-aw draws (three times, 2026-11-04), and once through `pr-rla-mcp` (draw #13); the raw responses of four draws are recorded, and all 36 descriptions are in the recorded audit's `changes.json` | `listRepos` **live** on the `navikt` org (223-repo subset, dry run and estimate, 2026-11-04); push log **live** on github/gh-aw (2026-11-04); the visibility proof (org owner, installation, `total_private_repos`) on fakes only |
+| `github` (github.com) | **live**: github/gh-aw Q3 2026, 3,944 changes (2026-11-03); recorded and synthetic fixtures | **live**, read-only, for the 36 issued gh-aw draws (three times, 2026-11-04), and once through `pr-rla-mcp` (draw #13); the raw responses of four draws are recorded, and all 36 descriptions are in the recorded audit's `changes.json` | `listRepos` **live** on the `navikt` org (223-repo subset, dry run and estimate, 2026-11-04); push log **live** on github/gh-aw (2026-11-04, and on 2026-11-10 with a gap after the freeze, reported as a caveat in check 5); a whole audit **live** on github/gh-aw, the retrospective demo of the [tour](tour.md): `register`, `freeze` (N = 171) on 2026-11-09, `sample`, DEMO verdicts and an online `verify` ending VERIFIED, exit 0, on 2026-11-10; the visibility proof (org owner, installation, `total_private_repos`) on fakes only |
 | `github` (Enterprise Server) | fake server only | fake server only | fake server only |
 | `gitlab` (gitlab.com) | **live**: gitlab-org/cli October 2026, anonymous (2026-11-03); recorded | recorded anonymously: gitlab-org/cli !4191 (2026-11-04) | `listRepos` on hand-made responses only; push log **live** on gitlab-org/cli (2026-11-04); no visibility proof (a rule with private repos is INCOMPLETE) |
 | `gitlab` (self-managed) | recorded anonymously: gitlab.freedesktop.org xorg/xserver (2026-11-04); with a token, unverified | unverified | unverified |
@@ -59,8 +59,8 @@ Private repositories and token scopes have not been exercised on any SCM: every 
 
 | Service | Status |
 |---|---|
-| The eight bundled timestamp authorities | **live**, hash only: one request each, twice, all eight answering (2026-11-03); `register` ran live on a demo audit. A `freeze` and a checkpoint with real tokens have run on mock authorities only |
-| drand quicknet | **live**: chain info and a round read (phase 1); recorded rounds verify their BLS signatures in the suite |
+| The eight bundled timestamp authorities | **live**, hash only: one request each, twice, all eight answering (2026-11-03); `register` and `freeze` ran live on a demo audit (2026-11-09, four authorities), and `verify` checked those tokens online (2026-11-10). A checkpoint with real tokens has run on mock authorities only |
+| drand quicknet | **live**: chain info and a round read (phase 1); round 33843684 fetched and BLS-verified by `sample` and `verify` on the demo audit (2026-11-10); recorded rounds verify their BLS signatures in the suite |
 | Rekor (transparency log) | **mock logs only**, v1 and v2. No entry has ever been written to a real log, production or staging (D3); the pinned production keys come from Sigstore's TUF root |
 
 ## Integrations
