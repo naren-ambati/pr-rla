@@ -73,7 +73,12 @@ describe("linguist-generated agrees with git check-attr", () => {
   it("lines git rejects are ignored whole: a trailing # comment, a comma, a lone -, builtin_, a negative pattern, 2,048 bytes", () => {
     const paths = ["x.lock.yml", "y.gen", "z.c", "w.txt", "!w.txt", "v.md"];
     agree({ "": "*.lock.yml linguist-generated # compiled\n" }, paths);
-    agree({ "": "*.gen linguist-generated,binary\n*.c - linguist-generated\n*.txt builtin_objectmode linguist-generated\n" }, paths);
+    agree({ "": "*.gen linguist-generated,binary\n*.c - linguist-generated\n" }, paths);
+    // git reserves the builtin_ prefix only from 2.42 on (Debian 12's git 2.39 accepts the line). pr-rla follows
+    // the current rule on every git: the line is ignored, so w.txt is not generated.
+    const builtin = { "": "*.txt builtin_objectmode linguist-generated\n" };
+    expect(ours(builtin, ["w.txt", "!w.txt"])).toEqual([false, false]);
+    if (!gitGenerated(builtin, ["w.txt"])[0]) agree(builtin, paths);
     agree({ "": "* linguist-generated\n!w.txt -linguist-generated\n\\!w.txt -linguist-generated\n" }, paths);
     // git ignores a line of 2,048 bytes or more: the unset on a 2,047-byte line counts, on a 2,048-byte one it does not.
     const line = (n: number) => `${"v.md".padEnd(n - "-linguist-generated".length, " ")}-linguist-generated`;

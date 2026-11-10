@@ -14,6 +14,12 @@ import { createLedger } from "../src/registry.js";
 import type { Ledger } from "../src/sdk/ledger.js";
 import { commitAll } from "./helpers/signed-commits.js";
 
+/** The local git's version is at least major.minor. */
+function gitAtLeast(major: number, minor: number): boolean {
+  const m = /git version (\d+)\.(\d+)/.exec(execFileSync("git", ["--version"], { encoding: "utf8" }));
+  return !!m && (Number(m[1]) > major || (Number(m[1]) === major && Number(m[2]) >= minor));
+}
+
 /**
  * The git-file ledger's append-only walk (U9, after review): every version of verdicts.jsonl, in
  * every commit reachable from HEAD through the parents its raw commit object names, must extend each
@@ -249,6 +255,13 @@ describe("a partial clone is refused, and nothing is fetched (review of U5)", ()
   it("the walk itself fetches nothing: a missing object is reported as missing, never as a deletion", async () => {
     const c = partialClone(origin());
     const before = packs(c);
+    if (!gitAtLeast(2, 44)) {
+      // Before GIT_NO_LAZY_FETCH (git 2.44) git cat-file stops at the first object it may not fetch: the walk
+      // fails closed, with nothing fetched and nothing read as a deletion (seen on Debian 12's git 2.39).
+      await expect(readFileHistory(c, REL)).rejects.toThrow(/git cat-file --batch exited 128/);
+      expect(packs(c)).toBe(before);
+      return;
+    }
     const h = await readFileHistory(c, REL);
     expect(h.problems.length).toBeGreaterThan(0);
     for (const p of h.problems) expect(p).toMatch(/^blob [0-9a-f]{10} \(commit [0-9a-f]{10}\) is missing or does not hash to its name$/);
