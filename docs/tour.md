@@ -1,10 +1,10 @@
 # A tour, with real output
 
-Every image here is a screenshot of a command's real output, captured on 2026-11-09 with pr-rla 0.1.0. Nothing in an image was typed by hand: [`docs/images/transcripts/`](images/transcripts) holds the captured text, and [`docs/images/README.md`](images/README.md) says how each one was made and what was left out. The full account of the round that produced them is [the end-to-end report](e2e-report-2026-11-09.md).
+Every image here is a screenshot of a command's real output, captured on 2026-11-09 and 2026-11-10 with pr-rla 0.1.0. Nothing in an image was typed by hand: [`docs/images/transcripts/`](images/transcripts) holds the captured text, and [`docs/images/README.md`](images/README.md) says how each one was made and what was left out. The full account of the round that produced them is [the end-to-end report](e2e-report-2026-11-09.md).
 
 Two audits appear. Both are demonstrations, not evidence:
 
-- **A live demo** of [github/gh-aw](https://github.com/github/gh-aw), registered and frozen on 2026-11-09 against the real GitHub API (read-only), four real timestamp authorities (SHA-256 hashes only) and the real drand beacon. The window, 2026-10-19 to 2026-11-08, closed before the registration, so it is labelled RETROSPECTIVE. Its seed round R publishes 24 hours after registration, so on the day it was made it could be frozen but not sampled. Steps 1 to 5 are this audit.
+- **A live demo** of [github/gh-aw](https://github.com/github/gh-aw), registered and frozen on 2026-11-09 against the real GitHub API (read-only), four real timestamp authorities (SHA-256 hashes only) and the real drand beacon. The window, 2026-10-19 to 2026-11-08, closed before the registration, so it is labelled RETROSPECTIVE. Its seed round R published 24 hours after registration, on 2026-11-10, when it was sampled, given DEMO verdicts and verified. Steps 1 to 5 are this audit.
 - **A recorded audit**, [`test/fixtures/audits/gh-aw-q3-recorded`](../test/fixtures/audits/gh-aw-q3-recorded/README.md): the Copilot stratum of gh-aw's Q3 2026 (N = 1,589) from recorded GitHub data and a real drand round, with a synthetic clock and a synthetic signing key. Steps 6 to 9 run on it, past R, with DEMO verdicts under a software ed25519 key made for the purpose.
 
 In the images, `pr-rla` is `node dist/cli.js`, the command `npm link` puts on your PATH, and the working directory is shortened to `~/e2e`.
@@ -41,13 +41,19 @@ The registration fixes the selector, window, parameters and protocol hash before
 
 The manifest names the default branch's head, which `verify` later holds to GitHub's push log. The freeze took about four minutes: it walks 500 commits of `main` and reads the reviews of 866 pull requests, paced to the API's budget.
 
-## 5. Status and verify before R
+## 5. Sample, status and verify after R
 
-![Terminal output: status, then verify ending INCOMPLETE with checks 4, 6 and 7 skipped](images/tour-05-verify-before-r.png)
+![Terminal output: sample issues 36 draws from the verified drand round, then status reaches the target with the certificate withheld](images/tour-05-sample-status.png)
 
-*`pr-rla status` and `pr-rla verify`, run 2026-11-09 on the live demo: there is no sample yet, so verify ends INCOMPLETE (exit 6), never VERIFIED.*
+*`pr-rla sample` and `pr-rla status`, run 2026-11-10 on the live demo after R published: 36 draws from a BLS-verified drand round, then, after 30 DEMO verdicts, the target is reached and the certificate withheld (exit 6).*
 
-Checks 1, 2, 3 and 5 pass: the registration and manifest times are proven by the authorities, R is the first round at least 24 hours after registration, and the population was rebuilt from GitHub and matches 171 of 171. Checks 4, 6 and 7 are skipped because R has not published and nothing is drawn. Skipped is not passed, so the verdict is INCOMPLETE and the exit code is 6.
+`sample` fetches round R, checks its BLS signature against the pinned quicknet key, and draws with replacement until the zero-failure stopping point: 36 draws, 30 distinct changes, because six draws name a change drawn before and reuse its verdict. The verdicts here are DEMO passes, recorded unsigned (self-asserted) with the note "DEMO verdict, not a review"; nobody reviewed these pull requests. `status` does not rebuild the population, so it withholds the certificate even with the target reached.
+
+![Terminal output: verify with checks 1 to 7 passing, CERTIFIED at risk 5%, VERIFIED](images/tour-05-verify-after-r.png)
+
+*`pr-rla verify`, run 2026-11-10 on the same audit, online: all seven checks pass, and it prints VERIFIED (exit 0).*
+
+The times are proven by four authorities, R is the right round and its signature verifies, the population is rebuilt from GitHub and matches 171 of 171, every draw reproduces from the seed, and the ledger only appended. Only `verify` can print VERIFIED. It still says RETROSPECTIVE and self-asserted: the window closed before registration and no reviewer key was registered, so this is a demonstration of the mechanics, not evidence about gh-aw. The push-log line in check 5 is a caveat, not a failure: GitHub's push log for `main` now has a gap after the freeze, so a window commit pushed after the freeze could not be placed in time; none was found, because the rebuilt population matches.
 
 ## 6. What a reviewer reads
 
@@ -79,7 +85,7 @@ The sequential test reached its target. `status` never prints CERTIFIED: it does
 
 *`pr-rla verify`, run 2026-11-09 on the same audit: checks 4 to 6 pass, 1 to 3 are INCOMPLETE because no authority proved the times, exit 6.*
 
-This is the difference between `status` and `verify`: both withhold the certificate here, for the same reason, but only `verify` has the authority to say what it could not establish. An audit whose times are proven by k authorities, with the population rebuilt, ends VERIFIED and exit 0 (the [CI job summaries](ci/github.md#the-job-summary) show that on a fixture with mock authorities).
+This is the difference between `status` and `verify`: both withhold the certificate here, for the same reason, but only `verify` has the authority to say what it could not establish. An audit whose times are proven by k authorities, with the population rebuilt, ends VERIFIED and exit 0, as [the live demo does in step 5](#5-sample-status-and-verify-after-r).
 
 ## What a tampered audit looks like
 
