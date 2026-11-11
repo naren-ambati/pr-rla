@@ -90,7 +90,7 @@ describe("FR8.1: the doc set", () => {
 
   it("the compatibility table states the Node versions, the platforms and every SCM's live or fixture status", () => {
     const c = read("docs", "compatibility.md");
-    for (const s of ["| 22.15 or later | **Required**", "| 22.23.2 | **Tested**", "| 24.20.0 | **Tested**", "| 26.8.2 | **Tested**", "| macOS", "| Linux | **Untested.**", "| Windows | **Untested**"]) expect(c, s).toContain(s);
+    for (const s of ["| 22.15 or later | **Required**", "| 22.23.2 | **Tested**", "| 24.20.0 | **Tested**", "| 26.8.2 | **Tested**", "| macOS", "| Linux | **Root suite tested**", "| Windows | **Untested**"]) expect(c, s).toContain(s);
     for (const p of ["`github` (github.com)", "`github` (Enterprise Server)", "`gitlab` (gitlab.com)", "`gitlab` (self-managed)", "`bitbucket-cloud`", "`bitbucket-data-center`", "`json-file`", "`gitea` (the example plugin)"]) {
       const row = c.split("\n").find((l) => l.startsWith(`| ${p} |`));
       expect(row, p).toBeDefined();
@@ -99,10 +99,11 @@ describe("FR8.1: the doc set", () => {
     for (const l of ["`git-file`", "`github-issues`", "`gitlab-issues`", "Jira (the example plugin)"]) expect(c, l).toContain(`| ${l} |`);
   });
 
-  it("NFR19: the README states the Windows status, and that Linux is untested here", () => {
+  it("NFR19: the README states the Windows status, and what has and has not run on Linux", () => {
     const r = read("README.md");
     expect(r).toMatch(/\*\*Windows is untested\*\*/);
-    expect(r).toMatch(/\*\*Linux is untested\*\*/);
+    expect(r).toMatch(/\*\*Linux\*\*: the root suite passes on Debian 12/);
+    expect(r).toMatch(/a GitHub-hosted runner is not yet tested/);
     expect(r).toContain("](docs/compatibility.md)");
   });
 
