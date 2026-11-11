@@ -233,7 +233,7 @@ with a fresh 128-bit id on every call. The fence lowers the risk of prompt injec
 
 ## Platforms
 
-Tested on macOS (Node 22.23.2, 24.20.0 and 26.8.2). **Linux is untested**: it is what the CI integrations target, but no suite has run on it yet. **Windows is untested**, and not supported until it is: pr-rla finds `git` and `ssh-keygen` by absolute paths on PATH, a checkout with `core.autocrlf=true` fails the git-file ledger's history check, and no part of pr-rla has been run there. Node 22.15 or later is required. Details, and every SCM's live and fixture status: [`docs/compatibility.md`](docs/compatibility.md).
+Tested on macOS (Node 22.23.2, 24.20.0 and 26.8.2). **Linux**: the root suite passes on Debian 12 (Node 22, git 2.39, in Docker, 2026-11-10), and the GitHub Action's steps ran there against a real audit; a GitHub-hosted runner is not yet tested. **Windows is untested**, and not supported until it is: pr-rla finds `git` and `ssh-keygen` by absolute paths on PATH, a checkout with `core.autocrlf=true` fails the git-file ledger's history check, and no part of pr-rla has been run there. Node 22.15 or later is required. Details, and every SCM's live and fixture status: [`docs/compatibility.md`](docs/compatibility.md).
 
 ## Limitations (v0.1)
 

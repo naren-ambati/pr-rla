@@ -107,7 +107,7 @@ npm --prefix integrations/github-action ci
 for d in scripts/demo-*.mjs packages/pr-rla-mcp/scripts/demo-*.mjs; do node "$d" > /dev/null || echo "FAIL $d"; done
 ```
 
-Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/vitest/vitest.mjs run`). macOS is the only platform tested so far ([`compatibility.md`](compatibility.md)): if a Linux machine is available, run the same there, including the two oracle tests that compare pr-rla with OpenSSH's `ssh-keygen` and OpenSSL's `openssl ts` (they have run only on macOS), and update the compatibility table either way. Windows stays untested unless someone runs it.
+Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/vitest/vitest.mjs run`). macOS is tested, and Linux's root suite has passed once in Docker (Debian 12, 2026-11-10; [`compatibility.md`](compatibility.md)): if a Linux machine is available, run the same there, including the two oracle tests that compare pr-rla with OpenSSH's `ssh-keygen` and OpenSSL's `openssl ts` (they have run only on macOS), and update the compatibility table either way. Windows stays untested unless someone runs it.
 
 ## 12. Check both tarballs, and date the changelogs
 
