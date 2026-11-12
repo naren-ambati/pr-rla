@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { RoundNotYetPublished, verifyQuicknetBeacon } from "../../beacon/drand.js";
 import { isRegistrationV2 } from "../../core/records.js";
-import { auditVerdict, certificateFor, isCertified, verdictExitCode, verdictWithholdings, type Withholding } from "../../core/verdict.js";
+import { auditVerdict, certificateFor, isCertified, verdictWithholdings, verifyExitCodeFor, type VerifyExitCode, type Withholding } from "../../core/verdict.js";
 import { accessShortfall } from "../access.js";
 import { localFails, verifyAudit, type VerifyCheck, type VerifyReport } from "../../core/verify.js";
 import { ledgerTraits, registeredCeiling, testOnlyLedgerOptions } from "../../ledger-traits.js";
@@ -40,7 +40,7 @@ export interface VerifyOptions {
   registration?: string;
 }
 
-/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE. The one map, src/core/verdict.ts. */
+/** The exit code of a verify verdict (contracts.md §7): 0 VERIFIED, 1 FAILED, 6 INCOMPLETE; verify itself exits by verifyExitCodeFor (src/core/verdict.ts). */
 export { verdictExitCode } from "../../core/verdict.js";
 
 /** A check as verify returns it: its lines rendered by the mode (S1, src/core/said.ts). */
@@ -49,8 +49,8 @@ export type VerifyCheckResult = Omit<VerifyCheck, "summary" | "details" | "verbo
 /** The seven checks (core/verify.ts) plus what the certificate prints around them. */
 export interface VerifyResult extends Omit<VerifyReport, "checks"> {
   checks: VerifyCheckResult[];
-  /** What `pr-rla verify` exits with for this verdict: 0 VERIFIED, 1 FAILED, 6 INCOMPLETE (nothing failed, but not a verification). */
-  exitCode: 0 | 1 | 6;
+  /** What `pr-rla verify` exits with: 1 FAILED, 6 INCOMPLETE (nothing failed, but not a verification); a VERIFIED audit 2 when it escalated, 3 when refused (below the minimum), else 0. */
+  exitCode: VerifyExitCode;
   /** The certificate line, when the audit has draws: CERTIFIED only when `certified` (never on a verdict other than VERIFIED). */
   statusLine: string | null;
   /** `isCertified(certificate)` (src/core/verdict.ts): the only "certified" a client may show; `status.sequence.state` is the SPRT's raw state. */
@@ -160,7 +160,7 @@ export async function verify(ctx: ApiContext, opts: VerifyOptions = {}): Promise
     statusLine: report.status ? statusLine(report.status, { p0: reg.parameters.p0, alpha: reg.parameters.alpha, protocol: reg.protocolSha256, maxLines: reg.selector.max_changed_lines, mode: report.mode, selector: reg.selector }, report.certificate ?? undefined) : null,
     fullTrustPlugins: isRegistrationV2(registration) ? [registration.record.plugins.provider, registration.record.plugins.ledger].filter((id) => id.trust === "full").map((id) => ({ name: id.name, version: id.version })) : [],
     verifiedWith: PR_RLA_VERSION,
-    exitCode: verdictExitCode(report.verdict),
+    exitCode: verifyExitCodeFor(report.verdict, report.certificate),
     certified: isCertified(report.certificate),
   };
   // One rendering for the whole result, by the mode: read-only says pr-rla's words and points into untrusted.errors.

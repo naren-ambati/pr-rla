@@ -87,6 +87,23 @@ export function certificateFor(sprt: SprtState, refusal: string | null, withheld
   return withheld.length ? { state: "WITHHELD", withheld: [...withheld] } : { state: "CERTIFIED", withheld: [] };
 }
 
+/** What `pr-rla verify` exits with: the verdict's code, or for a VERIFIED audit the certificate's (2 ESCALATE, 3 REFUSED). */
+export type VerifyExitCode = VerdictExitCode | 2 | 3;
+
+/**
+ * verify's exit code (contracts.md §7). FAILED (1) and INCOMPLETE (6) say the audit could not be shown to be what it
+ * claims. A VERIFIED audit then exits as its certificate does, as status does: 2 when the sequential test escalated,
+ * 3 when the population is below the registered minimum, else 0. Before this (sandbox showcase, 2026-11-12) verify
+ * exited 0 on a verified ESCALATE audit, so a CI job that maps exit codes (the Action, the GitLab and Bitbucket
+ * templates) passed on an audit whose reviews had just found too many failures.
+ */
+export function verifyExitCodeFor(verdict: AuditVerdict, certificate: Pick<Certificate, "state"> | null | undefined): VerifyExitCode {
+  if (verdict !== "VERIFIED") return verdictExitCode(verdict);
+  if (certificate?.state === "ESCALATE") return 2;
+  if (certificate?.state === "REFUSED") return 3;
+  return 0;
+}
+
 /**
  * The one display decision (seam review, 2026-11-04): whether anything may show or report the audit as CERTIFIED. Every
  * surface asks it: status's line and `certified`, verify's certificate line and `certified`, `audit_list`'s `certified`,

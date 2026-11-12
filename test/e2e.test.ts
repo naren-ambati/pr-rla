@@ -10,6 +10,7 @@ import { statusCommand } from "../src/commands/status.js";
 import { runVerify, verifyCommand } from "../src/commands/verify.js";
 import { manifestSha256, type DrawsFile, type LoggedEntry, type Manifest, type ManifestCommitmentRecord, type SignedRecord } from "../src/core/records.js";
 import { computeDraws, roundPublishTime } from "../src/core/seed.js";
+import { verifyExitCodeFor } from "../src/core/verdict.js";
 import { loadOrCreateKey, signRecord } from "../src/core/signing.js";
 import { RekorClient, buildHashedRekord } from "../src/translog/rekor.js";
 import { cloneScenario, makeChanges, setupAuditRepo, T, type Scenario } from "./helpers/audit-scenario.js";
@@ -122,6 +123,41 @@ describe("an honest retrospective audit, end to end (json-file provider, mock ti
     const text = s.out.join("\n");
     expect(text).toMatch(/registration after window close → RETROSPECTIVE \(a demonstration\) · manifest logged .* before R ✓ · R = 33,245,812: first round ≥ 24 h after registration ✓ · BLS ✓ · population 400\/400 match ✓ · 36\/36 draws reproduce ✓ · labels/);
     expect(text).toMatch(/VERIFIED$/);
+  });
+});
+
+describe("verify's exit code follows the certificate of a VERIFIED audit (sandbox showcase, 2026-11-12)", () => {
+  it("an audit that verifies but escalated exits 2, as status does, so a CI job that maps exit codes fails on it", async () => {
+    const s = setupAuditRepo({ changes: makeChanges(400, { bad: 80 }), log, tsa: { ids: ["test-a", "test-b"], server: tsa } });
+    at(s, "2026-10-20T00:00:00Z");
+    expect(await registerCommand(s.ctx, { submit: true })).toBe(0);
+    at(s, "2026-10-20T12:00:00Z");
+    expect(await freezeCommand(s.ctx, { submit: true })).toBe(0);
+    at(s, "2026-10-21T01:00:00Z");
+    expect(await sampleCommand(s.ctx, {})).toBe(0);
+    at(s, "2026-10-21T03:00:00Z");
+    const draws = readJ<DrawsFile>(s, `${W}/draws.json`);
+    const firsts = draws.draws.slice(0, 36).filter((d) => d.firstOccurrence).slice(0, 6).map((d) => d.draw);
+    await reviewDraws(s, Math.max(...firsts), firsts);
+    expect(await statusCommand(s.ctx, {})).toBe(2);
+    const report = await runVerify(s.ctx, { logKey: s.logKeyArgs });
+    expect(report.verdict).toBe("VERIFIED");
+    expect(report.certificate?.state).toBe("ESCALATE");
+    expect(report.certified).toBe(false);
+    // Before the fix verify exited 0 here, and the GitHub Action's job passed on a run whose reviews found too many failures.
+    expect(report.exitCode).toBe(2);
+    s.out.length = 0;
+    expect(await verifyCommand(s.ctx, { logKey: s.logKeyArgs })).toBe(2);
+    expect(s.out.join("\n")).toMatch(/ESCALATE: review all 400 or narrow the claim · RETROSPECTIVE\nVERIFIED$/);
+  });
+
+  it("the precedence: FAILED 1 and INCOMPLETE 6 whatever the certificate; a VERIFIED audit 2 ESCALATE, 3 REFUSED, else 0", () => {
+    expect(verifyExitCodeFor("FAILED", { state: "ESCALATE" })).toBe(1);
+    expect(verifyExitCodeFor("INCOMPLETE", { state: "REFUSED" })).toBe(6);
+    expect(verifyExitCodeFor("VERIFIED", { state: "ESCALATE" })).toBe(2);
+    expect(verifyExitCodeFor("VERIFIED", { state: "REFUSED" })).toBe(3);
+    for (const state of ["CERTIFIED", "NOT CERTIFIED", "WITHHELD"] as const) expect(verifyExitCodeFor("VERIFIED", { state })).toBe(0);
+    expect(verifyExitCodeFor("VERIFIED", null)).toBe(0);
   });
 });
 
