@@ -106,6 +106,9 @@ describe("checkpoint coverage and the index binding, as pure functions", () => {
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "z")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }] })).fails[0]).toMatch(/draw #3 is z, but draws\.json draws b there/);
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }] })).fails).toEqual([expect.stringMatching(/draw #3 \(b\) has no issue/)]);
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "b")], repeats: [] })).fails).toEqual([expect.stringMatching(/draw #2 \(a\) repeats draw #1 but the index does not say so/)]);
+    // Sandbox showcase, 2026-11-12: a draws.json whose first occurrence of a repeated change was replaced printed "repeats draw #?".
+    const replaced = { ...draws, draws: [{ ...draws.draws[0]!, changeId: "c" }, ...draws.draws.slice(1)] } as DrawsFile;
+    expect(indexBindingFindings(replaced, doc({ issues: [issue(1, "c"), issue(3, "b")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }] })).fails).toEqual([expect.stringMatching(/^ledger index: draw #2 \(a\) is marked a repeat in draws\.json, but no draw there is that change's first occurrence: draws\.json was edited$/)]);
     expect(indexBindingFindings(draws, { sha256: "h".repeat(64), value: null, error: "ledger-index.json is not valid JSON: x" }).fails).toEqual(["ledger-index.json is not valid JSON: x"]);
     // P1: foreignIssues is a test-only ledger option now; an audit index that carries it FAILs (it was a WARN).
     expect(indexBindingFindings(draws, doc({ issues: [issue(1, "a"), issue(3, "b")], repeats: [{ draw: 2, changeId: "a", sameAs: 1 }], foreignIssues: true })).fails).toEqual([expect.stringMatching(/^the ledger index carries foreignIssues, which turns off the issues' body-marker check/)]);

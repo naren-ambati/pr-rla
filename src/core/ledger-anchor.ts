@@ -70,7 +70,9 @@ export function indexBindingFindings(draws: DrawsFile, index: LedgerIndexDocumen
     } else {
       const first = draws.draws.find((x) => x.changeId === d.changeId && x.firstOccurrence);
       const r = repeats.get(d.draw);
-      if (!r || r.changeId !== d.changeId || !first || r.sameAs !== first.draw) out.fails.push(`ledger index: draw #${d.draw} (${d.changeId}) repeats draw #${first?.draw ?? "?"} but the index does not say so`);
+      // A repeat whose first occurrence is gone: draws.json was edited (a draw replaced), so there is no draw to name.
+      if (!first) out.fails.push(`ledger index: draw #${d.draw} (${d.changeId}) is marked a repeat in draws.json, but no draw there is that change's first occurrence: draws.json was edited`);
+      else if (!r || r.changeId !== d.changeId || r.sameAs !== first.draw) out.fails.push(`ledger index: draw #${d.draw} (${d.changeId}) repeats draw #${first.draw} but the index does not say so`);
     }
   }
   return out;
