@@ -154,7 +154,7 @@ This audit turned up one more thing to fix: `sample` and `draw-context` told the
 
 - A review by a second, independent person: the PRs and the reviews are by the same account (GitHub does not let an account approve its own PR, so the "reviewed and therefore excluded" path was not exercised live).
 - GitLab, Bitbucket, GitHub Enterprise Server and an organisation-wide pool: GitHub.com and a single repository only.
-- A hardware security key: verdicts were signed with a software ed25519 key.
+- A hardware security key: the verdicts were signed with software keys only (a software ed25519 key), and pr-rla does not check key hardware in any case (T16).
 
 
 ## How this was captured
