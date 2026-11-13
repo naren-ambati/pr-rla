@@ -1,0 +1,9 @@
+{
+ "id": "p-06-record-2",
+ "command": "pr-rla record 2 pass --note \"Error message lists known regions; behaviour otherwise unchanged.\" --sign ../../keys/reviewer-naren",
+ "output": "ssh-keygen: Signing file /var/folders/63/tf2cv9l123s5rgql_078jp_40000gn/T/pr-rla-sign-FzVEmg/verdict\nssh-keygen: Write signature to /var/folders/63/tf2cv9l123s5rgql_078jp_40000gn/T/pr-rla-sign-FzVEmg/verdict.sig\nrecorded draw #2 github:naren-ambati/pr-rla-sandbox#40: pass (per protocol 99d3e0f3…) in ledger git-file\nsigned: the verdict is signed by naren-ambati's ssh-ed25519 key SHA256:Eb8I/739FTl6wZrvnL3aa5BD5NGKc1DvZlvC9cpzv4o: account\ncommit the ledger file now: git history is the tamper trail",
+ "exit": 0,
+ "seconds": 0.37,
+ "at": "2026-11-13T00:02:57Z",
+ "cwd": "~/sandbox/audits/prospective-2026-11-11"
+}

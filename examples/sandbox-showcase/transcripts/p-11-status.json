@@ -1,0 +1,9 @@
+{
+ "id": "p-11-status",
+ "command": "pr-rla status | head -4",
+ "output": "prefix 75/75 · fails 5 · claim D (detected-defect rate ≤ 10%, protocol 99d3…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -2.086 / target 2.996 · NOT CERTIFIED · 60 more passing draws needed (135 total) · PROSPECTIVE\n  timestamp anchors: sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true) · digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1) · globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025) · microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\n  blocking draw: #76 github:naren-ambati/pr-rla-sandbox#23 https://github.com/naren-ambati/pr-rla-sandbox/pull/23\n  distinct changes reviewed: 20 · draws counted: 75",
+ "exit": 0,
+ "seconds": 3.28,
+ "at": "2026-11-13T00:04:08Z",
+ "cwd": "~/sandbox/audits/prospective-2026-11-11"
+}

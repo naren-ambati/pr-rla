@@ -1,0 +1,9 @@
+{
+ "id": "t-swap-issues",
+ "command": "pr-rla verify --offline | grep -E '^[1-7]\\. |^ +FAIL|^FAILED|^VERIFIED|^INCOMPLETE'",
+ "output": "1. PASS registration: registration after window opened → RETROSPECTIVE (a demonstration)\n2. PASS manifest before seed: manifest logged by 4 operators (k = 2) by 2026-11-11T00:00:49Z, before R\n3. PASS seed round: R = 33,879,412: first round ≥ 24 h after window close\n4. PASS BLS: BLS\n5. SKIP population: offline: population not rebuilt\n6. PASS draws: 36/36 draws reproduce\n7. FAIL labels: labels FAIL\n        FAIL the ledger index is not an append-only extension of what was published: draw #1: publication #1 lists issue #1 ({\"changeId\":\"github:naren-ambati/pr-rla-sandbox#16\",\"id\":\"6353093727\",\"number\":1,\"url\":\"https://github.com/naren-ambati/pr-rla-sandbox-audits/issues/1\"}), but ledger-index.json has #2 ({\"changeId\":\"github:naren-ambati/pr-rla-sandbox#16\",\"id\":\"6353093866\",\"number\":2,\"url\":\"https://github.com/naren-ambati/pr-rla-sandbox-audits/issues/2\"})\n        FAIL the ledger index is not an append-only extension of what was published: draw #2: publication #1 lists issue #2 ({\"changeId\":\"github:naren-ambati/pr-rla-sandbox#15\",\"id\":\"6353093866\",\"number\":2,\"url\":\"https://github.com/naren-ambati/pr-rla-sandbox-audits/issues/2\"}), but ledger-index.json has #1 ({\"changeId\":\"github:naren-ambati/pr-rla-sandbox#15\",\"id\":\"6353093727\",\"number\":1,\"url\":\"https://github.com/naren-ambati/pr-rla-sandbox-audits/issues/1\"})\n        FAIL the ledger index: draw #2 is issue #1, not after draw #1's #2: pr-rla opens issues in draw order, so issue numbers rise with the draws; these were swapped or re-pointed\nFAILED: check 7 (labels)",
+ "exit": 1,
+ "seconds": 1.2,
+ "at": "2026-11-12T15:55:11Z",
+ "cwd": "~/sandbox/tamper/swap-issues/retro-2026-11-10"
+}

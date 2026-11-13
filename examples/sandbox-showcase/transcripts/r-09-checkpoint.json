@@ -1,0 +1,9 @@
+{
+ "id": "r-09-checkpoint",
+ "command": "pr-rla checkpoint",
+ "output": "checkpoint 2026-11-12T15:33:25Z · ledger github-issues · 22 event(s) · 22 first verdict(s) · eventsSha256 d13b15cfa4b0…\n  appended to audit/retro-2026-11-10/ledger-checkpoints.jsonl · event list audit/retro-2026-11-10/ledger-history/20261112T153325Z-d13b15cfa4b0.json\n  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN\n    sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true)\n    digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1)\n    globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025)\n    microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\n  commit it: git add audit/retro-2026-11-10/ledger-checkpoints.jsonl audit/retro-2026-11-10/ledger-history/20261112T153325Z-d13b15cfa4b0.json && git commit -m \"pr-rla checkpoint retro-2026-11-10 2026-11-12T15:33:25Z\"   (or run \"pr-rla checkpoint --push\")",
+ "exit": 0,
+ "seconds": 5.38,
+ "at": "2026-11-12T15:33:21Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

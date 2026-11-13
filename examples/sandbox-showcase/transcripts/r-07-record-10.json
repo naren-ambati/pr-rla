@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-10",
+ "command": "pr-rla record 10 pass --note \"parseCoupon is anchored and bounded (d{1,5}); tests cover both forms and a non-match.\"",
+ "output": "recorded draw #10 github:naren-ambati/pr-rla-sandbox#9: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.09,
+ "at": "2026-11-12T15:31:51Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

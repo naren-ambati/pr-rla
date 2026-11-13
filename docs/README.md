@@ -5,6 +5,7 @@ Every document, by what you are doing. The project's front page is the [README](
 ## Understand it
 
 - [A tour, with real output](tour.md): one audit from `init` to `verify`, five tampering attempts, and the assistant and CI integrations, each step a screenshot of a real run. The end-to-end report is [e2e-report-2026-11-09.md](e2e-report-2026-11-09.md).
+- [A live showcase](../examples/sandbox-showcase/README.md): two audits of a real repository on GitHub, a retrospective one with verdicts as issue labels and a prospective one with signed verdicts, real reviews, tampering, the GitHub Action on GitHub's runners, the MCP server and Claude Code, 2026-11-10 to 2026-11-13.
 - [Concepts](concepts.md): the population, the stratum, the steps of an audit, the seven checks, the certificate, verdicts and provenance.
 - [The statistics](statistics.md): the sequential test, claim D, the stopping points, why a population below 150 means reviewing everything, and how the draws are derived.
 - [Trusted time](trusted-time.md): timestamp tokens from k independent authorities, what a token must satisfy, and how to check one with OpenSSL.

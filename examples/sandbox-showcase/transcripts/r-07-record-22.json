@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-22",
+ "command": "pr-rla record 22 pass --note \"Changelog only.\"",
+ "output": "recorded draw #22 github:naren-ambati/pr-rla-sandbox@9f70b571eae3f6b529a489b94c02b48aa31394b8: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 4.73,
+ "at": "2026-11-12T15:32:27Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

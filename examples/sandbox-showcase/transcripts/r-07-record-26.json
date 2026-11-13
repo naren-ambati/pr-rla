@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-26",
+ "command": "pr-rla record 26 fail --note \"Protocol 1: the subtotal cache is cleared in add() but not in remove(), so a removed line is still charged.\"",
+ "output": "recorded draw #26 github:naren-ambati/pr-rla-sandbox#13: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.2,
+ "at": "2026-11-12T15:32:37Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

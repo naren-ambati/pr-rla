@@ -1,0 +1,9 @@
+{
+ "id": "r-11-verify-fixed",
+ "command": "pr-rla verify | grep -E '^[1-7]\\. |^prefix|^VERIFIED|^FAILED|^INCOMPLETE'",
+ "output": "1. PASS registration: registration after window opened → RETROSPECTIVE (a demonstration)\n2. PASS manifest before seed: manifest logged by 4 operators (k = 2) by 2026-11-11T00:00:49Z, before R\n3. PASS seed round: R = 33,879,412: first round ≥ 24 h after window close\n4. PASS BLS: BLS\n5. PASS population: population 25/25 match\n6. PASS draws: 36/36 draws reproduce\n7. PASS labels: labels (prefix 36, 22 events)\nprefix 36/36 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol c558…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -8.039 / target 2.996 · ESCALATE: review all 25 or narrow the claim · RETROSPECTIVE\nVERIFIED",
+ "exit": 2,
+ "seconds": 16.2,
+ "at": "2026-11-12T16:02:20Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

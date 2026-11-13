@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-5",
+ "command": "pr-rla record 5 pass --note \"amountOff clamps at zero and validates its input; tests cover both.\"",
+ "output": "recorded draw #5 github:naren-ambati/pr-rla-sandbox#4: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.28,
+ "at": "2026-11-12T15:31:28Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

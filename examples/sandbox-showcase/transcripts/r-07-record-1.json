@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-1",
+ "command": "pr-rla record 1 pass --note \"Adds IE at 23% with a test; correct.\"",
+ "output": "recorded draw #1 github:naren-ambati/pr-rla-sandbox#16: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 6.93,
+ "at": "2026-11-12T15:31:05Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

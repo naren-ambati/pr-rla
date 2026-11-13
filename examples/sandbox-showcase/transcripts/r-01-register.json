@@ -1,0 +1,9 @@
+{
+ "id": "r-01-register",
+ "command": "pr-rla register --key ../../keys/retro-registration.pem",
+ "output": "registration 50ff1a109fad… · naren-ambati/pr-rla-sandbox · window retro-2026-11-10 (2026-11-10..2026-11-10)\n  claim D: detected-defect rate <= 10% (p1 2%, risk 5%) · certify after 36 / 56 / 75 draws with 0/1/2 fails · cap 144\n  selector {\"kinds\":[\"pull_request\",\"direct_push\"],\"authors\":\"any\",\"labels\":[],\"unreviewed\":\"no-human-review\",\"merged_by\":\"any\",\"max_changed_lines\":200,\"exclude_generated\":true,\"bots\":[],\"direct_push_via_merge\":\"include\"}\n  protocol c5584947e8df… (review-protocol.md)\n  provider github (builtin 0.1.0) · ledger github-issues · verdict provenance account · reviewers naren-ambati\n  seed round R = 33879412 (drand quicknet), publishes 2026-11-12T00:00:00Z: 24 h after the window close\n  RETROSPECTIVE (registered after the window opened: a demonstration, not evidence) · registration existed by 2026-11-10T23:10:37Z (U_k)\n  timestamps: 4 of 4 TSAs (sigstore, digicert, globalsign, microsoft) · k = 2 · PROVEN\n    sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true)\n    digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1)\n    globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025)\n    microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\nwrote ~/sandbox/audits/retro-2026-11-10/audit/retro-2026-11-10/registration.json",
+ "exit": 0,
+ "seconds": 1.42,
+ "at": "2026-11-10T23:10:35Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

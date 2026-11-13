@@ -1,0 +1,9 @@
+{
+ "id": "s-02-small-register-dry",
+ "command": "pr-rla register --dry-run --key /tmp/throwaway-small.pem",
+ "output": "[dry run] registration 3b1d640ca160… · naren-ambati/pr-rla-sandbox · window small-default-min (2026-11-10..2026-11-10)\n  claim D: detected-defect rate <= 10% (p1 2%, risk 5%) · certify after 36 / 56 / 75 draws with 0/1/2 fails · cap 144\n  selector {\"kinds\":[\"pull_request\",\"direct_push\"],\"authors\":\"any\",\"labels\":[],\"unreviewed\":\"no-human-review\",\"merged_by\":\"any\",\"max_changed_lines\":200,\"exclude_generated\":true,\"bots\":[],\"direct_push_via_merge\":\"include\"}\n  protocol c5584947e8df… (review-protocol.md)\n  provider github (builtin 0.1.0) · ledger github-issues · verdict provenance account · reviewers naren-ambati\n  seed round R = 33879556 (drand quicknet), publishes 2026-11-12T00:07:12Z: 24 h after the registration\n  RETROSPECTIVE (registered after the window opened: a demonstration, not evidence)\n  timestamps: not requested (dry run) · authorities sigstore, digicert, globalsign, microsoft · k = 2",
+ "exit": 0,
+ "seconds": 1.14,
+ "at": "2026-11-11T00:07:11Z",
+ "cwd": "~/sandbox/scratch-small"
+}

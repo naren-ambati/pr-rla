@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-8",
+ "command": "pr-rla record 8 pass --note \"Version bump and changelog date only; the Node 20 failure in its CI predates it (draw 4).\"",
+ "output": "recorded draw #8 github:naren-ambati/pr-rla-sandbox@978a7e741c0fded214e14c8c13836a404ab102a9: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.37,
+ "at": "2026-11-12T15:31:45Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

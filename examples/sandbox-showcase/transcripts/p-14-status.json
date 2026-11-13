@@ -1,0 +1,9 @@
+{
+ "id": "p-14-status",
+ "command": "pr-rla status | head -1",
+ "output": "prefix 80/135 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol 99d3…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -3.610 / target 2.996 · ESCALATE: review all 21 or narrow the claim · PROSPECTIVE",
+ "exit": 2,
+ "seconds": 1.98,
+ "at": "2026-11-13T00:04:30Z",
+ "cwd": "~/sandbox/audits/prospective-2026-11-11"
+}

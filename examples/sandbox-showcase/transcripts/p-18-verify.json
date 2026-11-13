@@ -1,0 +1,9 @@
+{
+ "id": "p-18-verify",
+ "command": "pr-rla verify | grep -E '^[1-7]\\. |^prefix|^VERIFIED|^FAILED|^INCOMPLETE'",
+ "output": "1. PASS registration: registered 2026-11-10T21:35:53Z, proven by 2026-11-10T21:35:54Z before the window opened → PROSPECTIVE\n2. PASS manifest before seed: manifest logged by 4 operators (k = 2) by 2026-11-12T15:27:16Z, before R\n3. PASS seed round: R = 33,908,212: first round ≥ 24 h after window close\n4. PASS BLS: BLS\n5. PASS population: population 21/21 match\n6. PASS draws: 135/135 draws reproduce\n7. PASS labels: labels (prefix 135, 21 events)\nprefix 135/135 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol 99d3…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -3.610 / target 2.996 · ESCALATE: review all 21 or narrow the claim · PROSPECTIVE\nVERIFIED",
+ "exit": 2,
+ "seconds": 7.95,
+ "at": "2026-11-13T00:05:10Z",
+ "cwd": "~/sandbox/audits/prospective-2026-11-11"
+}

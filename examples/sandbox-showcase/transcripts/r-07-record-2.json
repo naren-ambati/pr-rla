@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-2",
+ "command": "pr-rla record 2 fail --note \"Protocol 4: the title promises half-to-even tax rounding; the diff only reformats TAX_BPS and rounding is unchanged.\"",
+ "output": "recorded draw #2 github:naren-ambati/pr-rla-sandbox#15: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.26,
+ "at": "2026-11-12T15:31:12Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

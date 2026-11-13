@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-17",
+ "command": "pr-rla record 17 pass --note \"taxCents in basis points, unknown region throws; tested.\"",
+ "output": "recorded draw #17 github:naren-ambati/pr-rla-sandbox#1: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.12,
+ "at": "2026-11-12T15:32:12Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

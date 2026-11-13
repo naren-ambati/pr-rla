@@ -1,0 +1,9 @@
+{
+ "id": "t-drop-bad-change",
+ "command": "pr-rla verify --offline | grep -E '^[1-7]\\. |^ +FAIL|^FAILED|^VERIFIED|^INCOMPLETE'",
+ "output": "1. PASS registration: registration after window opened → RETROSPECTIVE (a demonstration)\n2. FAIL manifest before seed: manifest inconsistent\n3. PASS seed round: R = 33,879,412: first round ≥ 24 h after window close\n4. PASS BLS: BLS\n5. SKIP population: offline: population not rebuilt\n6. FAIL draws: 144 draws do not reproduce\n        FAIL draws file names a different manifest\n        FAIL draws file names a different N\n        FAIL draw #1: file says github:naren-ambati/pr-rla-sandbox#16 (index 7), recomputed github:naren-ambati/pr-rla-sandbox#2 (index 9)\n        FAIL draw #2: file says github:naren-ambati/pr-rla-sandbox#15 (index 6), recomputed github:naren-ambati/pr-rla-sandbox@3c9aa43884c5c7eee2ae463934a7266af123f3d5 (index 21)\n        FAIL draw #3: file says github:naren-ambati/pr-rla-sandbox#5 (index 15), recomputed github:naren-ambati/pr-rla-sandbox#21 (index 10)\n        FAIL draw #4: file says github:naren-ambati/pr-rla-sandbox@3094240df9bb5e79b2aa835fc5f3c1a12f0c2fb9 (index 21), recomputed github:naren-ambati/pr-rla-sandbox#1 (index 0)\n        FAIL draw #5: file says github:naren-ambati/pr-rla-sandbox#4 (index 14), recomputed github:naren-ambati/pr-rla-sandbox#8 (index 17)\n7. FAIL labels: labels FAIL\n        FAIL ledger-publication.json publication #1 names a different manifest\nFAILED: check 2 (manifest before seed), check 6 (draws), check 7 (labels)",
+ "exit": 1,
+ "seconds": 1.12,
+ "at": "2026-11-12T15:55:15Z",
+ "cwd": "~/sandbox/tamper/drop-bad-change/retro-2026-11-10"
+}

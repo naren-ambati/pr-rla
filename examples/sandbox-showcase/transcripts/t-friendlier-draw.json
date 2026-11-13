@@ -1,0 +1,9 @@
+{
+ "id": "t-friendlier-draw",
+ "command": "pr-rla verify --offline | grep -E '^[1-7]\\. |^ +FAIL|^FAILED|^VERIFIED|^INCOMPLETE'",
+ "output": "1. PASS registration: registration after window opened → RETROSPECTIVE (a demonstration)\n2. PASS manifest before seed: manifest logged by 4 operators (k = 2) by 2026-11-11T00:00:49Z, before R\n3. PASS seed round: R = 33,879,412: first round ≥ 24 h after window close\n4. PASS BLS: BLS\n5. SKIP population: offline: population not rebuilt\n6. FAIL draws: 1 draws do not reproduce\n        FAIL draw #2: file says github:naren-ambati/pr-rla-sandbox#16 (index 7), recomputed github:naren-ambati/pr-rla-sandbox#15 (index 6)\n7. FAIL labels: labels FAIL\n        FAIL ledger index: draw #2 is github:naren-ambati/pr-rla-sandbox#15, but draws.json draws github:naren-ambati/pr-rla-sandbox#16 there\n        FAIL ledger index: draw #2 (github:naren-ambati/pr-rla-sandbox#16) has no issue; a verdict cannot be recorded against it\n        FAIL ledger index: draw #9 (github:naren-ambati/pr-rla-sandbox#15) repeats draw #? but the index does not say so\n        FAIL ledger index: draw #27 (github:naren-ambati/pr-rla-sandbox#15) repeats draw #? but the index does not say so\n        FAIL ledger index: draw #29 (github:naren-ambati/pr-rla-sandbox#15) repeats draw #? but the index does not say so\n        FAIL ledger index: draw #30 (github:naren-ambati/pr-rla-sandbox#15) repeats draw #? but the index does not say so\nFAILED: check 6 (draws), check 7 (labels)",
+ "exit": 1,
+ "seconds": 1.07,
+ "at": "2026-11-12T15:55:13Z",
+ "cwd": "~/sandbox/tamper/friendlier-draw/retro-2026-11-10"
+}

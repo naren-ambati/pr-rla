@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-4",
+ "command": "pr-rla record 4 fail --note \"Protocol 3: adds Node 20 to the CI matrix, and the Node 20 job fails (node --test does not expand the quoted glob on Node 20).\"",
+ "output": "recorded draw #4 github:naren-ambati/pr-rla-sandbox@3094240df9bb5e79b2aa835fc5f3c1a12f0c2fb9: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.67,
+ "at": "2026-11-12T15:31:23Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

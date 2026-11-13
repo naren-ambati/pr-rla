@@ -1,0 +1,9 @@
+{
+ "id": "r-08-status",
+ "command": "pr-rla status",
+ "output": "prefix 36/36 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol c558…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -8.039 / target 2.996 · ESCALATE: review all 25 or narrow the claim · RETROSPECTIVE\n  timestamp anchors: sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true) · digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1) · globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025) · microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\n  WARN no time-stamped ledger checkpoint post-dates the last counted verdict (2026-11-12T15:32:36Z); there is none. Issue history deleted after the last checkpoint cannot be detected: run \"pr-rla checkpoint\" now that the verdicts are in\n  distinct changes reviewed: 17 · draws counted: 25 · 11 labelled draw(s) after the stop are not counted\n  VERDICT PROVENANCE: account (17) · registered minimum account\n  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.",
+ "exit": 2,
+ "seconds": 5.12,
+ "at": "2026-11-12T15:33:08Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

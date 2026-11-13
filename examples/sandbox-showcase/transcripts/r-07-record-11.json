@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-11",
+ "command": "pr-rla record 11 fail --note \"Protocol 3: replaces the rounding assertions with a typeof check, so the test no longer checks rounding.\"",
+ "output": "recorded draw #11 github:naren-ambati/pr-rla-sandbox#7: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 4.82,
+ "at": "2026-11-12T15:31:56Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

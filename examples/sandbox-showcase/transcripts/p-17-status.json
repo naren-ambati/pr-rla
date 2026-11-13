@@ -1,0 +1,9 @@
+{
+ "id": "p-17-status",
+ "command": "pr-rla status | head -5",
+ "output": "prefix 135/135 · fails 6 · claim D (detected-defect rate ≤ 10%, protocol 99d3…, stratum ≤ 200 lines, direct pushes via a pushed merge included) · LLR -3.610 / target 2.996 · ESCALATE: review all 21 or narrow the claim · PROSPECTIVE\n  timestamp anchors: sigstore: anchor confirmed independently (root sigstore-tsa-selfsigned, independent: true) · digicert: anchor confirmed independently (root DigiCert Trusted Root G4, independent: true) · TSA issuing CA pinned (DigiCert Trusted G4 TimeStamping RSA4096 SHA256 2025 CA1) · globalsign: anchor confirmed independently (root GlobalSign, independent: true) · TSA issuing CA pinned (GlobalSign Offline R45 Timestamping CA 2025) · microsoft: anchor pinned on first use (intermediate Microsoft Public RSA Timestamping CA 2020, independent: false)\n  distinct changes reviewed: 20 · draws counted: 77 · 58 labelled draw(s) after the stop are not counted\n  VERDICT PROVENANCE: account (20) · registered minimum account\n  assumptions: claim D is about detection under the registered protocol by these reviewers, not the true defect rate; draws are with replacement.",
+ "exit": 2,
+ "seconds": 4.04,
+ "at": "2026-11-13T00:05:06Z",
+ "cwd": "~/sandbox/audits/prospective-2026-11-11"
+}

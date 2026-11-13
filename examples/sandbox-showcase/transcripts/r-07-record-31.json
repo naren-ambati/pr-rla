@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-31",
+ "command": "pr-rla record 31 pass --note \"MAX_QUANTITY 99 enforced in add(), tested.\"",
+ "output": "recorded draw #31 github:naren-ambati/pr-rla-sandbox#8: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 4.86,
+ "at": "2026-11-12T15:32:43Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

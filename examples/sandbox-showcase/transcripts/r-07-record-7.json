@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-7",
+ "command": "pr-rla record 7 pass --note \"Free shipping from $50.00, boundary tested at 4999 and 5000.\"",
+ "output": "recorded draw #7 github:naren-ambati/pr-rla-sandbox#14: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.44,
+ "at": "2026-11-12T15:31:40Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

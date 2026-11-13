@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-19",
+ "command": "pr-rla record 19 pass --note \"Keywords and package.json reformatting only; the Node 20 failure predates it.\"",
+ "output": "recorded draw #19 github:naren-ambati/pr-rla-sandbox#22: pass (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.26,
+ "at": "2026-11-12T15:32:22Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

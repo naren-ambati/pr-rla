@@ -1,6 +1,6 @@
 # Compatibility
 
-What pr-rla 0.1.0 runs on, what has been verified against live services and what only on fixtures and mock servers, the exit codes, and the versioning rules. "Live" always means read-only: public GET requests, or a timestamp request that sends a SHA-256 digest and a nonce. Every write path (issues, labels, checkpoints pushed, CI jobs) is tested on mock servers and local bare git repositories only, by design (D8). Each row says when it was checked; [`BUILD-NOTES.md`](../BUILD-NOTES.md) has the commands and their output.
+What pr-rla 0.1.0 runs on, what has been verified against live services and what only on fixtures and mock servers, the exit codes, and the versioning rules. "Live" always means read-only: public GET requests, or a timestamp request that sends a SHA-256 digest and a nonce. Every write path (issues, labels, checkpoints pushed, CI jobs) is tested on mock servers and local bare git repositories, by design (D8); the `github-issues` writes and the GitHub Action have also run live, on repositories the owner created for the [sandbox showcase](../examples/sandbox-showcase/README.md) (2026-11-10 to 2026-11-13). Each row says when it was checked; [`BUILD-NOTES.md`](../BUILD-NOTES.md) has the commands and their output.
 
 ## Runtime
 
@@ -51,7 +51,7 @@ Private repositories and token scopes have not been exercised on any SCM: every 
 | Ledger | Reads | Writes |
 |---|---|---|
 | `git-file` | local git, real git 2.55.0 | local appends and commits; per-verdict signatures with real `ssh-keygen -Y sign` and software keys only (no hardware key, D7) |
-| `github-issues` | recorded public timelines (six GitHub issues, 2026-11-04); GitHub Enterprise Server on a mock | mock servers only (issues, labels, comments) |
+| `github-issues` | recorded public timelines (six GitHub issues, 2026-11-04); **live** on github.com in the [sandbox showcase](../examples/sandbox-showcase/README.md) (2026-11-12): 22 label events read back by `verify` and compared with a checkpoint; GitHub Enterprise Server on a mock | **live** on github.com (2026-11-12): `sample` opened 22 issues and created the labels, `record` applied 22 verdict labels, `checkpoint` time-stamped the history, and the Action posted comments, in a public repository the owner created for it; GitHub Enterprise Server on mock servers only |
 | `gitlab-issues` | synthetic, from the documented `resource_label_events` shape: the endpoint answers 401 without a token even on public projects (seen live, 2026-11-04), so its JSON itself is unverified; recorded label notes as evidence | mock servers only |
 | Jira (the example plugin) | recorded from hibernate.atlassian.net, Jira Cloud, anonymously (2026-11-04) | mock servers only; Jira Data Center not supported |
 
@@ -67,7 +67,7 @@ Private repositories and token scopes have not been exercised on any SCM: every 
 
 | Integration | Status |
 |---|---|
-| GitHub Action, GitLab component and snippet, Bitbucket step | schema-checked against the published schemas (vendored, dated) and run on fixtures and mock servers; never on a real runner. The GitLab component is not in the CI/CD Catalog |
+| GitHub Action, GitLab component and snippet, Bitbucket step | schema-checked against the published schemas (vendored, dated) and run on fixtures and mock servers. The **GitHub Action ran on GitHub-hosted runners** (`ubuntu-latest`, 2026-11-11 to 2026-11-13) from this repository pinned by commit, on push, label, schedule and dispatch events, `status` and online `verify` ([sandbox showcase](../examples/sandbox-showcase/README.md)); the GitLab component and the Bitbucket step never on a real runner. The GitLab component is not in the CI/CD Catalog |
 | Claude Code plugin | `claude plugin validate` passes (Claude Code 2.1.267, 2026-11-04); not yet run in a session |
 | Codex, Cursor | configuration from their documentation (read 2026-11-04); not run |
 | The three manual assistant runs (FR3.6) | **pending**: the founder's ([`assistants/manual-acceptance.md`](assistants/manual-acceptance.md)) |

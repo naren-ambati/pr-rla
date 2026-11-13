@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-25",
+ "command": "pr-rla record 25 fail --note \"Protocol 2: cartFromJSON evaluates caller-supplied text with new Function: arbitrary code execution.\"",
+ "output": "recorded draw #25 github:naren-ambati/pr-rla-sandbox#12: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.04,
+ "at": "2026-11-12T15:32:32Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}

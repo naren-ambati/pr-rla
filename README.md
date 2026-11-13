@@ -4,7 +4,7 @@ Risk-limiting audits for code changes that landed on a default branch with no re
 
 ![pr-rla status showing the target reached with the certificate withheld, then verify ending CERTIFIED and VERIFIED (exit 0)](docs/images/hero.png)
 
-*`pr-rla status` and `pr-rla verify`, run 2026-11-10 on a live, retrospective demo audit of github/gh-aw with DEMO verdicts (not a review, not an audit claim): `status` withholds the certificate, and only `verify` can print VERIFIED. [A tour with real output](docs/tour.md).*
+*`pr-rla status` and `pr-rla verify`, run 2026-11-10 on a live, retrospective demo audit of github/gh-aw with DEMO verdicts (not a review, not an audit claim): `status` withholds the certificate, and only `verify` can print VERIFIED. [A tour with real output](docs/tour.md), and [a live showcase](examples/sandbox-showcase/README.md) of two audits of a real repository.*
 
 Status: **0.1.0, not yet released.** All eleven units of the phase 3–4 design are built and tested, most of them on fixtures and mock servers; nothing is published ([`CHANGELOG.md`](CHANGELOG.md)). What has been verified against live services, and what only on fixtures, is in [`docs/compatibility.md`](docs/compatibility.md). Every document is listed in [`docs/README.md`](docs/README.md): start with [concepts](docs/concepts.md) and [the statistics](docs/statistics.md). The design is in [`docs/design/`](docs/design/spec.md); what was built, verified and assumed, round by round, is in [`BUILD-NOTES.md`](BUILD-NOTES.md). Licence: decided by the founder before release.
 

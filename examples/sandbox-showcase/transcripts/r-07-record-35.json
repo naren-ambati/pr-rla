@@ -1,0 +1,9 @@
+{
+ "id": "r-07-record-35",
+ "command": "pr-rla record 35 fail --note \"Protocol 1: percentOff accepts percent > 100, so percentOff(2000, 150) = -1000, a negative total.\"",
+ "output": "recorded draw #35 github:naren-ambati/pr-rla-sandbox#2: fail (per protocol c5584947…) in ledger github-issues\nthe tracker records the account that applied the label, and when; that, not --reviewer, is the verdict's reviewer",
+ "exit": 0,
+ "seconds": 5.28,
+ "at": "2026-11-12T15:32:59Z",
+ "cwd": "~/sandbox/audits/retro-2026-11-10"
+}
