@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as read from "pr-rla/api/read";
-import { drawContext } from "../src/api/read/draw-context.js";
+import { drawContext, howToRecord, signedVerdictsRequired } from "../src/api/read/draw-context.js";
+import type { PrRlaConfig, WindowPaths } from "../src/config.js";
+import type { LedgerTraits } from "../src/ledger-traits.js";
 import { buildPopulation } from "../src/core/population.js";
 import { DEFAULT_MAX_PATCH_BYTES, MAX_BODY_BYTES, MAX_CHECKS, MAX_FILES, MAX_NAME_BYTES, MAX_PATH_BYTES, MAX_TITLE_BYTES, MAX_URL_BYTES, buildDrawContext, cutUtf8, fenceClose, fenceOpen, protocolChecklist, type DrawContextInput } from "../src/core/draw-context.js";
 import { attributeFor, isLinguistGenerated, parseGitattributes, patternMatcher } from "../src/core/generated.js";
@@ -399,5 +401,28 @@ describe("drawContext on the recorded gh-aw audit (FR3.4: linguist-generated fil
     const reg = JSON.parse(readFileSync(join(dir, "audit", "2026-q3", "registration.json"), "utf8"));
     const pop = await buildPopulation({ apiVersion: 1, name: "json-file", listChanges: async () => ({ changes: cf.changes, defaultBranch: "main", limitations: [] }) }, { repo: "github/gh-aw", window: reg.record.window, selector: reg.record.selector, cutoffIso: "2026-10-20T12:00:00Z" });
     expect(pop.entries).toHaveLength(1589);
+  });
+});
+
+describe("the record hint of an audit that counts signed verdicts only (sandbox showcase, 2026-11-13)", () => {
+  // The prospective sandbox audit registered a reviewer key with min_provenance account; draw-context and sample still
+  // said "--reviewer <you>", which writes an unsigned line that audit lists as ignored.
+  const unsigned = { dir: "/a", ledger: { use: "git-file", options: {} }, verdicts: { minProvenance: null, reviewers: null, allowedSigners: null } } as unknown as PrRlaConfig;
+  const signed = { ...unsigned, verdicts: { minProvenance: "account", reviewers: ["r"], allowedSigners: ['r namespaces="pr-rla-verdict@v1" ssh-ed25519 AAAA'] } } as unknown as PrRlaConfig;
+  const paths = { windowDir: "/a/audit/w" } as WindowPaths;
+  const lt = { name: "git-file", provenance: "self-asserted" } as unknown as LedgerTraits;
+
+  it("signed only with registered keys and a minimum above self-asserted, or require_signed; never for an issue ledger", () => {
+    expect(signedVerdictsRequired(unsigned)).toBe(false);
+    expect(signedVerdictsRequired(signed)).toBe(true);
+    expect(signedVerdictsRequired({ ...signed, verdicts: { ...signed.verdicts, minProvenance: "self-asserted" } })).toBe(false);
+    expect(signedVerdictsRequired({ ...signed, verdicts: { ...signed.verdicts, minProvenance: null } })).toBe(false);
+    expect(signedVerdictsRequired({ ...unsigned, ledger: { use: "git-file", options: { require_signed: true } } })).toBe(true);
+    expect(signedVerdictsRequired({ ...signed, ledger: { use: "github-issues", options: {} } })).toBe(false);
+  });
+
+  it("the hint names --sign for such an audit, and --reviewer otherwise", () => {
+    expect(howToRecord(signed, paths, lt, 7, "c").text).toBe('pr-rla record 7 pass|fail --note "<one line>" --sign <your registered key>, then commit audit/w/verdicts.jsonl (this audit counts signed verdicts only)');
+    expect(howToRecord(unsigned, paths, lt, 7, "c").text).toBe('pr-rla record 7 pass|fail --reviewer <you> --note "<one line>", then commit audit/w/verdicts.jsonl');
   });
 });

@@ -30,6 +30,7 @@ export async function sampleCommand(ctx: CommandContext, opts: SampleOptions): P
   }
   if (r.publishedToLedger)
     ctx.out(`ledger ${r.ledger}: one issue per drawn change (audit/${r.window}/ledger-index.json); review in draw order under ${r.protocolFile} and apply the verdict label on each issue; commit draws.json, ledger-index.json and ledger-publication.json`);
+  else if (r.signedVerdicts) ctx.out(`review in draw order under ${r.protocolFile}; record each with "pr-rla record <draw> pass|fail --note \"<one line>\" --sign <your registered key>" and commit (this audit counts signed verdicts only)`);
   else ctx.out(`review in draw order under ${r.protocolFile}; record each with "pr-rla record <draw> pass|fail --reviewer <you>" and commit`);
   return code;
 }

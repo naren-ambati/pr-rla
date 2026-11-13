@@ -19,6 +19,7 @@ import { effectiveCap, zeroFailureStop } from "../../core/sprt.js";
 import { INDEX_FILE, readIndexDocument } from "../../ledgers/issue-index.js";
 import { AuditError } from "../errors.js";
 import { auditContextFor, configFor, getBeacon, isoNow, ledgerFor, readCommitment, readDraws, readManifest, readRegistration, requireWritable, trustFor, type ApiContext } from "../session.js";
+import { signedVerdictsRequired } from "../read/draw-context.js";
 import { writeJson } from "./files.js";
 
 export interface SampleOptions {
@@ -67,6 +68,8 @@ export type SampleResult =
       publication: SamplePublication | null;
       protocolFile: string;
       window: string;
+      /** The audit counts signed verdicts only (git-file with registered keys): `record` needs --sign. */
+      signedVerdicts: boolean;
     };
 
 /**
@@ -159,6 +162,7 @@ export async function sample(ctx: ApiContext, opts: SampleOptions = {}): Promise
     publication,
     protocolFile: config.protocol,
     window: config.window.name,
+    signedVerdicts: signedVerdictsRequired(config),
   };
 }
 

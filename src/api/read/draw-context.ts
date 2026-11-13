@@ -37,6 +37,18 @@ export function issuedDraws(paths: WindowPaths, window: string): DrawsFile {
 }
 
 /**
+ * Whether a git-file audit counts signed verdicts only (U9): reviewer keys configured and a minimum provenance above
+ * self-asserted, or the ledger option require_signed. The record hints then name --sign (sandbox showcase, 2026-11-13:
+ * they said --reviewer <you>, which writes a line such an audit ignores).
+ */
+export function signedVerdictsRequired(config: Pick<PrRlaConfig, "ledger" | "verdicts">): boolean {
+  if (config.ledger.use !== "git-file") return false;
+  if (config.ledger.options?.require_signed === true) return true;
+  const min = config.verdicts.minProvenance;
+  return !!config.verdicts.allowedSigners?.length && min !== null && min !== "self-asserted";
+}
+
+/**
  * How a person records a verdict on the draw, for this ledger, in pr-rla's words (the assistant
  * never records). For a tracker ledger, the issue and the verdict labels come from the ledger's
  * index, which holds the tracker's text: they are returned apart, as `target`, for the fence.
@@ -44,6 +56,8 @@ export function issuedDraws(paths: WindowPaths, window: string): DrawsFile {
 export function howToRecord(config: PrRlaConfig, paths: WindowPaths, lt: LedgerTraits, draw: number, changeId: string): { text: string; target: RecordTarget | null } {
   if (lt.name === "git-file") {
     const file = relative(config.dir, gitFileLedgerFile(paths.windowDir, config.ledger.options as { file?: string }));
+    // An audit that counts signed verdicts only: an unsigned line would be listed as ignored (the reviewer is the key's principal).
+    if (signedVerdictsRequired(config)) return { text: `pr-rla record ${draw} pass|fail --note "<one line>" --sign <your registered key>, then commit ${file} (this audit counts signed verdicts only)`, target: null };
     return { text: `pr-rla record ${draw} pass|fail --reviewer <you> --note "<one line>", then commit ${file}`, target: null };
   }
   if (lt.provenance === "account") {
