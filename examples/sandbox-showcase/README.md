@@ -6,10 +6,10 @@ The application is a dummy, and some of its changes were made wrong on purpose s
 
 | Repository | What it holds |
 |---|---|
-| [naren-ambati/pr-rla-sandbox](https://github.com/naren-ambati/pr-rla-sandbox) | `tiny-shop`, a small shopping-cart pricing library: 40 pull requests merged with no review and 9 direct pushes over two days |
-| [naren-ambati/pr-rla-sandbox-audits](https://github.com/naren-ambati/pr-rla-sandbox-audits) | the two audits: registrations, manifests, draws, ledger files, one issue per drawn change, and the workflow that runs the pr-rla GitHub Action |
+| `naren-ambati/pr-rla-sandbox` | `tiny-shop`, a small shopping-cart pricing library: 40 pull requests merged with no review and 9 direct pushes over two days |
+| `naren-ambati/pr-rla-sandbox-audits` | the two audits: registrations, manifests, draws, ledger files, one issue per drawn change, and the workflow that runs the pr-rla GitHub Action |
 
-To check either audit yourself: clone the audits repository (a full clone), install pr-rla, and run `pr-rla -C <audit> verify`.
+Both repositories were public while the showcase ran, which is when every screenshot of a GitHub page here was taken, signed out. They are private now. What they showed is kept here: the images, and in [`transcripts/`](transcripts) the captured text of every command, including each change's draw context, every `record`, `status` and `verify`, and the GitHub Actions job logs of the runs before and after the fix.
 
 ## The results at a glance
 
@@ -97,7 +97,36 @@ The first online `verify` of this audit printed ESCALATE and VERIFIED and **exit
 
 *After, run 43252619655: `verify -> exit 2`, and the job fails.*
 
-The workflow uses the action straight from this repository, pinned by commit, on `ubuntu-latest`: [`.github/workflows/pr-rla.yml`](https://github.com/naren-ambati/pr-rla-sandbox-audits/blob/main/.github/workflows/pr-rla.yml). It also runs `status` on every label event and on a schedule.
+The workflow uses the action straight from this repository, pinned by commit, on `ubuntu-latest`, and also runs `status` on every label event and on a schedule. This is its `.github/workflows/pr-rla.yml`, as it stood at the end:
+
+```yaml
+name: pr-rla
+on:
+  issues: { types: [labeled, unlabeled] }   # github-issues ledger: a reviewer's label is a verdict
+  push: { branches: [main] }                # git-file ledger and audit files
+  schedule: [{ cron: "17 */3 * * *" }]      # notices the window closing and the seed round publishing
+  workflow_dispatch:
+    inputs:
+      command: { type: choice, options: [status, verify], default: status }
+      online: { type: boolean, default: false, description: "verify online: rebuild the population from GitHub" }
+permissions: { contents: read, issues: write }
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [retro-2026-11-10, prospective-2026-11-11]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }                # the git-file ledger's history is its tamper trail
+      - uses: naren-ambati/pr-rla/integrations/github-action@46fd0aed72d78dc69e056e6aefe5419b9ce3a122 # master, 2026-11-13
+        with:
+          dir: ${{ matrix.dir }}
+          command: ${{ inputs.command || 'status' }}
+          offline: ${{ (github.event_name == 'workflow_dispatch' && inputs.online) && 'false' || 'true' }}
+          comment: ${{ github.event_name == 'issues' && matrix.dir == 'retro-2026-11-10' }}
+```
 
 ## Tampering
 
