@@ -14,6 +14,7 @@ Every document, by what you are doing. The project's front page is the [README](
 
 ## Run an audit
 
+- [Docker](docker.md): build the image from this repository and run `pr-rla` and the MCP server in it.
 - [Org-pooled audits](org-pooled-audits.md): one registration and certificate for an org, group or workspace.
 - Each provider's page: [GitHub](providers/github.md), [GitLab](providers/gitlab.md), [Bitbucket Cloud](providers/bitbucket-cloud.md), [Bitbucket Data Center](providers/bitbucket-data-center.md).
 - [The prospective gh-aw audit](gh-aw-prospective.md): the registration hand-off, for the founder.

@@ -1,0 +1,15 @@
+# Send the build only what the Dockerfile copies.
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!tsconfig.sdk.json
+!scripts/clean-dist.mjs
+!src/
+!packages/pr-rla-mcp/
+packages/pr-rla-mcp/node_modules/
+packages/pr-rla-mcp/dist/
+packages/pr-rla-mcp/test/
+!LICENSE
+!README.md

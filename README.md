@@ -31,11 +31,32 @@ Every provider passes the same conformance kit (`pr-rla/testing`); the HTTP ones
 
 Claim D (the default): *"deep review under protocol P would flag ≤ p0 of this window's changes in the stratum, at risk α."* With p0 = 10%, p1 = 2% and α = 5%, it certifies after 36, 56 or 75 draws with 0, 1 or 2 failures. It escalates at 144 draws (4 × 36), or earlier once the target is out of reach. Claim D is about what reviewers detect, not the true defect rate; the latter needs measured recall (claim T, which is not built). [`docs/statistics.md`](docs/statistics.md) explains the test, its stopping points and the draws.
 
+## Install
+
+pr-rla is not on npm yet. Two ways to run it, both from this repository:
+
+**Docker** (Node, git and ssh-keygen inside; nothing else to install):
+
+```sh
+git clone https://github.com/naren-ambati/pr-rla.git && cd pr-rla
+docker build -t pr-rla .
+cd ~/my-audit && docker run --rm -v "$PWD:/audit" -e GITHUB_TOKEN pr-rla status
+```
+
+The same image runs the read-only MCP server. Tokens, signing keys, file ownership on Linux and the assistant configuration are in [`docs/docker.md`](docs/docker.md).
+
+**From source** (Node 22.15 or later, git; ssh-keygen for signed verdicts):
+
+```sh
+git clone https://github.com/naren-ambati/pr-rla.git && cd pr-rla
+npm ci && npm run build && npm link            # puts `pr-rla` on PATH
+```
+
 ## Quickstart
 
 ```sh
-git clone <this repo> pr-rla && cd pr-rla
-npm ci && npm run build && npm link            # puts `pr-rla` on PATH
+git clone https://github.com/naren-ambati/pr-rla.git && cd pr-rla
+npm ci && npm run build && npm link            # puts `pr-rla` on PATH (or use the Docker image above)
 
 mkdir my-audit && cd my-audit && git init
 pr-rla init --repo github/gh-aw               # writes .pr-rla.yml, review-protocol.md, audit/
