@@ -2,7 +2,7 @@
   "name": "pr-rla-provider-gitea",
   "version": "0.1.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "description": "Example bring-your-own pr-rla provider for Gitea and Forgejo (Codeberg). Tutorial: docs/writing-a-provider.md",
   "type": "module",
   "exports": {

@@ -2,7 +2,7 @@
   "name": "pr-rla-mcp",
   "version": "0.1.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "description": "A read-only MCP server for pr-rla audits (stdio): it reads audits, draws and draw contexts, and never records a verdict",
   "type": "module",
   "bin": {

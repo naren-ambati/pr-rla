@@ -196,9 +196,9 @@ describe("FR6.4, NFR18: every integration pins the pr-rla version, and runs buil
   const pkg = JSON.parse(readFileSync(join(ACTION_DIR, "package.json"), "utf8")) as { private: boolean; license: string; dependencies: Record<string, string>; devDependencies?: unknown };
   const lock = JSON.parse(readFileSync(join(ACTION_DIR, "package-lock.json"), "utf8")) as { lockfileVersion: number; packages: Record<string, { version?: string; resolved?: string; integrity?: string }> };
 
-  it("the Action's package.json is private and UNLICENSED, and names exactly one dependency, pr-rla", () => {
+  it("the Action's package.json is private and Apache-2.0, and names exactly one dependency, pr-rla", () => {
     expect(pkg.private).toBe(true);
-    expect(pkg.license).toBe("UNLICENSED");
+    expect(pkg.license).toBe("Apache-2.0");
     expect(Object.keys(pkg.dependencies)).toEqual(["pr-rla"]);
     expect(pkg.devDependencies).toBeUndefined();
   });
@@ -354,10 +354,10 @@ describe("FR6.6: nothing in the build publishes", () => {
     for (const p of [".github", ".gitlab-ci.yml", "bitbucket-pipelines.yml"]) expect(existsSync(join(ROOT, p)), p).toBe(false);
   });
 
-  it("every package.json under integrations is private and UNLICENSED, and there is no licence file anywhere U7 wrote", () => {
+  it("every package.json under integrations is private and Apache-2.0, and there is no licence file anywhere U7 wrote (the root LICENSE covers them)", () => {
     for (const f of walk(join(ROOT, "integrations")).filter((x) => x.endsWith("package.json"))) {
       const p = JSON.parse(readFileSync(f, "utf8")) as { private: boolean; license: string };
-      expect([p.private, p.license], f).toEqual([true, "UNLICENSED"]);
+      expect([p.private, p.license], f).toEqual([true, "Apache-2.0"]);
     }
     for (const f of [...walk(join(ROOT, "integrations")), ...walk(join(ROOT, "docs", "ci"))]) expect(f, f).not.toMatch(/(^|\/)(LICEN[SC]E|COPYING)(\.|$)/i);
   });

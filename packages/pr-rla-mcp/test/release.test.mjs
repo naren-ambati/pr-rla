@@ -12,7 +12,7 @@ import { grepPackage } from "../../../scripts/secret-grep.mjs";
 import { PKG, REPO } from "./helpers.mjs";
 
 const PRELOAD = join(REPO, "test", "helpers", "ci-preload.cjs");
-const ALLOWED = (p) => p === "package.json" || p === "README.md" || p === "CHANGELOG.md" || p.startsWith("dist/");
+const ALLOWED = (p) => p === "package.json" || p === "README.md" || p === "CHANGELOG.md" || p === "LICENSE" || p.startsWith("dist/");
 
 function packList(cwd, denied, ignoreScripts = true) {
   const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--offline", ...(ignoreScripts ? ["--ignore-scripts"] : [])], {

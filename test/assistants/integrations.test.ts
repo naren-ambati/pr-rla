@@ -61,13 +61,16 @@ describe("the Claude Code plugin (integrations/claude-code)", () => {
     expect(listFiles(PLUGIN)).toEqual([".claude-plugin/plugin.json", ".mcp.json", "README.md", "hooks/guard.mjs", "hooks/hooks.json", "skills/review-draw/SKILL.md"]);
   });
 
-  it("the manifest: name pr-rla, the pr-rla version, no licence, no personal name", () => {
+  it("the manifest: name pr-rla, the pr-rla version, Apache-2.0, the author's GitHub handle and the repository", () => {
     const m = json("integrations/claude-code/.claude-plugin/plugin.json");
     expect(m.name).toBe("pr-rla");
     expect(m.version).toBe(PR_RLA_VERSION);
     expect(typeof m.description).toBe("string");
-    expect(m.author).toEqual({ name: "pr-rla" });
-    expect(Object.keys(m).sort()).toEqual(["author", "description", "keywords", "name", "version"]);
+    // The founder's decisions of 2026-11-14: the licence, and the project shown under the founder's GitHub handle.
+    expect(m.author).toEqual({ name: "naren-ambati" });
+    expect(m.license).toBe("Apache-2.0");
+    expect(m.repository).toBe("https://github.com/naren-ambati/pr-rla");
+    expect(Object.keys(m).sort()).toEqual(["author", "description", "keywords", "license", "name", "repository", "version"]);
   });
 
   it("the marketplace at the repo root lists it by relative path", () => {
@@ -244,18 +247,24 @@ describe("the guides show the files as committed", () => {
     }
   });
 
-  it("no licence text in the integrations or their docs", () => {
+  it("no licence text in the integrations or their docs: the root LICENSE (Apache-2.0) covers them", () => {
     /**
-     * A package's own licence field may say only UNLICENSED (no licence granted), as the root package.json does:
-     * U7's Action package (integrations/github-action) states it so. Its lockfile's dependency entries carry their
-     * own packages' licences (npm's metadata about third-party code, not a licence of ours). Both are checked,
-     * then left out of the text check, which every other byte still goes through.
+     * A package's own licence field, and the plugin manifest's, may say only Apache-2.0, as the root package.json
+     * does (the founder's decision, 2026-11-14). The Action's lockfile's dependency entries carry their own packages'
+     * licences (npm's metadata about third-party code, not a licence of ours). Both are checked, then left out of
+     * the text check, which every other byte still goes through.
      */
     const ours = (f: string, text: string): string => {
+      if (/(^|\/)\.claude-plugin\/plugin\.json$/.test(f)) {
+        const manifest = JSON.parse(text) as { license?: unknown };
+        expect(`${f}: ${String(manifest.license)}`).toBe(`${f}: Apache-2.0`);
+        delete manifest.license;
+        return JSON.stringify(manifest);
+      }
       if (!/(^|\/)package(-lock)?\.json$/.test(f)) return text;
       const doc = JSON.parse(text) as { license?: unknown; packages?: Record<string, { license?: unknown }> };
       const own = f.endsWith("package-lock.json") ? doc.packages?.[""] : doc;
-      if (own && "license" in own) expect(`${f}: ${String(own.license)}`).toBe(`${f}: UNLICENSED`);
+      if (own && "license" in own) expect(`${f}: ${String(own.license)}`).toBe(`${f}: Apache-2.0`);
       if (own) delete own.license;
       for (const [k, v] of Object.entries(doc.packages ?? {})) if (k.startsWith("node_modules/")) delete v.license;
       return JSON.stringify(doc);
@@ -267,7 +276,7 @@ describe("the guides show the files as committed", () => {
         expect(`${dir}/${f}: ${/"license"\s*:|SPDX-License|MIT License|Apache License/i.test(ours(f, read(`${dir}/${f}`)))}`).toBe(`${dir}/${f}: false`);
       }
     }
-    expect(existsSync(join(ROOT, "LICENSE"))).toBe(false);
+    expect(existsSync(join(ROOT, "LICENSE"))).toBe(true);
   });
 });
 

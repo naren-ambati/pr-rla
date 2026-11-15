@@ -4,7 +4,7 @@ Every release of `pr-rla` and `pr-rla-mcp`, newest first. The two packages are r
 
 ## 0.1.0: unreleased
 
-Nothing is published yet: no npm package, no public repository, no tag. This entry describes what the first public release carries: all eleven units of the phase 3–4 design on top of the phase 1–2 audit. The release steps are [`docs/release-checklist.md`](docs/release-checklist.md). Licence: decided by the founder before release.
+The source is public at [github.com/naren-ambati/pr-rla](https://github.com/naren-ambati/pr-rla); no npm package and no tag are published yet. This entry describes what the first release carries: all eleven units of the phase 3–4 design on top of the phase 1–2 audit. The release steps are [`docs/release-checklist.md`](docs/release-checklist.md). License: Apache-2.0 (2026-11-14).
 
 ### The audit (phases 1 and 2)
 

@@ -125,7 +125,7 @@ describe("external Gitea/Forgejo plugin, loaded from .pr-rla.yml through the reg
   it("is a standalone package that imports only the public SDK, and the core never imports it", () => {
     const dir = join(ROOT, "examples", "providers", "gitea");
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name: string; private: boolean; license: string };
-    expect(pkg).toMatchObject({ name: "pr-rla-provider-gitea", private: true, license: "UNLICENSED" });
+    expect(pkg).toMatchObject({ name: "pr-rla-provider-gitea", private: true, license: "Apache-2.0" });
     const specs = [...readFileSync(join(dir, "index.mjs"), "utf8").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
     expect(specs).toEqual(["pr-rla/provider"]);
     const testSpecs = [...readFileSync(join(dir, "test", "conformance.test.mjs"), "utf8").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]!).filter((s) => s.startsWith("pr-rla"));

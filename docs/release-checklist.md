@@ -7,7 +7,7 @@ Two owners:
 - **founder**: decides, and does every public or permanent act (a repository, a publish, a catalog entry, a registration).
 - **maintainer**: anyone working in a checkout. Every maintainer step is local and reversible, or read-only on the network (a public GET, or a timestamp request that sends a SHA-256 digest and a nonce).
 
-Licence: decided by the founder before release. Until then no package has a licence file or licence text, and every `package.json` stays `"private": true` and `"license": "UNLICENSED"` (`test/release.test.ts` enforces it).
+License: Apache-2.0, decided by the founder on 2026-11-14 (step 1, done): `LICENSE` at the root and in `packages/pr-rla-mcp`, and every `package.json` says `"license": "Apache-2.0"` while it stays `"private": true` until step 13 (`test/release.test.ts` enforces it).
 
 ## The steps
 
@@ -42,7 +42,7 @@ The order matters in four places: the decisions (1–4) change files the checks 
 
 ## 1. Decide the licence
 
-**Owner: founder.** Choose the licence, or decide to release without one. Then, in one change: add the licence file at the root and in `packages/pr-rla-mcp`, set `"license"` in the two package.json files that will be published, and update the tests that hold the no-licence rule: `test/release.test.ts` ("no licence", and its pack-list `ALLOWED`, because npm always packs a root `LICENSE`), `packages/pr-rla-mcp/test/release.test.mjs` (the same `ALLOWED`), `packages/pr-rla-mcp/test/mcp-package.test.mjs` ("private and unlicensed"), `test/ci-integrations.test.ts` (the integrations' package.json) and `test/assistants/integrations.test.ts` (the plugin manifest has no `license` field). The examples (`examples/providers/gitea`, `examples/ledgers/jira`) and the Action package stay private: they are not published.
+**Owner: founder.** **Done 2026-11-14: Apache-2.0.** What the change did, kept for the record: choose the licence, or decide to release without one. Then, in one change: add the licence file at the root and in `packages/pr-rla-mcp`, set `"license"` in the two package.json files that will be published, and update the tests that hold the no-licence rule: `test/release.test.ts` ("no licence", and its pack-list `ALLOWED`, because npm always packs a root `LICENSE`), `packages/pr-rla-mcp/test/release.test.mjs` (the same `ALLOWED`), `packages/pr-rla-mcp/test/mcp-package.test.mjs` ("private and unlicensed"), `test/ci-integrations.test.ts` (the integrations' package.json) and `test/assistants/integrations.test.ts` (the plugin manifest has no `license` field). The examples (`examples/providers/gitea`, `examples/ledgers/jira`) and the Action package stay private: they are not published.
 
 ## 2. Decide the security contact
 
@@ -119,7 +119,7 @@ Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/
 
 ## 14. Create the public repository `naren-ambati/pr-rla`
 
-**Owner: founder.** Create it and push the release commit. Then replace the address placeholders: `<owner>/pr-rla` in `docs/ci/github.md` and `docs/assistants/claude-code.md`, the Action's `<full commit SHA>` in `docs/ci/github.md` (after step 19), and `<group>/<project>` and `<exact ref>` in `docs/ci/gitlab.md` (after step 20). `test/ci-integrations.test.ts` ("the Action's workflow example pins … a full commit SHA placeholder") asserts the literal placeholder and changes with it. The prospective gh-aw audit lives in a separate audit repository (step 22), not here.
+**Owner: founder.** **Done in part:** the repository exists and is public (2026-11-11); the address placeholders below are still to replace. Create it and push the release commit. Then replace the address placeholders: `<owner>/pr-rla` in `docs/ci/github.md` and `docs/assistants/claude-code.md`, the Action's `<full commit SHA>` in `docs/ci/github.md` (after step 19), and `<group>/<project>` and `<exact ref>` in `docs/ci/gitlab.md` (after step 20). `test/ci-integrations.test.ts` ("the Action's workflow example pins … a full commit SHA placeholder") asserts the literal placeholder and changes with it. The prospective gh-aw audit lives in a separate audit repository (step 22), not here.
 
 ## 15. Set up trusted publishing
 

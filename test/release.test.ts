@@ -6,7 +6,8 @@
  *   (the wave-2 integration found dist/commands/freeze-pool.* in a tarball).
  * - The secret grep over the tarball is clean, and finds what it is meant to find.
  * - Every place that names the release names one version.
- * - No licence file or licence text, both packages private and UNLICENSED (the founder's instruction).
+ * - Licence: Apache-2.0 (the founder's decision, 2026-11-14): the Apache text in LICENSE at the root and in packages/pr-rla-mcp,
+ *   shipped in both tarballs; every package.json of ours says Apache-2.0 and stays private until the founder publishes.
  * - No step of the build publishes anything.
  *
  * Every npm call runs with --offline under a preload that refuses any socket beyond loopback, and
@@ -28,7 +29,7 @@ const json = <T = Record<string, unknown>>(...p: string[]) => JSON.parse(read(..
 const rootPkg = json<{ version: string; private: boolean; license: string; files: string[]; scripts: Record<string, string>; engines: { node: string } }>("package.json");
 
 /** What may be in a tarball (FR8.3). npm adds package.json and README.md itself; `files` names the rest. */
-const ALLOWED = (path: string) => path === "package.json" || path === "README.md" || path === "CHANGELOG.md" || path.startsWith("dist/");
+const ALLOWED = (path: string) => path === "package.json" || path === "README.md" || path === "CHANGELOG.md" || path === "LICENSE" || path.startsWith("dist/");
 
 function npm(args: string[], cwd: string, denied: string): string {
   return execFileSync("npm", [...args, "--offline"], {
@@ -242,30 +243,33 @@ describe("NFR13: the runtime both packages declare", () => {
   });
 });
 
-describe("no licence: none chosen yet (the founder decides before release)", () => {
+describe("licence: Apache-2.0 (the founder's decision, 2026-11-14)", () => {
   const tracked = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n");
+  const APACHE = /^\s+Apache License\n\s+Version 2\.0, January 2004\n/;
 
-  it("no licence file is tracked, anywhere", () => {
-    expect(tracked.filter((f) => /(^|\/)(LICEN[CS]E|COPYING|UNLICENSE)([.-][^/]*)?$/i.test(f))).toEqual([]);
+  it("the only licence files are LICENSE at the root and in packages/pr-rla-mcp, both the Apache License 2.0", () => {
+    expect(tracked.filter((f) => /(^|\/)(LICEN[CS]E|COPYING|UNLICENSE)([.-][^/]*)?$/i.test(f) && !f.startsWith("test/fixtures/"))).toEqual(["LICENSE", "packages/pr-rla-mcp/LICENSE"]);
+    expect(read("LICENSE")).toMatch(APACHE);
+    expect(read("packages/pr-rla-mcp/LICENSE")).toBe(read("LICENSE"));
   });
 
-  it("every package.json of ours is private and UNLICENSED", () => {
+  it("every package.json of ours says Apache-2.0 and stays private until the founder publishes (release checklist, step 13)", () => {
     const ours = tracked.filter((f) => f.endsWith("package.json") && !f.includes("node_modules/") && !f.startsWith("test/fixtures/"));
     expect(ours.length).toBeGreaterThanOrEqual(5);
     for (const f of ours) {
       const p = json<{ private?: boolean; license?: string }>(f);
-      expect([f, p.private, p.license]).toEqual([f, true, "UNLICENSED"]);
+      expect([f, p.private, p.license]).toEqual([f, true, "Apache-2.0"]);
     }
   });
 
-  it("no file of ours carries licence text (lockfiles' third-party metadata and recorded fixtures aside)", () => {
+  it("no other file of ours carries licence text (lockfiles' third-party metadata and recorded fixtures aside)", () => {
     const grant = /Permission is hereby granted|Licensed under the Apache License|SPDX-License-Identifier|GNU (?:Lesser |Affero )?General Public License|Mozilla Public License|THE SOFTWARE IS PROVIDED "AS IS"|Redistribution and use in source and binary forms/i;
-    const mine = tracked.filter((f) => !/(^|\/)package-lock\.json$|\.tgz$|^test\/fixtures\/|^test\/release\.test\.ts$/.test(f) && statSync(join(ROOT, f)).size < 4_000_000);
+    const mine = tracked.filter((f) => !/(^|\/)package-lock\.json$|\.tgz$|^test\/fixtures\/|^test\/release\.test\.ts$|(^|\/)LICENSE$/.test(f) && statSync(join(ROOT, f)).size < 4_000_000);
     expect(mine.filter((f) => grant.test(read(f)))).toEqual([]);
   });
 
-  it("the docs say who decides, and offer no licence", () => {
-    for (const f of ["CHANGELOG.md", "CONTRIBUTING.md", "docs/release-checklist.md"]) expect(read(f), f).toMatch(/licence: decided by the founder before release/i);
+  it("the docs name the licence", () => {
+    for (const f of ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "docs/release-checklist.md"]) expect(read(f), f).toMatch(/licen[cs]e: Apache-2\.0/i);
   });
 });
 

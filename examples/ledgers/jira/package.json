@@ -2,7 +2,7 @@
   "name": "pr-rla-ledger-jira",
   "version": "0.1.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "description": "Example external pr-rla ledger for Jira Cloud: one issue per draw, the verdict as a single-select custom field read from the changelog",
   "type": "module",
   "exports": {

@@ -13,10 +13,10 @@ const pkg = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8"));
 const lock = JSON.parse(readFileSync(join(PKG, "package-lock.json"), "utf8"));
 
 describe("the pr-rla-mcp package", () => {
-  it("is private and unlicensed, like every package here", () => {
+  it("is Apache-2.0 with its LICENSE, and private until the founder publishes it, like every package here", () => {
     assert.equal(pkg.private, true);
-    assert.equal(pkg.license, "UNLICENSED");
-    assert.ok(!existsSync(join(PKG, "LICENSE")));
+    assert.equal(pkg.license, "Apache-2.0");
+    assert.ok(existsSync(join(PKG, "LICENSE")));
   });
 
   it("pins every dependency to an exact version; pr-rla is the repository's own package, linked", () => {

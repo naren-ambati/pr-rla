@@ -1,6 +1,6 @@
 # Contributing
 
-pr-rla is pre-release: it has no public repository yet, and nothing is published. Licence: decided by the founder before release.
+pr-rla is public at [github.com/naren-ambati/pr-rla](https://github.com/naren-ambati/pr-rla); no npm package is published yet. License: Apache-2.0 ([`LICENSE`](LICENSE)): contributions are accepted under the same license (its section 5).
 
 ## Build and verify
 

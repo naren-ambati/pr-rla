@@ -15,4 +15,4 @@ Not published yet. The first release:
 - Error codes: `ROOT_ESCAPE`, `NO_AUDIT`, `BAD_WINDOW`, `DRAW_OUT_OF_RANGE`, `READ_ONLY_VIOLATION`, `PROVIDER_ERROR`, `TIMEOUT`, `TOO_MANY_JOBS`, `RESULT_TOO_LARGE`, `TOO_MUCH_WORK` and `FAILED`.
 
 
-Licence: decided by the founder before release.
+License: Apache-2.0 (2026-11-14).

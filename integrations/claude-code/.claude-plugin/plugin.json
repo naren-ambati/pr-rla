@@ -2,6 +2,8 @@
   "name": "pr-rla",
   "version": "0.1.0",
   "description": "Review pr-rla audit draws with the read-only pr-rla MCP server. The review-draw skill shows a draw's diff, CI results and protocol checklist; guard hooks block verdict writes, consent and audit-record edits from the assistant. The reviewer records every verdict.",
-  "author": { "name": "pr-rla" },
+  "author": { "name": "naren-ambati" },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/naren-ambati/pr-rla",
   "keywords": ["pr-rla", "audit", "code-review", "mcp"]
 }
