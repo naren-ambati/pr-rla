@@ -1,7 +1,6 @@
 {
   "name": "pr-rla",
   "version": "0.1.0",
-  "private": true,
   "license": "Apache-2.0",
   "description": "Risk-limiting audits for code changes that landed with no recorded human review",
   "type": "module",

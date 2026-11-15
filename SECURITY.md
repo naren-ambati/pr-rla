@@ -2,9 +2,9 @@
 
 ## Reporting a vulnerability
 
-**Contact: to be decided before public release.** The founder decides the security contact (design decision D10). Until it is set here, there is no private reporting channel, and pr-rla has no public repository or issue tracker either.
+**Contact: GitHub's private vulnerability reporting.** Report at [github.com/naren-ambati/pr-rla/security/advisories/new](https://github.com/naren-ambati/pr-rla/security/advisories/new) (the repository's Security tab, "Report a vulnerability"). Only the maintainer sees the report; please do not open a public issue for it.
 
-When the contact exists, report privately to it, not in a public issue, and include what you need to show the problem: the pr-rla version, the command or API call, and a fixture or audit directory that reproduces it.
+Include what you need to show the problem: the pr-rla version or commit, the command or API call, and a fixture or audit directory that reproduces it.
 
 ## What counts
 
@@ -21,4 +21,4 @@ pr-rla makes a statistical claim about changes that landed without review, and i
 
 ## Supported versions
 
-None yet: nothing has been released. Which releases receive security fixes is decided by the founder before release, with the contact above.
+Security fixes go into the latest release only; there is no long-term-support line. Before the first npm release (0.1.0), they go to `main`.

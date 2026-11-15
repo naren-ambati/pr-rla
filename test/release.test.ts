@@ -7,7 +7,8 @@
  * - The secret grep over the tarball is clean, and finds what it is meant to find.
  * - Every place that names the release names one version.
  * - Licence: Apache-2.0 (the founder's decision, 2026-11-14): the Apache text in LICENSE at the root and in packages/pr-rla-mcp,
- *   shipped in both tarballs; every package.json of ours says Apache-2.0 and stays private until the founder publishes.
+ *   shipped in both tarballs; every package.json of ours says Apache-2.0. pr-rla and pr-rla-mcp are publishable (step 13,
+ *   2026-11-14); the examples and the Action package stay private.
  * - No step of the build publishes anything.
  *
  * Every npm call runs with --offline under a preload that refuses any socket beyond loopback, and
@@ -253,12 +254,13 @@ describe("licence: Apache-2.0 (the founder's decision, 2026-11-14)", () => {
     expect(read("packages/pr-rla-mcp/LICENSE")).toBe(read("LICENSE"));
   });
 
-  it("every package.json of ours says Apache-2.0 and stays private until the founder publishes (release checklist, step 13)", () => {
+  it("every package.json of ours says Apache-2.0; pr-rla and pr-rla-mcp are publishable (step 13), the rest stay private", () => {
     const ours = tracked.filter((f) => f.endsWith("package.json") && !f.includes("node_modules/") && !f.startsWith("test/fixtures/"));
     expect(ours.length).toBeGreaterThanOrEqual(5);
+    const published = ["package.json", "packages/pr-rla-mcp/package.json"];
     for (const f of ours) {
       const p = json<{ private?: boolean; license?: string }>(f);
-      expect([f, p.private, p.license]).toEqual([f, true, "Apache-2.0"]);
+      expect([f, p.private, p.license]).toEqual([f, published.includes(f) ? undefined : true, "Apache-2.0"]);
     }
   });
 

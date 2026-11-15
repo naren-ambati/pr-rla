@@ -350,8 +350,21 @@ describe("FR6.6: nothing in the build publishes", () => {
     expect(component).not.toMatch(/^\s*release:/m);
   });
 
-  it("the repository has no CI of its own to publish from", () => {
-    for (const p of [".github", ".gitlab-ci.yml", "bitbucket-pipelines.yml"]) expect(existsSync(join(ROOT, p)), p).toBe(false);
+  it("the repository's only CI is the release workflow: it runs on a version tag only, tests first, and publishes with provenance (step 15)", () => {
+    for (const p of [".gitlab-ci.yml", "bitbucket-pipelines.yml"]) expect(existsSync(join(ROOT, p)), p).toBe(false);
+    expect(readdirSync(join(ROOT, ".github"))).toEqual(["workflows"]);
+    expect(readdirSync(join(ROOT, ".github", "workflows"))).toEqual(["release.yml"]);
+    const wf = readFileSync(join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+    const on = wf.slice(wf.indexOf("\non:"), wf.indexOf("\npermissions:"));
+    expect(on).toMatch(/^\s+push:\n\s+tags: \["v\*", "pr-rla-mcp-v\*"\]$/m);
+    expect(on).not.toMatch(/branches|pull_request|schedule|workflow_dispatch/);
+    expect(wf).toMatch(/id-token: write/);
+    expect(wf.match(/npm publish --provenance --access public/g)).toHaveLength(2);
+    // Tested before either publish; every action pinned by full commit SHA.
+    expect(wf.indexOf("npm test")).toBeLessThan(wf.indexOf("npm publish"));
+    for (const m of wf.matchAll(/uses: (\S+)/g)) expect(m[1], m[1]).toMatch(/@[0-9a-f]{40}$/);
+    // pr-rla-mcp publishes only once it pins the published pr-rla (step 17).
+    expect(wf).toMatch(/must pin the published pr-rla exactly first/);
   });
 
   it("every package.json under integrations is private and Apache-2.0, and there is no licence file anywhere U7 wrote (the root LICENSE covers them)", () => {

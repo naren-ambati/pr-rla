@@ -46,15 +46,15 @@ The order matters in four places: the decisions (1–4) change files the checks 
 
 ## 2. Decide the security contact
 
-**Owner: founder** (design decision D10). Replace the placeholder in [`SECURITY.md`](../SECURITY.md) ("Contact: to be decided before public release") with the contact, and say which releases receive security fixes and, if you want one, the disclosure policy. `test/docs.test.ts` ("SECURITY.md carries the placeholder contact") changes with it.
+**Owner: founder** (design decision D10). **Done 2026-11-14:** GitHub's private vulnerability reporting, enabled on the repository and named in `SECURITY.md`. What the change did, kept for the record: replace the placeholder in [`SECURITY.md`](../SECURITY.md) ("Contact: to be decided before public release") with the contact, and say which releases receive security fixes and, if you want one, the disclosure policy. `test/docs.test.ts` ("SECURITY.md carries the placeholder contact") changes with it.
 
 ## 3. Decide the npm names
 
-**Owner: founder.** The design uses `pr-rla` and `pr-rla-mcp`; the examples are `pr-rla-provider-gitea` and `pr-rla-ledger-jira` (not published). All four were unclaimed when checked with `npm view <name>` (E404 from `GET https://registry.npmjs.org/<name>`, 2026-11-04T11:39:54Z; BUILD-NOTES, "Bolt 11 (U10)"). A name is claimed by publishing it (steps 16 and 18), so check again just before. A different name changes `package.json`, the `bin`, the plugin and assistant pins (`pr-rla-mcp@…` in `integrations/`), the Action's dependency and every doc that names the package.
+**Owner: founder.** **Kept 2026-11-14:** `pr-rla` and `pr-rla-mcp`, both still unclaimed that day (`GET https://registry.npmjs.org/<name>` answered 404 for all four names). The design uses `pr-rla` and `pr-rla-mcp`; the examples are `pr-rla-provider-gitea` and `pr-rla-ledger-jira` (not published). All four were unclaimed when checked with `npm view <name>` (E404 from `GET https://registry.npmjs.org/<name>`, 2026-11-04T11:39:54Z; BUILD-NOTES, "Bolt 11 (U10)"). A name is claimed by publishing it (steps 16 and 18), so check again just before. A different name changes `package.json`, the `bin`, the plugin and assistant pins (`pr-rla-mcp@…` in `integrations/`), the Action's dependency and every doc that names the package.
 
 ## 4. Decide on `npm-shrinkwrap.json`
 
-**Owner: founder.** The question (U7, "Deviations" 6): publish each package with an `npm-shrinkwrap.json`, which pins its whole dependency tree for everyone who installs it, or without one, which lets npm resolve the transitive dependencies on the day.
+**Owner: founder.** **Decided 2026-11-14: yes, as recommended.** The release workflow (step 15) copies the committed lockfile to `npm-shrinkwrap.json` just before each `npm publish`. The question (U7, "Deviations" 6): publish each package with an `npm-shrinkwrap.json`, which pins its whole dependency tree for everyone who installs it, or without one, which lets npm resolve the transitive dependencies on the day.
 
 **Recommended: publish both packages with one, created at publish time from the committed `package-lock.json`** (`cp package-lock.json npm-shrinkwrap.json` in the release job, just before `npm publish`; the repository keeps `package-lock.json`, which `test/timestamp-library.test.ts` reads). The reasons:
 
@@ -115,7 +115,7 @@ Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/
 
 ## 13. Make the two packages publishable
 
-**Owner: founder.** npm refuses to publish a `"private": true` package. In `package.json` and `packages/pr-rla-mcp/package.json` only: remove `"private": true` and set `"license"` (step 1). Update the tests that hold the private rule for those two (step 1 lists them); the examples, the Action package and the plugin stay private.
+**Owner: founder.** **Done 2026-11-14, on the founder's instruction:** `"private": true` removed from `package.json` and `packages/pr-rla-mcp/package.json`, both `Apache-2.0`; the examples, the Action package and the plugin stay private. npm refuses to publish a `"private": true` package. In `package.json` and `packages/pr-rla-mcp/package.json` only: remove `"private": true` and set `"license"` (step 1). Update the tests that hold the private rule for those two (step 1 lists them); the examples, the Action package and the plugin stay private.
 
 ## 14. Create the public repository `naren-ambati/pr-rla`
 
@@ -123,7 +123,7 @@ Run the root suite on Node 24 and 26 as well as 22 (`/path/to/node node_modules/
 
 ## 15. Set up trusted publishing
 
-**Owner: founder** (NFR18). Configure npm trusted publishing (OIDC, no long-lived token) for `pr-rla` and `pr-rla-mcp` from a release workflow in the public repository. Check npm's current requirements first; whether a package must already exist before a trusted publisher can be configured was not checked here. The repository has no CI of its own today, and `test/ci-integrations.test.ts` ("the repository has no CI of its own to publish from") says so: the workflow and that test's update land in the same change.
+**Owner: founder** (NFR18). **The workflow is in place (2026-11-14):** [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs only on a pushed tag (`v<version>` publishes `pr-rla`, `pr-rla-mcp-v<version>` publishes `pr-rla-mcp`), runs the full build and tests first, checks the tag against the package version, ships the shrinkwrap (step 4) and publishes with `--provenance`; `test/ci-integrations.test.ts` holds it to that. What is left is on npmjs.com: configure a trusted publisher for each package (repository `naren-ambati/pr-rla`, workflow `release.yml`). If npm requires a package to exist before a trusted publisher can be added, either publish the first version by hand (`npm publish --provenance --access public` from a clean checkout of the tag) or add an `NPM_TOKEN` repository secret, which the workflow uses when it is set, and remove it once trusted publishing works.
 
 ## 16. Tag v0.1.0 and publish `pr-rla@0.1.0` with provenance
 

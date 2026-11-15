@@ -1,0 +1,53 @@
+# Publishes to npm, and only when the founder pushes a version tag (docs/release-checklist.md, steps 15 to 18):
+#   v<version>            publishes pr-rla from the repository root
+#   pr-rla-mcp-v<version> publishes packages/pr-rla-mcp, once it pins the published pr-rla (step 17)
+# It never runs on a push to a branch, a pull request or a schedule. Each publish is tested first, checks that the
+# tag names the package's version, ships an npm-shrinkwrap.json made from the committed lockfile (step 4), and
+# carries npm provenance. Authentication is npm trusted publishing (OIDC, no stored token) once it is configured
+# for the package on npmjs.com; until then an NPM_TOKEN repository secret, if set, is used instead.
+name: release
+on:
+  push:
+    tags: ["v*", "pr-rla-mcp-v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # some tests read the git history
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: npm with trusted publishing
+        run: npm install -g npm@11
+      - name: Build and test pr-rla
+        run: npm ci && npm run build && npm run typecheck && npm test
+      - name: Publish pr-rla
+        if: startsWith(github.ref_name, 'v')
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          [ "$version" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME does not name package.json's version ($version)"; exit 1; }
+          cp package-lock.json npm-shrinkwrap.json
+          npm publish --provenance --access public
+      - name: Publish pr-rla-mcp
+        if: startsWith(github.ref_name, 'pr-rla-mcp-v')
+        working-directory: packages/pr-rla-mcp
+        run: |
+          version="pr-rla-mcp-v$(node -p "require('./package.json').version")"
+          [ "$version" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME does not name package.json's version ($version)"; exit 1; }
+          node -e "const d = require('./package.json').dependencies['pr-rla']; if (!/^\d+\.\d+\.\d+$/.test(d)) { console.error('::error::pr-rla-mcp must pin the published pr-rla exactly first (release checklist, step 17); it has ' + d); process.exit(1); }"
+          npm ci && npm run build && npm test
+          cp package-lock.json npm-shrinkwrap.json
+          npm publish --provenance --access public

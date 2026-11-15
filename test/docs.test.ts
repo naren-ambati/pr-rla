@@ -63,9 +63,10 @@ describe("FR8.1: the doc set", () => {
     for (const f of ["trusted-time.md", "release-checklist.md", "org-pooled-audits.md", "gh-aw-prospective.md", "ci/README.md", "assistants/README.md", "assistants/guard.md", "assistants/manual-acceptance.md"]) expect(index, f).toContain(`](${f})`);
   });
 
-  it("SECURITY.md carries the placeholder contact (D10), and no address of anyone's", () => {
+  it("SECURITY.md names the contact (D10, the founder's decision of 2026-11-14: GitHub private vulnerability reporting), and no address of anyone's", () => {
     const s = read("SECURITY.md");
-    expect(s).toContain("**Contact: to be decided before public release.**");
+    expect(s).toContain("**Contact: GitHub's private vulnerability reporting.**");
+    expect(s).toContain("https://github.com/naren-ambati/pr-rla/security/advisories/new");
     expect(s).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
     expect(s).toContain("docs/security-model.md");
   });
